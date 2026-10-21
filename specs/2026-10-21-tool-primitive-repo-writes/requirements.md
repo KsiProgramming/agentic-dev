@@ -93,5 +93,5 @@ Principles that apply:
 | Resume | Recreate the worktree, and the writer runs again | It keeps 1.3's rule. Nothing has been pushed yet, so nothing is lost. |
 
 ## Open questions
-- Can `git worktree add` with a shallow clone (`--depth 1`) and a sandbox-user-owned `.git` inside a root-owned checkout work with no capabilities? Group 2 checks this in the container. The fallback is to make the whole base checkout owned by the sandbox user and keep it read only by mode bits.
+- ~~Can `git worktree add` with a shallow clone (`--depth 1`) and a sandbox-user-owned `.git` inside a root-owned checkout work with no capabilities?~~ Resolved in group 2: yes. git refuses the root-owned checkout as "dubious ownership" unless the command passes `-c safe.directory=/workspace/repo`, which `add_worktree` does. Inside the worktree, which the sandbox user owns, git needs nothing extra. The fallback was not needed.
 - Should a run summary list the branches each writer produced, for 1.8? It is not needed for "Done when". Decide in 1.8.
