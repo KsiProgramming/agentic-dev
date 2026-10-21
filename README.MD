@@ -466,6 +466,20 @@ cd web && pnpm gen:api
 
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
+## Workflow spec
+A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has two node types, `agent` and `sequence`. Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
+
+- JSON Schema: [schemas/workflow-spec.v0.json](schemas/workflow-spec.v0.json)
+- Examples: [packages/engine/tests/fixtures/specs/valid/](packages/engine/tests/fixtures/specs/valid/)
+
+The schema is generated from the models. After changing them:
+
+```bash
+uv run python scripts/export_workflow_schema.py
+```
+
+CI fails if `schemas/workflow-spec.v0.json` is out of date.
+
 ## Changelog
 Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
 

@@ -27,6 +27,13 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen
+      - run: uv run python scripts/export_workflow_schema.py
+      - name: Fail if the committed workflow spec schema is stale
+        run: |
+          git diff --exit-code -- schemas/ || {
+            echo "::error::Run 'uv run python scripts/export_workflow_schema.py' and commit the result."
+            exit 1
+          }
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright

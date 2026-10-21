@@ -1,0 +1,12 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Extra key",
+  "root": {
+    "type": "agent",
+    "id": "writer",
+    "role": "Technical writer",
+    "instructions": "Write docs.",
+    "temprature": 0.2
+  }
+}

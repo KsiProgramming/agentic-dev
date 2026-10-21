@@ -1,0 +1,11 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Bad node id",
+  "root": {
+    "type": "agent",
+    "id": "Writer/One",
+    "role": "Technical writer",
+    "instructions": "Write docs."
+  }
+}

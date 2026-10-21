@@ -1,0 +1,10 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Empty sequence",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": []
+  }
+}
