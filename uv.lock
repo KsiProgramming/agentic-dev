@@ -133,14 +133,12 @@ name = "agentic-sandbox"
 version = "0.1.0"
 source = { editable = "packages/sandbox" }
 dependencies = [
-    { name = "agentic-runtime" },
     { name = "docker" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "docker", specifier = ">=7.1" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
@@ -194,6 +192,7 @@ dependencies = [
     { name = "agentic-runtime" },
     { name = "agentic-sandbox" },
     { name = "agentic-store" },
+    { name = "agentic-tools" },
     { name = "anthropic" },
     { name = "pydantic-settings" },
     { name = "redis" },
@@ -206,6 +205,7 @@ requires-dist = [
     { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-store", editable = "packages/store" },
+    { name = "agentic-tools", editable = "packages/tools" },
     { name = "anthropic", specifier = ">=1.17" },
     { name = "pydantic-settings", specifier = ">=2.10" },
     { name = "redis", specifier = ">=6.4" },

@@ -5,8 +5,9 @@ Each run's spec and input are read from Postgres and its events are written back
 `AGENTIC_RUNTIME=claude`, which runs them on Claude with the key in `ANTHROPIC_API_KEY`.
 
 A run with a `repo` gets a sandbox holding a clone of it for its whole duration, and its agents
-get the repo tools that run in there. `SANDBOX_BACKEND` picks Docker containers or, where Docker
-is unavailable, temp directories on this host (no isolation).
+get the `repo.*` tools: a read-only `repo` MCP server bound to that sandbox, connected in memory.
+`SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
+this host (no isolation).
 """
 
 import asyncio
@@ -30,9 +31,10 @@ from agentic_engine.logging import configure_logging
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
-from agentic_sandbox import FakeSandboxManager, SandboxError, SandboxManager, SandboxTools
+from agentic_sandbox import FakeSandboxManager, SandboxError, SandboxManager
 from agentic_sandbox.docker_backend import DEFAULT_IMAGE
 from agentic_store import PostgresEventSink, StoredRun, dequeue_run, get_run
+from agentic_tools.repo import open_repo_tools
 
 log = logging.getLogger("agentic_worker")
 
@@ -165,7 +167,9 @@ async def _run(
         except asyncio.CancelledError:
             await _unstarted(run, sink, "cancelled", "cancelled while preparing the sandbox")
             raise
-        runtime = make_runtime(SandboxTools(sandbox))
+        # Entered after the sandbox, so the MCP client closes before the sandbox is destroyed.
+        tools = await stack.enter_async_context(open_repo_tools(sandbox))
+        runtime = make_runtime(tools)
         result = await run_workflow(run.spec, runtime, run.input, run_id=run.id, sink=sink)
         return result.status
 

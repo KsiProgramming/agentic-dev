@@ -1,5 +1,6 @@
 """Platform-owned tools as an adapter sees them: definitions to offer the model and a way to call
-them. Real executors (the `repo` MCP server) come in 1.2; adapters only route calls here."""
+them. The real executors are MCP servers bridged by `agentic_tools`; adapters only route calls
+here."""
 
 from collections.abc import Sequence
 from typing import Annotated, Protocol
