@@ -480,6 +480,20 @@ uv run python scripts/export_workflow_schema.py
 
 CI fails if `schemas/workflow-spec.v0.json` is out of date.
 
+## Agent runtime
+`agentic_runtime` defines the provider-neutral `AgentRuntime` interface: `start(AgentRequest)` returns an `AgentRun`, which you iterate once for `AgentEvent`s and can `cancel()` at any time. Events are `text_delta`, `message`, `tool_call`, `tool_result`, `usage`, and exactly one terminal event (`completed`, `failed` or `cancelled`). The contract is documented in `agentic_runtime/protocol.py` and checked by `check_events`.
+
+Tests use `FakeRuntime` (`agentic_runtime.fake`), which replays a script per node id and echoes the input for unscripted nodes. `Delay` steps let tests cancel mid-run:
+
+```python
+runtime = FakeRuntime({"reviewer": [ToolCall(call_id="c1", name="repo.read_file"),
+                                    ToolResult(call_id="c1", output="..."),
+                                    Message(text="LGTM"), Usage(input_tokens=5, output_tokens=1)]})
+result = await run_agent_node(node, runtime, input="draft")  # agentic_engine.agent
+```
+
+The runtime and engine test suites block all non-loopback network access (`agentic_runtime.testing.block_network`); tests marked `integration` are exempt.
+
 ## Changelog
 Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
 
