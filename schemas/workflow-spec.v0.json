@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "AgentNode": {
+      "additionalProperties": false,
+      "description": "One agent turn: a role and instructions run on a provider.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "type": {
+          "const": "agent",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "role",
+        "instructions"
+      ],
+      "title": "AgentNode",
+      "type": "object"
+    },
+    "SequenceNode": {
+      "additionalProperties": false,
+      "description": "Runs its steps in order.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "agent": "#/$defs/AgentNode",
+                "sequence": "#/$defs/SequenceNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AgentNode"
+              },
+              {
+                "$ref": "#/$defs/SequenceNode"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        },
+        "type": {
+          "const": "sequence",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "steps"
+      ],
+      "title": "SequenceNode",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/KsiProgramming/agentic-dev/schemas/workflow-spec.v0.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A versioned workflow document with a single root node.",
+  "properties": {
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "root": {
+      "discriminator": {
+        "mapping": {
+          "agent": "#/$defs/AgentNode",
+          "sequence": "#/$defs/SequenceNode"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AgentNode"
+        },
+        {
+          "$ref": "#/$defs/SequenceNode"
+        }
+      ],
+      "title": "Root"
+    },
+    "spec_version": {
+      "const": "0",
+      "title": "Spec Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "spec_version",
+    "id",
+    "name",
+    "root"
+  ],
+  "title": "Workflow spec v0",
+  "type": "object"
+}

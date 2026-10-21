@@ -43,12 +43,15 @@ class SequenceNode(_Base):
 Node = Annotated[AgentNode | SequenceNode, Field(discriminator="type")]
 
 
-def iter_nodes(node: Node) -> Iterator[Node]:
-    """Yield `node` and all its descendants, depth first."""
-    yield node
+def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
+    """Yield `(path, node)` for `node` and all its descendants, depth first.
+
+    Paths use the JSON field names, e.g. `root.steps[1].steps[0]`.
+    """
+    yield path, node
     if isinstance(node, SequenceNode):
-        for step in node.steps:
-            yield from iter_nodes(step)
+        for i, step in enumerate(node.steps):
+            yield from iter_nodes(step, f"{path}.steps[{i}]")
 
 
 class WorkflowSpec(_Base):
@@ -62,9 +65,12 @@ class WorkflowSpec(_Base):
 
     @model_validator(mode="after")
     def _unique_node_ids(self) -> Self:
-        seen: set[str] = set()
-        for node in iter_nodes(self.root):
+        seen: dict[str, str] = {}
+        for path, node in iter_nodes(self.root):
             if node.id in seen:
-                raise ValueError(f"duplicate node id {node.id!r}; node ids must be unique")
-            seen.add(node.id)
+                raise ValueError(
+                    f"duplicate node id {node.id!r} at {path} (first used at {seen[node.id]}); "
+                    "node ids must be unique"
+                )
+            seen[node.id] = path
         return self
