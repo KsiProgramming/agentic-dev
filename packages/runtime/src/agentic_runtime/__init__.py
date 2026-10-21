@@ -1,5 +1,6 @@
 """Agent runtime: the `AgentRuntime` interface, its events, and provider adapters."""
 
+from agentic_runtime.claude import ClaudeRuntime
 from agentic_runtime.contract import ContractViolation, check_events
 from agentic_runtime.events import (
     TERMINAL_EVENT_TYPES,
@@ -18,6 +19,7 @@ from agentic_runtime.events import (
 )
 from agentic_runtime.protocol import AgentRun, AgentRuntime
 from agentic_runtime.request import AgentRequest
+from agentic_runtime.tools import ToolDefinition, ToolExecutor, ToolOutput
 
 __all__ = [
     "TERMINAL_EVENT_TYPES",
@@ -26,6 +28,7 @@ __all__ = [
     "AgentRun",
     "AgentRuntime",
     "Cancelled",
+    "ClaudeRuntime",
     "Completed",
     "ContractViolation",
     "Failed",
@@ -33,6 +36,9 @@ __all__ = [
     "TerminalEvent",
     "TextDelta",
     "ToolCall",
+    "ToolDefinition",
+    "ToolExecutor",
+    "ToolOutput",
     "ToolResult",
     "Usage",
     "agent_event_adapter",

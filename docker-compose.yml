@@ -51,7 +51,11 @@ services:
     environment:
       <<: *db-env
       READY_FILE: /tmp/worker-ready
-      # Runs use the fake runtime for now; this paces its events so a run streams visibly.
+      # Agents run on the fake runtime unless AGENTIC_RUNTIME=claude (then ANTHROPIC_API_KEY is
+      # required). FAKE_STEP_DELAY_S paces fake events so a run streams visibly.
+      AGENTIC_RUNTIME: ${AGENTIC_RUNTIME:-fake}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5-5}
       FAKE_STEP_DELAY_S: ${FAKE_STEP_DELAY_S:-0.5}
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/worker-ready"]

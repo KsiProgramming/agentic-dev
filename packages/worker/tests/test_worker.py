@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.spec import WorkflowSpec, parse_spec
-from agentic_runtime import AgentRuntime, Failed
+from agentic_runtime import AgentRuntime, ClaudeRuntime, Failed
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
+from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
 from agentic_store import create_run, enqueue_run, get_run, list_run_events
 from agentic_worker.main import WorkerSettings, run
 
@@ -133,6 +134,32 @@ async def test_stopping_the_worker_cancels_the_run_in_flight(
     assert run_after is not None
     assert run_after.status == "cancelled"
     assert (await list_run_events(sessions, run_id))[-1].type == "run_cancelled"
+
+
+async def test_a_one_node_run_on_claude_stores_text_and_usage(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    mock = MockClaude([text_reply("Five ", "lines.", input_tokens=30, output_tokens=7)])
+    async with worker(postgres_url, redis_url, runtime=ClaudeRuntime(mock.client)):
+        run_id = await submit(sessions, redis_url, load_spec("single-agent.json"))
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    agent = [(e.type, e.payload) for e in events if e.node_id == "summarizer"]
+    assert [t for t, _ in agent] == [
+        "node_started",
+        "text_delta",
+        "text_delta",
+        "usage",
+        "message",
+        "completed",
+        "node_completed",
+    ]
+    assert agent[3][1]["input_tokens"] == 30
+    assert agent[4][1]["text"] == "Five lines."
+    assert events[-1].type == "run_completed"
+    assert "Read the README" in mock.requests[0]["system"]
+    assert all(MOCK_API_KEY not in str(e.payload) for e in events)
 
 
 def test_json_formatter_emits_one_json_object() -> None:
