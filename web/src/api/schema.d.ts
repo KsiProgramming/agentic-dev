@@ -220,6 +220,37 @@ export interface components {
             /** Root */
             root: components["schemas"]["AgentNode"] | components["schemas"]["SequenceNode"];
         };
+        JsonValue: unknown;
+        /**
+         * RunEvent
+         * @description One row of the run event log. For agent events, `type` is the `AgentEvent` type and
+         *     `payload` is the serialised event; payloads are data, never instructions.
+         */
+        RunEvent: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Seq */
+            seq: number;
+            /** Type */
+            type: string;
+            /**
+             * Node Id
+             * @default null
+             */
+            node_id: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
     };
     responses: never;
     parameters: never;
