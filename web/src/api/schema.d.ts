@@ -44,10 +44,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create
+         * @description Queue a run of `workflow` with `input` for its first node. Stream it from `events_url`.
+         */
+        post: operations["createRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Run Events
+         * @description The run's events as Server-Sent Events: stored ones first, then live ones as they are
+         *     written. Each frame's `id` is the event's `seq`, `event` its type and `data` the `RunEvent`.
+         *     The stream ends after the run's final event.
+         */
+        get: operations["streamRunEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentNode
+         * @description One agent turn: a role and instructions run on a provider.
+         */
+        AgentNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "agent";
+            /** Id */
+            id: string;
+            /** Role */
+            role: string;
+            /** Instructions */
+            instructions: string;
+            /**
+             * Provider
+             * @description Unset means the workspace default.
+             */
+            provider?: "claude" | null;
+            /** Model */
+            model?: string | null;
+            /** Tools */
+            tools?: string[];
+        };
+        /** CreateRunRequest */
+        CreateRunRequest: {
+            workflow: components["schemas"]["WorkflowSpec"];
+            /**
+             * Input
+             * @default
+             */
+            input: string;
+        };
+        /** CreateRunResponse */
+        CreateRunResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Status
+             * @default queued
+             * @constant
+             */
+            status: "queued";
+            /** Events Url */
+            events_url: string;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** Health */
         Health: {
             /**
@@ -74,6 +172,53 @@ export interface components {
              * @enum {string}
              */
             redis: "ok" | "error";
+        };
+        /**
+         * SequenceNode
+         * @description Runs its steps in order.
+         */
+        SequenceNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "sequence";
+            /** Id */
+            id: string;
+            /** Steps */
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["SequenceNode"])[];
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+        /**
+         * WorkflowSpec
+         * @description A versioned workflow document with a single root node.
+         */
+        WorkflowSpec: {
+            /**
+             * Spec Version
+             * @constant
+             */
+            spec_version: "0";
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Root */
+            root: components["schemas"]["AgentNode"] | components["schemas"]["SequenceNode"];
         };
     };
     responses: never;
@@ -129,6 +274,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    createRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    streamRunEvents: {
+        parameters: {
+            query?: {
+                /** @description Start after this seq (`Last-Event-ID` wins). */
+                after?: number | null;
+            };
+            header?: {
+                "last-event-id"?: number | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
