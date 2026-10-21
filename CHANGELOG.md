@@ -9,6 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 0.4 spec → LangGraph compiler: `agentic_engine.graph` with `compile_workflow` (nested sequences flattened to a chain of agent nodes named by spec id, a node that does not complete ends the run) and `run_workflow` (output of one node becomes the next node's input; returns status, order, per-node results and summed usage). Adds the `langgraph` dependency, typed stubs in `typings/langgraph/`, and `agentic_engine.agent.sum_usage`.
 - Phase 0.3 `AgentRuntime` interface and fake runtime: provider-neutral request and event models (`text_delta`, `message`, `tool_call`, `tool_result`, `usage`, `completed`/`failed`/`cancelled`) with a contract checker in `agentic_runtime`, cooperative cancellation, a scripted `FakeRuntime`, `agentic_engine.agent.run_agent_node`, and a no-network guard for the runtime and engine tests.
 - Phase 0.2 workflow spec v0: Pydantic models in `agentic_engine.spec` (`agent` and `sequence` nodes, unique slug ids, unknown keys rejected), a generated JSON Schema in `schemas/workflow-spec.v0.json` (`scripts/export_workflow_schema.py`) with a CI freshness check, and valid/invalid spec fixtures with tests.
 - `plan-feature` Claude Code skill (`.claude/skills/plan-feature/`) that finds the next unplanned phase in `specs/roadmap.md`, interviews the user, and writes its `plan.md`, `requirements.md` and `validation.md`.

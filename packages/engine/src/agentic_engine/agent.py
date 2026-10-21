@@ -1,6 +1,6 @@
 """Runs one `agent` node on an `AgentRuntime`. The LangGraph compiler (0.4) wraps this."""
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -91,14 +91,22 @@ def _final_text(events: Sequence[AgentEvent]) -> str:
 
 
 def _total_usage(events: Sequence[AgentEvent]) -> Usage | None:
-    usages = [e for e in events if isinstance(e, Usage)]
-    if not usages:
+    return sum_usage(e for e in events if isinstance(e, Usage))
+
+
+def sum_usage(usages: Iterable[Usage | None]) -> Usage | None:
+    """Add up usage records; `None` entries are skipped, and no records gives `None`.
+
+    Optional fields stay `None` unless at least one record sets them.
+    """
+    present = [u for u in usages if u is not None]
+    if not present:
         return None
-    premium = [u.premium_requests for u in usages if u.premium_requests is not None]
-    usd = [u.estimated_usd for u in usages if u.estimated_usd is not None]
+    premium = [u.premium_requests for u in present if u.premium_requests is not None]
+    usd = [u.estimated_usd for u in present if u.estimated_usd is not None]
     return Usage(
-        input_tokens=sum(u.input_tokens for u in usages),
-        output_tokens=sum(u.output_tokens for u in usages),
+        input_tokens=sum(u.input_tokens for u in present),
+        output_tokens=sum(u.output_tokens for u in present),
         premium_requests=sum(premium) if premium else None,
         estimated_usd=sum(usd) if usd else None,
     )
