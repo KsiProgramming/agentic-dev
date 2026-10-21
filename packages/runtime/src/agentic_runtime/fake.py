@@ -107,9 +107,16 @@ def _call_id(index: int) -> str:
 class FakeRun:
     """Replays one script. Implements `AgentRun`."""
 
-    def __init__(self, steps: Sequence[Step], tools: ToolExecutor | None = None) -> None:
+    def __init__(
+        self,
+        steps: Sequence[Step],
+        tools: ToolExecutor | None = None,
+        *,
+        node_id: str | None = None,
+    ) -> None:
         self._steps = steps
         self._tools = tools
+        self._node_id = node_id
         self._cancel = asyncio.Event()
         self._started = False
 
@@ -145,7 +152,7 @@ class FakeRun:
     async def _call(self, call_id: str, step: CallTool) -> ToolResult:
         assert self._tools is not None
         try:
-            output = await self._tools.call(step.name, dict(step.arguments))
+            output = await self._tools.call(step.name, dict(step.arguments), node_id=self._node_id)
         except Exception as e:
             return ToolResult(call_id=call_id, output=f"tool failed: {e}", is_error=True)
         return ToolResult(call_id=call_id, output=output.text, is_error=output.is_error)
@@ -178,10 +185,10 @@ class FakeRuntime:
     def start(self, request: AgentRequest) -> FakeRun:
         self.requests.append(request)
         if request.node_id in self._scripts:
-            return FakeRun(self._scripts[request.node_id], self._tools)
+            return FakeRun(self._scripts[request.node_id], self._tools, node_id=request.node_id)
         calls: list[Step] = []
         if self._tools is not None:
             examples = {d.name: _first_example(d.input_schema) for d in self._tools.definitions()}
             calls = [CallTool(name, examples.get(name, {})) for name in request.tools]
         script = [*calls, *self._default(request.input)]
-        return FakeRun(_prepare(request.node_id, script), self._tools)
+        return FakeRun(_prepare(request.node_id, script), self._tools, node_id=request.node_id)

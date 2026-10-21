@@ -38,6 +38,10 @@ class ToolExecutor(Protocol):
         """Every tool this executor can run; a request may use any subset by name."""
         ...
 
-    async def call(self, name: str, arguments: dict[str, JsonValue]) -> ToolOutput:
-        """Run one tool. An exception is reported to the model as an error result."""
+    async def call(
+        self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
+    ) -> ToolOutput:
+        """Run one tool for the node `node_id`, which lets a run's executor route the call (a
+        writer node's `repo.*` calls go to its own worktree). An exception is reported to the
+        model as an error result."""
         ...

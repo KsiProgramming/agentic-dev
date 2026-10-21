@@ -46,7 +46,10 @@ class McpToolExecutor:
     def definitions(self) -> Sequence[ToolDefinition]:
         return self._definitions
 
-    async def call(self, name: str, arguments: dict[str, JsonValue]) -> ToolOutput:
+    async def call(
+        self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
+    ) -> ToolOutput:
+        """Call `name` on the server; one server serves every node, so `node_id` is unused."""
         if name not in self._names:
             return ToolOutput(text=f"unknown tool: {name}", is_error=True)
         tool = name.removeprefix(self._prefix)

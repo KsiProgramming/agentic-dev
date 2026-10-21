@@ -58,6 +58,13 @@ class Worktree:
         self.path = path
         self.branch = branch
 
+    @classmethod
+    def of(cls, sandbox: Sandbox, run_id: UUID, node_id: str) -> "Worktree":
+        """Where `node_id`'s worktree goes, and its branch; `add_worktree` creates it."""
+        if not _NODE_ID.match(node_id):
+            raise ValueError(f"not a node id: {node_id!r}")
+        return cls(sandbox, f"{sandbox.worktrees_dir}/{node_id}", branch_name(run_id, node_id))
+
     @property
     def workdir(self) -> str:
         return self.path
@@ -82,16 +89,13 @@ class Worktree:
 async def add_worktree(sandbox: Sandbox, run_id: UUID, node_id: str) -> Worktree:
     """The worktree of `node_id` on `agent/<run-id>/<node-id>`, created from the clone's `HEAD`
     unless it already exists. Raises `SandboxError` if git cannot create it."""
-    if not _NODE_ID.match(node_id):
-        raise ValueError(f"not a node id: {node_id!r}")
-    branch = branch_name(run_id, node_id)
-    path = f"{sandbox.worktrees_dir}/{node_id}"
-    argv = ["sh", "-c", _ADD_SCRIPT, "add_worktree", branch, path, sandbox.workdir]
+    tree = Worktree.of(sandbox, run_id, node_id)
+    argv = ["sh", "-c", _ADD_SCRIPT, "add_worktree", tree.branch, tree.path, sandbox.workdir]
     result = await sandbox.exec(argv)
     if result.exit_code == _WRONG_BRANCH:
         raise SandboxError(f"the worktree of node {node_id} is on another branch")
     if result.exit_code != 0:
-        log.warning("git worktree add for %s failed: %s", branch, result.stderr.strip())
+        log.warning("git worktree add for %s failed: %s", tree.branch, result.stderr.strip())
         raise SandboxError(f"could not create the worktree of node {node_id}")
-    log.info("worktree for %s ready", branch)
-    return Worktree(sandbox, path, branch)
+    log.info("worktree for %s ready", tree.branch)
+    return tree

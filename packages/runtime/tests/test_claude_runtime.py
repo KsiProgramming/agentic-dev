@@ -181,6 +181,7 @@ async def test_tool_loop_two_turns() -> None:
         Completed(),
     ]
     assert tools.calls == [("repo.read_file", {"path": "README.md"})]
+    assert tools.node_ids == ["writer"]  # so a run's executor can route the call
     [tool] = mock.requests[0]["tools"]
     assert tool["name"] == "repo__read_file"
     assert tool["input_schema"] == {"type": "object", "properties": {}}
