@@ -1,10 +1,15 @@
-"""Fail a PR that implements a roadmap phase without marking it done in specs/roadmap.md.
+"""Check, or mark, that a PR implementing a roadmap phase marks it done in specs/roadmap.md.
 
 A PR implements a phase when it touches a spec folder (specs/<date>-<slug>/) whose
 requirements.md has a `Roadmap phase: <number>` line. That phase's row in
 specs/roadmap.md must then have a Status cell starting with "✅ Done".
 
-Usage: python scripts/check_roadmap.py <base-sha> <head-sha>
+Usage:
+  python scripts/check_roadmap.py <base-sha> <head-sha>
+      Fail if an implemented phase is not marked done at <head-sha>.
+  python scripts/check_roadmap.py <base-sha> <head-sha> --mark-done <pr-url>
+      Set the Status of each implemented phase to "✅ Done ([#<n>](<pr-url>))" in the
+      working-tree specs/roadmap.md. Phases already marked done are left as they are.
 """
 
 import io
@@ -53,11 +58,31 @@ def problems(phases: set[str], roadmap: str) -> list[str]:
     return errors
 
 
+def mark_done(phases: set[str], roadmap: str, pr_url: str) -> tuple[str, list[str]]:
+    """Return the roadmap with each phase's Status set to done, and the phases changed."""
+    number = pr_url.rstrip("/").rsplit("/", 1)[-1]
+    done = f"{DONE_PREFIX} ([#{number}]({pr_url}))"
+    changed: list[str] = []
+    lines = roadmap.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        match = PHASE_ROW.match(line)
+        if not match or match.group(1) not in phases:
+            continue
+        body = line.rstrip("\r\n")
+        cells = body.strip().strip("|").split("|")
+        if cells[-1].strip().startswith(DONE_PREFIX):
+            continue
+        cells[-1] = f" {done} "
+        lines[i] = "|" + "|".join(cells) + "|" + line[len(body) :]
+        changed.append(match.group(1))
+    return "".join(lines), changed
+
+
 def _git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, encoding="utf-8").stdout
 
 
-def main(base: str, head: str) -> int:
+def implemented_phases(base: str, head: str) -> set[str]:
     paths = _git("diff", "--name-only", f"{base}...{head}").splitlines()
     phases: set[str] = set()
     for spec_dir in sorted(changed_spec_dirs(paths)):
@@ -67,9 +92,21 @@ def main(base: str, head: str) -> int:
             continue  # folder deleted or has no requirements.md
         if phase := phase_of(requirements):
             phases.add(phase)
+    return phases
 
+
+def main(base: str, head: str, pr_url: str | None = None) -> int:
+    phases = implemented_phases(base, head)
     if not phases:
         print("This PR touches no phase spec folder; nothing to check.")
+        return 0
+
+    if pr_url is not None:
+        with open(ROADMAP, encoding="utf-8", newline="") as f:
+            roadmap, changed = mark_done(phases, f.read(), pr_url)
+        with open(ROADMAP, "w", encoding="utf-8", newline="") as f:
+            f.write(roadmap)
+        print(f"Marked phase(s) {', '.join(changed)} as done." if changed else "Already marked.")
         return 0
 
     errors = problems(phases, _git("show", f"{head}:{ROADMAP}"))
@@ -83,6 +120,9 @@ def main(base: str, head: str) -> int:
 if __name__ == "__main__":
     # Windows consoles default to cp1252, which cannot print the status emoji.
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    if len(args) == 4 and args[2] == "--mark-done":
+        sys.exit(main(args[0], args[1], args[3]))
+    if len(args) != 2:
         sys.exit(__doc__)
-    sys.exit(main(sys.argv[1], sys.argv[2]))
+    sys.exit(main(args[0], args[1]))

@@ -35,9 +35,34 @@ jobs:
     runs-on: ubuntu-latest
     # Planning-only PRs (spec written, not implemented yet) use the skip-roadmap label.
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-roadmap') }}
+    # Pushes the "mark phase done" commit to the PR branch.
+    permissions:
+      contents: write
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      # Fork branches cannot be pushed to; those PRs only get the check.
+      SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Commits pushed with the default GITHUB_TOKEN do not trigger new workflow runs.
+          # Set ROADMAP_BOT_TOKEN (PAT or GitHub App token) if required checks must rerun.
+          token: ${{ secrets.ROADMAP_BOT_TOKEN || github.token }}
+      - name: Mark implemented phases done in specs/roadmap.md
+        if: ${{ env.SAME_REPO == 'true' }}
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          python3 scripts/check_roadmap.py "$BASE_SHA" HEAD --mark-done "$PR_URL"
+          if git diff --quiet -- specs/roadmap.md; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Mark roadmap phase done for ${PR_URL##*/}" -- specs/roadmap.md
+          git push origin "HEAD:refs/heads/$HEAD_REF"
       - name: Require implemented phases to be marked done in specs/roadmap.md
-        run: python3 scripts/check_roadmap.py "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+        run: python3 scripts/check_roadmap.py "$BASE_SHA" HEAD

@@ -1,4 +1,4 @@
-from check_roadmap import changed_spec_dirs, phase_of, phase_statuses, problems
+from check_roadmap import changed_spec_dirs, mark_done, phase_of, phase_statuses, problems
 
 ROADMAP = """\
 | # | Phase | Done when | Status |
@@ -49,3 +49,21 @@ def test_not_done_or_unknown_phase_fails() -> None:
     assert len(errors) == 2
     assert "Phase 0.2 is implemented by this PR" in errors[0]
     assert "Phase 9.9 is not in" in errors[1]
+
+
+def test_mark_done_sets_status_with_pr_link() -> None:
+    url = "https://example.test/pull/7"
+    roadmap, changed = mark_done({"0.2", "1.10"}, ROADMAP, url)
+
+    assert changed == ["0.2", "1.10"]
+    assert phase_statuses(roadmap)["0.2"] == f"✅ Done ([#7]({url}))"
+    assert phase_statuses(roadmap)["1.10"] == f"✅ Done ([#7]({url}))"
+    assert "| 0.2 | Workflow spec v0 | A sample spec validates | ✅ Done" in roadmap
+    assert problems({"0.2", "1.10"}, roadmap) == []
+
+
+def test_mark_done_keeps_done_phases_and_other_lines() -> None:
+    roadmap, changed = mark_done({"0.1"}, ROADMAP, "https://example.test/pull/7")
+
+    assert changed == []
+    assert roadmap == ROADMAP

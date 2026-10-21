@@ -9,6 +9,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- `plan-feature` Claude Code skill (`.claude/skills/plan-feature/`) that finds the next unplanned phase in `specs/roadmap.md`, interviews the user, and writes its `plan.md`, `requirements.md` and `validation.md`.
+- `complete-phase` Claude Code skill (`.claude/skills/complete-phase/`) and `scripts/check_roadmap.py --mark-done <pr-url>`, which set an implemented phase's Status to `✅ Done` in `specs/roadmap.md`. The `Roadmap phase marked done` PR check now commits this to same-repo PR branches before checking it.
 - Phase 0.1 repo scaffold ([#1](https://github.com/KsiProgramming/agentic-dev/pull/1)):
   - Planning package for phase 0.1 in `specs/2026-10-21-repo-scaffold/`.
   - `uv` workspace (Python 3.12) with the `api`, `engine`, `runtime` and `tools` packages; ruff, pyright strict, pytest with Testcontainers.
