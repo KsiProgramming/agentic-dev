@@ -8,6 +8,7 @@ members = [
     "agentic-dev",
     "agentic-engine",
     "agentic-runtime",
+    "agentic-sandbox",
     "agentic-store",
     "agentic-tools",
     "agentic-worker",
@@ -48,6 +49,7 @@ dependencies = [
     { name = "agentic-api" },
     { name = "agentic-engine" },
     { name = "agentic-runtime" },
+    { name = "agentic-sandbox" },
     { name = "agentic-store" },
     { name = "agentic-tools" },
     { name = "agentic-worker" },
@@ -68,6 +70,7 @@ requires-dist = [
     { name = "agentic-api", editable = "packages/api" },
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "agentic-runtime", editable = "packages/runtime" },
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "agentic-tools", editable = "packages/tools" },
     { name = "agentic-worker", editable = "packages/worker" },
@@ -114,6 +117,21 @@ dependencies = [
 requires-dist = [
     { name = "anthropic", specifier = ">=1.17" },
     { name = "httpx2", specifier = ">=2.0,<3" },
+    { name = "pydantic", specifier = ">=2.11" },
+]
+
+[[package]]
+name = "agentic-sandbox"
+version = "0.1.0"
+source = { editable = "packages/sandbox" }
+dependencies = [
+    { name = "agentic-runtime" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
 

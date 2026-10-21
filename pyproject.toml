@@ -7,6 +7,7 @@ dependencies = [
     "agentic-api",
     "agentic-engine",
     "agentic-runtime",
+    "agentic-sandbox",
     "agentic-store",
     "agentic-tools",
     "agentic-worker",
@@ -32,6 +33,7 @@ members = ["packages/*"]
 agentic-api = { workspace = true }
 agentic-engine = { workspace = true }
 agentic-runtime = { workspace = true }
+agentic-sandbox = { workspace = true }
 agentic-store = { workspace = true }
 agentic-tools = { workspace = true }
 agentic-worker = { workspace = true }
@@ -45,7 +47,7 @@ extend-exclude = ["web"]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agentic_api", "agentic_engine", "agentic_runtime", "agentic_store", "agentic_tools", "agentic_worker"]
+known-first-party = ["agentic_api", "agentic_engine", "agentic_runtime", "agentic_sandbox", "agentic_store", "agentic_tools", "agentic_worker"]
 
 [tool.pyright]
 pythonVersion = "3.12"
