@@ -25,7 +25,7 @@ Strategy: **walking skeleton first**, then grow outward. The milestones follow t
 
 | # | Phase | Done when | Status |
 |---|---|---|---|
-| 1.1 | Sandbox manager: container per run with a local repo clone | An agent can list files in a cloned repo inside the container | — |
+| 1.1 | Sandbox manager: container per run with a local repo clone | An agent can list files in a cloned repo inside the container | ✅ Done ([#10](https://github.com/KsiProgramming/agentic-dev/pull/10)) |
 | 1.2 | `repo` MCP server (read only) wired into the agent runtime | An agent answers a question about the repo using the tools | — |
 | 1.3 | Durable execution with the Postgres checkpointer | Killing a worker mid-run and restarting it resumes after the last completed node (AC-8) | — |
 | 1.4 | Workspaces + connections; encrypted secrets (local KMS) | A Claude key is stored encrypted and used by a run; it never appears in logs | — |
