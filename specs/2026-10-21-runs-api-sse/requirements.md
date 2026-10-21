@@ -22,7 +22,7 @@ The tech stack fixes the shape: **API and workers are separate processes**, work
   - Each frame has `id: <seq>`, `event: <type>` and `data: <RunEvent JSON>`.
   - It replays stored events after `Last-Event-ID` (header) or `?after=<seq>`, then tails new ones.
   - The stream closes after the run's terminal event (`run_completed` / `run_failed` / `run_cancelled`), or right away after replay if the run has already finished.
-  - 404 for an unknown run id. A keep-alive comment is sent every 15 s.
+  - 404 for an unknown run id. FastAPI sends a `: ping` keep-alive comment every 15 s.
 - One `LISTEN` connection per API process (opened in the lifespan) that wakes per-run subscribers. On a wake-up the subscriber re-reads `run_events` after its last seq, so a missed or merged notification never loses an event.
 
 ### Out of scope
