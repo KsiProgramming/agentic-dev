@@ -168,6 +168,7 @@ source = { editable = "packages/store" }
 dependencies = [
     { name = "agentic-engine" },
     { name = "agentic-sandbox" },
+    { name = "agentic-secrets" },
     { name = "asyncpg" },
     { name = "langgraph-checkpoint-postgres" },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -179,6 +180,7 @@ dependencies = [
 requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "agentic-sandbox", editable = "packages/sandbox" },
+    { name = "agentic-secrets", editable = "packages/secrets" },
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=3" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },

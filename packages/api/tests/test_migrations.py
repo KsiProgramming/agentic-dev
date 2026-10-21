@@ -37,8 +37,10 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0006_checkpoints"
-    assert {"runs", "run_events"} | CHECKPOINT_TABLES <= set(table_names)
+    assert version == "0007_workspaces_connections"
+    assert {"runs", "run_events", "workspaces", "connections"} | CHECKPOINT_TABLES <= set(
+        table_names
+    )
     # The migrations match the `agentic_store` models.
     await asyncio.to_thread(command.check, config)
 
@@ -104,3 +106,32 @@ async def table_names(postgres_url: str) -> set[str]:
         names = set(rows.scalars())
     await engine.dispose()
     return names
+
+
+async def test_the_workspaces_revision_moves_existing_runs_to_the_default_workspace(
+    postgres_url: str,
+) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.downgrade, config, "0006_checkpoints")
+    assert not {"workspaces", "connections"} & await table_names(postgres_url)
+
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        run_id = (
+            await conn.execute(
+                text(
+                    "INSERT INTO runs (id, status, spec) "
+                    "VALUES (gen_random_uuid(), 'completed', '{}') RETURNING id"
+                )
+            )
+        ).scalar_one()
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.connect() as conn:
+        workspace_id = (
+            await conn.execute(text("SELECT workspace_id FROM runs WHERE id = :id"), {"id": run_id})
+        ).scalar_one()
+    await engine.dispose()
+
+    assert str(workspace_id) == "00000000-0000-0000-0000-000000000001"

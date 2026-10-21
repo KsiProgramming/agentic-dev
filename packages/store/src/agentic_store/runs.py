@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_sandbox import RepoSource
-from agentic_store.models import Run
+from agentic_store.models import DEFAULT_WORKSPACE_ID, Run
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class StoredRun:
     repo: RepoSource | None = None
     # How many times a worker has claimed the run; above 1 it is being resumed.
     attempt: int = 0
+    workspace_id: UUID = DEFAULT_WORKSPACE_ID
 
 
 async def create_run(
@@ -26,13 +27,16 @@ async def create_run(
     spec: WorkflowSpec,
     input: str = "",
     repo: RepoSource | None = None,
+    workspace_id: UUID = DEFAULT_WORKSPACE_ID,
 ) -> UUID:
-    """Insert a `queued` run holding `spec`, `input` and `repo`; returns its id."""
+    """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`; returns its
+    id. The workspace must exist."""
     run_id = uuid4()
     async with sessions.begin() as session:
         session.add(
             Run(
                 id=run_id,
+                workspace_id=workspace_id,
                 status="queued",
                 spec=spec.model_dump(mode="json"),
                 input=input,
@@ -56,4 +60,5 @@ def stored_run(run: Run) -> StoredRun:
         input=run.input,
         repo=RepoSource.model_validate(run.repo) if run.repo is not None else None,
         attempt=run.attempt,
+        workspace_id=run.workspace_id,
     )
