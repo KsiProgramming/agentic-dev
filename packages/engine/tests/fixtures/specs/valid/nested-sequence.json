@@ -1,0 +1,35 @@
+{
+  "spec_version": "0",
+  "id": "nested",
+  "name": "Nested sequence",
+  "root": {
+    "type": "sequence",
+    "id": "outer",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "planner",
+        "role": "Planner",
+        "instructions": "Plan the work."
+      },
+      {
+        "type": "sequence",
+        "id": "inner",
+        "steps": [
+          {
+            "type": "agent",
+            "id": "implementer",
+            "role": "Developer",
+            "instructions": "Implement the plan."
+          },
+          {
+            "type": "agent",
+            "id": "tester",
+            "role": "Tester",
+            "instructions": "Test the implementation."
+          }
+        ]
+      }
+    ]
+  }
+}

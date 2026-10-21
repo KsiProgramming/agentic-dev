@@ -1,0 +1,9 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Unknown node type",
+  "root": {
+    "type": "gate",
+    "id": "approve"
+  }
+}

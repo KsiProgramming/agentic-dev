@@ -1,0 +1,12 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Unknown provider",
+  "root": {
+    "type": "agent",
+    "id": "writer",
+    "role": "Technical writer",
+    "instructions": "Write docs.",
+    "provider": "copilot"
+  }
+}

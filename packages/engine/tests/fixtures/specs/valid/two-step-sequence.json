@@ -1,0 +1,27 @@
+{
+  "spec_version": "0",
+  "id": "draft-and-review",
+  "name": "Draft and review",
+  "description": "A writer drafts a document, then a reviewer checks it.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Draft the architecture overview.",
+        "provider": "claude",
+        "model": "claude-sonnet-5-5",
+        "tools": ["repo.read_file", "repo.list_files"]
+      },
+      {
+        "type": "agent",
+        "id": "reviewer",
+        "role": "Senior reviewer",
+        "instructions": "Review the draft for accuracy and clarity."
+      }
+    ]
+  }
+}
