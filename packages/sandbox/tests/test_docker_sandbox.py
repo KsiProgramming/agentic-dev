@@ -122,5 +122,28 @@ async def test_sweep_removes_leftover_sandboxes(
     assert labelled(client, run_id) == []
 
 
+async def test_sweep_keeps_sandboxes_of_runs_in_flight(
+    client: docker.DockerClient, manager: DockerSandboxManager, repos: Path
+) -> None:
+    run_id = uuid4()
+    async with manager.open(run_id, RepoSource(url=str(repos / "hello"))):
+        sweep_orphans(client, keep={str(run_id)})
+        assert labelled(client, run_id)
+
+
+async def test_reopening_a_run_replaces_the_sandbox_it_left(
+    client: docker.DockerClient, manager: DockerSandboxManager, repos: Path
+) -> None:
+    """A resumed run gets a fresh sandbox even if its earlier attempt's is still there."""
+    run_id = uuid4()
+    leftover = manager.open(run_id, RepoSource(url=str(repos / "hello")))
+    await leftover.__aenter__()  # never exited, as if the worker died
+
+    async with manager.open(run_id, RepoSource(url=str(repos / "hello"))) as box:
+        assert (await box.exec(["cat", "README.md"])).exit_code == 0
+        assert len(labelled(client, run_id)) == 2  # one container and its volume
+    assert labelled(client, run_id) == []
+
+
 def test_the_docker_manager_implements_the_protocol(client: docker.DockerClient) -> None:
     _: SandboxManager = DockerSandboxManager(client)

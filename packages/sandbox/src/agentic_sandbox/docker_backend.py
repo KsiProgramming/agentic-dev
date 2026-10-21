@@ -3,7 +3,8 @@
 The repo is cloned on the worker and copied into a per-run volume mounted at `/workspace`. The
 container has no network, a read-only root filesystem, no capabilities and runs as a non-root
 user; the clone is owned by root, so in this phase agents can read it but not change it. Every
-container and volume carries the `agentic.run_id` label, so leftovers can be swept.
+container and volume carries the `agentic.run_id` label, so leftovers can be swept. A run that is
+resumed after its worker died gets a fresh sandbox: `open` first removes the one it left.
 
 docker-py is blocking, so its calls run in threads.
 """
@@ -16,7 +17,7 @@ import shutil
 import tarfile
 import tempfile
 import time
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Collection, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -115,6 +116,10 @@ class DockerSandboxManager:
         try:
             archive = await self._clone(repo)
             try:
+                if leftovers := await asyncio.to_thread(
+                    _sweep, self._client, f"{RUN_LABEL}={run_id}"
+                ):
+                    log.info("sandbox %s: removed %d left by an earlier attempt", name, leftovers)
                 volume = await asyncio.to_thread(
                     self._client.volumes.create, name=name, labels={RUN_LABEL: str(run_id)}
                 )
@@ -203,12 +208,24 @@ def _remove(container: Container | None, volume: Volume | None) -> None:
             log.warning("could not remove a sandbox part: %s", e)
 
 
-def sweep_orphans(client: docker.DockerClient) -> int:
-    """Remove every sandbox container and volume (label `agentic.run_id`); returns how many
-    containers were removed. Call it when no run is in flight on this Docker host."""
-    containers = client.containers.list(all=True, filters={"label": RUN_LABEL})
+def sweep_orphans(client: docker.DockerClient, keep: Collection[str] = frozenset()) -> int:
+    """Remove every sandbox container and volume (label `agentic.run_id`) except those of the
+    run ids in `keep` (runs still in flight on another worker); returns how many containers were
+    removed."""
+    return _sweep(client, RUN_LABEL, keep)
+
+
+def _sweep(client: docker.DockerClient, label: str, keep: Collection[str] = frozenset()) -> int:
+    """Remove the sandbox containers and volumes matching the `label` filter, except `keep`."""
+    containers = [
+        c
+        for c in client.containers.list(all=True, filters={"label": label})
+        if c.labels.get(RUN_LABEL) not in keep
+    ]
     for container in containers:
         _remove(container, None)
-    for volume in client.volumes.list(filters={"label": RUN_LABEL}):
-        _remove(None, volume)
+    for volume in client.volumes.list(filters={"label": label}):
+        labels = cast(dict[str, str], (volume.attrs or {}).get("Labels") or {})
+        if labels.get(RUN_LABEL) not in keep:
+            _remove(None, volume)
     return len(containers)

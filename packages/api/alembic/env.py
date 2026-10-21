@@ -14,6 +14,16 @@ if config.config_file_name is not None:
 
 target_metadata = metadata
 
+CHECKPOINT_TABLES = frozenset(
+    {"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"}
+)
+"""Created by revision 0006 for the LangGraph checkpointer, which owns their shape; they have no
+model in `metadata`, so autogenerate and `alembic check` leave them alone."""
+
+
+def _include_name(name: str | None, type_: str, _parent_names: object) -> bool:
+    return not (type_ == "table" and name in CHECKPOINT_TABLES)
+
 
 def _database_url() -> str:
     return config.get_main_option("sqlalchemy.url") or Settings().database_url
@@ -23,6 +33,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=_database_url(),
         target_metadata=target_metadata,
+        include_name=_include_name,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -31,7 +42,9 @@ def run_migrations_offline() -> None:
 
 
 def _do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection, target_metadata=target_metadata, include_name=_include_name
+    )
     with context.begin_transaction():
         context.run_migrations()
 

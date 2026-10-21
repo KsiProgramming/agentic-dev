@@ -17,6 +17,7 @@ from agentic_runtime import AgentEvent, agent_event_adapter
 type RunStatus = Literal["running", "completed", "failed", "cancelled"]
 
 RUN_STARTED: Final = "run_started"
+RUN_RESUMED: Final = "run_resumed"
 RUN_COMPLETED: Final = "run_completed"
 RUN_FAILED: Final = "run_failed"
 RUN_CANCELLED: Final = "run_cancelled"
@@ -75,12 +76,13 @@ class NullEventSink:
 
 
 class RunEventLog:
-    """Numbers a run's events and hands them to a sink."""
+    """Numbers a run's events and hands them to a sink. A resumed run starts at `next_seq`, one
+    past the last event its earlier attempts wrote, so the stream has no gaps."""
 
-    def __init__(self, run_id: UUID, sink: EventSink) -> None:
+    def __init__(self, run_id: UUID, sink: EventSink, *, next_seq: int = 1) -> None:
         self.run_id = run_id
         self._sink = sink
-        self._seq = 0
+        self._seq = next_seq - 1
 
     async def emit(
         self,

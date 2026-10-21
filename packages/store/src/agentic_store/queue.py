@@ -1,7 +1,8 @@
 """The run queue: a Redis list of run ids. The API pushes, workers pop.
 
-Only the id travels; the spec and input are read from Postgres. Popping removes the job, so a
-run whose worker dies before finishing is not retried (durable execution comes later).
+Only the id travels; the spec and input are read from Postgres. Popping removes the job: the
+queue only announces new runs. Who runs a run is decided by its lease in Postgres
+(`agentic_store.lease`), and a run whose worker died comes back by reclaiming it there.
 """
 
 from typing import Any
