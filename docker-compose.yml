@@ -33,7 +33,10 @@ services:
       context: .
       dockerfile: packages/api/Dockerfile
     image: agentic-dev/python:dev
-    environment: *db-env
+    environment:
+      <<: *db-env
+      # The browser calls the API directly, so the web app's origin must be allowed.
+      CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

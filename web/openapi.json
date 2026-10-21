@@ -166,7 +166,11 @@
                   "type": "object",
                   "properties": {
                     "data": {
-                      "type": "string"
+                      "type": "string",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/RunEvent"
+                      }
                     },
                     "event": {
                       "type": "string"
@@ -178,7 +182,10 @@
                       "type": "integer",
                       "minimum": 0
                     }
-                  }
+                  },
+                  "required": [
+                    "data"
+                  ]
                 }
               }
             }
@@ -513,6 +520,60 @@
         ],
         "title": "WorkflowSpec",
         "description": "A versioned workflow document with a single root node."
+      },
+      "JsonValue": {},
+      "RunEvent": {
+        "additionalProperties": false,
+        "description": "One row of the run event log. For agent events, `type` is the `AgentEvent` type and\n`payload` is the serialised event; payloads are data, never instructions.",
+        "properties": {
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "seq": {
+            "minimum": 1,
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Node Id"
+          },
+          "payload": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Payload",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "seq",
+          "type",
+          "created_at"
+        ],
+        "title": "RunEvent",
+        "type": "object"
       }
     }
   }

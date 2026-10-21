@@ -1,7 +1,7 @@
 import asyncio
 import contextlib
 from collections.abc import AsyncIterable
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -18,6 +18,29 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 
 # Streams re-read the log this often even with no notification, in case one was lost.
 RECHECK_S = 15.0
+
+# Each frame's `data` is a `RunEvent`. FastAPI documents this itself only for plain yielded
+# models, not `ServerSentEvent`, so it is spelled out here (the component is added in app.py).
+_SSE_RUN_EVENTS: dict[str, Any] = {
+    "responses": {
+        "200": {
+            "content": {
+                "text/event-stream": {
+                    "itemSchema": {
+                        "required": ["data"],
+                        "properties": {
+                            "data": {
+                                "type": "string",
+                                "contentMediaType": "application/json",
+                                "contentSchema": {"$ref": "#/components/schemas/RunEvent"},
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
 
 
 def _sessions(request: Request) -> async_sessionmaker[AsyncSession]:
@@ -47,6 +70,7 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     operation_id="streamRunEvents",
     name="stream_run_events",
     responses={404: {"description": "No run with this id"}},
+    openapi_extra=_SSE_RUN_EVENTS,
 )
 async def stream_events(
     request: Request,
