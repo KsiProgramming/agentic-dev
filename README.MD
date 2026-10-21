@@ -504,6 +504,19 @@ result.status, result.order, result.text, result.usage, result.stopped_at
 
 LangGraph ships no type information, so `typings/langgraph/` holds minimal stubs for the parts the engine uses; extend them when you use more of its API.
 
+## Run event log
+Every run writes one ordered stream of events (`agentic_engine.events.RunEvent`): `run_started`, then for each node `node_started`, the node's agent events and `node_completed` / `node_failed` / `node_cancelled`, then `run_completed` / `run_failed` / `run_cancelled`. `seq` numbers the events 1, 2, … per run. Agent events keep their `AgentEvent` type, and their `payload` is the serialised event (`event.agent_event()` parses it back).
+
+The engine has no database code. It hands events to an `EventSink` passed to `run_workflow`. Tests use `InMemoryEventSink`. `agentic_store.PostgresEventSink` writes each event to the append-only `run_events` table in its own transaction and keeps the run's status in `runs`:
+
+```python
+sessions = async_sessionmaker(create_async_engine(database_url), expire_on_commit=False)
+result = await run_workflow(spec, runtime, "go", sink=PostgresEventSink(sessions))
+events = await list_run_events(sessions, result.run_id)  # ordered by seq
+```
+
+The `agentic_store` package holds the SQLAlchemy models. The Alembic revisions in `packages/api/alembic/` migrate them, and the migration test runs `alembic check` so the two cannot drift.
+
 ## Changelog
 Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
 
