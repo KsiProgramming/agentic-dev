@@ -22,19 +22,35 @@ Principles that apply:
 ## Scope
 ### In scope
 - New `uv` workspace package `agentic_sandbox` with:
-  - A `Sandbox` protocol: `exec(argv) -> ExecResult` (exit code, stdout, stderr, truncated flag) and `close()`. It also exposes `workdir`, where the repo lives inside the sandbox (`/workspace/repo`).
+  - A `Sandbox` protocol: `exec(argv, timeout_s) -> ExecResult` (exit code, stdout, stderr, truncated flag). It also exposes `workdir`, where the repo lives inside the sandbox (`/workspace/repo`). Closing is owned by the manager's context.
   - A `SandboxManager` protocol: `async with manager.open(run_id, repo) as sandbox:`. It creates the sandbox, clones the repo into it, and always destroys it on exit (success, failure or cancellation).
   - `FakeSandboxManager`: a temp directory per run and local `subprocess` exec. It is used by unit tests and by the worker when Docker is disabled.
   - `DockerSandboxManager`: uses the `docker` Python SDK, with blocking calls wrapped in `asyncio.to_thread`.
-- Repo source: `RepoSource` holds a local path or a git URL (`file://`, `https://`). The worker runs a shallow clone (`git clone --depth 1`, optional `ref`) into a host temp dir. The clone is then copied into the container (`put_archive`), so the container needs no network and no git credentials.
-- The container is hardened: a pinned small image (`alpine:3.20` with `findutils`), network disabled, no volumes or bind mounts, non-root user, read-only root FS with a writable `/workspace` tmpfs, `cap_drop=ALL`, `no-new-privileges`, and memory, CPU and PID limits. It is labelled `agentic.run_id=<id>` so leftovers can be found.
-- `SandboxTools(sandbox)` implements `ToolExecutor` with one tool, `repo.list_files(path=".", max_depth=3)`. It runs `find` inside the sandbox, relative to the repo root. It rejects absolute paths and paths that leave the repo root (`..`). It skips `.git` and caps output at 1,000 entries, then marks the output as truncated.
-- `FakeRuntime` can run scripted tool steps against a `ToolExecutor`: a `CallTool(name, args)` step emits `tool_call`, calls the executor and emits `tool_result`. The compose demo needs no API key because of this.
+- Repo source: `RepoSource` holds an `https://` URL without credentials, or a local path under the worker's `SANDBOX_LOCAL_ROOT` (unset means local paths are refused). It takes an optional `ref`. `file://`, ssh, scp-like and `ext::` sources are rejected. The worker runs a shallow clone (`git clone --depth 1`, optional `ref`) into a host temp dir, with only the https and file protocols enabled and its own throwaway git config. The clone is then copied into the container (`put_archive`), so the container needs no network and no git credentials.
+- The container is hardened:
+  - A pinned small image: plain `alpine:3.20`, whose busybox `find` is enough.
+  - Network mode `none`, and no bind mounts.
+  - A per-run named volume at `/workspace` (`put_archive` cannot write into tmpfs or a read-only root). The clone in it is root-owned and read-only for the agent user.
+  - A non-root user, a read-only root FS and a small `/tmp` tmpfs.
+  - `cap_drop=ALL`, `no-new-privileges`, and memory, CPU and PID limits.
+
+  The container and its volume are labelled `agentic.run_id=<id>`, so leftovers can be found.
+- `SandboxTools(sandbox)` implements `ToolExecutor` with one tool, `repo.list_files(path=".", max_depth=3)`.
+  - It runs `find` inside the sandbox, relative to the repo root.
+  - It rejects absolute paths and paths that leave the repo root (`..`, or a symlink pointing outside).
+  - It skips `.git` and caps output at 1,000 entries, then marks the output as truncated.
+- `FakeRuntime(tools=...)` runs tools through a `ToolExecutor`:
+  - A `CallTool(name, args)` script step emits `tool_call`, calls the executor and emits `tool_result`.
+  - Nodes without a script call each tool their request names, so the compose demo needs no API key and no extra setting.
 - Worker:
   - For a run with a `repo`, it opens a sandbox, builds a runtime with that run's `SandboxTools`, runs the workflow and closes the sandbox.
   - Runs without a `repo` behave as they do today.
-  - New settings: `SANDBOX_BACKEND=docker|fake` and `SANDBOX_IMAGE`.
-  - In compose, the worker mounts the Docker socket.
+  - A sandbox that cannot be opened ends the run with `run_started` then `run_failed`, written by the engine's `record_unstarted_run`.
+  - New settings: `SANDBOX_BACKEND=docker|fake`, `SANDBOX_IMAGE` and `SANDBOX_LOCAL_ROOT`.
+  - In compose:
+    - The worker mounts the Docker socket (group `DOCKER_GID`).
+    - This project's `.git` is mounted read-only at `/samples/agentic-dev.git` as the demo repo.
+    - The worker image installs `git`.
 - API: `CreateRunRequest` gets an optional `repo: {url, ref?}`, stored with the run (Alembic migration `0004`). A run that asks for `repo.*` tools without a repo fails validation with `422`.
 - Sandbox lifecycle is logged (created, cloned, destroyed, with duration). There are no new run event types yet.
 
@@ -55,7 +71,11 @@ Principles that apply:
 | Tool name | `repo.list_files` | This matches the dotted platform naming used by the Claude adapter, so 1.2 moves the tool into the MCP server without renaming it. |
 | Tools per run | The worker builds the runtime per run, with that run's `SandboxTools` | `ClaudeRuntime` already takes a `ToolExecutor` in its constructor, so the `AgentRuntime` protocol does not change. |
 | Sandbox lifetime | One per run, opened before the first node and destroyed after the terminal event | This is what the tech stack specifies. 1.3 revisits it for resume. |
-| Image | Pinned `alpine:3.20` plus `findutils`, configurable with `SANDBOX_IMAGE` | Small and fast to pull. Later phases add a purpose-built image. |
+| Image | Pinned `alpine:3.20` (busybox `find`), configurable with `SANDBOX_IMAGE` | Small and fast to pull, with no image build step. Later phases add a purpose-built image. |
+| Local repo paths | Only under `SANDBOX_LOCAL_ROOT`, unset by default | A hosted worker must not clone arbitrary host paths. Compose allows `/samples` for the demo. |
+| Fixture with repo tools | `two-step-sequence.json` drops its `repo.*` tools; new `list-repo-files.json` | A spec that uses `repo.*` tools now needs a `repo`, so the general-purpose fixture should not list them. |
 
 ## Open questions
 - None blocking. The sandbox image will need git, language toolchains and so on for 1.6/3.4. That choice is deferred to those phases.
+- `run_started` is written only once the sandbox is ready, so a run stays `queued` while its repo is cloned (a few seconds for this repo). Revisit when the monitor shows sandbox progress (2.5).
+- The startup sweep removes every labelled sandbox on the Docker host. That is safe with one worker per host, and 1.3 has to revisit it.

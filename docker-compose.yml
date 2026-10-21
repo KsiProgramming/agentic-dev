@@ -60,6 +60,18 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5-5}
       FAKE_STEP_DELAY_S: ${FAKE_STEP_DELAY_S:-0.5}
+      # Runs with a repo get a sandbox container on the host's Docker. Local repo paths may only
+      # come from /samples, where this project's own git history is mounted as a demo repo.
+      SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-alpine:3.20}
+      SANDBOX_LOCAL_ROOT: /samples
+    # The Docker socket gives the worker control of the host's Docker (dev only; phase 9.2
+    # replaces it). DOCKER_GID is the socket's group: 0 on Docker Desktop, `docker` on Linux.
+    group_add:
+      - "${DOCKER_GID:-0}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.git:/samples/agentic-dev.git:ro
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/worker-ready"]
       interval: 2s

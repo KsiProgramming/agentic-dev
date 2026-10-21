@@ -37,6 +37,8 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String(32))
     spec: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     input: Mapped[str] = mapped_column(Text, server_default="")
+    # The `RepoSource` the run works on, if any.
+    repo: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

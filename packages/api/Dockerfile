@@ -12,6 +12,7 @@ COPY pyproject.toml uv.lock ./
 COPY packages/api/pyproject.toml packages/api/
 COPY packages/engine/pyproject.toml packages/engine/
 COPY packages/runtime/pyproject.toml packages/runtime/
+COPY packages/sandbox/pyproject.toml packages/sandbox/
 COPY packages/store/pyproject.toml packages/store/
 COPY packages/tools/pyproject.toml packages/tools/
 COPY packages/worker/pyproject.toml packages/worker/
@@ -23,6 +24,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12-slim AS runtime
+# The worker clones run repos with git before copying them into their sandbox.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 app
 COPY --from=build /app/.venv /app/.venv
 COPY packages/api/alembic.ini /app/api/alembic.ini

@@ -557,6 +557,39 @@ The stream shows `run_started`, `node_started`, a series of `text_delta` frames 
 
 Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 
+## Sandbox
+A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents get the repo tools, which run in there. For now there is one tool, `repo.list_files(path=".", max_depth=3)`. It lists files and directories relative to the repo root (directories end with `/`), skips `.git`, refuses paths that leave the repo (including through symlinks) and stops at 1,000 entries. A spec whose nodes use `repo.*` tools is rejected with `422` if the run has no `repo`.
+
+How it works (`agentic_sandbox`):
+- **Repo source.** `url` is an `https://` URL without credentials, or a local path under `SANDBOX_LOCAL_ROOT` (unset by default, so only `https://` is allowed). `ref` is a branch or tag. Other transports, `ext::`, scp-like URLs and option-like values are rejected.
+- **Clone.** The worker runs `git clone --depth 1` itself, with only the https and file protocols enabled and without the user's or system's git config. It then copies the clone into the sandbox, so the sandbox needs no network and never sees credentials.
+- **Docker backend** (`SANDBOX_BACKEND=docker`, the compose default). There is one container (`SANDBOX_IMAGE`, default `alpine:3.20`) and one volume per run, both labelled `agentic.run_id`. The container:
+  - has no network and a read-only root filesystem;
+  - drops all capabilities and sets `no-new-privileges`;
+  - runs as uid 1000, with memory, CPU and PID limits;
+  - holds the clone root-owned, so agents can read it but not change it yet (write tools come in phase 1.6).
+- **Lifecycle.** The container and volume are removed when the run ends, whether it completes, fails or is cancelled. The worker also removes leftovers at startup. A clone that fails ends the run with `run_failed` and a message that names no host path.
+- **Fake backend** (`SANDBOX_BACKEND=fake`, the default outside compose). It uses a temp directory on the worker host and isolates nothing, so use it only for tests and trusted repos.
+
+In compose, the worker mounts the host's Docker socket to start sandbox containers. That gives it control of the host's Docker, which is acceptable for local development; production isolation comes in phase 9.2. On Linux, set `DOCKER_GID` in `.env` to the socket's group (`stat -c %g /var/run/docker.sock`); Docker Desktop needs nothing. Compose also mounts this project's own git history read-only at `/samples/agentic-dev.git` as a demo repo.
+
+Demo (the phase 1.1 "Done when", also run by CI against the compose stack):
+
+```bash
+docker compose up -d --build
+python scripts/sandbox_demo.py          # or the same request with curl:
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
+  -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/list-repo-files.json), \"repo\": {\"url\": \"/samples/agentic-dev.git\"}}"
+curl -N localhost:8000/runs/<id>/events
+```
+
+On the fake runtime, the agent calls each tool its node names, so the stream shows the following:
+1. `tool_call` for `repo.list_files`;
+2. `tool_result` listing this repo's files;
+3. `run_completed`.
+
+While a run is going, `docker ps --filter label=agentic.run_id` shows its container; afterwards it shows none. With `AGENTIC_RUNTIME=claude`, Claude decides when to call `repo.list_files` and answers from what it finds.
+
 ## Monitor
 Open `http://localhost:3000`, type an input and click **Start sample run**. The page starts a one-agent workflow (`web/src/runs/sample-spec.ts`) and opens `/runs/<id>`, which lists the run's events as they arrive: `seq`, time, type, node and a one-line summary of the payload, shown as plain text. The status badge goes from `connecting` to `live`, then to `completed`, `failed` or `cancelled`. A run started with `curl` (see above) can be opened the same way at `http://localhost:3000/runs/<id>`, and reloading a finished run shows its full list.
 

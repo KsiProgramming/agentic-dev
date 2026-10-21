@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Annotated, Self
 
@@ -77,8 +78,9 @@ async def clone_shallow(
 ) -> None:
     """Clone `source` into `dest` (which must not exist) with depth 1.
 
-    Only the https and file transports are enabled, prompts are off, and git's own config files
-    are ignored. Raises `SandboxError` with a message free of host paths if the clone fails.
+    Only the https and file transports are enabled, prompts are off, and the user's and system's
+    git config are ignored. Raises `SandboxError` with a message free of host paths if the clone
+    fails.
     """
     url = _local_repo(source, local_root) if source.is_local else source.url
     argv = [
@@ -90,12 +92,25 @@ async def clone_shallow(
         *(["--branch", source.ref] if source.ref else []),
         "--", url, str(dest),
     ]  # fmt: skip
-    env = {
-        **os.environ,
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": os.devnull,
-    }
+    with tempfile.TemporaryDirectory(prefix="agentic-git-") as config_dir:
+        config = Path(config_dir) / "gitconfig"
+        # A local repo is often owned by another user (e.g. mounted into the worker container).
+        # It is confined to `local_root` and only read. git honours `safe.directory` only from
+        # global or system config, so it goes in this clone's own global config.
+        trusted = f"[safe]\n\tdirectory = {Path(url).as_posix()}\n" if source.is_local else ""
+        await asyncio.to_thread(config.write_text, trusted, encoding="utf-8")
+        env = {
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": str(config),
+        }
+        await _git(argv, env, timeout_s, url, dest)
+
+
+async def _git(
+    argv: list[str], env: dict[str, str], timeout_s: float, url: str, dest: Path
+) -> None:
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,

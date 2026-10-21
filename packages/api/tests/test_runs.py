@@ -94,6 +94,8 @@ async def worker(
         redis_url=redis_url,
         queue_poll_s=0.1,
         fake_step_delay_s=step_delay_s,
+        # Never the runtime a developer's `.env` selects (it may be Claude with a real key).
+        runtime="fake",
     )
     task = asyncio.create_task(run_worker(settings, stop, ready, runtime=runtime))
     try:
@@ -259,3 +261,53 @@ async def test_a_failed_run_streams_run_failed_and_the_worker_carries_on(
     assert failed[-1].event == "run_failed"
     assert failed[-1].data["payload"] == {"stopped_at": "writer"}
     assert next_run[-1].event == "run_completed"
+
+
+async def test_post_run_stores_the_repo(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    repo = {"url": "https://github.com/octo/hello.git", "ref": "main"}
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post(
+            "/runs", json={"workflow": spec_json("valid/list-repo-files.json"), "repo": repo}
+        )
+
+    assert response.status_code == 202, response.text
+    run = await get_run(sessions, UUID(response.json()["run_id"]))
+    assert run is not None
+    assert run.repo is not None
+    assert run.repo.model_dump() == repo
+
+
+async def test_repo_tools_need_a_repo(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runs_before = await count_runs(sessions)
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post(
+            "/runs", json={"workflow": spec_json("valid/list-repo-files.json")}
+        )
+
+    assert response.status_code == 422
+    assert "node 'explorer' uses repo.list_files, which need a `repo`" in response.text
+    assert await count_runs(sessions) == runs_before
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        {"url": "git@github.com:octo/hello.git"},
+        {"url": "https://user:token@github.com/octo/hello.git"},
+        {"url": "https://github.com/octo/hello.git", "ref": "--upload-pack=x"},
+        {"url": "https://github.com/octo/hello.git", "depth": 5},
+    ],
+)
+async def test_unsafe_repos_are_rejected(
+    postgres_url: str, redis_url: str, repo: dict[str, Any]
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post(
+            "/runs", json={"workflow": spec_json("valid/list-repo-files.json"), "repo": repo}
+        )
+
+    assert response.status_code == 422

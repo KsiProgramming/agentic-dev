@@ -19,6 +19,7 @@ name = "agentic-api"
 version = "0.1.0"
 source = { editable = "packages/api" }
 dependencies = [
+    { name = "agentic-sandbox" },
     { name = "agentic-store" },
     { name = "alembic" },
     { name = "asyncpg" },
@@ -31,6 +32,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "alembic", specifier = ">=1.16" },
     { name = "asyncpg", specifier = ">=0.30" },
@@ -145,6 +147,7 @@ version = "0.1.0"
 source = { editable = "packages/store" }
 dependencies = [
     { name = "agentic-engine" },
+    { name = "agentic-sandbox" },
     { name = "asyncpg" },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -153,6 +156,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "redis", specifier = ">=6.4" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.43" },
@@ -170,6 +174,7 @@ source = { editable = "packages/worker" }
 dependencies = [
     { name = "agentic-engine" },
     { name = "agentic-runtime" },
+    { name = "agentic-sandbox" },
     { name = "agentic-store" },
     { name = "anthropic" },
     { name = "pydantic-settings" },
@@ -181,6 +186,7 @@ dependencies = [
 requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "agentic-runtime", editable = "packages/runtime" },
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "anthropic", specifier = ">=1.17" },
     { name = "pydantic-settings", specifier = ">=2.10" },

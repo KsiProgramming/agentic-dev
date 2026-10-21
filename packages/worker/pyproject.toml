@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agentic-engine",
     "agentic-runtime",
+    "agentic-sandbox",
     "agentic-store",
     "anthropic>=1.17",
     "pydantic-settings>=2.10",

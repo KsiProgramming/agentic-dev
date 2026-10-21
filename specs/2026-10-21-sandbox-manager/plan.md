@@ -3,49 +3,63 @@
 The order follows the protocol-first pattern from 0.3: the interface and fake come first, then the real backend, then the tool, then wiring. The project stays green after each group.
 
 ## 1. Sandbox protocol, repo source and fake backend
-- [ ] Add package `packages/sandbox` (`agentic_sandbox`) to the `uv` workspace and CI lint/type/test matrix.
-- [ ] `agentic_sandbox/protocol.py`: `ExecResult`, `Sandbox` (`workdir`, `exec`, `close`), `SandboxManager.open(run_id, repo)` (async context manager).
-- [ ] `agentic_sandbox/source.py`: `RepoSource(url, ref=None)`, validated (local path, `file://` or `https://` only). Add `clone_shallow(source, dest)` (`git clone --depth 1 [--branch ref]`) with a timeout and a clear `SandboxError` when the clone fails.
-- [ ] `agentic_sandbox/fake.py`: `FakeSandboxManager` (temp dir per run, `asyncio.create_subprocess_exec` with `cwd=workdir`, cleanup in `finally`).
-- [ ] Tests: lifecycle, cleanup on exception and on cancellation, a bad repo URL raises `SandboxError`, and the clone has the expected files (fixture repo made with `git init` in `tmp_path`).
+- [x] Add package `packages/sandbox` (`agentic_sandbox`) to the `uv` workspace. CI picks it up through the workspace-wide lint, type and test commands.
+- [x] `agentic_sandbox/protocol.py`: `ExecResult`, `Sandbox` (`workdir`, `exec`), `SandboxManager.open(run_id, repo)` (async context manager that owns cleanup). `SandboxError` lives in `errors.py`.
+- [x] `agentic_sandbox/source.py`:
+  - `RepoSource(url, ref=None)`, validated: an `https://` URL without credentials, or a local path. Unsafe refs are rejected.
+  - `clone_shallow(source, dest, local_root=)` (`git clone --depth 1 --no-local [--branch ref]`), with a timeout. A failed clone raises a `SandboxError` free of host paths.
+  - Local paths must be under `local_root`.
+- [x] `agentic_sandbox/fake.py`: `FakeSandboxManager` (temp dir per run, `asyncio.create_subprocess_exec` with `cwd=workdir`, cleanup in `finally`, read-only git objects handled on Windows).
+- [x] Tests:
+  - Lifecycle, and cleanup on exception and on cancellation.
+  - Bad sources and refs, and clone errors.
+  - The clone holds the fixture files (`agentic_sandbox.testing.make_repo`).
 
 ## 2. Docker backend
-- [ ] Add the `docker` dependency to `agentic-sandbox`. Add `agentic_sandbox/docker.py` with `DockerSandboxManager(client, image, limits)`.
-- [ ] Container config:
-  - `network_disabled=True`, `read_only=True`, tmpfs `/workspace`, `user="1000:1000"`, `cap_drop=["ALL"]`, `security_opt=["no-new-privileges"]`.
-  - `mem_limit`, `nano_cpus`, `pids_limit`, label `agentic.run_id`. The container command is `sleep infinity`.
-- [ ] Clone on the host into a temp dir, tar it, then `put_archive` to `/workspace`. Run `exec_run` with `workdir=/workspace/repo`, demuxed output, and output capped.
-- [ ] `close()` force-removes the container. Add `sweep_orphans(client)` to remove containers labelled `agentic.run_id`, and call it at worker start.
-- [ ] Integration tests marked `docker` (skipped if no daemon):
+- [x] Add `docker` (and `types-docker` for pyright) to `agentic-sandbox`. Add `agentic_sandbox/docker_backend.py` with `DockerSandboxManager(client, image, limits, local_root)`.
+- [x] Container config:
+  - `network_mode="none"`, `read_only=True`, a per-run named volume at `/workspace`, `/tmp` tmpfs, `user="1000:1000"`.
+  - `cap_drop=["ALL"]`, `security_opt=["no-new-privileges"]`, `mem_limit`, `nano_cpus`, `pids_limit`, `init`.
+  - Label `agentic.run_id`. The container command is `tail -f /dev/null`.
+- [x] Clone on the host into a temp dir, then tar it with root ownership and modes 644/755. `put_archive` it to `/workspace` before the container starts.
+- [x] Exec: `exec_run` under `timeout`, with `workdir=/workspace/repo` and demuxed, capped output.
+- [x] Teardown: `open` exiting force-removes the container and volume. `sweep_orphans(client)` removes labelled leftovers and is called at worker start.
+- [x] Integration tests (marker `integration`, skipped without a daemon):
   - Clone and list files.
-  - The container is gone after `open` exits, including on error.
-  - Outbound network fails inside the container.
-  - Writing outside `/workspace` fails.
+  - The container and volume are gone after the run, including on error and after a failed clone.
+  - There is no network.
+  - The process is non-root and the root is read-only.
+  - Commands time out.
+  - The sweep removes leftovers.
 
 ## 3. `repo.list_files` tool and fake runtime tool steps
-- [ ] `agentic_sandbox/tools.py`: `SandboxTools(sandbox)` implementing `ToolExecutor`.
+- [x] `agentic_sandbox/tools.py`: `SandboxTools(sandbox)` implementing `ToolExecutor`.
   - One definition, `repo.list_files`, with a JSON Schema for `path` and `max_depth` (1–10).
-  - Normalise and reject absolute and `..` paths. Run `find <path> -maxdepth N -not -path '*/.git*'`.
-  - Return sorted relative paths, cap them at 1,000, and add a truncation note. A missing path returns `ToolOutput(is_error=True)`.
-- [ ] `agentic_runtime/fake.py`: add a `CallTool(name, arguments)` step and an optional `tools: ToolExecutor` on `FakeRuntime`. The step emits `tool_call`, awaits `tools.call`, then emits `tool_result`. The `check_events` contract still holds.
-- [ ] Tests:
-  - `SandboxTools` on `FakeSandboxManager`: listing, depth, `.git` excluded, escape rejected, truncation.
-  - A fake runtime run with a `CallTool` step yields a valid event stream.
-  - A Claude runtime test, using the existing mocked client, routes `repo__list_files` to `SandboxTools`.
+  - It normalises the path and rejects absolute and `..` paths. A `sh -c` script `cd -P`s into the path, refuses symlinks out of the repo, and runs `find -prune .git` twice (directories, then the rest).
+  - It returns sorted repo-relative paths, caps them at 1,000 and adds a truncation note. A path that is not a directory returns `ToolOutput(is_error=True)`.
+- [x] `agentic_runtime/fake.py`:
+  - A `CallTool(name, arguments)` step and an optional `tools: ToolExecutor` on `FakeRuntime`. The step emits `tool_call`, awaits `tools.call`, then emits `tool_result`.
+  - With `tools` set, unscripted nodes first call each tool their request names.
+  - The `check_events` contract still holds.
+- [x] Tests:
+  - `SandboxTools` on both backends: listing, depth, `.git` excluded, escapes rejected (including symlinks, on Linux), truncation, bad arguments.
+  - Fake runtime tool steps.
+  - `ClaudeRuntime` on `MockClaude` routes `repo__list_files` to `SandboxTools`.
 
 ## 4. Worker and API wiring, compose, docs
-- [ ] API:
-  - Alembic `0004_run_repo`: nullable `repo` JSONB on `runs`. `CreateRunRequest.repo: RepoSource | None`, stored by `create_run` and returned by `get_run`.
+- [x] API:
+  - Alembic `0004_run_repo`: nullable `repo` JSONB on `runs`.
+  - `CreateRunRequest.repo: RepoSource | None`, stored by `create_run` and returned by `get_run`.
   - A `422` when a spec node lists a `repo.*` tool and `repo` is missing.
-- [ ] Worker:
-  - `WorkerSettings.sandbox_backend` (`docker` by default in compose, `fake` by default in tests) and `sandbox_image`.
-  - `process_run` opens the sandbox when `run.repo` is set and builds the runtime with `SandboxTools`. `build_runtime(settings, tools)` passes them to `ClaudeRuntime`/`FakeRuntime`.
-  - A sandbox or clone failure ends the run with `run_failed` and a clear reason, with no stack trace or host paths in events.
-- [ ] Fake demo script:
-  - When `FAKE_SCRIPT=list_files`, the fake runtime calls `repo.list_files` and echoes the result.
-  - The default stays the echo script.
-- [ ] `docker-compose.yml`:
-  - The worker mounts `/var/run/docker.sock` and gets `SANDBOX_BACKEND=docker` and `SANDBOX_IMAGE`.
-  - Add a `samples/` fixture repo, mounted read-only into the worker at `/samples/hello-repo` for the demo.
-  - The sandbox image is pulled on first use.
-- [ ] Docs: a README "Sandbox" section covering what it isolates, settings, the demo `curl`, and the Claude variant (`AGENTIC_RUNTIME=claude` with an agent node that has `tools: ["repo.list_files"]`). Add a CHANGELOG entry.
+- [x] Engine: `record_unstarted_run` logs `run_started` + `run_failed`/`run_cancelled` for a run that ended before its first node.
+- [x] Worker:
+  - `WorkerSettings.sandbox_backend` (`fake` by default, `docker` in compose), `sandbox_image` and `sandbox_local_root`.
+  - `runtime_factory(settings)` builds one runtime per run, sharing one Claude client. `process_run` opens the sandbox when `run.repo` is set and passes `SandboxTools`.
+  - A sandbox or clone failure ends the run with `run_failed` and a clear reason, with no host paths.
+- [x] Tests no longer read the developer's `.env` (worker conftest fixture; the API tests pin the fake runtime).
+- [x] `docker-compose.yml` and `Dockerfile`:
+  - The worker mounts `/var/run/docker.sock` (group `DOCKER_GID`) and gets `SANDBOX_BACKEND=docker`, `SANDBOX_IMAGE` and `SANDBOX_LOCAL_ROOT=/samples`.
+  - This repo's `.git` is mounted read-only at `/samples/agentic-dev.git` as the demo repo.
+  - The image installs `git`.
+- [x] Demo script `scripts/sandbox_demo.py` (stdlib only), run in the CI smoke job, which also checks that no sandbox container is left.
+- [x] Docs: README "Sandbox" section, `.env.example`, CHANGELOG entry, regenerated OpenAPI spec and web client.

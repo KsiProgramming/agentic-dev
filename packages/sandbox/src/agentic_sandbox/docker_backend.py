@@ -128,8 +128,9 @@ class DockerSandboxManager:
             log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
             yield DockerSandbox(container)
         finally:
-            await asyncio.to_thread(_remove, container, volume)
-            log.info("sandbox %s removed after %.2f s", name, time.monotonic() - started)
+            if container is not None or volume is not None:
+                await asyncio.to_thread(_remove, container, volume)
+                log.info("sandbox %s removed after %.2f s", name, time.monotonic() - started)
 
     async def _clone(self, repo: RepoSource) -> bytes:
         """A tar of a shallow clone of `repo`, rooted at `repo/`."""
