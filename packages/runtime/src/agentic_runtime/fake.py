@@ -92,6 +92,14 @@ def _expected_events(steps: Sequence[Step]) -> list[AgentEvent]:
     return events
 
 
+def _first_example(schema: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    match schema.get("examples"):
+        case [dict() as example, *_]:
+            return example
+        case _:
+            return {}
+
+
 def _call_id(index: int) -> str:
     return f"fake_call_{index}"
 
@@ -148,7 +156,8 @@ class FakeRuntime:
     (`echo_script` unless given).
 
     With `tools`, `CallTool` steps run through it, and a node without a script first calls each
-    tool its request names, with no arguments.
+    tool its request names, with the first `examples` entry of the tool's input schema (or no
+    arguments). That lets a demo exercise real tools with no provider and no script.
 
     Scripts are checked against the contract up front, so a bad script fails at construction.
     A script without a terminal event gets `completed` appended.
@@ -170,6 +179,9 @@ class FakeRuntime:
         self.requests.append(request)
         if request.node_id in self._scripts:
             return FakeRun(self._scripts[request.node_id], self._tools)
-        calls = [CallTool(name) for name in request.tools] if self._tools else []
+        calls: list[Step] = []
+        if self._tools is not None:
+            examples = {d.name: _first_example(d.input_schema) for d in self._tools.definitions()}
+            calls = [CallTool(name, examples.get(name, {})) for name in request.tools]
         script = [*calls, *self._default(request.input)]
         return FakeRun(_prepare(request.node_id, script), self._tools)

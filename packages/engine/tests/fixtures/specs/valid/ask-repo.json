@@ -1,0 +1,13 @@
+{
+  "spec_version": "0",
+  "id": "ask-repo",
+  "name": "Ask about the repo",
+  "description": "One agent answers a question about the run's repo with the read-only repo tools.",
+  "root": {
+    "type": "agent",
+    "id": "explorer",
+    "role": "Repository explorer",
+    "instructions": "Which Python packages make up this uv workspace, and what is each for? Use the repo tools to find out, and cite the files you read.",
+    "tools": ["repo.list_files", "repo.read_file", "repo.search"]
+  }
+}

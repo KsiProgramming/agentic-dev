@@ -2,8 +2,17 @@
 name = "agentic-tools"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "agentic-runtime",
+    "agentic-sandbox",
+    "mcp>=2.3",
+    "pydantic>=2.11",
+]
 
 [build-system]
 requires = ["uv_build>=0.8,<0.14"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+agentic-sandbox = { workspace = true }
+agentic-runtime = { workspace = true }

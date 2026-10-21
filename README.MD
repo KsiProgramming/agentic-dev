@@ -558,7 +558,17 @@ The stream shows `run_started`, `node_started`, a series of `text_delta` frames 
 Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 
 ## Sandbox
-A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents get the repo tools, which run in there. For now there is one tool, `repo.list_files(path=".", max_depth=3)`. It lists files and directories relative to the repo root (directories end with `/`), skips `.git`, refuses paths that leave the repo (including through symlinks) and stops at 1,000 entries. A spec whose nodes use `repo.*` tools is rejected with `422` if the run has no `repo`.
+A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents get the read-only repo tools, which run in there. A spec whose nodes use `repo.*` tools is rejected with `422` if the run has no `repo`.
+
+| Tool | What it does | Limits |
+|---|---|---|
+| `repo.list_files(path=".", max_depth=3)` | Files and directories under `path`, relative to the repo root; directories end with `/`. | 1,000 entries |
+| `repo.read_file(path, start_line=1, end_line=None)` | A text file's lines, each prefixed with its number and a tab. Directories and binary files (a NUL byte in the first 8 KiB) are refused. | 2,000 lines or 256 KiB; the note says where to continue |
+| `repo.search(pattern, path=".", regex=False, case_sensitive=True, max_results=100)` | `path:line: text` for each matching line in text files. The pattern is a fixed string unless `regex` (extended regex). | 500 matches at most; lines cut at 300 characters |
+
+Every tool skips `.git`, refuses absolute paths and paths that leave the repo (including through symlinks), and passes its arguments to the sandbox as data, never as shell code. Errors come back as error results that name no host path.
+
+The tools are served by the `repo` MCP server (`agentic_tools.repo`), built with the official MCP Python SDK. The worker builds one server per run, bound to that run's sandbox, and connects to it in memory (no process or port). `McpToolExecutor` (`agentic_tools.mcp_bridge`) offers the server's tools to the agent runtime as `repo.<tool>`, the same `ToolExecutor` the Claude and fake runtimes already use. The MCP client closes before the sandbox is removed.
 
 How it works (`agentic_sandbox`):
 - **Repo source.** `url` is an `https://` URL without credentials, or a local path under `SANDBOX_LOCAL_ROOT` (unset by default, so only `https://` is allowed). `ref` is a branch or tag. Other transports, `ext::`, scp-like URLs and option-like values are rejected.
@@ -573,7 +583,7 @@ How it works (`agentic_sandbox`):
 
 In compose, the worker mounts the host's Docker socket to start sandbox containers. That gives it control of the host's Docker, which is acceptable for local development; production isolation comes in phase 9.2. On Linux, set `DOCKER_GID` in `.env` to the socket's group (`stat -c %g /var/run/docker.sock`); Docker Desktop needs nothing. Compose also mounts this project's own git history read-only at `/samples/agentic-dev.git` as a demo repo.
 
-Demo (the phase 1.1 "Done when", also run by CI against the compose stack):
+Demos (the phase 1.1 and 1.2 "Done when", both run by CI against the compose stack):
 
 ```bash
 docker compose up -d --build
@@ -581,14 +591,18 @@ python scripts/sandbox_demo.py          # or the same request with curl:
 curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
   -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/list-repo-files.json), \"repo\": {\"url\": \"/samples/agentic-dev.git\"}}"
 curl -N localhost:8000/runs/<id>/events
+
+# Phase 1.2: one agent asks which packages make up this uv workspace
+python scripts/sandbox_demo.py --spec packages/engine/tests/fixtures/specs/valid/ask-repo.json
 ```
 
-On the fake runtime, the agent calls each tool its node names, so the stream shows the following:
-1. `tool_call` for `repo.list_files`;
-2. `tool_result` listing this repo's files;
-3. `run_completed`.
+On the fake runtime, the agent calls each tool its node names, with the example arguments from the tool's input schema (`list_files` on the root, `read_file` on `pyproject.toml`, `search` for `[project]`). For `ask-repo.json` the stream shows:
+1. `tool_call` / `tool_result` for `repo.list_files`, listing this repo (`packages/`, …);
+2. `tool_call` / `tool_result` for `repo.read_file`, with the numbered root `pyproject.toml` and its `members = ["packages/*"]`;
+3. `tool_call` / `tool_result` for `repo.search`, with one `packages/<name>/pyproject.toml:1: [project]` hit per package;
+4. `message` and `run_completed`.
 
-While a run is going, `docker ps --filter label=agentic.run_id` shows its container; afterwards it shows none. With `AGENTIC_RUNTIME=claude`, Claude decides when to call `repo.list_files` and answers from what it finds.
+While a run is going, `docker ps --filter label=agentic.run_id` shows its container; afterwards it shows none. With `AGENTIC_RUNTIME=claude`, Claude decides which tools to call and answers from what it finds. On `ask-repo.json` it reads each package's `pyproject.toml` and returns a table of the packages and what each is for.
 
 ## Monitor
 Open `http://localhost:3000`, type an input and click **Start sample run**. The page starts a one-agent workflow (`web/src/runs/sample-spec.ts`) and opens `/runs/<id>`, which lists the run's events as they arrive: `seq`, time, type, node and a one-line summary of the payload, shown as plain text. The status badge goes from `connecting` to `live`, then to `completed`, `failed` or `cancelled`. A run started with `curl` (see above) can be opened the same way at `http://localhost:3000/runs/<id>`, and reloading a finished run shows its full list.

@@ -1,1 +1,1 @@
-"""Platform-owned MCP tool servers (phase 1.2+)."""
+"""Platform-owned MCP tool servers, and the bridge that lets agent runtimes call them."""

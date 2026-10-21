@@ -9,6 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 1.2 `repo` MCP server (read only): the new `agentic_tools` package serves `repo.list_files`, `repo.read_file` (numbered lines, line ranges, 2,000-line / 256 KiB cap, binary files refused) and `repo.search` (fixed string or extended regex, optional case-insensitivity, up to 500 `path:line: text` hits) from an MCP server built per run with the official MCP Python SDK (`mcp`). The tools run inside the run's sandbox and stay confined to the repo, symlinks included. `McpToolExecutor` bridges an MCP client to the existing `ToolExecutor`, and `open_repo_tools(sandbox)` connects a run's agents to the server in memory. The worker gives every run with a repo these tools and closes the MCP client before the sandbox. `FakeRuntime` calls the tools of an unscripted node with the first `examples` entry of each tool's input schema. New spec fixture `ask-repo.json`; `scripts/sandbox_demo.py` takes `--spec` and repeatable `--expect`, and CI runs the phase 1.2 demo in the compose job.
 - Phase 1.1 sandbox manager: new `agentic_sandbox` package. `RepoSource` accepts an `https://` URL without credentials or a local path under `SANDBOX_LOCAL_ROOT`, with an optional ref. `clone_shallow` makes a depth-1 clone on the worker with only the https and file protocols enabled. There are two `SandboxManager` backends:
   - `DockerSandboxManager`: one container and volume per run, labelled `agentic.run_id`. The container has no network, a read-only root, no capabilities, a non-root user and resource limits. Both are removed when the run ends, and `sweep_orphans` removes leftovers at worker startup.
   - `FakeSandboxManager`: a temp directory on the worker, with no isolation.
@@ -42,5 +43,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - Worker and API tests no longer read the developer's `.env`, so they never run on Claude with a real key by accident.
 - The worker moved from `agentic_engine.worker` to the `agentic_worker` package (`python -m agentic_worker`); `agentic_engine` no longer depends on Redis or pydantic-settings.
 - `PostgresEventSink` no longer creates the `runs` row: create it with `create_run` first, and `run_started` moves it from `queued` to `running`.
+
+### Removed
+- `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main

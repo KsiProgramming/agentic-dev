@@ -223,6 +223,23 @@ async def test_with_tools_an_unscripted_node_calls_its_requested_tools_first() -
     assert tools.calls == [("repo.list_files", {})]
 
 
+async def test_an_unscripted_node_calls_tools_with_their_schema_example() -> None:
+    tools = ScriptedToolExecutor(
+        {"repo.read_file": "1	x", "repo.list_files": "README.md"},
+        examples={"repo.read_file": {"path": "pyproject.toml"}},
+    )
+    asking = request().model_copy(update={"tools": ["repo.read_file", "repo.list_files"]})
+
+    events = await collect_and_check(FakeRuntime(tools=tools), asking)
+
+    calls = [e for e in events if isinstance(e, ToolCall)]
+    assert [(c.name, c.arguments) for c in calls] == [
+        ("repo.read_file", {"path": "pyproject.toml"}),
+        ("repo.list_files", {}),
+    ]
+    assert tools.calls == [("repo.read_file", {"path": "pyproject.toml"}), ("repo.list_files", {})]
+
+
 async def test_without_tools_requested_tools_are_not_called() -> None:
     asking = request().model_copy(update={"tools": ["repo.list_files"]})
 
