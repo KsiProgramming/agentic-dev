@@ -21,6 +21,7 @@ dev = [
     "pytest-asyncio>=1.0",
     "ruff>=0.13",
     "testcontainers[postgres,redis]>=4.10",
+    "types-docker>=7.1",
 ]
 
 [tool.uv]
