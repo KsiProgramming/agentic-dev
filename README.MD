@@ -545,17 +545,28 @@ curl -N localhost:8000/runs/<id>/events
 By default the worker runs every node on the fake runtime, which echoes its input word by word. `FAKE_STEP_DELAY_S` (0.5 s in compose) paces its events so the stream is visibly live.
 
 ### Run on Claude
-Set `AGENTIC_RUNTIME=claude` and `ANTHROPIC_API_KEY` in your shell or `.env` (see `.env.example`), then start the stack and run a one-node workflow:
+Start the stack with `AGENTIC_RUNTIME=claude`, store your Claude API key, then run a one-node workflow. To store the key, open http://localhost:3000/settings and paste it, or use `curl` as below:
 
 ```bash
-AGENTIC_RUNTIME=claude ANTHROPIC_API_KEY=<your key> docker compose up -d --build
+AGENTIC_RUNTIME=claude docker compose up -d --build
+curl -s -X PUT localhost:8000/workspaces/00000000-0000-0000-0000-000000000001/connections/claude   -H 'content-type: application/json' -d '{"api_key": "<your key>"}'
+# {"id":"<id>","provider":"claude","key_hint":"<last 4>",...}
 curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
   -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/single-agent.json), \"input\": \"Agentic Dev lets teams design, run and trust AI agent workflows on their own repositories.\"}"
 # {"run_id":"<id>","status":"queued","events_url":"http://localhost:8000/runs/<id>/events"}
 curl -N localhost:8000/runs/<id>/events
 ```
 
-The stream shows `run_started`, `node_started`, a series of `text_delta` frames as Claude writes, one `usage` with the token counts, the `message` with the full text, `completed`, `node_completed` and `run_completed`. `CLAUDE_MODEL` (default `claude-sonnet-5-5`) picks the model; a node's `model` overrides it. The worker exits at startup if `AGENTIC_RUNTIME=claude` is set without a key. For now the key is read from the environment; encrypted per-workspace keys come in phase 1.4.
+The stream shows `run_started`, `node_started`, a series of `text_delta` frames as Claude writes, one `usage` with the token counts, the `message` with the full text, `completed`, `node_completed` and `run_completed`. `CLAUDE_MODEL` (default `claude-sonnet-5-5`) picks the model; a node's `model` overrides it. The worker exits at startup if `AGENTIC_RUNTIME=claude` is set without `MASTER_KEY_FILE`. A run whose workspace has no stored key ends with `run_failed` ("workspace has no Claude connection"). The key is no longer read from the environment.
+
+## Secrets
+Provider keys are stored per workspace, encrypted (phase 1.4, package `agentic_secrets`):
+- **Envelope encryption.** A master key (`MASTER_KEY_FILE`, 32 bytes) wraps one random data key per workspace (`workspaces.wrapped_dek`, `key_id`). Each secret is encrypted under its workspace's data key with AES-256-GCM (`connections.secret_ciphertext`). The associated data names the workspace, connection and provider, so a ciphertext copied to another row does not decrypt. A cloud KMS later replaces the local key file behind the same `KeyProvider` interface.
+- **Workspaces.** There is one workspace for now, `Default` (`00000000-0000-0000-0000-000000000001`, created by Alembic `0007_workspaces_connections`). Every run belongs to a workspace (`POST /runs` takes an optional `workspace_id`).
+- **Write only.** `PUT /workspaces/{id}/connections/claude` stores or replaces the key. `GET /workspaces/{id}/connections` and the Settings page show only its last 4 characters. `DELETE` removes it. Validation errors on these routes never echo the input. Without `MASTER_KEY_FILE` the API answers `503` to a `PUT`.
+- **Per run.** The worker decrypts the run's key when the run starts. It builds that run's own Anthropic client and closes it when the run ends. Nothing else ever sees the key: no prompt, tool or event.
+- **Never logged.** While a key is held, it is registered for redaction. The log handlers of the API and the worker, and the run event payloads, replace it with `[REDACTED]`. `test_no_secret_leak.py` proves this with a canary key that the mock API echoes back.
+- **The master key in compose.** The one-shot `keygen` service writes it to the `secrets` volume if it is missing, and the API and worker mount the volume read only. Deleting that volume makes stored keys unreadable: store them again (the workspace then gets a new data key). Outside compose, run `uv run python -m agentic_secrets generate-key .secrets/master.key` and set `MASTER_KEY_FILE` for both processes.
 
 Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 

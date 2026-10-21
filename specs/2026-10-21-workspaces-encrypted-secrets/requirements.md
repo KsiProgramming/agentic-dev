@@ -89,6 +89,8 @@ Principles and stack choices that apply:
 | Build order | Crypto → store → API → worker → UI; the env key is removed in the UI group | This was the user's choice. Each group leaves the project working, and Claude stays usable without `curl` until the page exists. |
 
 ## Open questions
+- ~~**Losing the master key:**~~ Resolved in group 2. A `PUT` on a workspace whose data key cannot be unwrapped gives it a new data key and drops the connections nobody can read any more, so storing the key again is the recovery. A run whose key cannot be decrypted fails with "the workspace's Claude key cannot be decrypted; store it again". No 409 is needed in the API, since it never decrypts.
 - **Checking the key on save:** a cheap Anthropic call (for example `models.list`) would catch typos early, but adds a network call and a failure mode to `PUT`. The current choice is to not check it, so a bad key shows up as a `run_failed` with the provider's error. Revisit when the settings page is used.
-- **Losing the master key:** if the `keygen` volume is deleted, stored secrets can't be decrypted. The API reports "cannot decrypt, re-enter the key" instead of a 500. Backup is an ops question for 9.5.
+- **Master key backup:** if the `secrets` volume is deleted, stored keys must be entered again. Backup is an ops question for 9.5.
+- **Testcontainers on Docker Desktop (Windows):** the Ryuk reaper container can fail with "Port mapping … 8080 is not available". Run the integration tests with `TESTCONTAINERS_RYUK_DISABLED=true` locally; CI (Linux) is not affected.
 - **Live Claude proof:** validation uses a fake Anthropic client that captures the key it was built with. No manual run against the real API was chosen. Run one before the MVP demo.

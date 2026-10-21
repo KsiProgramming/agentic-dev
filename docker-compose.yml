@@ -75,10 +75,9 @@ services:
       <<: [*db-env, *master-key]
       READY_FILE: /tmp/worker-ready
       # Agents run on the fake runtime unless AGENTIC_RUNTIME=claude: then each run uses the
-      # Claude key stored in its workspace, or ANTHROPIC_API_KEY if it has none (until the
-      # settings page replaces it). FAKE_STEP_DELAY_S paces fake events so a run streams visibly.
+      # Claude key stored in its workspace (the web app's Settings page). FAKE_STEP_DELAY_S paces
+      # fake events so a run streams visibly.
       AGENTIC_RUNTIME: ${AGENTIC_RUNTIME:-fake}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5-5}
       FAKE_STEP_DELAY_S: ${FAKE_STEP_DELAY_S:-0.5}
       # A run whose worker stops renewing its lease for LEASE_TTL_S is resumed by another worker.

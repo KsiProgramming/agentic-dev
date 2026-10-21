@@ -10,8 +10,8 @@ Each run's spec and input are read from Postgres and its events are written back
 (`PostgresEventSink`), where the API streams them. Agents run on the fake runtime unless
 `AGENTIC_RUNTIME=claude`, which runs them on Claude with the Claude key stored (encrypted) in the
 run's workspace. The key is decrypted when the run starts, used only by that run's Anthropic
-client, and redacted from logs and events while it is held. Until stored keys are the only way,
-a workspace with none falls back to `ANTHROPIC_API_KEY`.
+client, and redacted from logs and events while it is held. A workspace with no stored key
+fails its runs on Claude.
 
 A run with a `repo` gets a sandbox holding a clone of it for its whole duration, and its agents
 get the `repo.*` tools: a read-only `repo` MCP server bound to that sandbox, connected in memory.
@@ -100,8 +100,6 @@ class WorkerSettings(BaseSettings):
     runtime: Literal["fake", "claude"] = Field(default="fake", validation_alias="agentic_runtime")
     # The master key that decrypts workspaces' stored keys (a 32-byte file, shared with the API).
     master_key_file: Path | None = None
-    # Used by workspaces with no stored Claude key; removed once the settings page exists.
-    anthropic_api_key: SecretStr | None = None
     claude_model: str = DEFAULT_MODEL
     claude_max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, ge=1)
     claude_max_turns: int = Field(default=DEFAULT_MAX_TURNS, ge=1)
@@ -185,26 +183,20 @@ def run_runtimes(
     its workspace's key and closed when the run's attempt ends."""
     if settings.runtime != "claude":
         return fixed_runtimes(fake_runtime_factory(settings))
-    env_key = settings.anthropic_api_key
-    if keys is None and (env_key is None or not env_key.get_secret_value()):
-        raise ConfigError(
-            "AGENTIC_RUNTIME=claude needs MASTER_KEY_FILE (to read stored keys) "
-            "or ANTHROPIC_API_KEY to be set"
-        )
+    if keys is None:
+        raise ConfigError("AGENTIC_RUNTIME=claude needs MASTER_KEY_FILE to read stored keys")
+    master = keys
 
     async def claude_key(run: StoredRun) -> SecretStr:
-        if keys is not None:
-            try:
-                stored = await load_secret(sessions, keys, run.workspace_id, "claude")
-            except SecretDecryptError:
-                raise RunSetupError(
-                    "the workspace's Claude key cannot be decrypted; store it again"
-                ) from None
-            if stored is not None:
-                return stored
-        if env_key is not None and env_key.get_secret_value():
-            return env_key
-        raise RunSetupError("workspace has no Claude connection")
+        try:
+            stored = await load_secret(sessions, master, run.workspace_id, "claude")
+        except SecretDecryptError:
+            raise RunSetupError(
+                "the workspace's Claude key cannot be decrypted; store it again"
+            ) from None
+        if stored is None:
+            raise RunSetupError("workspace has no Claude connection")
+        return stored
 
     @asynccontextmanager
     async def open_claude(

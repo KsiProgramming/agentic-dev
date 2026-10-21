@@ -20,10 +20,10 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     select Claude and hold a real key)."""
     for name in (
         "AGENTIC_RUNTIME",
-        "ANTHROPIC_API_KEY",
         "CLAUDE_MODEL",
         "LEASE_HEARTBEAT_S",
         "LEASE_TTL_S",
+        "MASTER_KEY_FILE",
         "MAX_ATTEMPTS",
         "RUNTIME",
         "SANDBOX_BACKEND",
