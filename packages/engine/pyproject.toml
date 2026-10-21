@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Orchestration engine and run worker for the Agentic Dev Platform"
 requires-python = ">=3.12"
 dependencies = [
+    "pydantic>=2.11",
     "pydantic-settings>=2.10",
     "redis>=6.4",
 ]

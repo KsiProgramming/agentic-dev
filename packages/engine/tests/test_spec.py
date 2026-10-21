@@ -1,11 +1,11 @@
-# pyright: reportMissingImports=false, reportUnknownMemberType=false, reportUnknownVariableType=false
-# Temporary until agentic_engine.spec exists (plan group 2).
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+
+from agentic_engine.spec import WorkflowSpec, parse_spec
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs"
 VALID = sorted((FIXTURES / "valid").glob("*.json"))
@@ -41,21 +41,15 @@ def test_every_invalid_fixture_has_an_expectation() -> None:
     assert names == set(INVALID)
 
 
-@pytest.mark.xfail(strict=True, reason="spec models land in group 2")
 @pytest.mark.parametrize("path", VALID, ids=lambda p: p.stem)
 def test_valid_spec(path: Path) -> None:
-    from agentic_engine.spec import WorkflowSpec, parse_spec
-
     spec = parse_spec(load(path))
 
     assert WorkflowSpec.model_validate(spec.model_dump(mode="json")) == spec
 
 
-@pytest.mark.xfail(strict=True, reason="spec models land in group 2")
 @pytest.mark.parametrize("name", sorted(INVALID))
 def test_invalid_spec(name: str) -> None:
-    from agentic_engine.spec import parse_spec
-
     expected = INVALID[name]
     with pytest.raises(ValidationError) as exc:
         parse_spec(load(FIXTURES / "invalid" / f"{name}.json"))
