@@ -10,9 +10,11 @@ from agentic_sandbox.protocol import (
     SandboxManager,
 )
 from agentic_sandbox.source import RepoSource, clone_shallow
+from agentic_sandbox.tools import LIST_FILES, SandboxTools
 
 __all__ = [
     "DEFAULT_EXEC_TIMEOUT_S",
+    "LIST_FILES",
     "MAX_OUTPUT_BYTES",
     "ExecResult",
     "FakeSandbox",
@@ -21,5 +23,6 @@ __all__ = [
     "Sandbox",
     "SandboxError",
     "SandboxManager",
+    "SandboxTools",
     "clone_shallow",
 ]

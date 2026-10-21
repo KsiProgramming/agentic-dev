@@ -16,8 +16,9 @@ from agentic_runtime import (
     ToolResult,
     Usage,
 )
-from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime, slow_echo_script
-from agentic_runtime.testing import NetworkBlockedError, collect_and_check
+from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, slow_echo_script
+from agentic_runtime.testing import NetworkBlockedError, ScriptedToolExecutor, collect_and_check
+from agentic_runtime.tools import ToolOutput
 
 USAGE = Usage(input_tokens=3, output_tokens=4)
 
@@ -170,3 +171,61 @@ async def test_no_network_guard_allows_loopback() -> None:
     async with server:
         _, writer = await asyncio.open_connection("127.0.0.1", port)
         writer.close()
+
+
+async def test_a_call_tool_step_runs_the_tool_and_reports_its_result() -> None:
+    tools = ScriptedToolExecutor({"repo.list_files": "README.md\nsrc/"})
+    runtime = FakeRuntime(
+        {"writer": [CallTool("repo.list_files", {"path": "."}), Message(text="ok"), USAGE]},
+        tools=tools,
+    )
+
+    events = await collect_and_check(runtime, request())
+
+    call, result = events[0], events[1]
+    assert isinstance(call, ToolCall)
+    assert (call.name, call.arguments) == ("repo.list_files", {"path": "."})
+    assert result == ToolResult(call_id=call.call_id, output="README.md\nsrc/")
+    assert tools.calls == [("repo.list_files", {"path": "."})]
+    assert isinstance(events[-1], Completed)
+
+
+async def test_tool_errors_and_exceptions_become_error_results() -> None:
+    tools = ScriptedToolExecutor(
+        {"soft": ToolOutput(text="no such dir", is_error=True), "boom": RuntimeError("down")}
+    )
+    runtime = FakeRuntime({"writer": [CallTool("soft"), CallTool("boom"), USAGE]}, tools=tools)
+
+    events = await collect_and_check(runtime, request())
+
+    results = [e for e in events if isinstance(e, ToolResult)]
+    assert [(r.output, r.is_error) for r in results] == [
+        ("no such dir", True),
+        ("tool failed: down", True),
+    ]
+
+
+async def test_a_call_tool_step_without_an_executor_fails_the_run() -> None:
+    runtime = FakeRuntime({"writer": [CallTool("repo.list_files"), USAGE]})
+
+    events = await collect_and_check(runtime, request())
+
+    assert events == [Failed(error="tools requested but no tool executor is set: repo.list_files")]
+
+
+async def test_with_tools_an_unscripted_node_calls_its_requested_tools_first() -> None:
+    tools = ScriptedToolExecutor({"repo.list_files": "README.md"})
+    asking = request().model_copy(update={"tools": ["repo.list_files"]})
+
+    events = await collect_and_check(FakeRuntime(tools=tools), asking)
+
+    assert [e.type for e in events] == ["tool_call", "tool_result", "message", "usage", "completed"]
+    assert tools.calls == [("repo.list_files", {})]
+
+
+async def test_without_tools_requested_tools_are_not_called() -> None:
+    asking = request().model_copy(update={"tools": ["repo.list_files"]})
+
+    events = await collect_and_check(FakeRuntime(), asking)
+
+    assert [e.type for e in events] == ["message", "usage", "completed"]
