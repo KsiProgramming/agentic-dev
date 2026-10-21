@@ -7,7 +7,6 @@ import pytest
 from agentic_runtime import (
     AgentEvent,
     AgentRequest,
-    AgentRuntime,
     Cancelled,
     Completed,
     Failed,
@@ -16,10 +15,9 @@ from agentic_runtime import (
     ToolCall,
     ToolResult,
     Usage,
-    check_events,
 )
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime, slow_echo_script
-from agentic_runtime.testing import NetworkBlockedError
+from agentic_runtime.testing import NetworkBlockedError, collect_and_check
 
 USAGE = Usage(input_tokens=3, output_tokens=4)
 
@@ -28,12 +26,8 @@ def request(node_id: str = "writer", input: str = "hello") -> AgentRequest:
     return AgentRequest(node_id=node_id, role="Writer", instructions="Write.", input=input)
 
 
-async def collect(runtime: AgentRuntime, req: AgentRequest) -> list[AgentEvent]:
-    return [event async for event in runtime.start(req)]
-
-
 async def test_default_script_echoes_the_input() -> None:
-    events = await collect(FakeRuntime(), request(input="ping"))
+    events = await collect_and_check(FakeRuntime(), request(input="ping"))
     assert events == [Message(text="ping"), ECHO_USAGE, Completed()]
 
 
@@ -41,7 +35,7 @@ async def test_slow_echo_streams_word_deltas_over_time() -> None:
     runtime = FakeRuntime(default=lambda text: slow_echo_script(text, 0.01))
 
     started = time.monotonic()
-    events = await collect(runtime, request(input="hello big world"))
+    events = await collect_and_check(runtime, request(input="hello big world"))
 
     assert events == [
         TextDelta(text="hello "),
@@ -56,8 +50,8 @@ async def test_slow_echo_streams_word_deltas_over_time() -> None:
 
 async def test_scripts_are_chosen_per_node_id() -> None:
     runtime = FakeRuntime({"reviewer": [Message(text="LGTM"), USAGE]})
-    reviewed = await collect(runtime, request("reviewer"))
-    echoed = await collect(runtime, request("writer", input="draft"))
+    reviewed = await collect_and_check(runtime, request("reviewer"))
+    echoed = await collect_and_check(runtime, request("writer", input="draft"))
     assert reviewed == [Message(text="LGTM"), USAGE, Completed()]
     assert echoed[0] == Message(text="draft")
 
@@ -69,12 +63,14 @@ async def test_tool_call_then_result() -> None:
         Message(text="It is a readme."),
         USAGE,
     ]
-    events = await collect(FakeRuntime({"writer": script}), request())
+    events = await collect_and_check(FakeRuntime({"writer": script}), request())
     assert events == [*script, Completed()]
 
 
 async def test_scripted_failure() -> None:
-    events = await collect(FakeRuntime({"writer": [Failed(error="rate limited")]}), request())
+    events = await collect_and_check(
+        FakeRuntime({"writer": [Failed(error="rate limited")]}), request()
+    )
     assert events == [Failed(error="rate limited")]
 
 
@@ -88,14 +84,13 @@ async def test_scripted_failure() -> None:
     ],
 )
 async def test_every_stream_has_exactly_one_terminal_event_last(script: list[AgentEvent]) -> None:
-    events = await collect(FakeRuntime({"writer": script}), request())
-    check_events(events)
+    await collect_and_check(FakeRuntime({"writer": script}), request())
 
 
 async def test_requests_are_recorded() -> None:
     runtime = FakeRuntime()
-    await collect(runtime, request("a"))
-    await collect(runtime, request("b"))
+    await collect_and_check(runtime, request("a"))
+    await collect_and_check(runtime, request("b"))
     assert [r.node_id for r in runtime.requests] == ["a", "b"]
 
 
