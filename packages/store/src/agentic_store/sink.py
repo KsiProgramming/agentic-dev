@@ -47,6 +47,15 @@ class PostgresEventSink:
             )
 
 
+async def max_event_seq(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> int:
+    """The `seq` of the run's last event, 0 if it has none; a resumed attempt carries on after."""
+    async with sessions() as session:
+        last = await session.scalar(
+            select(func.max(RunEventRow.seq)).where(RunEventRow.run_id == run_id)
+        )
+    return last or 0
+
+
 async def list_run_events(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID, *, after_seq: int = 0
 ) -> list[RunEvent]:

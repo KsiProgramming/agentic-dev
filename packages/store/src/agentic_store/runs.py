@@ -17,6 +17,8 @@ class StoredRun:
     spec: WorkflowSpec
     input: str
     repo: RepoSource | None = None
+    # How many times a worker has claimed the run; above 1 it is being resumed.
+    attempt: int = 0
 
 
 async def create_run(
@@ -43,12 +45,15 @@ async def create_run(
 async def get_run(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> StoredRun | None:
     async with sessions() as session:
         run = await session.get(Run, run_id)
-    if run is None:
-        return None
+    return None if run is None else stored_run(run)
+
+
+def stored_run(run: Run) -> StoredRun:
     return StoredRun(
         id=run.id,
         status=run.status,
         spec=parse_spec(run.spec),
         input=run.input,
         repo=RepoSource.model_validate(run.repo) if run.repo is not None else None,
+        attempt=run.attempt,
     )
