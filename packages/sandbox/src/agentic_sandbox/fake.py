@@ -1,7 +1,9 @@
 """A sandbox in a temp directory on the worker, for tests and for `SANDBOX_BACKEND=fake`.
 
 It isolates nothing: commands run on the host with the clone as their current directory. Use it
-where Docker is unavailable and the repo is trusted.
+where Docker is unavailable and the repo is trusted. The temp directory has the layout of the
+Docker sandbox's `/workspace`: `repo/` (the clone), `worktrees/` and `.incoming/`. Like the
+sandbox image, commands read no system or user git config.
 """
 
 import asyncio
@@ -13,33 +15,51 @@ import tempfile
 from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from agentic_sandbox.errors import SandboxError
-from agentic_sandbox.protocol import DEFAULT_EXEC_TIMEOUT_S, ExecResult, decode_capped
+from agentic_sandbox.protocol import (
+    DEFAULT_EXEC_TIMEOUT_S,
+    MAX_PUT_FILE_BYTES,
+    ExecResult,
+    decode_capped,
+)
 from agentic_sandbox.source import RepoSource, clone_shallow
+
+_GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
 
 
 class FakeSandbox:
-    """Implements `Sandbox` with local processes."""
+    """Implements `Sandbox` with local processes. `root` holds the clone at `root/repo`."""
 
-    def __init__(self, workdir: Path) -> None:
-        self._workdir = workdir
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._workdir = root / "repo"
 
     @property
     def workdir(self) -> str:
         return str(self._workdir)
 
+    @property
+    def worktrees_dir(self) -> str:
+        return str(self._root / "worktrees")
+
     async def exec(
-        self, argv: Sequence[str], *, timeout_s: float = DEFAULT_EXEC_TIMEOUT_S
+        self,
+        argv: Sequence[str],
+        *,
+        timeout_s: float = DEFAULT_EXEC_TIMEOUT_S,
+        cwd: str | None = None,
     ) -> ExecResult:
+        workdir = self._checked_cwd(cwd)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
-                cwd=self._workdir,
+                cwd=workdir,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, **_GIT_ENV},
             )
         except OSError as e:
             return ExecResult(exit_code=127, stdout="", stderr=f"{argv[0]}: {e.strerror}")
@@ -58,6 +78,24 @@ class FakeSandbox:
         assert proc.returncode is not None
         return ExecResult(proc.returncode, stdout, stderr, truncated=out_cut or err_cut)
 
+    async def put_file(self, data: bytes) -> str:
+        if len(data) > MAX_PUT_FILE_BYTES:
+            raise SandboxError(f"file too large for the sandbox: {len(data)} bytes")
+        path = self._root / ".incoming" / uuid4().hex
+        await asyncio.to_thread(path.write_bytes, data)
+        return path.as_posix()
+
+    def _checked_cwd(self, cwd: str | None) -> Path:
+        """`cwd` (default the clone) if it is the clone or a directory under the worktrees."""
+        if cwd is None:
+            return self._workdir
+        path = Path(cwd).resolve()
+        worktrees = (self._root / "worktrees").resolve()
+        in_worktree = path != worktrees and path.is_relative_to(worktrees)
+        if in_worktree or path == self._workdir.resolve():
+            return path
+        raise ValueError("cwd must be the repo checkout or a worktree")
+
 
 class FakeSandboxManager:
     """Implements `SandboxManager`: one temp directory per run, removed on exit.
@@ -74,7 +112,9 @@ class FakeSandboxManager:
         root = Path(tempfile.mkdtemp(prefix=f"agentic-sandbox-{run_id}-", dir=self._base_dir))
         try:
             await clone_shallow(repo, root / "repo", local_root=self._local_root)
-            yield FakeSandbox(root / "repo")
+            (root / "worktrees").mkdir()
+            (root / ".incoming").mkdir()
+            yield FakeSandbox(root)
         finally:
             await asyncio.to_thread(shutil.rmtree, root, onexc=_make_writable_and_retry)
 

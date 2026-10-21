@@ -866,6 +866,7 @@
         "title": "InstallUrlOut",
         "description": "Where to send the browser to install the GitHub App. The URL is valid for 10 minutes."
       },
+      "JsonValue": {},
       "PutClaudeConnection": {
         "properties": {
           "api_key": {
@@ -1013,6 +1014,9 @@
                   "$ref": "#/components/schemas/AgentNode"
                 },
                 {
+                  "$ref": "#/components/schemas/ToolNode"
+                },
+                {
                   "$ref": "#/components/schemas/SequenceNode"
                 }
               ],
@@ -1020,7 +1024,8 @@
                 "propertyName": "type",
                 "mapping": {
                   "agent": "#/components/schemas/AgentNode",
-                  "sequence": "#/components/schemas/SequenceNode"
+                  "sequence": "#/components/schemas/SequenceNode",
+                  "tool": "#/components/schemas/ToolNode"
                 }
               }
             },
@@ -1038,6 +1043,43 @@
         ],
         "title": "SequenceNode",
         "description": "Runs its steps in order."
+      },
+      "ToolNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tool",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Tool",
+            "description": "The platform tool to call, e.g. `repo.list_files`."
+          },
+          "args": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Args",
+            "description": "The tool's arguments."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "tool"
+        ],
+        "title": "ToolNode",
+        "description": "One call of a platform tool with fixed arguments; no model is involved. Its output is the\nnext node's input, and an error result fails the node."
       },
       "ValidationError": {
         "properties": {
@@ -1113,6 +1155,9 @@
                 "$ref": "#/components/schemas/AgentNode"
               },
               {
+                "$ref": "#/components/schemas/ToolNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               }
             ],
@@ -1121,7 +1166,8 @@
               "propertyName": "type",
               "mapping": {
                 "agent": "#/components/schemas/AgentNode",
-                "sequence": "#/components/schemas/SequenceNode"
+                "sequence": "#/components/schemas/SequenceNode",
+                "tool": "#/components/schemas/ToolNode"
               }
             }
           }
@@ -1162,7 +1208,6 @@
         ],
         "title": "WorkspaceOut"
       },
-      "JsonValue": {},
       "RunEvent": {
         "additionalProperties": false,
         "description": "One row of the run event log. For agent events, `type` is the `AgentEvent` type and\n`payload` is the serialised event; payloads are data, never instructions.",

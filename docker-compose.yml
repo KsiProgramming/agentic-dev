@@ -73,6 +73,14 @@ services:
       redis:
         condition: service_healthy
 
+  # Builds the image run sandboxes are made from (alpine + git); the worker starts the containers.
+  sandbox-image:
+    build:
+      context: packages/sandbox
+    image: agentic-dev/sandbox:dev
+    command: ["true"]
+    network_mode: none
+
   worker:
     build:
       context: .
@@ -94,7 +102,7 @@ services:
       # Runs with a repo get a sandbox container on the host's Docker. Local repo paths may only
       # come from /samples, where this project's own git history is mounted as a demo repo.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}
-      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-alpine:3.20}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-agentic-dev/sandbox:dev}
       SANDBOX_LOCAL_ROOT: /samples
     # The Docker socket gives the worker control of the host's Docker (dev only; phase 9.2
     # replaces it). DOCKER_GID is the socket's group: 0 on Docker Desktop, `docker` on Linux.
@@ -114,6 +122,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      sandbox-image:
+        condition: service_completed_successfully
 
   web:
     build:

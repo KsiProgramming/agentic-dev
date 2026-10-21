@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agentic_engine.spec import AgentNode, WorkflowSpec, iter_nodes
+from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools
 from agentic_sandbox import RepoSource
 
 
@@ -27,12 +27,11 @@ class CreateRunRequest(BaseModel):
         if self.repo is not None:
             return self
         for _, node in iter_nodes(self.workflow.root):
-            if isinstance(node, AgentNode):
-                repo_tools = [t for t in node.tools if t.startswith("repo.")]
-                if repo_tools:
-                    raise ValueError(
-                        f"node {node.id!r} uses {', '.join(repo_tools)}, which need a `repo`"
-                    )
+            repo_tools = [t for t in node_tools(node) if t.startswith("repo.")]
+            if repo_tools:
+                raise ValueError(
+                    f"node {node.id!r} uses {', '.join(repo_tools)}, which need a `repo`"
+                )
         return self
 
 

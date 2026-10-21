@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from agentic_engine.graph import compile_workflow
-from agentic_engine.graph.compile import agent_nodes
+from agentic_engine.graph.compile import step_nodes
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime.fake import FakeRuntime
 
@@ -23,7 +23,7 @@ def load(name: str) -> WorkflowSpec:
     ],
 )
 def test_sequences_flatten_depth_first(fixture: str, expected: list[str]) -> None:
-    assert [n.id for n in agent_nodes(load(fixture).root)] == expected
+    assert [n.id for n in step_nodes(load(fixture).root)] == expected
 
 
 @pytest.mark.parametrize(

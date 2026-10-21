@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "id": "tool-node",
+  "name": "List, then summarise",
+  "description": "A tool node lists the repo with no model; an agent then summarises the listing it receives as input.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "tool",
+        "id": "list",
+        "tool": "repo.list_files",
+        "args": { "path": ".", "max_depth": 1 }
+      },
+      {
+        "type": "agent",
+        "id": "summariser",
+        "role": "Summariser",
+        "instructions": "Describe the layout of the repository whose top-level listing is your input."
+      }
+    ]
+  }
+}

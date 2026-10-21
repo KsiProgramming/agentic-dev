@@ -187,6 +187,7 @@ async def test_a_call_tool_step_runs_the_tool_and_reports_its_result() -> None:
     assert (call.name, call.arguments) == ("repo.list_files", {"path": "."})
     assert result == ToolResult(call_id=call.call_id, output="README.md\nsrc/")
     assert tools.calls == [("repo.list_files", {"path": "."})]
+    assert tools.node_ids == ["writer"]  # so a run's executor can route the call
     assert isinstance(events[-1], Completed)
 
 
@@ -238,6 +239,7 @@ async def test_an_unscripted_node_calls_tools_with_their_schema_example() -> Non
         ("repo.list_files", {}),
     ]
     assert tools.calls == [("repo.read_file", {"path": "pyproject.toml"}), ("repo.list_files", {})]
+    assert tools.node_ids == ["writer", "writer"]
 
 
 async def test_without_tools_requested_tools_are_not_called() -> None:

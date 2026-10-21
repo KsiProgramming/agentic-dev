@@ -3,10 +3,10 @@
 New primitives are added as members of the `Node` union; existing specs keep validating.
 """
 
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
 """Slug used in branch names (`agent/<run>/<node>`), so it must be path- and ref-safe."""
@@ -32,6 +32,18 @@ class AgentNode(_Base):
     tools: list[str] = Field(default_factory=list[str])
 
 
+class ToolNode(_Base):
+    """One call of a platform tool with fixed arguments; no model is involved. Its output is the
+    next node's input, and an error result fails the node."""
+
+    type: Literal["tool"]
+    id: NodeId
+    tool: NonEmptyStr = Field(description="The platform tool to call, e.g. `repo.list_files`.")
+    args: dict[str, JsonValue] = Field(
+        default_factory=dict[str, JsonValue], description="The tool's arguments."
+    )
+
+
 class SequenceNode(_Base):
     """Runs its steps in order."""
 
@@ -40,7 +52,7 @@ class SequenceNode(_Base):
     steps: list["Node"] = Field(min_length=1)
 
 
-Node = Annotated[AgentNode | SequenceNode, Field(discriminator="type")]
+Node = Annotated[AgentNode | ToolNode | SequenceNode, Field(discriminator="type")]
 
 
 def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
@@ -52,6 +64,27 @@ def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
     if isinstance(node, SequenceNode):
         for i, step in enumerate(node.steps):
             yield from iter_nodes(step, f"{path}.steps[{i}]")
+
+
+def node_tools(node: Node) -> list[str]:
+    """The platform tools `node` itself may call: an agent's `tools`, a tool node's `tool`."""
+    match node:
+        case AgentNode():
+            return list(node.tools)
+        case ToolNode():
+            return [node.tool]
+        case SequenceNode():
+            return []
+
+
+def writer_node_ids(root: Node, write_tools: Collection[str]) -> set[str]:
+    """The ids of the nodes under `root` that may call one of `write_tools` (each gets its own
+    worktree and branch)."""
+    return {
+        node.id
+        for _, node in iter_nodes(root)
+        if any(tool in write_tools for tool in node_tools(node))
+    }
 
 
 class WorkflowSpec(_Base):

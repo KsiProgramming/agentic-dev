@@ -100,6 +100,8 @@ class ScriptedToolExecutor:
         self._tools = dict(tools)
         self._examples = dict(examples or {})
         self.calls: list[tuple[str, dict[str, JsonValue]]] = []
+        self.node_ids: list[str | None] = []
+        """The `node_id` of each call, in order."""
         self.gate: asyncio.Event | None = None
         """If set, each call waits for it first (to test cancelling a call in flight)."""
 
@@ -115,8 +117,11 @@ class ScriptedToolExecutor:
             for name in self._tools
         ]
 
-    async def call(self, name: str, arguments: dict[str, JsonValue]) -> ToolOutput:
+    async def call(
+        self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
+    ) -> ToolOutput:
         self.calls.append((name, arguments))
+        self.node_ids.append(node_id)
         if self.gate is not None:
             await self.gate.wait()
         result = self._tools[name]

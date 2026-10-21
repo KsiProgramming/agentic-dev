@@ -13,10 +13,17 @@ CallRepo = Callable[..., Awaitable[tuple[bool, str]]]
 
 
 async def call_tool(
-    sandbox: Sandbox, tool: str, arguments: dict[str, Any], limits: RepoLimits | None = None
+    sandbox: Sandbox,
+    tool: str,
+    arguments: dict[str, Any],
+    limits: RepoLimits | None = None,
+    *,
+    writable: bool = False,
 ) -> tuple[bool, str]:
-    """Call one `repo` tool through a fresh in-memory MCP client; returns (is_error, text)."""
-    async with Client(build_repo_server(sandbox, limits=limits)) as client:
+    """Call one `repo` tool through a fresh in-memory MCP client; returns (is_error, text). With
+    `writable`, `sandbox` must be a worktree."""
+    server = build_repo_server(sandbox, writable=writable, limits=limits)
+    async with Client(server) as client:
         result = await client.call_tool(tool, arguments)
     text = "\n".join(c.text for c in result.content if c.type == "text")
     return result.is_error, text

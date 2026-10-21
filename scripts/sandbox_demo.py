@@ -3,12 +3,17 @@ stream. Exits non-zero unless the run completes, every `tool_result` succeeded, 
 results hold each `--expect` text.
 
 The default spec is phase 1.1's: one agent lists the repo's files. Phase 1.2's `ask-repo.json`
-has the agent list, read and search the repo through the `repo` MCP server.
+has the agent list, read and search the repo through the `repo` MCP server. Phase 1.6's
+`write-file.json` has a writer agent commit NOTES.md on its branch `agent/<run>/writer`, then a
+tool node list the shared checkout.
 
 Stdlib only, so it runs anywhere Python 3.12 does (CI runs it against the compose stack):
 
     python scripts/sandbox_demo.py --api http://localhost:8000 --repo /samples/agentic-dev.git
     python scripts/sandbox_demo.py --spec packages/engine/tests/fixtures/specs/valid/ask-repo.json
+    python scripts/sandbox_demo.py \
+        --spec packages/engine/tests/fixtures/specs/valid/write-file.json \
+        --expect "wrote NOTES.md (" --expect "/writer: NOTES.md"
 """
 
 import argparse

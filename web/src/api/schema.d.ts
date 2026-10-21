@@ -353,6 +353,7 @@ export interface components {
             /** Install Url */
             install_url: string;
         };
+        JsonValue: unknown;
         /** PutClaudeConnection */
         PutClaudeConnection: {
             /**
@@ -424,7 +425,33 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["SequenceNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["SequenceNode"])[];
+        };
+        /**
+         * ToolNode
+         * @description One call of a platform tool with fixed arguments; no model is involved. Its output is the
+         *     next node's input, and an error result fails the node.
+         */
+        ToolNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "tool";
+            /** Id */
+            id: string;
+            /**
+             * Tool
+             * @description The platform tool to call, e.g. `repo.list_files`.
+             */
+            tool: string;
+            /**
+             * Args
+             * @description The tool's arguments.
+             */
+            args?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
         };
         /** ValidationError */
         ValidationError: {
@@ -456,7 +483,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["SequenceNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["SequenceNode"];
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -473,7 +500,6 @@ export interface components {
              */
             created_at: string;
         };
-        JsonValue: unknown;
         /**
          * RunEvent
          * @description One row of the run event log. For agent events, `type` is the `AgentEvent` type and

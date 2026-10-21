@@ -29,6 +29,7 @@ INVALID: dict[str, Rejection] = {
     "bad-node-id": Rejection(("root", "agent", "id"), "string_pattern_mismatch"),
     "wrong-spec-version": Rejection(("spec_version",), "literal_error"),
     "unknown-provider": Rejection(("root", "agent", "provider"), "literal_error"),
+    "tool-node-missing-tool": Rejection(("root", "tool", "tool"), "missing"),
 }
 
 
@@ -67,8 +68,9 @@ def test_exported_schema_has_discriminated_node_union() -> None:
 
     root = schema["properties"]["root"]
     assert root["discriminator"]["propertyName"] == "type"
-    assert set(root["discriminator"]["mapping"]) == {"agent", "sequence"}
+    assert set(root["discriminator"]["mapping"]) == {"agent", "tool", "sequence"}
     assert {ref["$ref"] for ref in root["oneOf"]} == {
         "#/$defs/AgentNode",
+        "#/$defs/ToolNode",
         "#/$defs/SequenceNode",
     }

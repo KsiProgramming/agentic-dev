@@ -234,7 +234,9 @@ class ClaudeRun:
     ) -> ToolResult:
         assert self._tools is not None  # a tool_use block only comes back for offered tools
         try:
-            output = await self._unless_cancelled(self._tools.call(name, arguments))
+            output = await self._unless_cancelled(
+                self._tools.call(name, arguments, node_id=self._request.node_id)
+            )
         except _Stopped:
             raise
         except Exception as e:

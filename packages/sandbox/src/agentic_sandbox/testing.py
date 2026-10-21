@@ -4,6 +4,14 @@ import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
+import docker
+from docker.errors import ImageNotFound
+
+from agentic_sandbox.docker_backend import DEFAULT_IMAGE
+
+# `packages/sandbox`, which holds the sandbox image's Dockerfile.
+_PACKAGE_DIR = Path(__file__).resolve().parents[2]
+
 SAMPLE_FILES: Mapping[str, str] = {
     "README.md": "# Hello repo\n",
     "src/app.py": "print('hello')\n",
@@ -29,3 +37,13 @@ def make_repo(
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
     return path
+
+
+def ensure_sandbox_image(client: docker.DockerClient, image: str = DEFAULT_IMAGE) -> str:
+    """`image`, built from `packages/sandbox/Dockerfile` first if the daemon lacks it (as compose
+    and CI do before tests); returns `image`."""
+    try:
+        client.images.get(image)
+    except ImageNotFound:
+        client.images.build(path=str(_PACKAGE_DIR), tag=image, rm=True)
+    return image

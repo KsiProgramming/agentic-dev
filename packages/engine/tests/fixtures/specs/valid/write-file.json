@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "id": "write-file",
+  "name": "Write a file on a branch",
+  "description": "A writer agent adds a file and commits it on its own branch, agent/<run>/writer; a tool node then lists the shared checkout, which the commit does not touch.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Read the README, then add a short NOTES.md that summarises what this repository is for, and commit it.",
+        "tools": ["repo.read_file", "repo.write_file", "repo.commit"]
+      },
+      {
+        "type": "tool",
+        "id": "list",
+        "tool": "repo.list_files",
+        "args": { "path": ".", "max_depth": 1 }
+      }
+    ]
+  }
+}

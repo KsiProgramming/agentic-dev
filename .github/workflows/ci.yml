@@ -37,6 +37,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
+      - name: Build the sandbox image (Docker tests run in it)
+        run: docker build -t agentic-dev/sandbox:dev packages/sandbox
       - run: uv run pytest
 
   web:
@@ -119,6 +121,15 @@ jobs:
             --expect "packages/tools/" \
             --expect 'members = ["packages/*"]' \
             --expect "packages/tools/pyproject.toml:1: [project]"
+          test -z "$(docker ps -aq --filter label=agentic.run_id)"
+      - name: Repo write demo (phase 1.6)
+        # A writer agent commits NOTES.md on agent/<run>/writer in its worktree, then a tool node
+        # lists the shared checkout; nothing is pushed and no sandbox is left.
+        run: |
+          python3 scripts/sandbox_demo.py --api http://localhost:8000 \
+            --spec packages/engine/tests/fixtures/specs/valid/write-file.json \
+            --expect "wrote NOTES.md (" \
+            --expect "/writer: NOTES.md"
           test -z "$(docker ps -aq --filter label=agentic.run_id)"
       - uses: pnpm/action-setup@v6
         with:
