@@ -1,0 +1,18 @@
+[project]
+name = "agentic-api"
+version = "0.1.0"
+description = "HTTP API (FastAPI) for the Agentic Dev Platform"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.16",
+    "asyncpg>=0.30",
+    "fastapi>=0.118",
+    "pydantic-settings>=2.10",
+    "redis>=6.4",
+    "sqlalchemy[asyncio]>=2.0.43",
+    "uvicorn[standard]>=0.37",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"
