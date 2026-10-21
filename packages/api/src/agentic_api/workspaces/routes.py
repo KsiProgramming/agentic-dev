@@ -50,7 +50,7 @@ async def connections(workspace_id: UUID, request: Request) -> list[ConnectionOu
         found = await list_connections(_sessions(request), workspace_id)
     except WorkspaceNotFoundError:
         raise _not_found(workspace_id) from None
-    return [ConnectionOut.of(c) for c in found if c.provider == "claude"]
+    return [ConnectionOut.of(c) for c in found]
 
 
 @router.put(

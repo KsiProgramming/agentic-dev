@@ -25,6 +25,7 @@ name = "agentic-api"
 version = "0.1.0"
 source = { editable = "packages/api" }
 dependencies = [
+    { name = "agentic-github" },
     { name = "agentic-sandbox" },
     { name = "agentic-secrets" },
     { name = "agentic-store" },
@@ -39,6 +40,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentic-github", editable = "packages/github" },
     { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-secrets", editable = "packages/secrets" },
     { name = "agentic-store", editable = "packages/store" },

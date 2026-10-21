@@ -15,12 +15,14 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from agentic_api.github.routes import router as github_router
 from agentic_api.health import router as health_router
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.routes import router as runs_router
 from agentic_api.settings import Settings
 from agentic_api.workspaces.routes import router as workspaces_router
 from agentic_engine.events import RunEvent
+from agentic_github import GithubApp, GithubAppConfig, GithubConfigError
 from agentic_secrets import LocalKeyProvider, install_redaction
 
 # Loggers with their own handlers when uvicorn serves the app; the rest propagate to root.
@@ -54,6 +56,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await listening
             await redis.aclose()
             await db.dispose()
+            if app.state.github is not None:
+                app.state.github.close()
 
     app = FastAPI(title="Agentic Dev Platform API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
@@ -61,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.keys = (
         LocalKeyProvider.from_file(settings.master_key_file) if settings.master_key_file else None
     )
+    app.state.github = _github_app(settings)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -70,9 +75,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(runs_router)
     app.include_router(workspaces_router)
+    app.include_router(github_router)
     app.add_exception_handler(RequestValidationError, _validation_error)
     _add_schema_components(app, RunEvent)
     return app
+
+
+def _github_app(settings: Settings) -> GithubApp | None:
+    """The GitHub App, if its id and slug are set. A missing or unreadable private key then fails
+    here, at startup."""
+    if settings.github_app_id is None or settings.github_app_slug is None:
+        return None
+    if settings.github_app_private_key_file is None:
+        raise GithubConfigError("GITHUB_APP_PRIVATE_KEY_FILE must be set with GITHUB_APP_ID")
+    return GithubApp(
+        GithubAppConfig.from_file(
+            settings.github_app_id, settings.github_app_slug, settings.github_app_private_key_file
+        )
+    )
 
 
 async def _validation_error(request: Request, exc: Exception) -> JSONResponse:

@@ -146,6 +146,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/connections/github/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Install
+         * @description An install URL for the GitHub App. Installing it links the installation to the workspace.
+         */
+        post: operations["startGithubInstall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/github/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Complete Install
+         * @description GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the
+         *     web app's settings page with `github=connected`, or `github=error` and a `reason`.
+         */
+        get: operations["completeGithubInstall"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Repos
+         * @description The repos the workspace's GitHub App installation can reach, by full name.
+         */
+        get: operations["listRepos"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/connections/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Github
+         * @description Unlink the workspace from its installation. The App stays installed on GitHub.
+         */
+        delete: operations["deleteGithubConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -179,6 +260,8 @@ export interface components {
         /**
          * ConnectionOut
          * @description A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.
+         *
+         *     A GitHub connection has no secret: it shows the account the App is installed on instead.
          */
         ConnectionOut: {
             /**
@@ -188,11 +271,13 @@ export interface components {
             id: string;
             /**
              * Provider
-             * @constant
+             * @enum {string}
              */
-            provider: "claude";
+            provider: "claude" | "github";
             /** Key Hint */
-            key_hint: string;
+            key_hint?: string | null;
+            /** Account Login */
+            account_login?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -236,6 +321,16 @@ export interface components {
             /** Events Url */
             events_url: string;
         };
+        /**
+         * GithubErrorDetail
+         * @description The `detail` of a 409 from the repos endpoint: `code` says what the user should do.
+         */
+        GithubErrorDetail: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -249,6 +344,14 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /**
+         * InstallUrlOut
+         * @description Where to send the browser to install the GitHub App. The URL is valid for 10 minutes.
+         */
+        InstallUrlOut: {
+            /** Install Url */
+            install_url: string;
         };
         /** PutClaudeConnection */
         PutClaudeConnection: {
@@ -276,6 +379,26 @@ export interface components {
              * @enum {string}
              */
             redis: "ok" | "error";
+        };
+        /**
+         * RepoOut
+         * @description A repo the workspace's GitHub App installation can reach.
+         */
+        RepoOut: {
+            /** Id */
+            id: number;
+            /** Full Name */
+            full_name: string;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /** Private */
+            private: boolean;
+            /** Default Branch */
+            default_branch: string;
+            /** Html Url */
+            html_url: string;
         };
         /**
          * RepoSource
@@ -648,6 +771,179 @@ export interface operations {
                 content?: never;
             };
             /** @description No such workspace, or it has no Claude connection */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    startGithubInstall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallUrlOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The GitHub App is not configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    completeGithubInstall: {
+        parameters: {
+            query?: {
+                installation_id?: number | null;
+                setup_action?: string | null;
+                state?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listRepos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoOut"][];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `no_connection`: the workspace has no GitHub connection. `installation_gone`: the App was uninstalled or lost access; install it again. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GithubErrorDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description GitHub answered with an error or could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The GitHub App is not configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteGithubConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such workspace, or it has no GitHub connection */
             404: {
                 headers: {
                     [name: string]: unknown;
