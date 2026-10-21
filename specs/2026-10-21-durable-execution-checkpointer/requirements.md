@@ -77,6 +77,6 @@ Principles and stack choices that apply:
 | Crash loops | `max_attempts = 3`, then `run_failed` | This is safe by construction (2). |
 
 ## Open questions
-- **Serializing `RunState`:** the state holds `AgentNodeResult` Pydantic models. Check that LangGraph's `JsonPlusSerializer` round-trips them in the installed version, including any allow-list for msgpack types. If it doesn't, store them as plain dicts in the state. Settle this in group 1 with an `InMemorySaver` round-trip test.
+- ~~**Serializing `RunState`:** the state holds `AgentNodeResult` Pydantic models. Check that LangGraph's `JsonPlusSerializer` round-trips them in the installed version, including any allow-list for msgpack types.~~ Resolved in group 1: it round-trips them, but logs that unregistered types "will be blocked in a future version". `agentic_engine.graph.checkpoint_serde()` lists `AgentNodeResult` in `allowed_msgpack_modules`, which also works under `LANGGRAPH_STRICT_MSGPACK=true`. Every saver is built with it.
 - **Coverage of lease and reclaim:** the user chose engine unit tests plus the manual compose demo. The lease SQL (claim, renew, reclaim with `SKIP LOCKED`) is therefore proven only by the demo. Small store tests can be added later if it regresses.
 - **Downgrading the checkpoint migration:** the saver owns its table list and has its own `checkpoint_migrations` table. The downgrade drops the tables that are known at the pinned version.

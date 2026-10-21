@@ -22,6 +22,7 @@ from agentic_engine.events import (
     NullEventSink,
     RunEventLog,
 )
+from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.state import RunState, RunUpdate
 from agentic_engine.spec import AgentNode, Node, SequenceNode, WorkflowSpec, iter_nodes
 from agentic_runtime import AgentEvent, AgentRuntime
@@ -55,9 +56,13 @@ NODE_END: dict[AgentNodeStatus, str] = {
 
 
 def compile_workflow(
-    spec: WorkflowSpec, runtime: AgentRuntime, log: RunEventLog | None = None
+    spec: WorkflowSpec,
+    runtime: AgentRuntime,
+    log: RunEventLog | None = None,
+    checkpointer: Checkpointer | None = None,
 ) -> CompiledWorkflow:
-    """Build the graph for `spec`. Agent nodes run on `runtime` and write to `log`, if given."""
+    """Build the graph for `spec`. Agent nodes run on `runtime` and write to `log`, if given.
+    With `checkpointer`, the state is saved after each node, in the run's thread."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
     agents = agent_nodes(spec.root)
@@ -72,7 +77,7 @@ def compile_workflow(
             builder.add_conditional_edges(
                 agent.id, _continue_if_completed(agent.id, following.id), [following.id, END]
             )
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
 
 
 def _agent_step(
