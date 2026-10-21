@@ -21,7 +21,7 @@ Principles that apply:
 
 ## Scope
 ### In scope
-- New dependency `anthropic` in `agentic-runtime`.
+- New dependencies `anthropic` (≥ 1.17) and `httpx2`, its HTTP client, in `agentic-runtime`.
 - New module `agentic_runtime.claude` with `ClaudeRuntime(client: AsyncAnthropic, *, default_model, max_tokens, max_turns, tools: ToolExecutor | None = None)`. `start(request)` returns a `ClaudeRun` (an async iterator plus `cancel()`).
 - Request mapping:
   - The system prompt is `role` + `instructions`.
@@ -29,19 +29,20 @@ Principles that apply:
   - The model is `request.model`, or the default model if it is unset.
 - Streaming:
   - Text chunks become `text_delta` events.
-  - At the end of the turn, the full text becomes one `message` event.
-  - Each API call emits one `usage` event (`input_tokens`, `output_tokens`; cache tokens are counted in input). `estimated_usd` stays `None` until 2.1.
+  - Each API call ends with one `usage` event (`input_tokens`, `output_tokens`; cache tokens are counted in input). `estimated_usd` stays `None` until 2.1.
+  - A finished turn then adds one `message` event (the final turn's text) and `completed`.
 - Tool-loop skeleton:
-  - A `ToolExecutor` protocol with `definitions(names) -> list[ToolDefinition]` (name, description, JSON Schema input) and `async call(name, arguments) -> ToolOutput`.
+  - A `ToolExecutor` protocol with `definitions() -> Sequence[ToolDefinition]` (name, description, JSON Schema input) and `async call(name, arguments) -> ToolOutput`.
+  - Dots in platform tool names are sent to the API as `__`, since the API only allows `[a-zA-Z0-9_-]`.
   - On `stop_reason == "tool_use"`, the runtime emits `tool_call`, awaits the executor and emits `tool_result`. The result goes back as a `tool_result` block and the loop continues, up to `max_turns`.
   - An executor exception becomes `tool_result(is_error=True)` and the loop goes on.
   - No real tools ship in this phase. Tests use a scripted executor.
 - Terminal mapping:
-  - `end_turn` → `completed`.
+  - `end_turn` or `stop_sequence` → `completed`.
   - `max_tokens`, `refusal`, an unknown stop reason, or `max_turns` exceeded → `failed(retryable=False)` with a clear reason.
   - Errors:
-    - Retryable (`failed(retryable=True)`): rate limit (429), overloaded or 5xx, connection errors and timeouts.
-    - Not retryable: auth (401/403) and bad request (400).
+    - Retryable (`failed(retryable=True)`): 408, 409, rate limit (429), overloaded (529) or other 5xx, connection errors and timeouts.
+    - Not retryable: other statuses, such as auth (401/403) and bad request (400).
   - If `request.tools` names a tool and no executor is set, or the executor does not know the tool, the run ends with `failed` before any API call.
 - Cancellation:
   - Cooperative cancel, as the 0.3 contract requires.
@@ -78,7 +79,7 @@ Principles that apply:
 | Turn limit | `max_turns` (default 10) → `failed` when it is exceeded | This stops runaway tool loops until the policy limits in 2.2 exist. |
 | Runtime selection | `AGENTIC_RUNTIME=fake\|claude`, default `fake` | CI and local compose keep working without a key. |
 | API key | `ANTHROPIC_API_KEY` read as `SecretStr` and passed straight to `AsyncAnthropic` | The roadmap says "from env for now". `SecretStr` keeps the key out of reprs and logs until 1.4. |
-| Test seam | A real `AsyncAnthropic` with `httpx.MockTransport` replaying recorded SSE bodies | This exercises the real SDK parsing with no network, so the 0.3 `block_network` guard stays on. |
+| Test seam | A real `AsyncAnthropic` on `httpx2.MockTransport` replaying scripted SSE replies (`agentic_runtime.testing.MockClaude`) | This exercises the real SDK parsing with no network, so the 0.3 `block_network` guard stays on. |
 
 ## Open questions
 - None

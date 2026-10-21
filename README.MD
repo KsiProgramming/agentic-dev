@@ -494,6 +494,16 @@ result = await run_agent_node(node, runtime, input="draft")  # agentic_engine.ag
 
 The runtime and engine test suites block all non-loopback network access (`agentic_runtime.testing.block_network`); tests marked `integration` are exempt.
 
+### Claude adapter
+`ClaudeRuntime` (`agentic_runtime.claude`) runs requests on the Anthropic Messages API with our own loop:
+
+- `role` and `instructions` form the system prompt. `input` goes in the user turn inside an `<input>` block marked as data.
+- Each API call streams `text_delta` events, then emits one `usage` event (input tokens include cache tokens). A finished turn adds `message` (the final turn's text) and `completed`.
+- When Claude asks for tools, each one becomes a `tool_call`, runs through the `ToolExecutor` given to the runtime, and becomes a `tool_result` that is sent back. Then the loop calls the API again, up to `max_turns` (default 10). Platform tool names such as `repo.read_file` are sent to the API as `repo__read_file`. A request that names tools the executor cannot offer fails before any API call. No real tools exist until phase 1.2.
+- API errors become `failed`. Rate limits, overloaded and 5xx responses, timeouts and connection errors are marked `retryable`. Hitting `max_tokens`, a refusal, or running out of turns fails without `retryable`.
+
+Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
+
 ## Engine
 `agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. In v0, nested `sequence`s are flattened depth first into one chain of `agent` nodes, each named by its spec node id. The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run.
 
@@ -530,7 +540,20 @@ curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
 curl -N localhost:8000/runs/<id>/events
 ```
 
-Until a real provider is wired in, the worker runs every node on the fake runtime, which echoes its input word by word. `FAKE_STEP_DELAY_S` (0.5 s in compose) paces its events so the stream is visibly live.
+By default the worker runs every node on the fake runtime, which echoes its input word by word. `FAKE_STEP_DELAY_S` (0.5 s in compose) paces its events so the stream is visibly live.
+
+### Run on Claude
+Set `AGENTIC_RUNTIME=claude` and `ANTHROPIC_API_KEY` in your shell or `.env` (see `.env.example`), then start the stack and run a one-node workflow:
+
+```bash
+AGENTIC_RUNTIME=claude ANTHROPIC_API_KEY=<your key> docker compose up -d --build
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
+  -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/single-agent.json), \"input\": \"Agentic Dev lets teams design, run and trust AI agent workflows on their own repositories.\"}"
+# {"run_id":"<id>","status":"queued","events_url":"http://localhost:8000/runs/<id>/events"}
+curl -N localhost:8000/runs/<id>/events
+```
+
+The stream shows `run_started`, `node_started`, a series of `text_delta` frames as Claude writes, one `usage` with the token counts, the `message` with the full text, `completed`, `node_completed` and `run_completed`. `CLAUDE_MODEL` (default `claude-sonnet-5-5`) picks the model; a node's `model` overrides it. The worker exits at startup if `AGENTIC_RUNTIME=claude` is set without a key. For now the key is read from the environment; encrypted per-workspace keys come in phase 1.4.
 
 Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 
