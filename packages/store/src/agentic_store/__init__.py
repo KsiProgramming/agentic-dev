@@ -1,7 +1,13 @@
 """Postgres persistence (models, runs, the run event sink) and the Redis run queue."""
 
 from agentic_store.checkpoint import open_checkpointer
-from agentic_store.lease import claim_run, reclaim_expired_run, release_run, renew_lease
+from agentic_store.lease import (
+    claim_run,
+    leased_run_ids,
+    reclaim_expired_run,
+    release_run,
+    renew_lease,
+)
 from agentic_store.models import Base, Run, RunEventRow, metadata
 from agentic_store.notify import listen
 from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run
@@ -26,6 +32,7 @@ __all__ = [
     "dequeue_run",
     "enqueue_run",
     "get_run",
+    "leased_run_ids",
     "list_run_events",
     "listen",
     "max_event_seq",

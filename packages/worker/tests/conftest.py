@@ -22,10 +22,14 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "AGENTIC_RUNTIME",
         "ANTHROPIC_API_KEY",
         "CLAUDE_MODEL",
+        "LEASE_HEARTBEAT_S",
+        "LEASE_TTL_S",
+        "MAX_ATTEMPTS",
         "RUNTIME",
         "SANDBOX_BACKEND",
         "SANDBOX_IMAGE",
         "SANDBOX_LOCAL_ROOT",
+        "WORKER_ID",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setitem(WorkerSettings.model_config, "env_file", None)

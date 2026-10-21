@@ -71,6 +71,15 @@ async def release_run(
         )
 
 
+async def leased_run_ids(sessions: async_sessionmaker[AsyncSession]) -> set[UUID]:
+    """Runs some worker holds a live lease on, i.e. that are in flight right now."""
+    async with sessions() as session:
+        rows = await session.scalars(
+            select(Run.id).where(Run.status.in_(LIVE_STATUSES), Run.lease_expires_at > func.now())
+        )
+        return set(rows)
+
+
 def _claim(worker_id: str, ttl_s: float) -> Update:
     return update(Run).values(
         worker_id=worker_id,

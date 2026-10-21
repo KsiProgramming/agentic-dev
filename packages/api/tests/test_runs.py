@@ -18,12 +18,14 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 import uvicorn
+from langgraph.checkpoint.memory import InMemorySaver
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_api import create_app
 from agentic_api.settings import Settings
+from agentic_engine.graph import checkpoint_serde
 from agentic_runtime import AgentRuntime, Failed
 from agentic_runtime.fake import FakeRuntime
 from agentic_store import RUN_QUEUE, Run, get_run
@@ -97,7 +99,11 @@ async def worker(
         # Never the runtime a developer's `.env` selects (it may be Claude with a real key).
         runtime="fake",
     )
-    task = asyncio.create_task(run_worker(settings, stop, ready, runtime=runtime))
+    # Checkpoints in memory: psycopg cannot run on the Windows test loop.
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
+    task = asyncio.create_task(
+        run_worker(settings, stop, ready, runtime=runtime, checkpointer=checkpointer)
+    )
     try:
         async with asyncio.timeout(10):
             await ready.wait()
