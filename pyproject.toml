@@ -55,6 +55,7 @@ venv = ".venv"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-testpaths = ["packages"]
+testpaths = ["packages", "scripts"]
+pythonpath = ["scripts"]
 addopts = "--import-mode=importlib"
 markers = ["integration: needs Docker (Testcontainers)"]

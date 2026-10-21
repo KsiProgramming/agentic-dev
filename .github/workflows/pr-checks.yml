@@ -1,7 +1,7 @@
-name: Changelog
+name: PR checks
 
-# Every PR must record its changes in CHANGELOG.md before merge.
-# Kept separate from CI so adding/removing the label does not rerun the full pipeline.
+# Rules every PR must meet before merge. Kept separate from CI so adding or
+# removing a skip label does not rerun the full pipeline.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
@@ -29,3 +29,15 @@ jobs:
             echo "::error file=CHANGELOG.md::Add your changes under [Unreleased] in CHANGELOG.md, or label the PR 'skip-changelog' if it has no notable change."
             exit 1
           fi
+
+  roadmap:
+    name: Roadmap phase marked done
+    runs-on: ubuntu-latest
+    # Planning-only PRs (spec written, not implemented yet) use the skip-roadmap label.
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-roadmap') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require implemented phases to be marked done in specs/roadmap.md
+        run: python3 scripts/check_roadmap.py "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"

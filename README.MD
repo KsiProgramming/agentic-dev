@@ -468,3 +468,6 @@ CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Changelog
 Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
+
+## Roadmap status
+A PR that implements a roadmap phase (it touches a `specs/<date>-<slug>/` folder whose `requirements.md` names the phase) must set that phase's Status in [specs/roadmap.md](specs/roadmap.md) to `✅ Done ([#<pr>](<pr-url>))`. The `Roadmap phase marked done` CI check fails otherwise. Label planning-only PRs `skip-roadmap`.

@@ -20,5 +20,6 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `docker compose` stack (Postgres 16, Redis 7, API, worker, web), with a healthcheck on every service.
   - GitHub Actions CI: Python, web, API contract drift check, and a compose smoke test with Playwright.
   - This changelog, and a CI check that requires each PR to update it.
+  - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main

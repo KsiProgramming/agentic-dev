@@ -35,5 +35,6 @@
 - [ ] `uv.lock` and `pnpm-lock.yaml` are committed, and CI installs with frozen lockfiles.
 - [ ] README "Run locally" section is updated and verified from a clean clone.
 - [ ] `CHANGELOG.md` lists this phase's changes under `[Unreleased]`, and the `Changelog` check passes.
+- [ ] Phase 0.1 is marked `✅ Done` in `specs/roadmap.md`, and the `Roadmap phase marked done` check passes.
 - [ ] No real secrets in the repo; `.env` is git-ignored and only `.env.example` is committed.
 - [ ] Open questions in requirements.md are resolved or explicitly deferred.
