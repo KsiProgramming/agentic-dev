@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Agent runtime interface and provider adapters for the Agentic Dev Platform"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=1.17",
+    "httpx2>=2.0,<3",
     "pydantic>=2.11",
 ]
 
