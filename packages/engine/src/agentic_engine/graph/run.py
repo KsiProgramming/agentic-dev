@@ -23,7 +23,7 @@ from agentic_engine.graph.checkpoint import Checkpointer, thread_config
 from agentic_engine.graph.compile import CompiledWorkflow, compile_workflow
 from agentic_engine.graph.state import RunState, WorkflowRunResult, initial_state
 from agentic_engine.spec import WorkflowSpec
-from agentic_runtime import AgentRuntime
+from agentic_runtime import AgentRuntime, ToolExecutor
 
 RUN_END = {"completed": RUN_COMPLETED, "failed": RUN_FAILED, "cancelled": RUN_CANCELLED}
 
@@ -36,6 +36,7 @@ async def run_workflow(
     run_id: UUID | None = None,
     sink: EventSink | None = None,
     checkpointer: Checkpointer | None = None,
+    tools: ToolExecutor | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -48,12 +49,15 @@ async def run_workflow(
 
     With `checkpointer`, the state is saved after each node in the thread of `run_id`, so
     `resume_workflow` can carry on after the last completed node.
+
+    `tool` nodes call `tools`: give it the executor the runtime's agents use, so both reach the
+    same per-run tools.
     """
     log = RunEventLog(run_id or uuid4(), sink or NullEventSink())
     await _start(log, spec, input)
     return await _finish(
         log,
-        lambda: compile_workflow(spec, runtime, log, checkpointer),
+        lambda: compile_workflow(spec, runtime, log, checkpointer, tools),
         initial_state(input),
         thread_config(log.run_id),
     )
@@ -69,6 +73,7 @@ async def resume_workflow(
     checkpointer: Checkpointer,
     next_seq: int,
     attempt: int,
+    tools: ToolExecutor | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -78,7 +83,7 @@ async def resume_workflow(
     one whose graph had already ended just reports its outcome.
     """
     log = RunEventLog(run_id, sink, next_seq=next_seq)
-    graph = compile_workflow(spec, runtime, log, checkpointer)
+    graph = compile_workflow(spec, runtime, log, checkpointer, tools)
     config = thread_config(run_id)
     snapshot = await graph.aget_state(config)
     saved = snapshot.values

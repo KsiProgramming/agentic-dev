@@ -68,6 +68,7 @@
       "title": "AgentNode",
       "type": "object"
     },
+    "JsonValue": {},
     "SequenceNode": {
       "additionalProperties": false,
       "description": "Runs its steps in order.",
@@ -82,13 +83,17 @@
             "discriminator": {
               "mapping": {
                 "agent": "#/$defs/AgentNode",
-                "sequence": "#/$defs/SequenceNode"
+                "sequence": "#/$defs/SequenceNode",
+                "tool": "#/$defs/ToolNode"
               },
               "propertyName": "type"
             },
             "oneOf": [
               {
                 "$ref": "#/$defs/AgentNode"
+              },
+              {
+                "$ref": "#/$defs/ToolNode"
               },
               {
                 "$ref": "#/$defs/SequenceNode"
@@ -111,6 +116,43 @@
         "steps"
       ],
       "title": "SequenceNode",
+      "type": "object"
+    },
+    "ToolNode": {
+      "additionalProperties": false,
+      "description": "One call of a platform tool with fixed arguments; no model is involved. Its output is the\nnext node's input, and an error result fails the node.",
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "The tool's arguments.",
+          "title": "Args",
+          "type": "object"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "tool": {
+          "description": "The platform tool to call, e.g. `repo.list_files`.",
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "tool"
+      ],
+      "title": "ToolNode",
       "type": "object"
     }
   },
@@ -145,13 +187,17 @@
       "discriminator": {
         "mapping": {
           "agent": "#/$defs/AgentNode",
-          "sequence": "#/$defs/SequenceNode"
+          "sequence": "#/$defs/SequenceNode",
+          "tool": "#/$defs/ToolNode"
         },
         "propertyName": "type"
       },
       "oneOf": [
         {
           "$ref": "#/$defs/AgentNode"
+        },
+        {
+          "$ref": "#/$defs/ToolNode"
         },
         {
           "$ref": "#/$defs/SequenceNode"

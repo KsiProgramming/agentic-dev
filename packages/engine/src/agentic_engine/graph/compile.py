@@ -1,8 +1,9 @@
 """Compiles a workflow spec to a LangGraph graph.
 
-v0 supports `agent` and `sequence`: sequences are flattened depth first into one linear chain of
-agent nodes, each named by its spec node id. A node that does not complete ends the run. Each node
-writes `node_started`, its agent events and `node_<status>` to the run's event log.
+v0 supports `agent`, `tool` and `sequence`: sequences are flattened depth first into one linear
+chain of agent and tool nodes, each named by its spec node id. A node that does not complete ends
+the run. Each node writes `node_started`, its agent events (a tool node: one `tool_call` and its
+`tool_result`) and `node_<status>` to the run's event log.
 """
 
 import asyncio
@@ -13,7 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import JsonValue
 
-from agentic_engine.agent import AgentNodeStatus, run_agent_node
+from agentic_engine.agent import AgentNodeResult, AgentNodeStatus, run_agent_node
 from agentic_engine.events import (
     NODE_CANCELLED,
     NODE_COMPLETED,
@@ -24,28 +25,30 @@ from agentic_engine.events import (
 )
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.state import RunState, RunUpdate
-from agentic_engine.spec import AgentNode, Node, SequenceNode, WorkflowSpec, iter_nodes
-from agentic_runtime import AgentEvent, AgentRuntime
+from agentic_engine.spec import AgentNode, Node, SequenceNode, ToolNode, WorkflowSpec, iter_nodes
+from agentic_engine.tool import run_tool_node
+from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor
 
 type CompiledWorkflow = CompiledStateGraph[RunState]
+type StepNode = AgentNode | ToolNode
 
 
 class CompileError(ValueError):
     """The spec uses something this compiler does not support yet."""
 
 
-def agent_nodes(root: Node) -> list[AgentNode]:
-    """The agent nodes under `root` in run order (depth first)."""
-    agents: list[AgentNode] = []
+def step_nodes(root: Node) -> list[StepNode]:
+    """The agent and tool nodes under `root` in run order (depth first)."""
+    steps: list[StepNode] = []
     for path, node in iter_nodes(root):
         match node:
-            case AgentNode():
-                agents.append(node)
+            case AgentNode() | ToolNode():
+                steps.append(node)
             case SequenceNode():
                 pass
             case _:
                 raise CompileError(f"node type {node.type!r} at {path} is not supported yet")
-    return agents
+    return steps
 
 
 NODE_END: dict[AgentNodeStatus, str] = {
@@ -60,36 +63,43 @@ def compile_workflow(
     runtime: AgentRuntime,
     log: RunEventLog | None = None,
     checkpointer: Checkpointer | None = None,
+    tools: ToolExecutor | None = None,
 ) -> CompiledWorkflow:
-    """Build the graph for `spec`. Agent nodes run on `runtime` and write to `log`, if given.
-    With `checkpointer`, the state is saved after each node, in the run's thread."""
+    """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, and
+    both write to `log`, if given. With `checkpointer`, the state is saved after each node, in
+    the run's thread."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
-    agents = agent_nodes(spec.root)
+    steps = step_nodes(spec.root)
     builder = StateGraph(RunState)
-    for agent in agents:
-        builder.add_node(agent.id, _agent_step(agent, runtime, log))
-    builder.add_edge(START, agents[0].id)
-    for agent, following in zip(agents, [*agents[1:], None], strict=True):
+    for node in steps:
+        builder.add_node(node.id, _step(node, runtime, tools, log))
+    builder.add_edge(START, steps[0].id)
+    for node, following in zip(steps, [*steps[1:], None], strict=True):
         if following is None:
-            builder.add_edge(agent.id, END)
+            builder.add_edge(node.id, END)
         else:
             builder.add_conditional_edges(
-                agent.id, _continue_if_completed(agent.id, following.id), [following.id, END]
+                node.id, _continue_if_completed(node.id, following.id), [following.id, END]
             )
     return builder.compile(checkpointer=checkpointer)
 
 
-def _agent_step(
-    node: AgentNode, runtime: AgentRuntime, log: RunEventLog
+def _step(
+    node: StepNode, runtime: AgentRuntime, tools: ToolExecutor | None, log: RunEventLog
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     async def on_event(event: AgentEvent) -> None:
         await log.agent_event(node.id, event)
 
+    async def run(input: str) -> AgentNodeResult:
+        if isinstance(node, ToolNode):
+            return await run_tool_node(node, tools, on_event)
+        return await run_agent_node(node, runtime, input, on_event)
+
     async def step(state: RunState) -> RunUpdate:
         await log.emit(NODE_STARTED, node_id=node.id)
         try:
-            result = await run_agent_node(node, runtime, state["last_text"], on_event)
+            result = await run(state["last_text"])
         except asyncio.CancelledError:
             await log.emit(NODE_CANCELLED, node_id=node.id)
             raise

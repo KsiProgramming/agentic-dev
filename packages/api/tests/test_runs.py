@@ -299,6 +299,18 @@ async def test_repo_tools_need_a_repo(
     assert await count_runs(sessions) == runs_before
 
 
+async def test_a_tool_node_on_repo_tools_needs_a_repo(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runs_before = await count_runs(sessions)
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json={"workflow": spec_json("valid/tool-node.json")})
+
+    assert response.status_code == 422
+    assert "node 'list' uses repo.list_files, which need a `repo`" in response.text
+    assert await count_runs(sessions) == runs_before
+
+
 @pytest.mark.parametrize(
     "repo",
     [

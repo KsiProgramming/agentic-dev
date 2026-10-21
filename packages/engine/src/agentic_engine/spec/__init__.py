@@ -1,12 +1,15 @@
-"""Workflow spec models (v0: `agent` and `sequence`)."""
+"""Workflow spec models (v0: `agent`, `tool` and `sequence`)."""
 
 from agentic_engine.spec.models import (
     AgentNode,
     Node,
     NodeId,
     SequenceNode,
+    ToolNode,
     WorkflowSpec,
     iter_nodes,
+    node_tools,
+    writer_node_ids,
 )
 
 __all__ = [
@@ -14,9 +17,12 @@ __all__ = [
     "Node",
     "NodeId",
     "SequenceNode",
+    "ToolNode",
     "WorkflowSpec",
     "iter_nodes",
+    "node_tools",
     "parse_spec",
+    "writer_node_ids",
 ]
 
 
