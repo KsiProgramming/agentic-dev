@@ -28,7 +28,7 @@ Principles and stack choices that apply:
 - **New package `agentic_github`** (built on `githubkit`), used by the API now and by the tool servers later:
   - `GithubAppConfig`: `app_id`, `slug`, the private key (`SecretStr`, read from `GITHUB_APP_PRIVATE_KEY_FILE`).
   - `GithubApp`: one shared `githubkit.GitHub(AppAuthStrategy(...))`.
-    - `get_installation(installation_id)` returns the account login and type, and raises `InstallationNotFound`.
+    - `get_installation(installation_id)` returns the account login and type, and raises `InstallationNotFoundError`.
     - `list_repos(installation_id)` pages through `GET /installation/repositories` with installation auth and returns `RepoInfo` items (`id`, `full_name`, `name`, `owner`, `private`, `default_branch`, `html_url`).
   - Installation tokens use githubkit's built-in in-memory cache, so a token is reused until it nears expiry.
   - The PEM is registered with the 1.4 redaction registry when it is loaded.
@@ -41,7 +41,7 @@ Principles and stack choices that apply:
   - `get_github_installation(workspace_id) -> int | None`.
   - `list_connections` also returns `account_login` for GitHub rows.
   - `delete_connection` already works for any provider.
-- **API settings:** `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY_FILE`, `WEB_BASE_URL`. If any of them is unset, the GitHub endpoints return `503` with a clear message. Everything else keeps working.
+- **API settings:** `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY_FILE`, `WEB_BASE_URL` (default `http://localhost:3000`). If the id or slug is unset, the GitHub endpoints return `503` with a clear message and everything else keeps working. If they are set and the key file is missing or unreadable, the API fails at startup.
 - **API:**
   - `POST /workspaces/{id}/connections/github/install` returns `{ "install_url": "https://github.com/apps/<slug>/installations/new?state=<s>" }`.
     - `state` is random and single use. It is stored in Redis for 10 minutes and maps to the workspace.
@@ -58,7 +58,7 @@ Principles and stack choices that apply:
   - `GET /workspaces/{id}/connections` includes the GitHub row (provider, `account_login`, timestamps).
 - **Compose:**
   - The API reads the GitHub settings from `.env`.
-  - A gitignored `./.local-secrets/` directory is mounted read only at `/github` for the PEM.
+  - The gitignored `./.secrets/` directory is mounted read only at `/github` for the PEM.
   - `.env.example` documents the variables. `docker compose up` still works when they are blank.
 - **Web:**
   - `/settings` gets a "GitHub" section.
@@ -98,3 +98,4 @@ Principles and stack choices that apply:
 - **No-leak test for the PEM:** not chosen for this phase. The PEM is registered for redaction, but no test asserts it yet. Consider adding one when installation tokens reach the tool servers (1.6).
 - **Large installations:** with hundreds of repos, the paginated live call may be slow. If it is, add a short TTL cache or a `repos` table in 1.11.
 - **Who may install:** with no users, anyone who can open `/settings` can link an installation to the default workspace. This is fine for local dev only.
+- ~~**Compose with the App unset:**~~ Resolved in group 5. With `GITHUB_APP_ID`/`GITHUB_APP_SLUG` blank, the stack starts, `/settings` renders, `GET …/repos` answers 503 and the setup redirect reports `not_configured`. The production web build needed `searchParams` read inside `<Suspense>`.
