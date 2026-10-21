@@ -507,15 +507,32 @@ LangGraph ships no type information, so `typings/langgraph/` holds minimal stubs
 ## Run event log
 Every run writes one ordered stream of events (`agentic_engine.events.RunEvent`): `run_started`, then for each node `node_started`, the node's agent events and `node_completed` / `node_failed` / `node_cancelled`, then `run_completed` / `run_failed` / `run_cancelled`. `seq` numbers the events 1, 2, … per run. Agent events keep their `AgentEvent` type, and their `payload` is the serialised event (`event.agent_event()` parses it back).
 
-The engine has no database code. It hands events to an `EventSink` passed to `run_workflow`. Tests use `InMemoryEventSink`. `agentic_store.PostgresEventSink` writes each event to the append-only `run_events` table in its own transaction and keeps the run's status in `runs`:
+The engine has no database code. It hands events to an `EventSink` passed to `run_workflow`. Tests use `InMemoryEventSink`. `agentic_store.PostgresEventSink` writes each event to the append-only `run_events` table in its own transaction, keeps the run's status in `runs` (`queued` → `running` → final status), and sends `pg_notify('run_events', '<run_id>:<seq>')` with each insert. The run's row must exist first:
 
 ```python
 sessions = async_sessionmaker(create_async_engine(database_url), expire_on_commit=False)
-result = await run_workflow(spec, runtime, "go", sink=PostgresEventSink(sessions))
-events = await list_run_events(sessions, result.run_id)  # ordered by seq
+run_id = await create_run(sessions, spec, "go")  # status "queued"
+await run_workflow(spec, runtime, "go", run_id=run_id, sink=PostgresEventSink(sessions))
+events = await list_run_events(sessions, run_id)  # ordered by seq
 ```
 
 The `agentic_store` package holds the SQLAlchemy models. The Alembic revisions in `packages/api/alembic/` migrate them, and the migration test runs `alembic check` so the two cannot drift.
+
+## Runs API
+`POST /runs` takes an inline workflow spec and an input, stores a `queued` run and puts its id on the Redis queue (`runs:queue`). The worker (`python -m agentic_worker`) takes it, runs it and writes its events to Postgres. `GET /runs/{id}/events` streams them as Server-Sent Events: stored events first, then new ones as they are written, ending after `run_completed` / `run_failed` / `run_cancelled`. Each frame's `id` is the event's `seq`, `event` its type and `data` the `RunEvent` JSON. To resume, send `Last-Event-ID: <seq>` (browsers do this on reconnect) or `?after=<seq>`.
+
+With the stack running (`docker compose up`):
+
+```bash
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
+  -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/two-step-sequence.json), \"input\": \"Write the overview\"}"
+# {"run_id":"<id>","status":"queued","events_url":"http://localhost:8000/runs/<id>/events"}
+curl -N localhost:8000/runs/<id>/events
+```
+
+Until a real provider is wired in, the worker runs every node on the fake runtime, which echoes its input word by word. `FAKE_STEP_DELAY_S` (0.5 s in compose) paces its events so the stream is visibly live.
+
+Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 
 ## Changelog
 Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
