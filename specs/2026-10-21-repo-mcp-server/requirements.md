@@ -59,5 +59,5 @@ Principles that apply:
 | "Done when" proof | Scripted fake agent in compose and on Docker in the worker test | The user chose no live-Claude check. The proof is that a run's events show the three tools returning the facts (package names and their `pyproject.toml` contents) that answer the question. |
 
 ## Open questions
-- Busybox `grep` in `alpine:3.20` may not support every flag (`-I`, `--exclude-dir`). If the Docker test shows a gap, `search` falls back to `find … -exec grep` with a NUL-byte check, or the image moves to one with GNU grep. Decide during group 2 based on the Docker test.
+- ~~Busybox `grep` in `alpine:3.20` may not support every flag (`-I`, `--exclude-dir`).~~ Resolved in group 2: it supports neither. `search` runs `find … -exec grep -Hn -E` (pruning `.git`) and drops files that fail a NUL-byte check. Fixed strings are escaped into an extended regex instead of using `-F`, because Git for Windows' grep 3.0 aborts on `-F -i`.
 - The `read_file` example (`pyproject.toml`) only makes sense for Python repos. In the fake demo, another repo just gets an error result. This should be revisited when templates bring their own scripted demos.
