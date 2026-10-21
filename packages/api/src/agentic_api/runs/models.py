@@ -16,6 +16,11 @@ class CreateRunRequest(BaseModel):
         default=None,
         description="The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools.",
     )
+    workspace_id: UUID | None = Field(
+        default=None,
+        description="The workspace the run belongs to; its connections are used. Default: the "
+        "default workspace.",
+    )
 
     @model_validator(mode="after")
     def _repo_for_repo_tools(self) -> Self:

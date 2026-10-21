@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.models import CreateRunRequest, CreateRunResponse
 from agentic_engine.events import RUN_END_STATUS
-from agentic_store import create_run, enqueue_run, get_run, list_run_events
+from agentic_store import (
+    DEFAULT_WORKSPACE_ID,
+    create_run,
+    enqueue_run,
+    get_run,
+    get_workspace,
+    list_run_events,
+)
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -53,12 +60,21 @@ async def existing_run(run_id: UUID, request: Request) -> UUID:
     return run_id
 
 
-@router.post("", status_code=status.HTTP_202_ACCEPTED, operation_id="createRun")
+@router.post(
+    "",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="createRun",
+    responses={404: {"description": "No workspace with this id"}},
+)
 async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     """Queue a run of `workflow` with `input` for its first node, working on `repo` if given.
     Stream it from `events_url`."""
     redis: Redis = request.app.state.redis
-    run_id = await create_run(_sessions(request), body.workflow, body.input, body.repo)
+    sessions = _sessions(request)
+    workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
+    if await get_workspace(sessions, workspace_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
+    run_id = await create_run(sessions, body.workflow, body.input, body.repo, workspace_id)
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
