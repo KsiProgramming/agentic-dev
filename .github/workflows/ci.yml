@@ -94,7 +94,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: cp .env.example .env
+      - name: Configure the stack
+        # The worker reaches Docker through its socket, whose group differs per host.
+        run: |
+          cp .env.example .env
+          echo "DOCKER_GID=$(stat -c %g /var/run/docker.sock)" >> .env
       - name: Start stack
         run: docker compose up -d --build --wait --wait-timeout 180
       - name: Probe endpoints
@@ -102,6 +106,11 @@ jobs:
           curl -fsS http://localhost:8000/health
           curl -fsS http://localhost:8000/health/ready
           curl -fsS -o /dev/null http://localhost:3000
+      - name: Sandbox demo (phase 1.1)
+        # An agent lists the files of this repo, cloned into a sandbox container; none is left.
+        run: |
+          python3 scripts/sandbox_demo.py --api http://localhost:8000
+          test -z "$(docker ps -aq --filter label=agentic.run_id)"
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json

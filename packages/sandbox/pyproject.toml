@@ -1,0 +1,14 @@
+[project]
+name = "agentic-sandbox"
+version = "0.1.0"
+description = "Per-run sandboxes holding a repo clone, and the tools agents run in them"
+requires-python = ">=3.12"
+dependencies = [
+    "agentic-runtime",
+    "docker>=7.1",
+    "pydantic>=2.11",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"

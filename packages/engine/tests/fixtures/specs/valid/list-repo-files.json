@@ -1,0 +1,13 @@
+{
+  "spec_version": "0",
+  "id": "list-repo-files",
+  "name": "List the repo files",
+  "description": "One agent lists the files of the run's repo from inside its sandbox.",
+  "root": {
+    "type": "agent",
+    "id": "explorer",
+    "role": "Repository explorer",
+    "instructions": "List the files in the repository and say what kind of project it is.",
+    "tools": ["repo.list_files"]
+  }
+}

@@ -8,6 +8,7 @@ members = [
     "agentic-dev",
     "agentic-engine",
     "agentic-runtime",
+    "agentic-sandbox",
     "agentic-store",
     "agentic-tools",
     "agentic-worker",
@@ -18,6 +19,7 @@ name = "agentic-api"
 version = "0.1.0"
 source = { editable = "packages/api" }
 dependencies = [
+    { name = "agentic-sandbox" },
     { name = "agentic-store" },
     { name = "alembic" },
     { name = "asyncpg" },
@@ -30,6 +32,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "alembic", specifier = ">=1.16" },
     { name = "asyncpg", specifier = ">=0.30" },
@@ -48,6 +51,7 @@ dependencies = [
     { name = "agentic-api" },
     { name = "agentic-engine" },
     { name = "agentic-runtime" },
+    { name = "agentic-sandbox" },
     { name = "agentic-store" },
     { name = "agentic-tools" },
     { name = "agentic-worker" },
@@ -61,6 +65,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "ruff" },
     { name = "testcontainers", extra = ["redis"] },
+    { name = "types-docker" },
 ]
 
 [package.metadata]
@@ -68,6 +73,7 @@ requires-dist = [
     { name = "agentic-api", editable = "packages/api" },
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "agentic-runtime", editable = "packages/runtime" },
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "agentic-tools", editable = "packages/tools" },
     { name = "agentic-worker", editable = "packages/worker" },
@@ -81,6 +87,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.0" },
     { name = "ruff", specifier = ">=0.13" },
     { name = "testcontainers", extras = ["postgres", "redis"], specifier = ">=4.10" },
+    { name = "types-docker", specifier = ">=7.1" },
 ]
 
 [[package]]
@@ -118,11 +125,29 @@ requires-dist = [
 ]
 
 [[package]]
+name = "agentic-sandbox"
+version = "0.1.0"
+source = { editable = "packages/sandbox" }
+dependencies = [
+    { name = "agentic-runtime" },
+    { name = "docker" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentic-runtime", editable = "packages/runtime" },
+    { name = "docker", specifier = ">=7.1" },
+    { name = "pydantic", specifier = ">=2.11" },
+]
+
+[[package]]
 name = "agentic-store"
 version = "0.1.0"
 source = { editable = "packages/store" }
 dependencies = [
     { name = "agentic-engine" },
+    { name = "agentic-sandbox" },
     { name = "asyncpg" },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -131,6 +156,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "redis", specifier = ">=6.4" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.43" },
@@ -148,6 +174,7 @@ source = { editable = "packages/worker" }
 dependencies = [
     { name = "agentic-engine" },
     { name = "agentic-runtime" },
+    { name = "agentic-sandbox" },
     { name = "agentic-store" },
     { name = "anthropic" },
     { name = "pydantic-settings" },
@@ -159,6 +186,7 @@ dependencies = [
 requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "agentic-runtime", editable = "packages/runtime" },
+    { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "anthropic", specifier = ">=1.17" },
     { name = "pydantic-settings", specifier = ">=2.10" },
@@ -1697,6 +1725,31 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ee/9f/c5201d42a484c061e528825fc8e2d565f5abd50a4ced6fb7d29c4ec99b2b/truststore-0.10.5.tar.gz", hash = "sha256:30d36967ccaded5cbb38d602c433f53600036c79d502f4533a49b60a03bbefcd", size = 28091, upload-time = "2026-10-12T22:27:31.808Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/e9/3a7820be2bb0fe53b6bc9c3be26d3d1158004e4c3ab953aa6840b955b1e9/truststore-0.10.5-py3-none-any.whl", hash = "sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c", size = 19017, upload-time = "2026-10-12T22:27:30.377Z" },
+]
+
+[[package]]
+name = "types-docker"
+version = "7.2.0.20261006"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "types-requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/bd/7c46cbb3190622accb6c6aed717083712b0531c6e8ec5f753b7b95cdebe6/types_docker-7.2.0.20261006.tar.gz", hash = "sha256:bd2fc6c302bce7c0caeb06b6e60f7738085fc15f7f5be540b917f6dd33b36619", size = 37408, upload-time = "2026-10-06T08:16:13.843Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/70/67/2f16e88c38b6d873d0d417f81a12af119998ede025f99b1422fb157ad288/types_docker-7.2.0.20261006-py3-none-any.whl", hash = "sha256:866041971a378a226edd095a4a55d3924e51d9d15faea5beeeef256f86f2320d", size = 51408, upload-time = "2026-10-06T08:16:12.831Z" },
+]
+
+[[package]]
+name = "types-requests"
+version = "2.33.0.20261006"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/57/15/9b7e2e2e7c87d01366185b198b3febc6bc0c973f2bf21a62da4ab7d3495e/types_requests-2.33.0.20261006.tar.gz", hash = "sha256:0652999e9306aea345f40732d58fa49a7f6cade6a0d74d92119c5c8d82eddaf0", size = 25316, upload-time = "2026-10-06T08:15:57.782Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/72/b82789207b3d360ce9f5a4372c790c52cc3dd928aeb7d4faeec652b651b2/types_requests-2.33.0.20261006-py3-none-any.whl", hash = "sha256:26cc8146505cab33cda9737991929e4144c559bebe05078ccc6998f27c4ca2c1", size = 21445, upload-time = "2026-10-06T08:15:56.658Z" },
 ]
 
 [[package]]

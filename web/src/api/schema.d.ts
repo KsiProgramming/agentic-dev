@@ -55,7 +55,8 @@ export interface paths {
         put?: never;
         /**
          * Create
-         * @description Queue a run of `workflow` with `input` for its first node. Stream it from `events_url`.
+         * @description Queue a run of `workflow` with `input` for its first node, working on `repo` if given.
+         *     Stream it from `events_url`.
          */
         post: operations["createRun"];
         delete?: never;
@@ -124,6 +125,8 @@ export interface components {
              * @default
              */
             input: string;
+            /** @description The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools. */
+            repo?: components["schemas"]["RepoSource"] | null;
         };
         /** CreateRunResponse */
         CreateRunResponse: {
@@ -172,6 +175,17 @@ export interface components {
              * @enum {string}
              */
             redis: "ok" | "error";
+        };
+        /**
+         * RepoSource
+         * @description The repo a run works on: an `https://` URL or a local path, at `ref` (default branch if
+         *     unset).
+         */
+        RepoSource: {
+            /** Url */
+            url: string;
+            /** Ref */
+            ref?: string | null;
         };
         /**
          * SequenceNode

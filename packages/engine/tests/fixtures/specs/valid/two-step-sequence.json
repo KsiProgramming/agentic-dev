@@ -13,8 +13,7 @@
         "role": "Technical writer",
         "instructions": "Draft the architecture overview.",
         "provider": "claude",
-        "model": "claude-sonnet-5-5",
-        "tools": ["repo.read_file", "repo.list_files"]
+        "model": "claude-sonnet-5-5"
       },
       {
         "type": "agent",

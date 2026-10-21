@@ -5,6 +5,7 @@ description = "Postgres persistence (models, runs, run event sink) and the Redis
 requires-python = ">=3.12"
 dependencies = [
     "agentic-engine",
+    "agentic-sandbox",
     "asyncpg>=0.30",
     "redis>=6.4",
     "sqlalchemy[asyncio]>=2.0.43",

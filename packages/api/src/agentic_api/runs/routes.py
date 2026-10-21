@@ -55,9 +55,10 @@ async def existing_run(run_id: UUID, request: Request) -> UUID:
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED, operation_id="createRun")
 async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
-    """Queue a run of `workflow` with `input` for its first node. Stream it from `events_url`."""
+    """Queue a run of `workflow` with `input` for its first node, working on `repo` if given.
+    Stream it from `events_url`."""
     redis: Redis = request.app.state.redis
-    run_id = await create_run(_sessions(request), body.workflow, body.input)
+    run_id = await create_run(_sessions(request), body.workflow, body.input, body.repo)
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))

@@ -1,6 +1,7 @@
 """Runs a workflow spec end to end on an `AgentRuntime`."""
 
 import asyncio
+from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import JsonValue
@@ -41,9 +42,7 @@ async def run_workflow(
     as `run_failed` and re-raised.
     """
     log = RunEventLog(run_id or uuid4(), sink or NullEventSink())
-    await log.emit(
-        RUN_STARTED, payload={"workflow_id": spec.id, "workflow_name": spec.name, "input": input}
-    )
+    await _start(log, spec, input)
     try:
         final = await compile_workflow(spec, runtime, log).ainvoke(initial_state(input))
     except asyncio.CancelledError:
@@ -67,4 +66,27 @@ async def run_workflow(
         results=results,
         usage=sum_usage(r.usage for r in results.values()),
         stopped_at=stopped_at,
+    )
+
+
+async def record_unstarted_run(
+    spec: WorkflowSpec,
+    input: str,
+    *,
+    run_id: UUID,
+    sink: EventSink,
+    status: Literal["failed", "cancelled"],
+    reason: str,
+) -> None:
+    """Log a run that ended before its first node, e.g. because its sandbox could not be created:
+    `run_started`, then `run_failed` (payload `error`) or `run_cancelled` (payload `reason`)."""
+    log = RunEventLog(run_id, sink)
+    await _start(log, spec, input)
+    key = "error" if status == "failed" else "reason"
+    await log.emit(RUN_END[status], payload={key: reason})
+
+
+async def _start(log: RunEventLog, spec: WorkflowSpec, input: str) -> None:
+    await log.emit(
+        RUN_STARTED, payload={"workflow_id": spec.id, "workflow_name": spec.name, "input": input}
     )

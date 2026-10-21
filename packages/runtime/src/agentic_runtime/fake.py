@@ -1,22 +1,29 @@
-"""A deterministic `AgentRuntime` for tests: replays scripted events, with no network or I/O."""
+"""A deterministic `AgentRuntime` for tests: replays scripted events, with no network or I/O of
+its own. Tools it is asked to call run through the `ToolExecutor` it is given."""
 
 import asyncio
 import contextlib
 import re
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from pydantic import JsonValue
 
 from agentic_runtime.contract import check_events
 from agentic_runtime.events import (
     AgentEvent,
     Cancelled,
     Completed,
+    Failed,
     Message,
     TextDelta,
+    ToolCall,
+    ToolResult,
     Usage,
     is_terminal,
 )
 from agentic_runtime.request import AgentRequest
+from agentic_runtime.tools import ToolExecutor
 
 
 @dataclass(frozen=True)
@@ -26,7 +33,16 @@ class Delay:
     seconds: float
 
 
-type Step = AgentEvent | Delay
+@dataclass(frozen=True)
+class CallTool:
+    """A script step that calls a tool through the runtime's `ToolExecutor`: it emits
+    `tool_call`, runs the tool and emits its `tool_result`."""
+
+    name: str
+    arguments: dict[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+
+
+type Step = AgentEvent | Delay | CallTool
 type Script = Sequence[Step]
 
 ECHO_USAGE = Usage(input_tokens=10, output_tokens=10)
@@ -51,7 +67,7 @@ def slow_echo_script(text: str, step_delay_s: float) -> list[Step]:
 def _prepare(node_id: str, script: Script) -> tuple[Step, ...]:
     """Append `completed` if the script has no terminal event, then check the contract."""
     steps = list(script)
-    events = [s for s in steps if not isinstance(s, Delay)]
+    events = _expected_events(steps)
     if not events or not is_terminal(events[-1]):
         steps.append(Completed())
         events.append(Completed())
@@ -62,11 +78,30 @@ def _prepare(node_id: str, script: Script) -> tuple[Step, ...]:
     return tuple(steps)
 
 
+def _expected_events(steps: Sequence[Step]) -> list[AgentEvent]:
+    """The events `steps` produce, with a placeholder result for each tool call."""
+    events: list[AgentEvent] = []
+    for i, step in enumerate(steps):
+        if isinstance(step, CallTool):
+            events += [
+                ToolCall(call_id=_call_id(i), name=step.name),
+                ToolResult(call_id=_call_id(i), output=""),
+            ]
+        elif not isinstance(step, Delay):
+            events.append(step)
+    return events
+
+
+def _call_id(index: int) -> str:
+    return f"fake_call_{index}"
+
+
 class FakeRun:
     """Replays one script. Implements `AgentRun`."""
 
-    def __init__(self, steps: Sequence[Step]) -> None:
+    def __init__(self, steps: Sequence[Step], tools: ToolExecutor | None = None) -> None:
         self._steps = steps
+        self._tools = tools
         self._cancel = asyncio.Event()
         self._started = False
 
@@ -80,7 +115,7 @@ class FakeRun:
         return self._stream()
 
     async def _stream(self) -> AsyncIterator[AgentEvent]:
-        for step in self._steps:
+        for i, step in enumerate(self._steps):
             if self._cancel.is_set():
                 yield Cancelled()
                 return
@@ -88,14 +123,32 @@ class FakeRun:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._cancel.wait(), step.seconds)
                 continue
+            if isinstance(step, CallTool):
+                if self._tools is None:
+                    yield Failed(error=f"tools requested but no tool executor is set: {step.name}")
+                    return
+                yield ToolCall(call_id=_call_id(i), name=step.name, arguments=step.arguments)
+                yield await self._call(_call_id(i), step)
+                continue
             yield step
             if is_terminal(step):
                 return
+
+    async def _call(self, call_id: str, step: CallTool) -> ToolResult:
+        assert self._tools is not None
+        try:
+            output = await self._tools.call(step.name, dict(step.arguments))
+        except Exception as e:
+            return ToolResult(call_id=call_id, output=f"tool failed: {e}", is_error=True)
+        return ToolResult(call_id=call_id, output=output.text, is_error=output.is_error)
 
 
 class FakeRuntime:
     """Scripted per `node_id`; nodes without a script get `default(request.input)`
     (`echo_script` unless given).
+
+    With `tools`, `CallTool` steps run through it, and a node without a script first calls each
+    tool its request names, with no arguments.
 
     Scripts are checked against the contract up front, so a bad script fails at construction.
     A script without a terminal event gets `completed` appended.
@@ -106,13 +159,17 @@ class FakeRuntime:
         scripts: Mapping[str, Script] | None = None,
         *,
         default: Callable[[str], Script] = echo_script,
+        tools: ToolExecutor | None = None,
     ) -> None:
         self._scripts = {node_id: _prepare(node_id, s) for node_id, s in (scripts or {}).items()}
         self._default = default
+        self._tools = tools
         self.requests: list[AgentRequest] = []
 
     def start(self, request: AgentRequest) -> FakeRun:
         self.requests.append(request)
         if request.node_id in self._scripts:
-            return FakeRun(self._scripts[request.node_id])
-        return FakeRun(_prepare(request.node_id, self._default(request.input)))
+            return FakeRun(self._scripts[request.node_id], self._tools)
+        calls = [CallTool(name) for name in request.tools] if self._tools else []
+        script = [*calls, *self._default(request.input)]
+        return FakeRun(_prepare(request.node_id, script), self._tools)

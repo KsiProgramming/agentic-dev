@@ -65,7 +65,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow` with `input` for its first node. Stream it from `events_url`.",
+        "description": "Queue a run of `workflow` with `input` for its first node, working on `repo` if given.\nStream it from `events_url`.",
         "operationId": "createRun",
         "requestBody": {
           "content": {
@@ -284,6 +284,17 @@
             "type": "string",
             "title": "Input",
             "default": ""
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools."
           }
         },
         "additionalProperties": false,
@@ -377,6 +388,36 @@
           "redis"
         ],
         "title": "Readiness"
+      },
+      "RepoSource": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Url"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._/][A-Za-z0-9._/-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "RepoSource",
+        "description": "The repo a run works on: an `https://` URL or a local path, at `ref` (default branch if\nunset)."
       },
       "SequenceNode": {
         "properties": {

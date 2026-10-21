@@ -1,12 +1,13 @@
 import asyncio
 import json
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import pytest
 
 from agentic_engine.events import InMemoryEventSink
-from agentic_engine.graph import run_workflow
+from agentic_engine.graph import record_unstarted_run, run_workflow
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime import Failed, Message, TextDelta, Usage
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
@@ -76,3 +77,22 @@ async def test_caller_cancellation_ends_with_run_cancelled() -> None:
 
     assert [e.type for e in sink.events][-2:] == ["node_cancelled", "run_cancelled"]
     assert [e.seq for e in sink.events] == list(range(1, len(sink.events) + 1))
+
+
+@pytest.mark.parametrize(
+    ("status", "end"),
+    [("failed", ("run_failed", "error")), ("cancelled", ("run_cancelled", "reason"))],
+)
+async def test_a_run_that_never_reached_a_node_is_logged(
+    status: Literal["failed", "cancelled"], end: tuple[str, str]
+) -> None:
+    sink = InMemoryEventSink()
+    run_id = uuid4()
+
+    await record_unstarted_run(
+        two_step(), "go", run_id=run_id, sink=sink, status=status, reason="no sandbox"
+    )
+
+    assert [(e.seq, e.type) for e in sink.events] == [(1, "run_started"), (2, end[0])]
+    assert sink.events[0].payload["input"] == "go"
+    assert sink.events[1].payload == {end[1]: "no sandbox"}

@@ -9,7 +9,26 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from testcontainers.community.postgres import PostgresContainer
 from testcontainers.community.redis import RedisContainer
 
+from agentic_worker.main import WorkerSettings
+
 ALEMBIC_INI = Path(__file__).resolve().parents[2] / "api" / "alembic.ini"
+
+
+@pytest.fixture(autouse=True)
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings come only from each test, not from the developer's shell or `.env` (which may
+    select Claude and hold a real key)."""
+    for name in (
+        "AGENTIC_RUNTIME",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_MODEL",
+        "RUNTIME",
+        "SANDBOX_BACKEND",
+        "SANDBOX_IMAGE",
+        "SANDBOX_LOCAL_ROOT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setitem(WorkerSettings.model_config, "env_file", None)
 
 
 @pytest.fixture(scope="session")

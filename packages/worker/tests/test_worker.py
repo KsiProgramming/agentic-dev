@@ -6,17 +6,22 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import docker
 import pytest
+from docker.errors import DockerException
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.spec import WorkflowSpec, parse_spec
-from agentic_runtime import AgentRuntime, ClaudeRuntime, Failed
+from agentic_runtime import AgentRuntime, ClaudeRuntime, Failed, ToolExecutor
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
 from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
+from agentic_sandbox import FakeSandboxManager, RepoSource, SandboxManager
+from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
+from agentic_sandbox.testing import make_repo
 from agentic_store import create_run, enqueue_run, get_run, list_run_events
-from agentic_worker.main import WorkerSettings, run
+from agentic_worker.main import RuntimeFactory, WorkerSettings, run
 
 SPECS = Path(__file__).resolve().parents[2] / "engine" / "tests" / "fixtures" / "specs" / "valid"
 
@@ -35,6 +40,8 @@ async def worker(
     redis_url: str,
     *,
     runtime: AgentRuntime | None = None,
+    make_runtime: RuntimeFactory | None = None,
+    sandboxes: SandboxManager | None = None,
     ready_file: Path | None = None,
 ) -> AsyncGenerator[asyncio.Event]:
     """A worker running in this event loop; yields its stop event and stops it on exit."""
@@ -42,7 +49,9 @@ async def worker(
     settings = WorkerSettings(
         database_url=postgres_url, redis_url=redis_url, ready_file=ready_file, queue_poll_s=0.1
     )
-    task = asyncio.create_task(run(settings, stop, ready, runtime=runtime))
+    task = asyncio.create_task(
+        run(settings, stop, ready, runtime=runtime, make_runtime=make_runtime, sandboxes=sandboxes)
+    )
     try:
         async with asyncio.timeout(10):
             await ready.wait()
@@ -65,9 +74,12 @@ async def wait_for_status(
 
 
 async def submit(
-    sessions: async_sessionmaker[AsyncSession], redis_url: str, spec: WorkflowSpec
+    sessions: async_sessionmaker[AsyncSession],
+    redis_url: str,
+    spec: WorkflowSpec,
+    repo: RepoSource | None = None,
 ) -> UUID:
-    run_id = await create_run(sessions, spec, "go")
+    run_id = await create_run(sessions, spec, "go", repo)
     redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
     try:
         await enqueue_run(redis, run_id)
@@ -169,3 +181,80 @@ def test_json_formatter_emits_one_json_object() -> None:
 
     assert entry["msg"] == "hello world"
     assert entry["level"] == "info"
+
+
+def fake_with_tools(tools: ToolExecutor | None) -> AgentRuntime:
+    return FakeRuntime(tools=tools)
+
+
+async def test_a_run_with_a_repo_lists_its_files_in_a_sandbox(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    sandboxes = FakeSandboxManager(local_root=repos, base_dir=boxes)
+    repo = RepoSource(url=str(repos / "hello"))
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, load_spec("list-repo-files.json"), repo)
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    call = next(e for e in events if e.type == "tool_call")
+    result = next(e for e in events if e.type == "tool_result")
+    assert (call.node_id, call.payload["name"]) == ("explorer", "repo.list_files")
+    assert result.payload["is_error"] is False
+    assert {"README.md", "src/", "src/app.py"} <= set(str(result.payload["output"]).splitlines())
+    assert list(boxes.iterdir()) == []  # the sandbox is gone
+
+
+async def test_a_repo_that_cannot_be_cloned_fails_the_run_cleanly(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos = tmp_path / "repos"
+    repos.mkdir()
+    sandboxes = FakeSandboxManager(local_root=repos)
+    repo = RepoSource(url=str(repos / "missing"))
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        failed = await submit(sessions, redis_url, load_spec("list-repo-files.json"), repo)
+        await wait_for_status(sessions, failed, "failed")
+        after = await submit(sessions, redis_url, load_spec("single-agent.json"))
+        await wait_for_status(sessions, after, "completed")
+
+    events = await list_run_events(sessions, failed)
+    assert [e.type for e in events] == ["run_started", "run_failed"]
+    error = str(events[-1].payload["error"])
+    assert error.startswith("could not clone the repo")
+    assert str(tmp_path) not in error
+    assert tmp_path.as_posix() not in error
+
+
+async def test_done_when_an_agent_lists_files_in_a_cloned_repo_inside_a_container(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """Done when (1.1): an agent lists files in a cloned repo inside the container."""
+    try:
+        client = docker.from_env()
+        client.ping()
+    except DockerException:
+        pytest.skip("no Docker daemon")
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    sandboxes = DockerSandboxManager(client, local_root=repos)
+    repo = RepoSource(url=str(repos / "hello"))
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, load_spec("list-repo-files.json"), repo)
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    result = next(e for e in events if e.type == "tool_result")
+    assert "src/pkg/__init__.py" in str(result.payload["output"]).splitlines()
+    # The run ends before its sandbox is removed; give the removal a moment.
+    async with asyncio.timeout(10):
+        while True:
+            if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
+                break
+            await asyncio.sleep(0.1)
