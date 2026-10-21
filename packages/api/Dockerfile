@@ -12,6 +12,7 @@ COPY pyproject.toml uv.lock ./
 COPY packages/api/pyproject.toml packages/api/
 COPY packages/engine/pyproject.toml packages/engine/
 COPY packages/runtime/pyproject.toml packages/runtime/
+COPY packages/store/pyproject.toml packages/store/
 COPY packages/tools/pyproject.toml packages/tools/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-workspace

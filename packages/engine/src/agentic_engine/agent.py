@@ -1,6 +1,6 @@
 """Runs one `agent` node on an `AgentRuntime`. The LangGraph compiler (0.4) wraps this."""
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +21,7 @@ from agentic_runtime import (
 )
 
 type AgentNodeStatus = Literal["completed", "failed", "cancelled"]
+type OnAgentEvent = Callable[[AgentEvent], Awaitable[None]]
 
 
 class AgentNodeResult(BaseModel):
@@ -47,17 +48,22 @@ def to_request(node: AgentNode, input: str) -> AgentRequest:
     )
 
 
-async def run_agent_node(node: AgentNode, runtime: AgentRuntime, input: str) -> AgentNodeResult:
+async def run_agent_node(
+    node: AgentNode, runtime: AgentRuntime, input: str, on_event: OnAgentEvent | None = None
+) -> AgentNodeResult:
     """Run `node` to its terminal event and summarise the stream.
 
-    Raises `ContractViolation` if the runtime's stream breaks the contract. If the caller is
-    cancelled while the run is in flight, the run is cancelled too.
+    `on_event` sees each event as it arrives, before the stream is checked. Raises
+    `ContractViolation` if the runtime's stream breaks the contract. If the caller is cancelled
+    while the run is in flight, the run is cancelled too.
     """
     run = runtime.start(to_request(node, input))
     events: list[AgentEvent] = []
     try:
         async for event in run:
             events.append(event)
+            if on_event is not None:
+                await on_event(event)
     finally:
         if not events or not is_terminal(events[-1]):
             run.cancel()

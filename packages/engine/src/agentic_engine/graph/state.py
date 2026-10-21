@@ -2,6 +2,7 @@
 
 import operator
 from typing import Annotated, TypedDict
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -46,6 +47,7 @@ class WorkflowRunResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    run_id: UUID
     status: AgentNodeStatus
     text: str
     order: list[str]

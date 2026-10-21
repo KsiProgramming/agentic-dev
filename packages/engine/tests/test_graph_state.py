@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from agentic_engine.agent import AgentNodeResult, sum_usage
 from agentic_engine.graph.state import WorkflowRunResult, initial_state, merge_results
 from agentic_runtime import Completed, Message, Usage
@@ -40,6 +42,11 @@ def test_sum_usage_adds_optional_fields_when_set() -> None:
 
 def test_workflow_run_result_round_trips_through_json() -> None:
     result = WorkflowRunResult(
-        status="completed", text="hi", order=["a"], results={"a": DONE}, usage=DONE.usage
+        run_id=uuid4(),
+        status="completed",
+        text="hi",
+        order=["a"],
+        results={"a": DONE},
+        usage=DONE.usage,
     )
     assert WorkflowRunResult.model_validate_json(result.model_dump_json()) == result

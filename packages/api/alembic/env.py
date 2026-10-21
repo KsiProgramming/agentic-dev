@@ -6,13 +6,13 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from agentic_api.settings import Settings
+from agentic_store import metadata
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
-# No ORM models yet (tables arrive in phase 0.5).
-target_metadata = None
+target_metadata = metadata
 
 
 def _database_url() -> str:
