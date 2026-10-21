@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import JsonValue
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Identity,
@@ -31,6 +32,13 @@ metadata = Base.metadata
 # The workspace every run belongs to until users and workspace membership exist.
 DEFAULT_WORKSPACE_ID = UUID("00000000-0000-0000-0000-000000000001")
 
+# A GitHub connection is an App installation and has no secret; every other provider has one.
+CONNECTION_COLUMNS_CHECK = (
+    "(provider = 'github' AND external_id IS NOT NULL) OR "
+    "(provider <> 'github' AND secret_nonce IS NOT NULL AND secret_ciphertext IS NOT NULL "
+    "AND key_hint IS NOT NULL)"
+)
+
 
 class Workspace(Base):
     """A tenant: it owns runs and connections.
@@ -51,19 +59,24 @@ class Workspace(Base):
 class Connection(Base):
     """A workspace's credentials for one provider, encrypted under the workspace's data key.
 
-    `key_hint` (the last 4 characters) is the only part of the secret ever shown."""
+    `key_hint` (the last 4 characters) is the only part of the secret ever shown. A `github`
+    connection holds no secret: `external_id` is its App installation and `account_login` the
+    user or organisation it is installed on."""
 
     __tablename__ = "connections"
     __table_args__ = (
         UniqueConstraint("workspace_id", "provider", name="uq_connections_workspace_id_provider"),
+        CheckConstraint(CONNECTION_COLUMNS_CHECK, name="ck_connections_provider_columns"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
     provider: Mapped[str] = mapped_column(String(32))
-    secret_nonce: Mapped[bytes] = mapped_column(LargeBinary)
-    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
-    key_hint: Mapped[str] = mapped_column(String(8))
+    secret_nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    secret_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    key_hint: Mapped[str | None] = mapped_column(String(8))
+    external_id: Mapped[int | None] = mapped_column(BigInteger)
+    account_login: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

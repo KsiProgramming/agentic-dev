@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from agentic_store import ConnectionInfo, WorkspaceInfo
 
-Provider = Literal["claude"]
+Provider = Literal["claude", "github"]
 
 
 class WorkspaceOut(BaseModel):
@@ -20,11 +20,14 @@ class WorkspaceOut(BaseModel):
 
 
 class ConnectionOut(BaseModel):
-    """A stored connection. Its secret is never returned; `key_hint` is its last 4 characters."""
+    """A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.
+
+    A GitHub connection has no secret: it shows the account the App is installed on instead."""
 
     id: UUID
     provider: Provider
-    key_hint: str
+    key_hint: str | None = None
+    account_login: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -32,8 +35,9 @@ class ConnectionOut(BaseModel):
     def of(cls, info: ConnectionInfo) -> "ConnectionOut":
         return cls(
             id=info.id,
-            provider="claude",
+            provider="github" if info.provider == "github" else "claude",
             key_hint=info.key_hint,
+            account_login=info.account_login,
             created_at=info.created_at,
             updated_at=info.updated_at,
         )
