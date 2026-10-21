@@ -17,7 +17,7 @@
 - [ ] `test_graph_state.py`: state reducers and `WorkflowRunResult` JSON round-trip.
 - [ ] Existing CI jobs are green:
   - `ruff check` and `ruff format --check`
-  - `pyright` (strict), with no `# type: ignore` added for LangGraph types
+  - `pyright` (strict), with no `# type: ignore` added for LangGraph types (typed stubs in `typings/langgraph/` instead)
   - `pytest` (all packages)
   - schema freshness, web and API contract jobs
 - [ ] `uv.lock` is updated and committed with `langgraph`.

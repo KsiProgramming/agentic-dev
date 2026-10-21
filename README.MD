@@ -494,6 +494,16 @@ result = await run_agent_node(node, runtime, input="draft")  # agentic_engine.ag
 
 The runtime and engine test suites block all non-loopback network access (`agentic_runtime.testing.block_network`); tests marked `integration` are exempt.
 
+## Engine
+`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. In v0, nested `sequence`s are flattened depth first into one chain of `agent` nodes, each named by its spec node id. The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run.
+
+```python
+result = await run_workflow(spec, FakeRuntime(), input="Write the overview.")
+result.status, result.order, result.text, result.usage, result.stopped_at
+```
+
+LangGraph ships no type information, so `typings/langgraph/` holds minimal stubs for the parts the engine uses; extend them when you use more of its API.
+
 ## Changelog
 Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
 
