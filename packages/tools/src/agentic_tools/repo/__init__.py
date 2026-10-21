@@ -9,7 +9,13 @@ from mcp import Client
 from agentic_sandbox import Sandbox
 from agentic_tools.mcp_bridge import McpToolExecutor
 from agentic_tools.repo.paths import repo_relative
-from agentic_tools.repo.server import SERVER_NAME, RepoLimits, build_repo_server
+from agentic_tools.repo.server import (
+    COMMIT_AUTHOR,
+    SERVER_NAME,
+    WRITE_TOOLS,
+    RepoLimits,
+    build_repo_server,
+)
 
 
 @asynccontextmanager
@@ -24,7 +30,9 @@ async def open_repo_tools(
 
 
 __all__ = [
+    "COMMIT_AUTHOR",
     "SERVER_NAME",
+    "WRITE_TOOLS",
     "RepoLimits",
     "build_repo_server",
     "open_repo_tools",

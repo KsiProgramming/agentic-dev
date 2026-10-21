@@ -7,13 +7,20 @@ import subprocess
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import docker
 import pytest
 from docker.errors import DockerException
 
-from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
+from agentic_sandbox import (
+    FakeSandboxManager,
+    RepoSource,
+    Sandbox,
+    SandboxManager,
+    Worktree,
+    add_worktree,
+)
 from agentic_sandbox.docker_backend import DockerSandboxManager
 from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_tools.repo import RepoLimits
@@ -60,8 +67,13 @@ def manager(request: pytest.FixtureRequest, repos: Path) -> SandboxManager:
 
 
 @pytest.fixture
-async def sandbox(manager: SandboxManager, repos: Path) -> AsyncIterator[Sandbox]:
-    async with manager.open(uuid4(), RepoSource(url=str(repos / "hello"))) as box:
+def run_id() -> UUID:
+    return uuid4()
+
+
+@pytest.fixture
+async def sandbox(manager: SandboxManager, repos: Path, run_id: UUID) -> AsyncIterator[Sandbox]:
+    async with manager.open(run_id, RepoSource(url=str(repos / "hello"))) as box:
         yield box
 
 
@@ -71,5 +83,23 @@ def call(sandbox: Sandbox) -> CallRepo:
         tool: str, limits: RepoLimits | None = None, **arguments: Any
     ) -> tuple[bool, str]:
         return await call_tool(sandbox, tool, arguments, limits)
+
+    return _call
+
+
+@pytest.fixture
+async def worktree(sandbox: Sandbox, run_id: UUID) -> Worktree:
+    """The worktree of the writer node `writer`, on `agent/<run>/writer`."""
+    return await add_worktree(sandbox, run_id, "writer")
+
+
+@pytest.fixture
+def call_writer(worktree: Worktree) -> CallRepo:
+    """Calls tools on the writable server of the `writer` node's worktree."""
+
+    async def _call(
+        tool: str, limits: RepoLimits | None = None, **arguments: Any
+    ) -> tuple[bool, str]:
+        return await call_tool(worktree, tool, arguments, limits, writable=True)
 
     return _call
