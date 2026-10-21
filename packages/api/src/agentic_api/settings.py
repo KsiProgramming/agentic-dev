@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,3 +13,6 @@ class Settings(BaseSettings):
     readiness_timeout_s: float = 2.0
     # Browser origins allowed to call the API (the web app). Env: a JSON list.
     cors_origins: list[str] = ["http://localhost:3000"]
+    # The master key that encrypts stored secrets (a 32-byte file). Unset, keys cannot be
+    # stored.
+    master_key_file: Path | None = None

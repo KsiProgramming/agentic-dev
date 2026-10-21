@@ -10,6 +10,7 @@ import docker
 import pytest
 from docker.errors import DockerException
 from langgraph.checkpoint.memory import InMemorySaver
+from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -22,7 +23,15 @@ from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
 from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
 from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
 from agentic_sandbox.testing import make_repo
-from agentic_store import create_run, enqueue_run, get_run, list_run_events
+from agentic_secrets import LocalKeyProvider, generate_key_file
+from agentic_store import (
+    Workspace,
+    create_run,
+    enqueue_run,
+    get_run,
+    list_run_events,
+    put_connection,
+)
 from agentic_tools.repo import open_repo_tools
 from agentic_worker.main import RuntimeFactory, WorkerSettings, run
 
@@ -48,15 +57,23 @@ async def worker(
     sandboxes: SandboxManager | None = None,
     checkpointer: Checkpointer | None = None,
     ready_file: Path | None = None,
+    claude: MockClaude | None = None,
+    master_key_file: Path | None = None,
 ) -> AsyncGenerator[asyncio.Event]:
     """A worker running in this event loop; yields its stop event and stops it on exit.
 
-    Its checkpoints are kept in memory (psycopg cannot run on the Windows test loop); pass one
-    `checkpointer` to workers that must share them."""
+    With `claude`, runs use the Claude runtime with workspaces' stored keys (`master_key_file`),
+    each on its own client from the mock. Its checkpoints are kept in memory (psycopg cannot run
+    on the Windows test loop); pass one `checkpointer` to workers that must share them."""
     stop, ready = asyncio.Event(), asyncio.Event()
     checkpointer = checkpointer or InMemorySaver(serde=checkpoint_serde())
     settings = WorkerSettings(
-        database_url=postgres_url, redis_url=redis_url, ready_file=ready_file, queue_poll_s=0.1
+        database_url=postgres_url,
+        redis_url=redis_url,
+        ready_file=ready_file,
+        queue_poll_s=0.1,
+        runtime="claude" if claude else "fake",
+        master_key_file=master_key_file,
     )
     task = asyncio.create_task(
         run(
@@ -65,6 +82,7 @@ async def worker(
             ready,
             runtime=runtime,
             make_runtime=make_runtime,
+            make_client=(lambda k: claude.make_client(k.get_secret_value())) if claude else None,
             sandboxes=sandboxes,
             checkpointer=checkpointer,
         )
@@ -393,3 +411,96 @@ async def test_done_when_an_agent_answers_a_question_about_the_repo(
             if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
                 break
             await asyncio.sleep(0.1)
+
+
+@pytest.fixture
+def master_key(tmp_path: Path) -> Path:
+    path = tmp_path / "master.key"
+    generate_key_file(path)
+    return path
+
+
+async def new_workspace(sessions: async_sessionmaker[AsyncSession]) -> UUID:
+    workspace_id = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=workspace_id, name=f"ws-{workspace_id.hex[:6]}"))
+    return workspace_id
+
+
+async def submit_to(
+    sessions: async_sessionmaker[AsyncSession], redis_url: str, workspace_id: UUID
+) -> UUID:
+    run_id = await create_run(
+        sessions, load_spec("single-agent.json"), "go", workspace_id=workspace_id
+    )
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await enqueue_run(redis, run_id)
+    finally:
+        await redis.aclose()
+    return run_id
+
+
+async def test_each_run_uses_its_workspace_s_stored_claude_key(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, master_key: Path
+) -> None:
+    keys = LocalKeyProvider.from_file(master_key)
+    first, second = await new_workspace(sessions), await new_workspace(sessions)
+    await put_connection(sessions, keys, first, "claude", SecretStr("sk-ant-first-workspace"))
+    await put_connection(sessions, keys, second, "claude", SecretStr("sk-ant-second-workspace"))
+    mock = MockClaude([text_reply("one"), text_reply("two")])
+
+    async with worker(postgres_url, redis_url, claude=mock, master_key_file=master_key):
+        run_a = await submit_to(sessions, redis_url, first)
+        await wait_for_status(sessions, run_a, "completed")
+        run_b = await submit_to(sessions, redis_url, second)
+        await wait_for_status(sessions, run_b, "completed")
+
+    assert mock.api_keys == ["sk-ant-first-workspace", "sk-ant-second-workspace"]
+    # One client per run (after the mock's own), each closed when its run ended.
+    assert len(mock.clients) == 3
+    assert all(c.is_closed() for c in mock.clients[1:])
+
+
+async def test_a_workspace_without_a_claude_key_fails_its_run(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, master_key: Path
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    mock = MockClaude([])
+
+    async with worker(postgres_url, redis_url, claude=mock, master_key_file=master_key):
+        run_id = await submit_to(sessions, redis_url, workspace_id)
+        await wait_for_status(sessions, run_id, "failed")
+
+    events = await list_run_events(sessions, run_id)
+    assert [e.type for e in events] == ["run_started", "run_failed"]
+    assert events[-1].payload["error"] == "workspace has no Claude connection"
+    assert mock.requests == []
+    run = await get_run(sessions, run_id)
+    assert run is not None and run.attempt == 1
+
+
+async def test_a_key_stored_under_another_master_key_fails_the_run_cleanly(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    master_key: Path,
+    tmp_path: Path,
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    other = tmp_path / "other.key"
+    generate_key_file(other)
+    await put_connection(
+        sessions,
+        LocalKeyProvider.from_file(other),
+        workspace_id,
+        "claude",
+        SecretStr("sk-ant-unreadable-here"),
+    )
+
+    async with worker(postgres_url, redis_url, claude=MockClaude([]), master_key_file=master_key):
+        run_id = await submit_to(sessions, redis_url, workspace_id)
+        await wait_for_status(sessions, run_id, "failed")
+
+    [*_, failed] = await list_run_events(sessions, run_id)
+    assert "cannot be decrypted" in str(failed.payload["error"])

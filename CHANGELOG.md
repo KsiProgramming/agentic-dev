@@ -9,6 +9,13 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 1.4 workspaces, connections and encrypted secrets. A new `agentic_secrets` package provides:
+  - a `KeyProvider` protocol, and `LocalKeyProvider`, which reads a 32-byte master key from `MASTER_KEY_FILE`;
+  - envelope encryption: AES-256-GCM, one data key per workspace, ciphertexts bound to their row;
+  - `python -m agentic_secrets generate-key`;
+  - a log `RedactingFilter` and `redact_json` for live secrets.
+
+  Alembic `0007_workspaces_connections` adds `workspaces` (with a `Default` workspace), `connections` and `runs.workspace_id`. `agentic_store` gains `put_connection`, `load_secret`, `list_connections`, `delete_connection`, `list_workspaces` and `get_workspace`. New API routes: `GET /workspaces`, `GET /workspaces/{id}/connections`, and `PUT`/`DELETE /workspaces/{id}/connections/claude`; the key is write only and shown by its last 4 characters. `POST /runs` takes an optional `workspace_id`. On Claude, the worker builds each run's own client from its workspace's stored key, closes it when the run ends, and redacts the key from logs and event payloads. A new Settings page (`/settings`) stores, replaces and removes the key. Compose gains a `keygen` one-shot and a `secrets` volume. `MockClaude.make_client` records the key each call sends.
 - Phase 1.3 durable execution: runs are checkpointed in Postgres after each node with the LangGraph Postgres checkpointer (`langgraph-checkpoint-postgres`, psycopg), and a run whose worker dies is resumed by another worker after its last completed node (AC-8). `run_workflow(..., checkpointer=)` and the new `resume_workflow` in `agentic_engine.graph`; `checkpoint_serde()` allows only the engine's state types to be loaded from a checkpoint. A resumed attempt writes the new `run_resumed` event (`attempt`, `completed_nodes`) and continues `seq` (`RunEventLog(next_seq=)`, `agentic_store.max_event_seq`). Workers lease runs (`agentic_store.lease`: `claim_run`, `renew_lease`, `reclaim_expired_run` with `SKIP LOCKED`, `release_run`) and reclaim those whose lease expired; a run claimed more than `MAX_ATTEMPTS` times fails. Alembic revisions `0005_run_lease` (`runs.worker_id`, `lease_expires_at`, `attempt`) and `0006_checkpoints` (the saver's tables). New worker settings `WORKER_ID`, `LEASE_TTL_S`, `LEASE_HEARTBEAT_S`, `MAX_ATTEMPTS`. New spec fixture `three-step-sequence.json` and a kill/restart demo in the README.
 - Phase 1.2 `repo` MCP server (read only): the new `agentic_tools` package serves `repo.list_files`, `repo.read_file` (numbered lines, line ranges, 2,000-line / 256 KiB cap, binary files refused) and `repo.search` (fixed string or extended regex, optional case-insensitivity, up to 500 `path:line: text` hits) from an MCP server built per run with the official MCP Python SDK (`mcp`). The tools run inside the run's sandbox and stay confined to the repo, symlinks included. `McpToolExecutor` bridges an MCP client to the existing `ToolExecutor`, and `open_repo_tools(sandbox)` connects a run's agents to the server in memory. The worker gives every run with a repo these tools and closes the MCP client before the sandbox. `FakeRuntime` calls the tools of an unscripted node with the first `examples` entry of each tool's input schema. New spec fixture `ask-repo.json`; `scripts/sandbox_demo.py` takes `--spec` and repeatable `--expect`, and CI runs the phase 1.2 demo in the compose job.
 - Phase 1.1 sandbox manager: new `agentic_sandbox` package. `RepoSource` accepts an `https://` URL without credentials or a local path under `SANDBOX_LOCAL_ROOT`, with an optional ref. `clone_shallow` makes a depth-1 clone on the worker with only the https and file protocols enabled. There are two `SandboxManager` backends:
@@ -39,6 +46,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- The worker no longer shares one Anthropic client between runs: each run on Claude gets its own client, built from its workspace's stored key. `RunRuntimes` opens a runtime per run, and `AttemptSink` redacts live secrets from event payloads.
 - Stopping the worker no longer cancels the run in flight: it releases the run unfinished (no `run_cancelled`) and the next worker resumes it. On Windows, `python -m agentic_worker` runs on a selector event loop, which psycopg needs.
 - The worker's startup sweep keeps the sandboxes of runs other workers hold a lease on, and `DockerSandboxManager.open` replaces a sandbox an earlier attempt of the same run left behind.
 - The `two-step-sequence.json` spec fixture no longer lists `repo.*` tools, since a run that uses them now needs a `repo`. `list-repo-files.json` is the fixture for repo tools.
@@ -48,6 +56,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `PostgresEventSink` no longer creates the `runs` row: create it with `create_run` first, and `run_started` moves it from `queued` to `running`.
 
 ### Removed
+- `ANTHROPIC_API_KEY`: the worker no longer reads a Claude key from the environment (settings, compose and `.env.example`). Store it on the Settings page or with `PUT /workspaces/{id}/connections/claude`.
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main

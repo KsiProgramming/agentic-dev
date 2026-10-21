@@ -7,6 +7,7 @@ dependencies = [
     "agentic-engine",
     "agentic-runtime",
     "agentic-sandbox",
+    "agentic-secrets",
     "agentic-store",
     "agentic-tools",
     "anthropic>=1.17",

@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agentic-engine",
     "agentic-sandbox",
+    "agentic-secrets",
     "asyncpg>=0.30",
     "langgraph-checkpoint-postgres>=3",
     "psycopg[binary,pool]>=3.2",

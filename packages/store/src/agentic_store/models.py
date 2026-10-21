@@ -11,6 +11,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -26,6 +27,45 @@ class Base(DeclarativeBase):
 
 
 metadata = Base.metadata
+
+# The workspace every run belongs to until users and workspace membership exist.
+DEFAULT_WORKSPACE_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+class Workspace(Base):
+    """A tenant: it owns runs and connections.
+
+    `wrapped_dek` is the workspace's data key, wrapped by the master key `key_id`. It is made when
+    the first secret is stored, so a workspace with no secrets has none."""
+
+    __tablename__ = "workspaces"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    wrapped_dek: Mapped[bytes | None] = mapped_column(LargeBinary)
+    key_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Connection(Base):
+    """A workspace's credentials for one provider, encrypted under the workspace's data key.
+
+    `key_hint` (the last 4 characters) is the only part of the secret ever shown."""
+
+    __tablename__ = "connections"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "provider", name="uq_connections_workspace_id_provider"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    provider: Mapped[str] = mapped_column(String(32))
+    secret_nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    key_hint: Mapped[str] = mapped_column(String(8))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Run(Base):
@@ -48,6 +88,7 @@ class Run(Base):
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
     status: Mapped[str] = mapped_column(String(32))
     spec: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     input: Mapped[str] = mapped_column(Text, server_default="")

@@ -8,7 +8,10 @@ its run without ending it and releases the lease, so the run is resumed at once 
 
 Each run's spec and input are read from Postgres and its events are written back there
 (`PostgresEventSink`), where the API streams them. Agents run on the fake runtime unless
-`AGENTIC_RUNTIME=claude`, which runs them on Claude with the key in `ANTHROPIC_API_KEY`.
+`AGENTIC_RUNTIME=claude`, which runs them on Claude with the Claude key stored (encrypted) in the
+run's workspace. The key is decrypted when the run starts, used only by that run's Anthropic
+client, and redacted from logs and events while it is held. A workspace with no stored key
+fails its runs on Claude.
 
 A run with a `repo` gets a sandbox holding a clone of it for its whole duration, and its agents
 get the `repo.*` tools: a read-only `repo` MCP server bound to that sandbox, connected in memory.
@@ -23,7 +26,8 @@ import os
 import signal
 import socket
 import sys
-from collections.abc import Callable, Collection, Coroutine
+from collections.abc import AsyncGenerator, Callable, Collection, Coroutine
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
@@ -50,12 +54,22 @@ from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAUL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
 from agentic_sandbox import FakeSandboxManager, SandboxError, SandboxManager
 from agentic_sandbox.docker_backend import DEFAULT_IMAGE
+from agentic_secrets import (
+    KeyProvider,
+    LocalKeyProvider,
+    SecretDecryptError,
+    SecretsConfigError,
+    install_redaction,
+    redact_json,
+    registered,
+)
 from agentic_store import (
     PostgresEventSink,
     StoredRun,
     claim_run,
     dequeue_run,
     leased_run_ids,
+    load_secret,
     max_event_seq,
     open_checkpointer,
     reclaim_expired_run,
@@ -84,8 +98,8 @@ class WorkerSettings(BaseSettings):
     fake_step_delay_s: float = 0.0
     # Which provider runs agent nodes (env `AGENTIC_RUNTIME`).
     runtime: Literal["fake", "claude"] = Field(default="fake", validation_alias="agentic_runtime")
-    # Read from the environment for now; encrypted per-workspace keys come in phase 1.4.
-    anthropic_api_key: SecretStr | None = None
+    # The master key that decrypts workspaces' stored keys (a 32-byte file, shared with the API).
+    master_key_file: Path | None = None
     claude_model: str = DEFAULT_MODEL
     claude_max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, ge=1)
     claude_max_turns: int = Field(default=DEFAULT_MAX_TURNS, ge=1)
@@ -106,24 +120,39 @@ class WorkerSettings(BaseSettings):
 type RuntimeFactory = Callable[[ToolExecutor | None], AgentRuntime]
 """Builds the runtime for one run, given its sandbox's tools (None for a run without a repo)."""
 
+type RunRuntimes = Callable[
+    [StoredRun, ToolExecutor | None], AbstractAsyncContextManager[AgentRuntime]
+]
+"""Opens the runtime for one run, given the run and its sandbox's tools, for as long as the run
+lasts; closing it releases what the run held (its provider client and decrypted key)."""
+
+type ClaudeClientFactory = Callable[[SecretStr], anthropic.AsyncAnthropic]
+
 
 class ConfigError(RuntimeError):
     """The worker settings cannot start a runtime or a sandbox backend."""
 
 
-def runtime_factory(settings: WorkerSettings) -> RuntimeFactory:
-    """The runtimes this worker's runs use. Clients are made once and shared by every run."""
-    if settings.runtime == "claude":
-        if settings.anthropic_api_key is None or not settings.anthropic_api_key.get_secret_value():
-            raise ConfigError("AGENTIC_RUNTIME=claude needs ANTHROPIC_API_KEY to be set")
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
-        return lambda tools: ClaudeRuntime(
-            client,
-            model=settings.claude_model,
-            max_tokens=settings.claude_max_tokens,
-            max_turns=settings.claude_max_turns,
-            tools=tools,
-        )
+class RunSetupError(RuntimeError):
+    """A run cannot start on this worker, e.g. its workspace has no key for its provider. The
+    run fails with this message, which is safe to show (it never holds a secret)."""
+
+
+def anthropic_client(key: SecretStr) -> anthropic.AsyncAnthropic:
+    return anthropic.AsyncAnthropic(api_key=key.get_secret_value())
+
+
+def build_keys(settings: WorkerSettings) -> KeyProvider | None:
+    """The master key provider, if `MASTER_KEY_FILE` is set."""
+    if settings.master_key_file is None:
+        return None
+    try:
+        return LocalKeyProvider.from_file(settings.master_key_file)
+    except SecretsConfigError as e:
+        raise ConfigError(str(e)) from None
+
+
+def fake_runtime_factory(settings: WorkerSettings) -> RuntimeFactory:
     if settings.fake_step_delay_s > 0:
         delay = settings.fake_step_delay_s
         return lambda tools: FakeRuntime(
@@ -132,8 +161,62 @@ def runtime_factory(settings: WorkerSettings) -> RuntimeFactory:
     return lambda tools: FakeRuntime(tools=tools)
 
 
-def build_runtime(settings: WorkerSettings, tools: ToolExecutor | None = None) -> AgentRuntime:
-    return runtime_factory(settings)(tools)
+def fixed_runtimes(make_runtime: RuntimeFactory) -> RunRuntimes:
+    """Runtimes that hold nothing per run (the fake one, or one given by a test)."""
+
+    @asynccontextmanager
+    async def open_runtime(
+        _run: StoredRun, tools: ToolExecutor | None
+    ) -> AsyncGenerator[AgentRuntime]:
+        yield make_runtime(tools)
+
+    return open_runtime
+
+
+def run_runtimes(
+    settings: WorkerSettings,
+    sessions: async_sessionmaker[AsyncSession],
+    keys: KeyProvider | None,
+    make_client: ClaudeClientFactory = anthropic_client,
+) -> RunRuntimes:
+    """The runtimes this worker's runs use. On Claude, each run gets its own client, made with
+    its workspace's key and closed when the run's attempt ends."""
+    if settings.runtime != "claude":
+        return fixed_runtimes(fake_runtime_factory(settings))
+    if keys is None:
+        raise ConfigError("AGENTIC_RUNTIME=claude needs MASTER_KEY_FILE to read stored keys")
+    master = keys
+
+    async def claude_key(run: StoredRun) -> SecretStr:
+        try:
+            stored = await load_secret(sessions, master, run.workspace_id, "claude")
+        except SecretDecryptError:
+            raise RunSetupError(
+                "the workspace's Claude key cannot be decrypted; store it again"
+            ) from None
+        if stored is None:
+            raise RunSetupError("workspace has no Claude connection")
+        return stored
+
+    @asynccontextmanager
+    async def open_claude(
+        run: StoredRun, tools: ToolExecutor | None
+    ) -> AsyncGenerator[AgentRuntime]:
+        key = await claude_key(run)
+        with registered(key):
+            client = make_client(key)
+            try:
+                yield ClaudeRuntime(
+                    client,
+                    model=settings.claude_model,
+                    max_tokens=settings.claude_max_tokens,
+                    max_turns=settings.claude_max_turns,
+                    tools=tools,
+                )
+            finally:
+                await client.close()
+
+    return open_claude
 
 
 def build_sandboxes(
@@ -165,7 +248,7 @@ class Worker:
 
     settings: WorkerSettings
     sessions: async_sessionmaker[AsyncSession]
-    make_runtime: RuntimeFactory
+    open_runtime: RunRuntimes
     sandboxes: SandboxManager
     checkpointer: Checkpointer
 
@@ -173,7 +256,7 @@ class Worker:
 class AttemptSink:
     """Writes one attempt's events until the worker lets the run go (it is stopping, or another
     worker took the lease). Later events are dropped, so a cancelled attempt does not end the run
-    and it stays resumable."""
+    and it stays resumable. Live secrets are redacted from payloads before they are written."""
 
     def __init__(self, sink: EventSink, detached: Callable[[], bool]) -> None:
         self._sink = sink
@@ -181,6 +264,9 @@ class AttemptSink:
 
     async def emit(self, event: RunEvent) -> None:
         if not self._detached():
+            payload = redact_json(event.payload)
+            if payload != event.payload:
+                event = event.model_copy(update={"payload": payload})
             await self._sink.emit(event)
 
 
@@ -238,24 +324,29 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
         log.warning("run %s: gave up after %d attempts", run.id, tries)
         await _fail(run, sink, last_seq, f"gave up after {tries} attempts")
         return "failed"
-    if run.repo is None:
-        return (await _workflow(worker, run, sink, last_seq, None)).status
     async with contextlib.AsyncExitStack() as stack:
+        tools: ToolExecutor | None = None
+        if run.repo is not None:
+            try:
+                sandbox = await stack.enter_async_context(worker.sandboxes.open(run.id, run.repo))
+            except SandboxError as e:
+                log.warning("run %s has no sandbox: %s", run.id, e)
+                await _fail(run, sink, last_seq, str(e))
+                return "failed"
+            # Entered after the sandbox, so the MCP client closes before the sandbox is destroyed.
+            tools = await stack.enter_async_context(open_repo_tools(sandbox))
         try:
-            sandbox = await stack.enter_async_context(worker.sandboxes.open(run.id, run.repo))
-        except SandboxError as e:
-            log.warning("run %s has no sandbox: %s", run.id, e)
+            runtime = await stack.enter_async_context(worker.open_runtime(run, tools))
+        except RunSetupError as e:
+            log.warning("run %s cannot start: %s", run.id, e)
             await _fail(run, sink, last_seq, str(e))
             return "failed"
-        # Entered after the sandbox, so the MCP client closes before the sandbox is destroyed.
-        tools = await stack.enter_async_context(open_repo_tools(sandbox))
-        return (await _workflow(worker, run, sink, last_seq, tools)).status
+        return (await _workflow(worker, run, sink, last_seq, runtime)).status
 
 
 async def _workflow(
-    worker: Worker, run: StoredRun, sink: EventSink, last_seq: int, tools: ToolExecutor | None
+    worker: Worker, run: StoredRun, sink: EventSink, last_seq: int, runtime: AgentRuntime
 ) -> WorkflowRunResult:
-    runtime = worker.make_runtime(tools)
     if last_seq == 0:
         log.info("run %s started", run.id)
         return await run_workflow(
@@ -316,21 +407,28 @@ async def run(
     *,
     runtime: AgentRuntime | None = None,
     make_runtime: RuntimeFactory | None = None,
+    make_client: ClaudeClientFactory | None = None,
     sandboxes: SandboxManager | None = None,
     checkpointer: Checkpointer | None = None,
 ) -> None:
     """Run abandoned and queued runs until `stop` is set; a run still going then is released
     unfinished, for another worker to resume.
 
-    Tests pass `runtime` (used for every run, whatever its tools) or `make_runtime`, and
-    `sandboxes` and `checkpointer`; otherwise they are built from `settings`."""
-    if make_runtime is None:
-        fixed = runtime
-        make_runtime = (lambda _tools: fixed) if fixed else runtime_factory(settings)
+    Tests pass `runtime` (used for every run, whatever its tools) or `make_runtime`, or
+    `make_client` for the Claude runtime, and `sandboxes` and `checkpointer`; otherwise they are
+    built from `settings`."""
+    keys = build_keys(settings)
     redis = Redis.from_url(settings.redis_url)  # pyright: ignore[reportUnknownMemberType]
     db = create_async_engine(settings.database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(db, expire_on_commit=False)
     try:
+        if runtime is not None:
+            fixed = runtime
+            open_runtime = fixed_runtimes(lambda _tools: fixed)
+        elif make_runtime is not None:
+            open_runtime = fixed_runtimes(make_runtime)
+        else:
+            open_runtime = run_runtimes(settings, sessions, keys, make_client or anthropic_client)
         async with contextlib.AsyncExitStack() as stack:
             if sandboxes is None:
                 in_flight = await leased_run_ids(sessions)
@@ -339,7 +437,7 @@ async def run(
                 checkpointer = await stack.enter_async_context(
                     open_checkpointer(settings.database_url)
                 )
-            worker = Worker(settings, sessions, make_runtime, sandboxes, checkpointer)
+            worker = Worker(settings, sessions, open_runtime, sandboxes, checkpointer)
             await redis.ping()  # pyright: ignore[reportUnknownMemberType]
             log.info("worker ready")
             if settings.ready_file is not None:
@@ -389,6 +487,7 @@ async def _main() -> None:
 
 def main() -> None:
     configure_logging()
+    install_redaction()
     # psycopg (the checkpointer's driver) cannot use Windows' default Proactor loop.
     loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
     asyncio.run(_main(), loop_factory=loop_factory)

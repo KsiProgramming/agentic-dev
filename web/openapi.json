@@ -88,6 +88,9 @@
               }
             }
           },
+          "404": {
+            "description": "No workspace with this id"
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -205,6 +208,179 @@
           }
         }
       }
+    },
+    "/workspaces": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Workspaces",
+        "operationId": "listWorkspaces",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkspaceOut"
+                  },
+                  "type": "array",
+                  "title": "Response Listworkspaces"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/connections": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Connections",
+        "description": "The workspace's connections, without their secrets.",
+        "operationId": "listConnections",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectionOut"
+                  },
+                  "title": "Response Listconnections"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/connections/claude": {
+      "put": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Put Claude",
+        "description": "Store the workspace's Claude API key, encrypted, replacing any stored one. The\nworkspace's runs on Claude use it.",
+        "operationId": "putClaudeConnection",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutClaudeConnection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "503": {
+            "description": "No master key is configured"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Delete Claude",
+        "operationId": "deleteClaudeConnection",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such workspace, or it has no Claude connection"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -275,6 +451,44 @@
         "title": "AgentNode",
         "description": "One agent turn: a role and instructions run on a provider."
       },
+      "ConnectionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "provider": {
+            "type": "string",
+            "const": "claude",
+            "title": "Provider"
+          },
+          "key_hint": {
+            "type": "string",
+            "title": "Key Hint"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider",
+          "key_hint",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConnectionOut",
+        "description": "A stored connection. Its secret is never returned; `key_hint` is its last 4 characters."
+      },
       "CreateRunRequest": {
         "properties": {
           "workflow": {
@@ -295,6 +509,19 @@
               }
             ],
             "description": "The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools."
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id",
+            "description": "The workspace the run belongs to; its connections are used. Default: the default workspace."
           }
         },
         "additionalProperties": false,
@@ -353,6 +580,25 @@
         },
         "type": "object",
         "title": "Health"
+      },
+      "PutClaudeConnection": {
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 8,
+            "format": "password",
+            "title": "Api Key",
+            "description": "The Anthropic API key. Stored encrypted; it is never returned.",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "api_key"
+        ],
+        "title": "PutClaudeConnection"
       },
       "Readiness": {
         "properties": {
@@ -561,6 +807,31 @@
         ],
         "title": "WorkflowSpec",
         "description": "A versioned workflow document with a single root node."
+      },
+      "WorkspaceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at"
+        ],
+        "title": "WorkspaceOut"
       },
       "JsonValue": {},
       "RunEvent": {

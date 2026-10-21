@@ -16,6 +16,9 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             entry["exc"] = self.formatException(record.exc_info)
+        elif record.exc_text:
+            # Set (and redacted) by a filter that formatted the exception already.
+            entry["exc"] = record.exc_text
         return json.dumps(entry)
 
 

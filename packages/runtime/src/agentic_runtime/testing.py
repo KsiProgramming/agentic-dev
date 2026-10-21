@@ -238,16 +238,27 @@ class MockClaude:
     def __init__(self, replies: Sequence[MockReply]) -> None:
         self._replies = list(replies)
         self.requests: list[dict[str, Any]] = []
+        self.api_keys: list[str] = []
+        """The `x-api-key` header of each call, in order."""
+        self.clients: list[anthropic.AsyncAnthropic] = []
+        """Every client made by `make_client`."""
         self.closed = asyncio.Event()
         """Set when a hanging stream's response is closed (the run stopped reading it)."""
-        self.client = anthropic.AsyncAnthropic(
-            api_key=MOCK_API_KEY,
+        self.client = self.make_client(MOCK_API_KEY)
+
+    def make_client(self, api_key: str) -> anthropic.AsyncAnthropic:
+        """Another client on the same script, sending `api_key`."""
+        client = anthropic.AsyncAnthropic(
+            api_key=api_key,
             max_retries=0,
             http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle)),
         )
+        self.clients.append(client)
+        return client
 
     async def _handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(json.loads(request.content))
+        self.api_keys.append(request.headers.get("x-api-key", ""))
         if not self._replies:
             raise AssertionError(f"unexpected API call #{len(self.requests)}")
         reply = self._replies.pop(0)

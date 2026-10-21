@@ -5,6 +5,11 @@ x-db-env: &db-env
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agentic}:${POSTGRES_PASSWORD:-agentic}@postgres:5432/${POSTGRES_DB:-agentic}
   REDIS_URL: redis://redis:6379/0
 
+# The master key that encrypts stored secrets, made once by `keygen` and kept in the `secrets`
+# volume. Deleting that volume makes stored keys unreadable: they must be entered again.
+x-master-key: &master-key
+  MASTER_KEY_FILE: /secrets/master.key
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -28,18 +33,33 @@ services:
       timeout: 3s
       retries: 30
 
+  keygen:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    image: agentic-dev/python:dev
+    command: ["python", "-m", "agentic_secrets", "generate-key", "/secrets/master.key", "--if-missing"]
+    volumes:
+      - secrets:/secrets
+    healthcheck:
+      disable: true
+
   api:
     build:
       context: .
       dockerfile: packages/api/Dockerfile
     image: agentic-dev/python:dev
     environment:
-      <<: *db-env
+      <<: [*db-env, *master-key]
       # The browser calls the API directly, so the web app's origin must be allowed.
       CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
     ports:
       - "${API_PORT:-8000}:8000"
+    volumes:
+      - secrets:/secrets:ro
     depends_on:
+      keygen:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -52,12 +72,12 @@ services:
     image: agentic-dev/python:dev
     command: ["python", "-m", "agentic_worker"]
     environment:
-      <<: *db-env
+      <<: [*db-env, *master-key]
       READY_FILE: /tmp/worker-ready
-      # Agents run on the fake runtime unless AGENTIC_RUNTIME=claude (then ANTHROPIC_API_KEY is
-      # required). FAKE_STEP_DELAY_S paces fake events so a run streams visibly.
+      # Agents run on the fake runtime unless AGENTIC_RUNTIME=claude: then each run uses the
+      # Claude key stored in its workspace (the web app's Settings page). FAKE_STEP_DELAY_S paces
+      # fake events so a run streams visibly.
       AGENTIC_RUNTIME: ${AGENTIC_RUNTIME:-fake}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5-5}
       FAKE_STEP_DELAY_S: ${FAKE_STEP_DELAY_S:-0.5}
       # A run whose worker stops renewing its lease for LEASE_TTL_S is resumed by another worker.
@@ -75,6 +95,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./.git:/samples/agentic-dev.git:ro
+      - secrets:/secrets:ro
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/worker-ready"]
       interval: 2s
@@ -97,3 +118,4 @@ services:
 
 volumes:
   pgdata:
+  secrets:

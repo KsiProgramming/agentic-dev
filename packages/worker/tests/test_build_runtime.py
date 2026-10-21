@@ -1,48 +1,115 @@
+import json
+import os
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.spec import parse_spec
 from agentic_runtime import ClaudeRuntime
 from agentic_runtime.fake import FakeRuntime
+from agentic_runtime.testing import MockClaude
 from agentic_sandbox import FakeSandboxManager
-from agentic_worker.main import ConfigError, WorkerSettings, build_runtime, build_sandboxes
+from agentic_secrets import KEY_BYTES, LocalKeyProvider
+from agentic_store import StoredRun
+from agentic_worker.main import (
+    ConfigError,
+    RunSetupError,
+    WorkerSettings,
+    build_keys,
+    build_sandboxes,
+    run_runtimes,
+)
 
 KEY = "sk-ant-test-0000-do-not-log"
+# Never bound: these tests read no stored keys.
+NO_DB: async_sessionmaker[AsyncSession] = async_sessionmaker()
+SPEC = parse_spec(
+    json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "engine/tests/fixtures/specs/valid/single-agent.json"
+        ).read_text(encoding="utf-8")
+    )
+)
 
 
-def test_the_fake_runtime_is_the_default() -> None:
-    assert isinstance(build_runtime(WorkerSettings()), FakeRuntime)
+def a_run() -> StoredRun:
+    return StoredRun(id=uuid4(), status="queued", spec=SPEC, input="")
 
 
-def test_agentic_runtime_claude_selects_the_claude_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_fake_runtime_is_the_default() -> None:
+    async with run_runtimes(WorkerSettings(), NO_DB, None)(a_run(), None) as runtime:
+        assert isinstance(runtime, FakeRuntime)
+
+
+@pytest.fixture
+def keys() -> LocalKeyProvider:
+    return LocalKeyProvider(os.urandom(KEY_BYTES))
+
+
+def stored(monkeypatch: pytest.MonkeyPatch, secret: SecretStr | None) -> None:
+    """Every workspace's stored Claude key reads as `secret`."""
+
+    async def load(*_args: object) -> SecretStr | None:
+        return secret
+
+    monkeypatch.setattr("agentic_worker.main.load_secret", load)
+
+
+async def test_agentic_runtime_claude_runs_on_the_stored_key(
+    monkeypatch: pytest.MonkeyPatch, keys: LocalKeyProvider
+) -> None:
     monkeypatch.setenv("AGENTIC_RUNTIME", "claude")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", KEY)
     monkeypatch.setenv("CLAUDE_MODEL", "claude-haiku-5-5")
-
+    stored(monkeypatch, SecretStr(KEY))
     settings = WorkerSettings()
+    mock = MockClaude([])
+    runtimes = run_runtimes(settings, NO_DB, keys, lambda k: mock.make_client(k.get_secret_value()))
+
+    async with runtimes(a_run(), None) as runtime:
+        assert isinstance(runtime, ClaudeRuntime)
 
     assert settings.runtime == "claude"
     assert settings.claude_model == "claude-haiku-5-5"
-    assert isinstance(build_runtime(settings), ClaudeRuntime)
+    assert [c.api_key for c in mock.clients[1:]] == [KEY]
+    assert mock.clients[1].is_closed()
 
 
 def test_the_runtime_can_be_set_by_field_name() -> None:
-    settings = WorkerSettings.model_validate({"runtime": "claude", "anthropic_api_key": KEY})
-    assert isinstance(build_runtime(settings), ClaudeRuntime)
+    assert WorkerSettings.model_validate({"runtime": "claude"}).runtime == "claude"
 
 
-@pytest.mark.parametrize("key", [None, ""])
-def test_claude_without_a_key_fails_fast(key: str | None) -> None:
-    settings = WorkerSettings.model_validate({"runtime": "claude", "anthropic_api_key": key})
-    with pytest.raises(ConfigError, match="needs ANTHROPIC_API_KEY") as caught:
-        build_runtime(settings)
+def test_claude_without_a_master_key_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A key left in the environment is no longer read.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", KEY)
+    settings = WorkerSettings.model_validate({"runtime": "claude"})
+
+    with pytest.raises(ConfigError, match="needs MASTER_KEY_FILE") as caught:
+        run_runtimes(settings, NO_DB, None)
     assert "sk-ant" not in str(caught.value)
-
-
-def test_the_key_is_hidden_in_the_settings_repr() -> None:
-    settings = WorkerSettings.model_validate({"runtime": "claude", "anthropic_api_key": KEY})
     assert KEY not in repr(settings)
-    assert KEY not in str(settings.model_dump())
+
+
+async def test_a_workspace_with_no_stored_key_cannot_start_a_run(
+    monkeypatch: pytest.MonkeyPatch, keys: LocalKeyProvider
+) -> None:
+    stored(monkeypatch, None)
+    settings = WorkerSettings.model_validate({"runtime": "claude"})
+
+    with pytest.raises(RunSetupError, match="workspace has no Claude connection"):
+        async with run_runtimes(settings, NO_DB, keys)(a_run(), None):
+            pass
+
+
+def test_a_bad_master_key_file_fails_fast(tmp_path: Path) -> None:
+    bad = tmp_path / "master.key"
+    bad.write_bytes(b"short")
+    with pytest.raises(ConfigError, match="must hold 32 bytes"):
+        build_keys(WorkerSettings.model_validate({"master_key_file": bad}))
+    assert build_keys(WorkerSettings()) is None
 
 
 def test_the_fake_sandbox_backend_is_the_default() -> None:
