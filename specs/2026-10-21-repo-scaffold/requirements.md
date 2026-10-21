@@ -20,7 +20,7 @@ This phase unblocks 0.2 (spec models in `engine`), 0.3 (`runtime` package), 0.5 
   - `GET /health`: liveness, no dependencies checked.
   - `GET /health/ready`: readiness, checks Postgres (`SELECT 1` via async SQLAlchemy) and Redis (`PING`). Returns 503 with the failing component when one is down.
 - Alembic set up against Postgres with an empty baseline revision. The API image runs `alembic upgrade head` on start.
-- Worker process stub (`python -m engine.worker`). It connects to Redis, logs "ready", and idles until SIGTERM. It does not process jobs yet.
+- Worker process stub (`python -m agentic_engine.worker`). It connects to Redis, logs "ready", writes a ready file for its container healthcheck, and idles until SIGTERM. It does not process jobs yet.
 - Next.js (App Router, strict TS) app in `web/`: one empty page with Tailwind configured. No shadcn/ui components yet.
 - OpenAPI → TS client pipeline:
   - a script exports `openapi.json` from the FastAPI app
@@ -47,15 +47,14 @@ This phase unblocks 0.2 (spec models in `engine`), 0.3 (`runtime` package), 0.5 
 ## Decisions
 | Decision | Choice | Rationale |
 |---|---|---|
-| Repo layout | `packages/{api,engine,runtime,tools}` (uv workspace members) + `web/` at the root | Matches the tech-stack package split. Python and TS stay apart and share contracts only through JSON Schema / OpenAPI. |
+| Repo layout | `packages/{api,engine,runtime,tools}` (uv workspace members, imported as `agentic_api`, `agentic_engine`, …) + `web/` at the root | Matches the tech-stack package split. The `agentic_` prefix avoids clashes with generic top-level names like `tools`. Python and TS stay apart and share contracts only through JSON Schema / OpenAPI. |
 | Health endpoints | `/health` (liveness) + `/health/ready` (Postgres + Redis) | Liveness meets "Done when". Readiness lets compose and CI wait on real dependencies. |
-| Worker location | `engine.worker` module, own compose service | The tech stack separates API and worker processes. Workers will run engine graphs. |
+| Worker location | `agentic_engine.worker` module, own compose service, same image as the API | The tech stack separates API and worker processes. Workers will run engine graphs. |
 | Queue library | Not chosen. The stub uses `redis.asyncio` directly. | Not fixed in the tech stack. We decide when the worker first consumes jobs (0.6). |
 | TS client generator | `openapi-typescript` (types) + `openapi-fetch` (client) | Small, type-only output with no runtime codegen. Easy to check for drift in CI. Not fixed in the tech stack, so it is proposed here. |
-| Node package manager | `pnpm`, Node 22 LTS | Fast, strict lockfile. Not fixed in the tech stack. |
+| Node package manager | `pnpm`, Node 24 LTS | Fast, strict lockfile. Not fixed in the tech stack. Node 24 is the active LTS line. |
 | Type checker | `pyright` strict | The tech stack allows mypy or pyright. Pyright is faster and stricter by default. |
 | Migrations at start | API container runs `alembic upgrade head` before uvicorn | Keeps `docker compose up` a single command. We will revisit for SaaS deployment in 9.5. |
 
 ## Open questions
-- Should the Docker images be multi-stage and production-like now, or dev-only until 9.5? Proposal: multi-stage now, because it is cheap and the CI smoke test uses them.
-- Confirm `pnpm` and `openapi-typescript` before implementation, or swap them now. Both are cheap to change in this phase.
+- None. Resolved during implementation: the Docker images are multi-stage now (the CI smoke test uses them), and `pnpm` + `openapi-typescript` were kept.
