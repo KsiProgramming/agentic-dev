@@ -119,6 +119,7 @@ source = { editable = "packages/store" }
 dependencies = [
     { name = "agentic-engine" },
     { name = "asyncpg" },
+    { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
@@ -126,6 +127,7 @@ dependencies = [
 requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "asyncpg", specifier = ">=0.30" },
+    { name = "redis", specifier = ">=6.4" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.43" },
 ]
 

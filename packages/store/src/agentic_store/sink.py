@@ -2,32 +2,28 @@
 
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import RUN_END_STATUS, RUN_STARTED, RunEvent
 from agentic_store.models import Run, RunEventRow
 
+RUN_EVENTS_CHANNEL = "run_events"
+"""Postgres `NOTIFY` channel; the payload of each notification is `<run_id>:<seq>`."""
+
 
 class PostgresEventSink:
     """An `EventSink` that writes each event in its own transaction, so a live run is visible
-    while it runs. `run_started` creates the `runs` row; the final run event sets its status."""
+    while it runs, and notifies `RUN_EVENTS_CHANNEL` when that transaction commits.
+
+    The run's row must exist (see `create_run`): `run_started` sets it to `running` and the
+    final run event sets its end status."""
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
 
     async def emit(self, event: RunEvent) -> None:
         async with self._sessions.begin() as session:
-            if event.type == RUN_STARTED:
-                session.add(
-                    Run(
-                        id=event.run_id,
-                        status="running",
-                        created_at=event.created_at,
-                        updated_at=event.created_at,
-                    )
-                )
-                await session.flush()
             session.add(
                 RunEventRow(
                     run_id=event.run_id,
@@ -38,12 +34,17 @@ class PostgresEventSink:
                     created_at=event.created_at,
                 )
             )
-            if status := RUN_END_STATUS.get(event.type):
+            status = "running" if event.type == RUN_STARTED else RUN_END_STATUS.get(event.type)
+            if status:
                 await session.execute(
                     update(Run)
                     .where(Run.id == event.run_id)
                     .values(status=status, updated_at=event.created_at)
                 )
+            # Delivered on commit, so a listener that wakes up can already read the row.
+            await session.execute(
+                select(func.pg_notify(RUN_EVENTS_CHANNEL, f"{event.run_id}:{event.seq}"))
+            )
 
 
 async def list_run_events(

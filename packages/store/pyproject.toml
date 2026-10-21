@@ -1,11 +1,12 @@
 [project]
 name = "agentic-store"
 version = "0.1.0"
-description = "Postgres persistence (SQLAlchemy models, run event sink) for the Agentic Dev Platform"
+description = "Postgres persistence (models, runs, run event sink) and the Redis run queue for the Agentic Dev Platform"
 requires-python = ">=3.12"
 dependencies = [
     "agentic-engine",
     "asyncpg>=0.30",
+    "redis>=6.4",
     "sqlalchemy[asyncio]>=2.0.43",
 ]
 
