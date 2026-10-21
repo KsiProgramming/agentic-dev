@@ -1,8 +1,8 @@
 """Run worker process: takes run ids from the Redis queue and runs them, one at a time.
 
 Each run's spec and input are read from Postgres and its events are written back there
-(`PostgresEventSink`), where the API streams them. Until a real provider is wired in, runs use
-the fake runtime.
+(`PostgresEventSink`), where the API streams them. Agents run on the fake runtime unless
+`AGENTIC_RUNTIME=claude`, which runs them on Claude with the key in `ANTHROPIC_API_KEY`.
 """
 
 import asyncio
@@ -12,16 +12,19 @@ import signal
 from collections.abc import Coroutine
 from pathlib import Path
 from types import FrameType
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
+import anthropic
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from agentic_engine.graph import run_workflow
 from agentic_engine.logging import configure_logging
-from agentic_runtime import AgentRuntime
+from agentic_runtime import AgentRuntime, ClaudeRuntime
+from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
 from agentic_store import PostgresEventSink, dequeue_run, get_run
 
@@ -29,7 +32,7 @@ log = logging.getLogger("agentic_worker")
 
 
 class WorkerSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", validate_by_name=True)
 
     database_url: str = "postgresql+asyncpg://agentic:agentic@localhost:5432/agentic"
     redis_url: str = "redis://localhost:6379/0"
@@ -39,9 +42,30 @@ class WorkerSettings(BaseSettings):
     queue_poll_s: float = 1.0
     # Pause before each fake runtime event, so a run streams visibly (0 = instant).
     fake_step_delay_s: float = 0.0
+    # Which provider runs agent nodes (env `AGENTIC_RUNTIME`).
+    runtime: Literal["fake", "claude"] = Field(default="fake", validation_alias="agentic_runtime")
+    # Read from the environment for now; encrypted per-workspace keys come in phase 1.4.
+    anthropic_api_key: SecretStr | None = None
+    claude_model: str = DEFAULT_MODEL
+    claude_max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, ge=1)
+    claude_max_turns: int = Field(default=DEFAULT_MAX_TURNS, ge=1)
+
+
+class ConfigError(RuntimeError):
+    """The worker settings cannot start a runtime."""
 
 
 def build_runtime(settings: WorkerSettings) -> AgentRuntime:
+    if settings.runtime == "claude":
+        if settings.anthropic_api_key is None or not settings.anthropic_api_key.get_secret_value():
+            raise ConfigError("AGENTIC_RUNTIME=claude needs ANTHROPIC_API_KEY to be set")
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
+        return ClaudeRuntime(
+            client,
+            model=settings.claude_model,
+            max_tokens=settings.claude_max_tokens,
+            max_turns=settings.claude_max_turns,
+        )
     if settings.fake_step_delay_s > 0:
         delay = settings.fake_step_delay_s
         return FakeRuntime(default=lambda text: slow_echo_script(text, delay))
