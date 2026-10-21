@@ -7,6 +7,7 @@ Job consumption arrives with the run queue (phase 0.4/0.6).
 import asyncio
 import logging
 import signal
+from pathlib import Path
 from types import FrameType
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,6 +22,8 @@ class WorkerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     redis_url: str = "redis://localhost:6379/0"
+    # Touched once Redis answers; container healthchecks test for it.
+    ready_file: Path | None = None
 
 
 async def run(
@@ -30,11 +33,15 @@ async def run(
     try:
         await redis.ping()  # pyright: ignore[reportUnknownMemberType]
         log.info("worker ready")
+        if settings.ready_file is not None:
+            settings.ready_file.touch()
         if ready is not None:
             ready.set()
         await stop.wait()
         log.info("worker stopping")
     finally:
+        if settings.ready_file is not None:
+            settings.ready_file.unlink(missing_ok=True)
         await redis.aclose()
 
 

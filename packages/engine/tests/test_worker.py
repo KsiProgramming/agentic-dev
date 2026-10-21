@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from testcontainers.community.redis import RedisContainer
@@ -17,20 +18,26 @@ def redis_url() -> Iterator[str]:
 
 
 @pytest.mark.integration
-async def test_worker_starts_and_stops(redis_url: str, caplog: pytest.LogCaptureFixture) -> None:
+async def test_worker_starts_and_stops(
+    redis_url: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     stop, ready = asyncio.Event(), asyncio.Event()
+    ready_file = tmp_path / "worker-ready"
     caplog.set_level(logging.INFO, logger="agentic_engine.worker")
+    settings = WorkerSettings(redis_url=redis_url, ready_file=ready_file)
 
-    task = asyncio.create_task(run(WorkerSettings(redis_url=redis_url), stop, ready))
+    task = asyncio.create_task(run(settings, stop, ready))
     async with asyncio.timeout(10):
         await ready.wait()
     assert "worker ready" in caplog.messages
+    assert ready_file.exists()
 
     stop.set()
     async with asyncio.timeout(5):
         await task
 
     assert caplog.messages[-1] == "worker stopping"
+    assert not ready_file.exists()
 
 
 def test_json_formatter_emits_one_json_object() -> None:

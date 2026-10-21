@@ -10,7 +10,7 @@ OUT = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
 
 def main() -> None:
     spec = create_app().openapi()
-    OUT.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    OUT.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {OUT}")
 
 
