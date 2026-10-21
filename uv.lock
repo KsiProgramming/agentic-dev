@@ -80,6 +80,7 @@ name = "agentic-engine"
 version = "0.1.0"
 source = { editable = "packages/engine" }
 dependencies = [
+    { name = "agentic-runtime" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "redis" },
@@ -87,6 +88,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-settings", specifier = ">=2.10" },
     { name = "redis", specifier = ">=6.4" },
