@@ -12,12 +12,13 @@ from agentic_runtime import (
     Completed,
     Failed,
     Message,
+    TextDelta,
     ToolCall,
     ToolResult,
     Usage,
     check_events,
 )
-from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
+from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime, slow_echo_script
 from agentic_runtime.testing import NetworkBlockedError
 
 USAGE = Usage(input_tokens=3, output_tokens=4)
@@ -34,6 +35,23 @@ async def collect(runtime: AgentRuntime, req: AgentRequest) -> list[AgentEvent]:
 async def test_default_script_echoes_the_input() -> None:
     events = await collect(FakeRuntime(), request(input="ping"))
     assert events == [Message(text="ping"), ECHO_USAGE, Completed()]
+
+
+async def test_slow_echo_streams_word_deltas_over_time() -> None:
+    runtime = FakeRuntime(default=lambda text: slow_echo_script(text, 0.01))
+
+    started = time.monotonic()
+    events = await collect(runtime, request(input="hello big world"))
+
+    assert events == [
+        TextDelta(text="hello "),
+        TextDelta(text="big "),
+        TextDelta(text="world"),
+        Message(text="hello big world"),
+        ECHO_USAGE,
+        Completed(),
+    ]
+    assert time.monotonic() - started >= 0.05
 
 
 async def test_scripts_are_chosen_per_node_id() -> None:

@@ -10,6 +10,7 @@ members = [
     "agentic-runtime",
     "agentic-store",
     "agentic-tools",
+    "agentic-worker",
 ]
 
 [[package]]
@@ -49,6 +50,7 @@ dependencies = [
     { name = "agentic-runtime" },
     { name = "agentic-store" },
     { name = "agentic-tools" },
+    { name = "agentic-worker" },
 ]
 
 [package.dev-dependencies]
@@ -68,6 +70,7 @@ requires-dist = [
     { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "agentic-tools", editable = "packages/tools" },
+    { name = "agentic-worker", editable = "packages/worker" },
 ]
 
 [package.metadata.requires-dev]
@@ -88,8 +91,6 @@ dependencies = [
     { name = "agentic-runtime" },
     { name = "langgraph" },
     { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "redis" },
 ]
 
 [package.metadata]
@@ -97,8 +98,6 @@ requires-dist = [
     { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "langgraph", specifier = ">=1.2.16" },
     { name = "pydantic", specifier = ">=2.11" },
-    { name = "pydantic-settings", specifier = ">=2.10" },
-    { name = "redis", specifier = ">=6.4" },
 ]
 
 [[package]]
@@ -135,6 +134,29 @@ requires-dist = [
 name = "agentic-tools"
 version = "0.1.0"
 source = { editable = "packages/tools" }
+
+[[package]]
+name = "agentic-worker"
+version = "0.1.0"
+source = { editable = "packages/worker" }
+dependencies = [
+    { name = "agentic-engine" },
+    { name = "agentic-runtime" },
+    { name = "agentic-store" },
+    { name = "pydantic-settings" },
+    { name = "redis" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentic-engine", editable = "packages/engine" },
+    { name = "agentic-runtime", editable = "packages/runtime" },
+    { name = "agentic-store", editable = "packages/store" },
+    { name = "pydantic-settings", specifier = ">=2.10" },
+    { name = "redis", specifier = ">=6.4" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.43" },
+]
 
 [[package]]
 name = "alembic"

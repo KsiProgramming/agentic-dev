@@ -1,0 +1,17 @@
+[project]
+name = "agentic-worker"
+version = "0.1.0"
+description = "Run worker for the Agentic Dev Platform: executes queued runs"
+requires-python = ">=3.12"
+dependencies = [
+    "agentic-engine",
+    "agentic-runtime",
+    "agentic-store",
+    "pydantic-settings>=2.10",
+    "redis>=6.4",
+    "sqlalchemy[asyncio]>=2.0.43",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"

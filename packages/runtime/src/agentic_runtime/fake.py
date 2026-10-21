@@ -2,11 +2,20 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Mapping, Sequence
+import re
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from agentic_runtime.contract import check_events
-from agentic_runtime.events import AgentEvent, Cancelled, Completed, Message, Usage, is_terminal
+from agentic_runtime.events import (
+    AgentEvent,
+    Cancelled,
+    Completed,
+    Message,
+    TextDelta,
+    Usage,
+    is_terminal,
+)
 from agentic_runtime.request import AgentRequest
 
 
@@ -26,6 +35,17 @@ ECHO_USAGE = Usage(input_tokens=10, output_tokens=10)
 def echo_script(text: str) -> list[Step]:
     """The default script: reply with the input."""
     return [Message(text=text), ECHO_USAGE, Completed()]
+
+
+def slow_echo_script(text: str, step_delay_s: float) -> list[Step]:
+    """Reply with the input as if streamed: one `text_delta` per word, then the message, waiting
+    `step_delay_s` before each event. Makes a run visibly live without a real provider."""
+    steps: list[Step] = []
+    for chunk in re.findall(r"\S+\s*", text):
+        steps += [Delay(step_delay_s), TextDelta(text=chunk)]
+    for event in echo_script(text):
+        steps += [Delay(step_delay_s), event]
+    return steps
 
 
 def _prepare(node_id: str, script: Script) -> tuple[Step, ...]:
@@ -74,18 +94,25 @@ class FakeRun:
 
 
 class FakeRuntime:
-    """Scripted per `node_id`; nodes without a script get `echo_script(request.input)`.
+    """Scripted per `node_id`; nodes without a script get `default(request.input)`
+    (`echo_script` unless given).
 
     Scripts are checked against the contract up front, so a bad script fails at construction.
     A script without a terminal event gets `completed` appended.
     """
 
-    def __init__(self, scripts: Mapping[str, Script] | None = None) -> None:
+    def __init__(
+        self,
+        scripts: Mapping[str, Script] | None = None,
+        *,
+        default: Callable[[str], Script] = echo_script,
+    ) -> None:
         self._scripts = {node_id: _prepare(node_id, s) for node_id, s in (scripts or {}).items()}
+        self._default = default
         self.requests: list[AgentRequest] = []
 
     def start(self, request: AgentRequest) -> FakeRun:
         self.requests.append(request)
         if request.node_id in self._scripts:
             return FakeRun(self._scripts[request.node_id])
-        return FakeRun(echo_script(request.input))
+        return FakeRun(_prepare(request.node_id, self._default(request.input)))

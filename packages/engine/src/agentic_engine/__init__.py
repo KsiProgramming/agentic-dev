@@ -1,1 +1,1 @@
-"""Orchestration engine: workflow spec compilation and run workers."""
+"""Orchestration engine: workflow spec compilation and execution."""
