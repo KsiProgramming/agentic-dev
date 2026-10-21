@@ -465,3 +465,6 @@ cd web && pnpm gen:api
 ```
 
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
+
+## Changelog
+Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
