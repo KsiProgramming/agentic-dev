@@ -1,0 +1,61 @@
+[project]
+name = "agentic-dev"
+version = "0.1.0"
+description = "Agentic Dev Platform (uv workspace root)"
+requires-python = ">=3.12"
+dependencies = [
+    "agentic-api",
+    "agentic-engine",
+    "agentic-runtime",
+    "agentic-tools",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "pyright>=1.1.400",
+    "pytest>=8.4",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.13",
+    "testcontainers[postgres,redis]>=4.10",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+agentic-api = { workspace = true }
+agentic-engine = { workspace = true }
+agentic-runtime = { workspace = true }
+agentic-tools = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["web"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agentic_api", "agentic_engine", "agentic_runtime", "agentic_tools"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["packages", "scripts"]
+exclude = ["**/__pycache__", "**/.venv", "web"]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["packages", "scripts"]
+pythonpath = ["scripts"]
+addopts = "--import-mode=importlib"
+markers = ["integration: needs Docker (Testcontainers)"]

@@ -1,0 +1,43 @@
+name: PR checks
+
+# Rules every PR must meet before merge. Kept separate from CI so adding or
+# removing a skip label does not rerun the full pipeline.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: CHANGELOG.md updated
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require a CHANGELOG.md entry
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md is updated."
+          else
+            echo "::error file=CHANGELOG.md::Add your changes under [Unreleased] in CHANGELOG.md, or label the PR 'skip-changelog' if it has no notable change."
+            exit 1
+          fi
+
+  roadmap:
+    name: Roadmap phase marked done
+    runs-on: ubuntu-latest
+    # Planning-only PRs (spec written, not implemented yet) use the skip-roadmap label.
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-roadmap') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require implemented phases to be marked done in specs/roadmap.md
+        run: python3 scripts/check_roadmap.py "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"

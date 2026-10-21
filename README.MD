@@ -418,3 +418,56 @@ Sources
 • GitHub Spec Kit
 
 Also we need to put budget an optional option, when not set the flow goes on.
+---
+
+# Development
+
+## Run locally
+Requires Docker. Postgres and Redis stay inside the compose network; only the API and web app are published.
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+- API: http://localhost:8000/health (liveness), http://localhost:8000/health/ready (Postgres + Redis), http://localhost:8000/docs
+- Web: http://localhost:3000
+
+## Tests and checks
+Python (uv workspace, Python 3.12):
+
+```bash
+uv sync
+uv run ruff check . && uv run ruff format --check .
+uv run pyright
+uv run pytest                  # integration tests need Docker (Testcontainers)
+uv run pytest -m "not integration"
+```
+
+On Docker Desktop for Windows, set `TESTCONTAINERS_RYUK_DISABLED=true` if Testcontainers reports "Port mapping ... 8080 is not available".
+
+Web (Node 24, pnpm):
+
+```bash
+cd web
+pnpm install
+pnpm lint && pnpm format:check && pnpm typecheck && pnpm test
+pnpm exec playwright install chromium
+E2E_BASE_URL=http://localhost:3000 pnpm test:e2e   # against a running app
+```
+
+## API client
+The web client's types are generated from the API's OpenAPI spec. After changing an endpoint:
+
+```bash
+uv run python scripts/export_openapi.py
+cd web && pnpm gen:api
+```
+
+CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
+
+## Changelog
+Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
+
+## Roadmap status
+A PR that implements a roadmap phase (it touches a `specs/<date>-<slug>/` folder whose `requirements.md` names the phase) must set that phase's Status in [specs/roadmap.md](specs/roadmap.md) to `✅ Done ([#<pr>](<pr-url>))`. The `Roadmap phase marked done` CI check fails otherwise. Label planning-only PRs `skip-roadmap`.
