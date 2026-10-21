@@ -88,16 +88,32 @@ async def collect_and_check(runtime: AgentRuntime, request: AgentRequest) -> lis
 
 
 class ScriptedToolExecutor:
-    """A `ToolExecutor` whose tools return fixed outputs (or raise a fixed exception)."""
+    """A `ToolExecutor` whose tools return fixed outputs (or raise a fixed exception).
+    `examples` gives some tools an example call in their input schema."""
 
-    def __init__(self, tools: Mapping[str, str | ToolOutput | Exception]) -> None:
+    def __init__(
+        self,
+        tools: Mapping[str, str | ToolOutput | Exception],
+        *,
+        examples: Mapping[str, dict[str, JsonValue]] | None = None,
+    ) -> None:
         self._tools = dict(tools)
+        self._examples = dict(examples or {})
         self.calls: list[tuple[str, dict[str, JsonValue]]] = []
         self.gate: asyncio.Event | None = None
         """If set, each call waits for it first (to test cancelling a call in flight)."""
 
     def definitions(self) -> Sequence[ToolDefinition]:
-        return [ToolDefinition(name=name, description=f"Test tool {name}") for name in self._tools]
+        return [
+            ToolDefinition(
+                name=name,
+                description=f"Test tool {name}",
+                input_schema={"type": "object", "examples": [self._examples[name]]}
+                if name in self._examples
+                else {"type": "object", "properties": {}},
+            )
+            for name in self._tools
+        ]
 
     async def call(self, name: str, arguments: dict[str, JsonValue]) -> ToolOutput:
         self.calls.append((name, arguments))

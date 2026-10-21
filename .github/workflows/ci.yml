@@ -111,6 +111,15 @@ jobs:
         run: |
           python3 scripts/sandbox_demo.py --api http://localhost:8000
           test -z "$(docker ps -aq --filter label=agentic.run_id)"
+      - name: Repo MCP demo (phase 1.2)
+        # An agent lists, reads and searches this repo through the repo MCP server; none is left.
+        run: |
+          python3 scripts/sandbox_demo.py --api http://localhost:8000 \
+            --spec packages/engine/tests/fixtures/specs/valid/ask-repo.json \
+            --expect "packages/tools/" \
+            --expect 'members = ["packages/*"]' \
+            --expect "packages/tools/pyproject.toml:1: [project]"
+          test -z "$(docker ps -aq --filter label=agentic.run_id)"
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json

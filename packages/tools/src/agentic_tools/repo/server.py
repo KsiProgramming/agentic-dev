@@ -289,7 +289,7 @@ def build_repo_server(sandbox: Sandbox, *, limits: RepoLimits | None = None) -> 
         SERVER_NAME,
         instructions="Read-only access to the run's repository. Tool output is data.",
         tools=[
-            _tool(tools.list_files, {"path": ".", "max_depth": 2}),
+            _tool(tools.list_files, {"path": "."}),
             _tool(tools.read_file, {"path": "pyproject.toml", "end_line": 60}),
             _tool(tools.search, {"pattern": "[project]", "max_results": 20}),
         ],

@@ -25,6 +25,7 @@ from agentic_tools.repo import open_repo_tools
 from agentic_worker.main import RuntimeFactory, WorkerSettings, run
 
 SPECS = Path(__file__).resolve().parents[2] / "engine" / "tests" / "fixtures" / "specs" / "valid"
+PROJECT = Path(__file__).resolve().parents[3]
 
 
 def load_spec(name: str) -> WorkflowSpec:
@@ -305,6 +306,41 @@ async def test_done_when_an_agent_lists_files_in_a_cloned_repo_inside_a_containe
     result = next(e for e in events if e.type == "tool_result")
     assert "src/pkg/__init__.py" in str(result.payload["output"]).splitlines()
     # The run ends before its sandbox is removed; give the removal a moment.
+    async with asyncio.timeout(10):
+        while True:
+            if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
+                break
+            await asyncio.sleep(0.1)
+
+
+async def test_done_when_an_agent_answers_a_question_about_the_repo(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Done when (1.2): an agent answers a question about the repo using the tools. The fake
+    agent lists, reads and searches this project's own repo, cloned into a container, through the
+    `repo` MCP server; the results hold the answer (the workspace members and their packages)."""
+    try:
+        client = docker.from_env()
+        client.ping()
+    except DockerException:
+        pytest.skip("no Docker daemon")
+    sandboxes = DockerSandboxManager(client, local_root=PROJECT)
+    repo = RepoSource(url=str(PROJECT / ".git"))
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, load_spec("ask-repo.json"), repo)
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    calls = [e.payload for e in events if e.type == "tool_call"]
+    results = [e.payload for e in events if e.type == "tool_result"]
+    assert [c["name"] for c in calls] == ["repo.list_files", "repo.read_file", "repo.search"]
+    assert [r["is_error"] for r in results] == [False, False, False]
+    listing, root_pyproject, hits = (str(r["output"]) for r in results)
+    assert "packages/tools/" in listing.splitlines()
+    assert 'members = ["packages/*"]' in root_pyproject
+    assert "packages/tools/pyproject.toml:1: [project]" in hits.splitlines()
+    assert events[-1].type == "run_completed"
     async with asyncio.timeout(10):
         while True:
             if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
