@@ -22,7 +22,7 @@ from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
 from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
 from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
 from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
-from agentic_sandbox.testing import make_repo
+from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_secrets import LocalKeyProvider, generate_key_file
 from agentic_store import (
     Workspace,
@@ -358,6 +358,7 @@ async def test_done_when_an_agent_lists_files_in_a_cloned_repo_inside_a_containe
         client.ping()
     except DockerException:
         pytest.skip("no Docker daemon")
+    ensure_sandbox_image(client)
     repos = tmp_path / "repos"
     make_repo(repos / "hello")
     sandboxes = DockerSandboxManager(client, local_root=repos)
@@ -389,6 +390,7 @@ async def test_done_when_an_agent_answers_a_question_about_the_repo(
         client.ping()
     except DockerException:
         pytest.skip("no Docker daemon")
+    ensure_sandbox_image(client)
     sandboxes = DockerSandboxManager(client, local_root=PROJECT)
     repo = RepoSource(url=str(PROJECT / ".git"))
 

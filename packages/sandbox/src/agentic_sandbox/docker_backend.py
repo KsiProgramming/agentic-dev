@@ -36,7 +36,9 @@ from agentic_sandbox.source import RepoSource, clone_shallow
 
 log = logging.getLogger("agentic_sandbox")
 
-DEFAULT_IMAGE = "alpine:3.20"
+# Built from `packages/sandbox/Dockerfile` (compose builds it); other images are pulled if missing.
+DEFAULT_IMAGE = "agentic-dev/sandbox:dev"
+SANDBOX_DOCKERFILE_DIR = "packages/sandbox"
 RUN_LABEL = "agentic.run_id"
 WORKSPACE = "/workspace"
 REPO_DIR = f"{WORKSPACE}/repo"
@@ -171,7 +173,13 @@ class DockerSandboxManager:
             return create()
         except ImageNotFound:
             log.info("pulling sandbox image %s", self._image)
-            self._client.images.pull(self._image)
+            try:
+                self._client.images.pull(self._image)
+            except DockerException as e:
+                raise SandboxError(
+                    f"sandbox image {self._image} is not available; build it with "
+                    f"`docker build -t {self._image} {SANDBOX_DOCKERFILE_DIR}`"
+                ) from e
             return create()
 
 

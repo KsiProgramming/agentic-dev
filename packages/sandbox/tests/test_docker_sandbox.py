@@ -10,6 +10,7 @@ from docker.errors import DockerException
 
 from agentic_sandbox import RepoSource, SandboxError, SandboxManager
 from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager, sweep_orphans
+from agentic_sandbox.testing import ensure_sandbox_image
 
 pytestmark = pytest.mark.integration
 
@@ -21,6 +22,7 @@ def client() -> Iterator[docker.DockerClient]:
         client.ping()
     except DockerException:
         pytest.skip("no Docker daemon")
+    ensure_sandbox_image(client)
     yield client
     client.close()
 

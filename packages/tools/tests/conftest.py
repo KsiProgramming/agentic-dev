@@ -15,7 +15,7 @@ from docker.errors import DockerException
 
 from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
 from agentic_sandbox.docker_backend import DockerSandboxManager
-from agentic_sandbox.testing import make_repo
+from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_tools.repo import RepoLimits
 from agentic_tools.testing import CallRepo, call_tool
 
@@ -33,6 +33,7 @@ def _docker_manager(local_root: Path) -> SandboxManager:
         client.ping()
     except DockerException:
         pytest.skip("no Docker daemon")
+    ensure_sandbox_image(client)
     return DockerSandboxManager(client, local_root=local_root)
 
 

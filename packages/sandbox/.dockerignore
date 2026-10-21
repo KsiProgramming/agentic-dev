@@ -1,0 +1,3 @@
+# The sandbox image needs only its Dockerfile.
+*
+!Dockerfile

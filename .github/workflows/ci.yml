@@ -37,6 +37,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
+      - name: Build the sandbox image (Docker tests run in it)
+        run: docker build -t agentic-dev/sandbox:dev packages/sandbox
       - run: uv run pytest
 
   web:

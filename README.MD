@@ -627,7 +627,7 @@ The tools are served by the `repo` MCP server (`agentic_tools.repo`), built with
 How it works (`agentic_sandbox`):
 - **Repo source.** `url` is an `https://` URL without credentials, or a local path under `SANDBOX_LOCAL_ROOT` (unset by default, so only `https://` is allowed). `ref` is a branch or tag. Other transports, `ext::`, scp-like URLs and option-like values are rejected.
 - **Clone.** The worker runs `git clone --depth 1` itself, with only the https and file protocols enabled and without the user's or system's git config. It then copies the clone into the sandbox, so the sandbox needs no network and never sees credentials.
-- **Docker backend** (`SANDBOX_BACKEND=docker`, the compose default). There is one container (`SANDBOX_IMAGE`, default `alpine:3.20`) and one volume per run, both labelled `agentic.run_id`. The container:
+- **Docker backend** (`SANDBOX_BACKEND=docker`, the compose default). There is one container (`SANDBOX_IMAGE`, default `agentic-dev/sandbox:dev`: alpine plus git, built by compose from `packages/sandbox/Dockerfile`, or by hand with `docker build -t agentic-dev/sandbox:dev packages/sandbox`) and one volume per run, both labelled `agentic.run_id`. The container:
   - has no network and a read-only root filesystem;
   - drops all capabilities and sets `no-new-privileges`;
   - runs as uid 1000, with memory, CPU and PID limits;
