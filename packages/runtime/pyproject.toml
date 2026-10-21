@@ -1,8 +1,11 @@
 [project]
 name = "agentic-runtime"
 version = "0.1.0"
+description = "Agent runtime interface and provider adapters for the Agentic Dev Platform"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.11",
+]
 
 [build-system]
 requires = ["uv_build>=0.8,<0.14"]

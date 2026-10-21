@@ -1,0 +1,24 @@
+"""What the engine asks a runtime to run. Independent of the workflow spec models."""
+
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field
+
+NonEmptyStr = Annotated[str, Field(min_length=1)]
+
+
+class AgentRequest(BaseModel):
+    """One agent turn.
+
+    `input` is the data the agent works on (previous outputs, repo content). It is kept apart from
+    `instructions` so it is never treated as instructions.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    node_id: NonEmptyStr
+    role: NonEmptyStr
+    instructions: NonEmptyStr
+    input: str = ""
+    model: NonEmptyStr | None = Field(default=None, description="Unset means the provider default.")
+    tools: list[str] = Field(default_factory=list[str])
