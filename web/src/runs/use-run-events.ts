@@ -61,19 +61,26 @@ export function useRunEvents(runId: string, baseUrl = apiBaseUrl()): RunStream {
     // "message" is in the list, so frames without an `event:` name arrive too.
     for (const type of EVENT_TYPES) source.addEventListener(type, onEvent);
 
+    // The browser retries a dropped stream by itself, but gives up on a non-200 answer.
+    const failIfClosed = () => {
+      if (source.readyState === EventSource.CLOSED) fail("error");
+    };
+
     source.onerror = () => {
-      if (source.readyState === EventSource.CLOSED) return fail("error");
-      // Reconnecting. Before any event, an unknown run looks the same, so ask for the status.
-      if (received || probing) return;
+      if (received) return failIfClosed();
+      // `EventSource` hides the HTTP status, so ask for it: an unknown run is a 404.
+      if (probing) return;
       probing = true;
       fetch(url, { signal: probe.signal }).then(
         (response) => {
           probe.abort();
           probing = false;
           if (response.status === 404) fail("not_found");
+          else failIfClosed();
         },
         () => {
           probing = false;
+          failIfClosed();
         },
       );
     };

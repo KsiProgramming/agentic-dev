@@ -72,11 +72,25 @@ test("an unknown run is not_found", async () => {
   const { result } = render();
   const source = FakeEventSource.latest();
 
-  act(() => source.fail());
+  // The browser does not retry a 404, so the stream is already closed.
+  act(() => source.fail(FakeEventSource.CLOSED));
 
   await waitFor(() => expect(result.current.status).toBe("not_found"));
   expect(fetch).toHaveBeenCalledWith(source.url, expect.anything());
-  expect(source.readyState).toBe(FakeEventSource.CLOSED);
+});
+
+test("an error while connecting keeps retrying when the run exists", async () => {
+  const fetch = vi.fn().mockResolvedValue({ status: 200 });
+  vi.stubGlobal("fetch", fetch);
+  const { result } = render();
+  const source = FakeEventSource.latest();
+
+  act(() => source.fail());
+
+  await waitFor(() => expect(fetch).toHaveBeenCalled());
+  expect(result.current.status).toBe("connecting");
+  act(() => source.emit(runEvent(1, "run_started")));
+  expect(result.current.status).toBe("live");
 });
 
 test("a reconnect after events keeps the list and does not probe", () => {
@@ -96,12 +110,26 @@ test("a reconnect after events keeps the list and does not probe", () => {
   expect(result.current.status).toBe("live");
 });
 
-test("a stream the browser gives up on is an error", () => {
+test("a stream the browser gives up on is an error", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 500 }));
   const { result } = render();
 
   act(() => FakeEventSource.latest().fail(FakeEventSource.CLOSED));
 
+  await waitFor(() => expect(result.current.status).toBe("error"));
+});
+
+test("a stream that drops for good after events is an error", () => {
+  const { result } = render();
+  const source = FakeEventSource.latest();
+
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.fail(FakeEventSource.CLOSED);
+  });
+
   expect(result.current.status).toBe("error");
+  expect(result.current.events).toHaveLength(1);
 });
 
 test("unmounting closes the stream", () => {

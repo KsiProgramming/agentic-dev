@@ -557,6 +557,11 @@ The stream shows `run_started`, `node_started`, a series of `text_delta` frames 
 
 Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 
+## Monitor
+Open `http://localhost:3000`, type an input and click **Start sample run**. The page starts a one-agent workflow (`web/src/runs/sample-spec.ts`) and opens `/runs/<id>`, which lists the run's events as they arrive: `seq`, time, type, node and a one-line summary of the payload, shown as plain text. The status badge goes from `connecting` to `live`, then to `completed`, `failed` or `cancelled`. A run started with `curl` (see above) can be opened the same way at `http://localhost:3000/runs/<id>`, and reloading a finished run shows its full list.
+
+The browser calls the API directly (`NEXT_PUBLIC_API_URL`, default `http://localhost:8000`) and reads `GET /runs/{id}/events` with `EventSource`, so the API must allow the web app's origin: `CORS_ORIGINS` is a JSON list, and compose sets it to `["http://localhost:${WEB_PORT}"]`. The `RunEvent` type the page uses is generated from the OpenAPI spec like the rest of the client. The Playwright test `web/e2e/monitor.spec.ts` checks the roadmap target: every live event shows up in the browser less than 1 s after it was stored.
+
 ## Changelog
 Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
 

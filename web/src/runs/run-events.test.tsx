@@ -62,7 +62,7 @@ test("an unknown run says so", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 404 }));
   const source = renderRun();
 
-  act(() => source.fail());
+  act(() => source.fail(FakeEventSource.CLOSED));
 
   await waitFor(() => expect(screen.getByText("Run not found.")).toBeDefined());
   expect(screen.getByTestId("run-status").textContent).toBe("not found");
