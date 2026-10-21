@@ -2,15 +2,18 @@
 
 from agentic_store.checkpoint import open_checkpointer
 from agentic_store.connections import (
+    GITHUB,
     ConnectionInfo,
     WorkspaceInfo,
     WorkspaceNotFoundError,
     delete_connection,
+    get_github_installation,
     get_workspace,
     list_connections,
     list_workspaces,
     load_secret,
     put_connection,
+    put_github_connection,
 )
 from agentic_store.lease import (
     claim_run,
@@ -20,6 +23,7 @@ from agentic_store.lease import (
     renew_lease,
 )
 from agentic_store.models import (
+    CONNECTION_COLUMNS_CHECK,
     DEFAULT_WORKSPACE_ID,
     Base,
     Connection,
@@ -39,7 +43,9 @@ from agentic_store.sink import (
 )
 
 __all__ = [
+    "CONNECTION_COLUMNS_CHECK",
     "DEFAULT_WORKSPACE_ID",
+    "GITHUB",
     "RUN_EVENTS_CHANNEL",
     "RUN_QUEUE",
     "Base",
@@ -57,6 +63,7 @@ __all__ = [
     "delete_connection",
     "dequeue_run",
     "enqueue_run",
+    "get_github_installation",
     "get_run",
     "get_workspace",
     "leased_run_ids",
@@ -69,6 +76,7 @@ __all__ = [
     "metadata",
     "open_checkpointer",
     "put_connection",
+    "put_github_connection",
     "reclaim_expired_run",
     "release_run",
     "renew_lease",

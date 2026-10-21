@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_secrets import KEY_BYTES, LocalKeyProvider, SecretDecryptError
@@ -13,11 +14,13 @@ from agentic_store import (
     Workspace,
     WorkspaceNotFoundError,
     delete_connection,
+    get_github_installation,
     get_workspace,
     list_connections,
     list_workspaces,
     load_secret,
     put_connection,
+    put_github_connection,
 )
 
 pytestmark = pytest.mark.integration
@@ -65,6 +68,7 @@ async def test_a_secret_round_trips_and_is_stored_encrypted(
     workspace, connection = await stored_row(sessions, workspace_id)
     assert workspace.key_id == KEYS.key_id
     assert workspace.wrapped_dek is not None
+    assert connection.secret_ciphertext is not None
     assert secret.get_secret_value().encode() not in connection.secret_ciphertext
     assert secret.get_secret_value().encode() not in workspace.wrapped_dek
 
@@ -151,3 +155,89 @@ async def test_an_unknown_workspace_is_reported(
     with pytest.raises(WorkspaceNotFoundError):
         await delete_connection(sessions, missing, "claude")
     assert await get_workspace(sessions, missing) is None
+
+
+async def test_a_github_installation_round_trips_without_a_data_key(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    assert await get_github_installation(sessions, workspace_id) is None
+
+    info = await put_github_connection(sessions, workspace_id, 42, "acme")
+
+    assert (info.provider, info.account_login, info.key_hint) == ("github", "acme", None)
+    assert await get_github_installation(sessions, workspace_id) == 42
+    workspace, connection = await stored_row(sessions, workspace_id)
+    assert workspace.wrapped_dek is None
+    assert connection.secret_ciphertext is None
+    assert await load_secret(sessions, KEYS, workspace_id, "github") is None
+
+
+async def test_a_new_installation_replaces_the_old_one(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    first = await put_github_connection(sessions, workspace_id, 42, "acme")
+
+    second = await put_github_connection(sessions, workspace_id, 43, "acme-two")
+
+    assert second.id == first.id
+    assert await get_github_installation(sessions, workspace_id) == 43
+    assert [c.account_login for c in await list_connections(sessions, workspace_id)] == ["acme-two"]
+    assert await delete_connection(sessions, workspace_id, "github") is True
+    assert await get_github_installation(sessions, workspace_id) is None
+
+
+async def test_claude_and_github_connections_coexist(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    await put_connection(sessions, KEYS, workspace_id, "claude", SecretStr("sk-both-jjjj"))
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+
+    listed = await list_connections(sessions, workspace_id)
+
+    assert [(c.provider, c.key_hint, c.account_login) for c in listed] == [
+        ("claude", "jjjj", None),
+        ("github", None, "acme"),
+    ]
+    assert await load_secret(sessions, KEYS, workspace_id, "claude") == SecretStr("sk-both-jjjj")
+
+
+async def test_a_lost_master_key_keeps_the_github_connection(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    await put_connection(sessions, KEYS, workspace_id, "claude", SecretStr("sk-lost-kkkk"))
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+    replaced = LocalKeyProvider(os.urandom(KEY_BYTES))
+
+    await put_connection(sessions, replaced, workspace_id, "openai", SecretStr("sk-other-llll"))
+
+    providers = [c.provider for c in await list_connections(sessions, workspace_id)]
+    assert providers == ["github", "openai"]
+
+
+async def test_the_columns_each_provider_needs_are_enforced(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id = await new_workspace(sessions)
+
+    with pytest.raises(IntegrityError):
+        async with sessions.begin() as session:
+            session.add(Connection(id=uuid4(), workspace_id=workspace_id, provider="github"))
+    with pytest.raises(IntegrityError):
+        async with sessions.begin() as session:
+            session.add(
+                Connection(id=uuid4(), workspace_id=workspace_id, provider="claude", external_id=1)
+            )
+
+
+async def test_github_lookups_report_an_unknown_workspace(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    missing = uuid4()
+    with pytest.raises(WorkspaceNotFoundError):
+        await put_github_connection(sessions, missing, 42, "acme")
+    with pytest.raises(WorkspaceNotFoundError):
+        await get_github_installation(sessions, missing)

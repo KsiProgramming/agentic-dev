@@ -568,6 +568,23 @@ Provider keys are stored per workspace, encrypted (phase 1.4, package `agentic_s
 - **Never logged.** While a key is held, it is registered for redaction. The log handlers of the API and the worker, and the run event payloads, replace it with `[REDACTED]`. `test_no_secret_leak.py` proves this with a canary key that the mock API echoes back.
 - **The master key in compose.** The one-shot `keygen` service writes it to the `secrets` volume if it is missing, and the API and worker mount the volume read only. Deleting that volume makes stored keys unreadable: store them again (the workspace then gets a new data key). Outside compose, run `uv run python -m agentic_secrets generate-key .secrets/master.key` and set `MASTER_KEY_FILE` for both processes.
 
+## GitHub App
+A workspace reaches GitHub through the platform's GitHub App (phase 1.5, package `agentic_github` on `githubkit`). The App's id, slug and private key belong to the platform; a workspace stores only its installation (a `github` connection with no secret, Alembic `0008_github_connections`). No personal access token is stored.
+
+Create a dev App once, at <https://github.com/settings/apps/new> (or under an organisation):
+1. **Name** it anything; its URL slug (`github.com/apps/<slug>`) is `GITHUB_APP_SLUG`. **Homepage URL**: `http://localhost:3000`.
+2. **Setup URL**: `http://localhost:8000/github/setup` (the API), and tick **Redirect on update**. Leave "Request user authorization (OAuth) during installation" off.
+3. **Webhook**: untick **Active** (webhooks come in phase 6.6).
+4. **Repository permissions**: Metadata read only is enough to list repos. Later phases need Contents and Pull requests read and write (1.6, 1.8), so grant them now to avoid re-approving the App.
+5. Create it, note its **App ID** (`GITHUB_APP_ID`), then **Generate a private key** and save the downloaded file as `.secrets/github-app.pem` (gitignored).
+6. Set `GITHUB_APP_ID` and `GITHUB_APP_SLUG` in `.env`, run `docker compose up --build api`, open <http://localhost:3000/settings> and click **Install GitHub App**. GitHub asks which repos to grant, then sends you back to Settings, which lists them.
+
+How it works:
+- `POST /workspaces/{id}/connections/github/install` returns the install URL with a random `state` kept in Redis for 10 minutes. `GET /github/setup` consumes the state (single use), checks with the App's JWT that the installation is ours, stores it and redirects to `/settings?github=connected` (or `?github=error&reason=state|installation|pending|github|not_configured`).
+- `GET /workspaces/{id}/repos` lists the repos live with an installation token, which githubkit caches until shortly before it expires. It answers `409` with `code` `no_connection` or `installation_gone` (the App was uninstalled: install it again), `502` if GitHub fails, and `503` if the App is not configured.
+- `DELETE /workspaces/{id}/connections/github` unlinks the workspace; the App stays installed on GitHub.
+- The private key is read when the API starts (a configured App with a missing key stops the API) and is redacted from its logs. Errors from GitHub carry only a status code, never a token.
+
 Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 
 ## Durable runs

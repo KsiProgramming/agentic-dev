@@ -2,7 +2,10 @@
 
 Each workspace has a data key (DEK) wrapped by the master key (`KeyProvider`). A connection's
 secret is encrypted under that DEK, bound to its workspace, connection and provider. Only
-`load_secret` ever decrypts; the listings carry the hint, never the secret."""
+`load_secret` ever decrypts; the listings carry the hint, never the secret.
+
+A GitHub connection is the workspace's App installation, which is not a secret: it is stored in
+the clear (`put_github_connection`) and survives a lost master key."""
 
 import logging
 from dataclasses import dataclass
@@ -26,6 +29,8 @@ from agentic_store.models import Connection, Workspace
 
 log = logging.getLogger(__name__)
 
+GITHUB = "github"
+
 
 class WorkspaceNotFoundError(LookupError):
     """No workspace has the given id."""
@@ -43,7 +48,10 @@ class ConnectionInfo:
     id: UUID
     workspace_id: UUID
     provider: str
-    key_hint: str
+    # Set for connections with a secret.
+    key_hint: str | None
+    # Set for GitHub: the account the App is installed on.
+    account_login: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -113,6 +121,47 @@ async def put_connection(
         return _connection_info(connection)
 
 
+async def put_github_connection(
+    sessions: async_sessionmaker[AsyncSession],
+    workspace_id: UUID,
+    installation_id: int,
+    account_login: str,
+) -> ConnectionInfo:
+    """Link the workspace to a GitHub App installation, replacing any earlier one."""
+    now = datetime.now(UTC)
+    async with sessions.begin() as session:
+        if await session.get(Workspace, workspace_id, with_for_update=True) is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        connection = await session.scalar(
+            select(Connection).where(
+                Connection.workspace_id == workspace_id, Connection.provider == GITHUB
+            )
+        )
+        if connection is None:
+            connection = Connection(
+                id=uuid4(), workspace_id=workspace_id, provider=GITHUB, created_at=now
+            )
+            session.add(connection)
+        connection.external_id = installation_id
+        connection.account_login = account_login
+        connection.updated_at = now
+        return _connection_info(connection)
+
+
+async def get_github_installation(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
+) -> int | None:
+    """The workspace's GitHub App installation id, or `None` if it has no GitHub connection."""
+    async with sessions() as session:
+        if await session.get(Workspace, workspace_id) is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        return await session.scalar(
+            select(Connection.external_id).where(
+                Connection.workspace_id == workspace_id, Connection.provider == GITHUB
+            )
+        )
+
+
 async def delete_connection(
     sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, provider: str
 ) -> bool:
@@ -148,6 +197,8 @@ async def load_secret(
     if row is None:
         return None
     workspace, connection = row
+    if connection.secret_nonce is None or connection.secret_ciphertext is None:
+        return None
     if workspace.wrapped_dek is None or workspace.key_id is None:
         raise SecretDecryptError("the workspace has no data key")
     dek = keys.unwrap(WrappedKey(workspace.key_id, workspace.wrapped_dek), _dek_context(workspace))
@@ -171,7 +222,12 @@ async def _workspace_dek(
                 workspace.id,
                 keys.key_id,
             )
-            await session.execute(delete(Connection).where(Connection.workspace_id == workspace.id))
+            await session.execute(
+                delete(Connection).where(
+                    Connection.workspace_id == workspace.id,
+                    Connection.secret_ciphertext.is_not(None),
+                )
+            )
     dek = new_dek()
     wrapped = keys.wrap(dek, _dek_context(workspace))
     workspace.wrapped_dek = wrapped.blob
@@ -200,6 +256,7 @@ def _connection_info(connection: Connection) -> ConnectionInfo:
         workspace_id=connection.workspace_id,
         provider=connection.provider,
         key_hint=connection.key_hint,
+        account_login=connection.account_login,
         created_at=connection.created_at,
         updated_at=connection.updated_at,
     )

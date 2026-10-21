@@ -37,7 +37,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0007_workspaces_connections"
+    assert version == "0008_github_connections"
     assert {"runs", "run_events", "workspaces", "connections"} | CHECKPOINT_TABLES <= set(
         table_names
     )
@@ -135,3 +135,39 @@ async def test_the_workspaces_revision_moves_existing_runs_to_the_default_worksp
     await engine.dispose()
 
     assert str(workspace_id) == "00000000-0000-0000-0000-000000000001"
+
+
+async def connection_columns(postgres_url: str) -> set[str]:
+    engine = create_async_engine(postgres_url)
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'connections'"
+            )
+        )
+        columns = set(rows.scalars())
+    await engine.dispose()
+    return columns
+
+
+async def test_the_github_connections_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO connections (id, workspace_id, provider, external_id, account_login) "
+                "VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'github', "
+                "42, 'acme')"
+            )
+        )
+    await engine.dispose()
+
+    # The downgrade drops GitHub rows, which the restored NOT NULL secret columns cannot hold.
+    await asyncio.to_thread(command.downgrade, config, "0007_workspaces_connections")
+    assert not {"external_id", "account_login"} & await connection_columns(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert {"external_id", "account_login"} <= await connection_columns(postgres_url)
