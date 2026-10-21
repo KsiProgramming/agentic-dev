@@ -13,6 +13,7 @@ members = [
     "agentic-engine",
     "agentic-runtime",
     "agentic-sandbox",
+    "agentic-secrets",
     "agentic-store",
     "agentic-tools",
     "agentic-worker",
@@ -56,6 +57,7 @@ dependencies = [
     { name = "agentic-engine" },
     { name = "agentic-runtime" },
     { name = "agentic-sandbox" },
+    { name = "agentic-secrets" },
     { name = "agentic-store" },
     { name = "agentic-tools" },
     { name = "agentic-worker" },
@@ -78,6 +80,7 @@ requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "agentic-sandbox", editable = "packages/sandbox" },
+    { name = "agentic-secrets", editable = "packages/secrets" },
     { name = "agentic-store", editable = "packages/store" },
     { name = "agentic-tools", editable = "packages/tools" },
     { name = "agentic-worker", editable = "packages/worker" },
@@ -140,6 +143,21 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "docker", specifier = ">=7.1" },
+    { name = "pydantic", specifier = ">=2.11" },
+]
+
+[[package]]
+name = "agentic-secrets"
+version = "0.1.0"
+source = { editable = "packages/secrets" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", specifier = ">=45" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
 
