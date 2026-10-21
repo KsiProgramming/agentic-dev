@@ -13,6 +13,7 @@ COPY packages/api/pyproject.toml packages/api/
 COPY packages/engine/pyproject.toml packages/engine/
 COPY packages/runtime/pyproject.toml packages/runtime/
 COPY packages/sandbox/pyproject.toml packages/sandbox/
+COPY packages/secrets/pyproject.toml packages/secrets/
 COPY packages/store/pyproject.toml packages/store/
 COPY packages/tools/pyproject.toml packages/tools/
 COPY packages/worker/pyproject.toml packages/worker/
@@ -29,6 +30,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 app
+# Mount point of the master key volume; a new named volume takes this owner, so `app` can
+# write the key there (compose `keygen`).
+RUN mkdir /secrets && chown app:app /secrets && chmod 700 /secrets
 COPY --from=build /app/.venv /app/.venv
 COPY packages/api/alembic.ini /app/api/alembic.ini
 COPY packages/api/alembic /app/api/alembic
