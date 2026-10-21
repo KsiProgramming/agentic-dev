@@ -28,19 +28,25 @@ GIT_SAFETY: tuple[str, ...] = (
     "-c", "tag.gpgsign=false",
 )  # fmt: skip
 """`git` options every command in a sandbox runs with."""
+AGENT_IDENTITY = ("agentic-dev agent", "agent@agentic-dev.invalid")
+"""The name and email git records for agents' commits and ref updates. Every git command that
+writes a ref must set it: without one, git asks DNS for the host's full name, which in a sandbox
+with no network takes seconds to time out."""
 
 # The spec's node id pattern: lowercase, ref- and path-safe.
 _NODE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
 _WRONG_BRANCH = 9
 
-# `$1` branch, `$2` worktree path, `$3` the checkout (trusted by git although root owns it).
-# A worktree that already exists on the branch is reused. The options hold no shell syntax.
+# `$1` branch, `$2` worktree path, `$3` the checkout (trusted by git although root owns it), `$4`
+# and `$5` the identity. A worktree that already exists on the branch is reused. The options hold
+# no shell syntax.
 _ADD_SCRIPT = f"""
 if [ -e "$2" ]; then
   [ "$(git -C "$2" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$1" ] && exit 0
   exit {_WRONG_BRANCH}
 fi
-git -c safe.directory="$3" {" ".join(GIT_SAFETY)} worktree add -q -b "$1" "$2" HEAD
+git -c safe.directory="$3" -c user.name="$4" -c user.email="$5" {" ".join(GIT_SAFETY)} \\
+  worktree add -q -b "$1" "$2" HEAD
 """
 
 
@@ -90,7 +96,10 @@ async def add_worktree(sandbox: Sandbox, run_id: UUID, node_id: str) -> Worktree
     """The worktree of `node_id` on `agent/<run-id>/<node-id>`, created from the clone's `HEAD`
     unless it already exists. Raises `SandboxError` if git cannot create it."""
     tree = Worktree.of(sandbox, run_id, node_id)
-    argv = ["sh", "-c", _ADD_SCRIPT, "add_worktree", tree.branch, tree.path, sandbox.workdir]
+    argv = [
+        "sh", "-c", _ADD_SCRIPT, "add_worktree",
+        tree.branch, tree.path, sandbox.workdir, *AGENT_IDENTITY,
+    ]  # fmt: skip
     result = await sandbox.exec(argv)
     if result.exit_code == _WRONG_BRANCH:
         raise SandboxError(f"the worktree of node {node_id} is on another branch")

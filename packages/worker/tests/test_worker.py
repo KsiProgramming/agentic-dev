@@ -1,9 +1,11 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator
+import re
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import docker
@@ -14,6 +16,7 @@ from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.events import RunEvent
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.spec import WorkflowSpec, parse_spec
@@ -32,7 +35,7 @@ from agentic_store import (
     list_run_events,
     put_connection,
 )
-from agentic_tools.repo import open_repo_tools
+from agentic_tools.repo import COMMIT_AUTHOR, open_repo_tools
 from agentic_worker.main import RuntimeFactory, WorkerSettings, run
 
 SPECS = Path(__file__).resolve().parents[2] / "engine" / "tests" / "fixtures" / "specs" / "valid"
@@ -277,18 +280,55 @@ async def test_a_run_with_a_repo_lists_its_files_in_a_sandbox(
 
 
 class RecordingSandboxes:
-    """Wraps a `SandboxManager`, noting in `order` when each sandbox is closed."""
+    """Wraps a `SandboxManager`, noting in `order` when each sandbox is closed and setting
+    `closed`. `inspect` runs in the sandbox just before it is closed, once the run has ended.
+    Wait for `closed` before stopping the worker, or the teardown is cut short."""
 
-    def __init__(self, inner: SandboxManager, order: list[str]) -> None:
-        self._inner, self._order = inner, order
+    def __init__(
+        self,
+        inner: SandboxManager,
+        order: list[str] | None = None,
+        inspect: Callable[[Sandbox], Awaitable[None]] | None = None,
+    ) -> None:
+        self._inner, self._order, self._inspect = inner, order if order is not None else [], inspect
+        self.closed = asyncio.Event()
 
     @asynccontextmanager
     async def open(self, run_id: UUID, repo: RepoSource) -> AsyncGenerator[Sandbox]:
         try:
             async with self._inner.open(run_id, repo) as box:
-                yield box
+                try:
+                    yield box
+                finally:
+                    if self._inspect is not None:
+                        await self._inspect(box)
         finally:
             self._order.append("sandbox closed")
+            self.closed.set()
+
+
+# Prints the writer branches, then each commit on them that the checkout's HEAD lacks, with its
+# author, subject and files.
+_BRANCH_LOG = """
+git() { command git -c safe.directory="$(pwd -P)" "$@"; }
+git branch --list 'agent/*' --format='%(refname:short)'
+echo ---
+git log --branches='agent/*' --not HEAD --format='%an <%ae>|%s' --name-only
+"""
+
+
+class BranchLog:
+    """`inspect` for `RecordingSandboxes`: what the run left on `agent/*` branches."""
+
+    def __init__(self) -> None:
+        self.branches: list[str] = []
+        self.commits: list[str] = []
+
+    async def __call__(self, box: Sandbox) -> None:
+        result = await box.exec(["sh", "-c", _BRANCH_LOG])
+        branches, _, commits = result.stdout.partition("---\n")
+        self.branches = branches.split()
+        self.commits = [line for line in commits.splitlines() if line]
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -306,9 +346,9 @@ async def test_the_repo_tools_close_before_the_sandbox(
     sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos), order)
 
     @asynccontextmanager
-    async def recording_tools(sandbox: Sandbox) -> AsyncGenerator[ToolExecutor]:
+    async def recording_tools(sandbox: Sandbox, **options: Any) -> AsyncGenerator[ToolExecutor]:
         try:
-            async with open_repo_tools(sandbox) as tools:
+            async with open_repo_tools(sandbox, **options) as tools:
                 yield tools
         finally:
             order.append("tools closed")
@@ -408,6 +448,81 @@ async def test_done_when_an_agent_answers_a_question_about_the_repo(
     assert 'members = ["packages/*"]' in root_pyproject
     assert "packages/tools/pyproject.toml:1: [project]" in hits.splitlines()
     assert events[-1].type == "run_completed"
+    async with asyncio.timeout(10):
+        while True:
+            if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
+                break
+            await asyncio.sleep(0.1)
+
+
+def assert_wrote_and_committed_notes(events: list[RunEvent], run_id: UUID) -> None:
+    """The `write-file.json` run on the unscripted fake agent: it read the README, wrote and
+    committed NOTES.md on its branch, and the tool node then listed the shared checkout."""
+    calls = [(e.node_id, e.payload["name"]) for e in events if e.type == "tool_call"]
+    outputs = [
+        (str(e.payload["output"]), e.payload["is_error"]) for e in events if e.type == "tool_result"
+    ]
+    assert calls == [
+        ("writer", "repo.read_file"),
+        ("writer", "repo.write_file"),
+        ("writer", "repo.commit"),
+        ("list", "repo.list_files"),
+    ]
+    assert [is_error for _, is_error in outputs[1:]] == [False, False, False]
+    assert outputs[1][0].startswith("wrote NOTES.md (")
+    assert re.fullmatch(rf"[0-9a-f]{{7,}} on agent/{run_id}/writer: NOTES\.md", outputs[2][0])
+    assert "NOTES.md" not in outputs[3][0].splitlines()  # the shared checkout is untouched
+    assert events[-1].type == "run_completed"
+
+
+async def test_a_writer_commits_a_file_to_its_branch(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    branch_log = BranchLog()
+    sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos), inspect=branch_log)
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        repo = RepoSource(url=str(repos / "hello"))
+        run_id = await submit(sessions, redis_url, load_spec("write-file.json"), repo)
+        await wait_for_status(sessions, run_id, "completed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+
+    assert_wrote_and_committed_notes(await list_run_events(sessions, run_id), run_id)
+    name, email = COMMIT_AUTHOR
+    assert branch_log.branches == [f"agent/{run_id}/writer"]
+    assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
+
+
+async def test_done_when_an_agent_commits_a_file_to_its_branch(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Done when (1.6): an agent commits a file to `agent/<run>/<node>`. The fake agent writes
+    NOTES.md in its worktree of this project's repo, inside a container, and commits it with
+    `repo.commit`; before the sandbox goes, git there shows one commit by the platform on the
+    branch, touching only that file."""
+    try:
+        client = docker.from_env()
+        client.ping()
+    except DockerException:
+        pytest.skip("no Docker daemon")
+    ensure_sandbox_image(client)
+    branch_log = BranchLog()
+    sandboxes = RecordingSandboxes(
+        DockerSandboxManager(client, local_root=PROJECT), inspect=branch_log
+    )
+    repo = RepoSource(url=str(PROJECT / ".git"))
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, load_spec("write-file.json"), repo)
+        await wait_for_status(sessions, run_id, "completed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 30)
+
+    assert_wrote_and_committed_notes(await list_run_events(sessions, run_id), run_id)
+    name, email = COMMIT_AUTHOR
+    assert branch_log.branches == [f"agent/{run_id}/writer"]
+    assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
     async with asyncio.timeout(10):
         while True:
             if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):

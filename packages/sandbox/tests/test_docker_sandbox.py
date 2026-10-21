@@ -101,7 +101,7 @@ async def test_it_runs_as_non_root_on_a_read_only_root(
 
     assert uid.stdout.strip() == "1000"
     assert root_write.exit_code != 0
-    assert repo_write.exit_code != 0  # the clone is read-only in this phase
+    assert repo_write.exit_code != 0  # the shared checkout is read-only; writers get worktrees
 
 
 async def test_a_slow_command_times_out(manager: DockerSandboxManager, repos: Path) -> None:

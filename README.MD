@@ -467,7 +467,12 @@ cd web && pnpm gen:api
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Workflow spec
-A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has two node types, `agent` and `sequence`. Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
+A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has three node types:
+- `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`);
+- `tool`: one call of a platform tool with fixed arguments and no model, e.g. `{"type": "tool", "id": "list", "tool": "repo.list_files", "args": {"path": "."}}`;
+- `sequence`: its `steps`, in order.
+
+Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
 
 - JSON Schema: [schemas/workflow-spec.v0.json](schemas/workflow-spec.v0.json)
 - Examples: [packages/engine/tests/fixtures/specs/valid/](packages/engine/tests/fixtures/specs/valid/)
@@ -505,7 +510,9 @@ The runtime and engine test suites block all non-loopback network access (`agent
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
 
 ## Engine
-`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. In v0, nested `sequence`s are flattened depth first into one chain of `agent` nodes, each named by its spec node id. The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run.
+`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. In v0, nested `sequence`s are flattened depth first into one chain of `agent` and `tool` nodes, each named by its spec node id. The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run.
+
+A `tool` node calls the `ToolExecutor` passed as `run_workflow(..., tools=)` (the worker passes the same per-run tools its agents get). It writes one `tool_call` and one `tool_result` event, and its output text becomes the next node's input. An error result, an exception or a run without tools fails the node.
 
 ```python
 result = await run_workflow(spec, FakeRuntime(), input="Write the overview.")
@@ -612,17 +619,21 @@ curl -s localhost:8000/runs/<id>/events
 The stream shows `run_resumed` with `"attempt": 2, "completed_nodes": ["step-1"]`, then `node_started step-2`, `step-3` and `run_completed`. `step-1` has exactly one `node_completed`, and `seq` runs from 1 with no gaps. With `docker compose stop worker` in place of `kill`, the run is resumed as soon as a worker is back.
 
 ## Sandbox
-A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents get the read-only repo tools, which run in there. A spec whose nodes use `repo.*` tools is rejected with `422` if the run has no `repo`.
+A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents and tool nodes get the repo tools, which run in there. A spec whose nodes (agent or tool) use `repo.*` tools is rejected with `422` if the run has no `repo`.
 
 | Tool | What it does | Limits |
 |---|---|---|
 | `repo.list_files(path=".", max_depth=3)` | Files and directories under `path`, relative to the repo root; directories end with `/`. | 1,000 entries |
 | `repo.read_file(path, start_line=1, end_line=None)` | A text file's lines, each prefixed with its number and a tab. Directories and binary files (a NUL byte in the first 8 KiB) are refused. | 2,000 lines or 256 KiB; the note says where to continue |
 | `repo.search(pattern, path=".", regex=False, case_sensitive=True, max_results=100)` | `path:line: text` for each matching line in text files. The pattern is a fixed string unless `regex` (extended regex). | 500 matches at most; lines cut at 300 characters |
+| `repo.write_file(path, content)` | Writers only. Creates or overwrites a UTF-8 text file on the node's branch, creating parent directories. Refuses anything under `.git`, directories, and writing through a symlink. | 1 MiB per file |
+| `repo.commit(message)` | Writers only. Commits every change on the node's branch; returns `<short-sha> on agent/<run>/<node>: <files>`. Nothing to commit is an error. | 5,000-character message; 50 files listed |
 
 Every tool skips `.git`, refuses absolute paths and paths that leave the repo (including through symlinks), and passes its arguments to the sandbox as data, never as shell code. Errors come back as error results that name no host path.
 
-The tools are served by the `repo` MCP server (`agentic_tools.repo`), built with the official MCP Python SDK. The worker builds one server per run, bound to that run's sandbox, and connects to it in memory (no process or port). `McpToolExecutor` (`agentic_tools.mcp_bridge`) offers the server's tools to the agent runtime as `repo.<tool>`, the same `ToolExecutor` the Claude and fake runtimes already use. The MCP client closes before the sandbox is removed.
+**Writers.** A node whose spec names `repo.write_file` or `repo.commit` (in an agent's `tools`, or as a tool node's `tool`) is a writer. On its first call it gets its own git worktree, `/workspace/worktrees/<node>`, on a new branch `agent/<run-id>/<node-id>` made from the clone's `HEAD`, and all its `repo.*` calls go there: it reads its own writes, and the shared checkout and other nodes never see them. Other nodes calling a write tool get an "unknown tool" error. Commits are by `agentic-dev agent <agent@agentic-dev.invalid>`, and git runs with hooks, fsmonitor and signing off and no system or user config, so nothing in the repo can make it run code. Nothing is pushed: the sandbox has no network, and the branch goes when the sandbox does (push and PR, behind a gate, come in phases 1.7 and 1.8). A resumed run gets a fresh sandbox, so its writer runs again on a fresh worktree.
+
+The tools are served by the `repo` MCP server (`agentic_tools.repo`), built with the official MCP Python SDK. The worker builds one read-only server per run, bound to that run's checkout, and one writable server per writer, bound to its worktree, and connects to them in memory (no process or port). `open_repo_tools` returns a `RepoTools` executor that routes each call by the node id the runtime passes to `ToolExecutor.call`, and offers the tools to the agent runtime as `repo.<tool>`. The MCP clients close before the sandbox is removed.
 
 How it works (`agentic_sandbox`):
 - **Repo source.** `url` is an `https://` URL without credentials, or a local path under `SANDBOX_LOCAL_ROOT` (unset by default, so only `https://` is allowed). `ref` is a branch or tag. Other transports, `ext::`, scp-like URLs and option-like values are rejected.
@@ -631,13 +642,13 @@ How it works (`agentic_sandbox`):
   - has no network and a read-only root filesystem;
   - drops all capabilities and sets `no-new-privileges`;
   - runs as uid 1000, with memory, CPU and PID limits;
-  - holds the clone root-owned, so agents can read it but not change it yet (write tools come in phase 1.6).
+  - holds the checkout root-owned, so it can be read but not changed; its `.git`, `/workspace/worktrees` (writers' worktrees) and `/workspace/.incoming` (file contents on their way in, via `Sandbox.put_file`) belong to uid 1000.
 - **Lifecycle.** The container and volume are removed when the run ends, whether it completes, fails or is cancelled. A worker removes leftovers at startup, except those of runs other workers hold a lease on. A resumed run gets a fresh sandbox: opening it first removes the one its earlier attempt left. A clone that fails ends the run with `run_failed` and a message that names no host path.
 - **Fake backend** (`SANDBOX_BACKEND=fake`, the default outside compose). It uses a temp directory on the worker host and isolates nothing, so use it only for tests and trusted repos.
 
 In compose, the worker mounts the host's Docker socket to start sandbox containers. That gives it control of the host's Docker, which is acceptable for local development; production isolation comes in phase 9.2. On Linux, set `DOCKER_GID` in `.env` to the socket's group (`stat -c %g /var/run/docker.sock`); Docker Desktop needs nothing. Compose also mounts this project's own git history read-only at `/samples/agentic-dev.git` as a demo repo.
 
-Demos (the phase 1.1 and 1.2 "Done when", both run by CI against the compose stack):
+Demos (the phase 1.1, 1.2 and 1.6 "Done when", all run by CI against the compose stack):
 
 ```bash
 docker compose up -d --build
@@ -648,6 +659,10 @@ curl -N localhost:8000/runs/<id>/events
 
 # Phase 1.2: one agent asks which packages make up this uv workspace
 python scripts/sandbox_demo.py --spec packages/engine/tests/fixtures/specs/valid/ask-repo.json
+
+# Phase 1.6: a writer commits NOTES.md on agent/<run>/writer, then a tool node lists the checkout
+python scripts/sandbox_demo.py --spec packages/engine/tests/fixtures/specs/valid/write-file.json \
+  --expect "wrote NOTES.md (" --expect "/writer: NOTES.md"
 ```
 
 On the fake runtime, the agent calls each tool its node names, with the example arguments from the tool's input schema (`list_files` on the root, `read_file` on `pyproject.toml`, `search` for `[project]`). For `ask-repo.json` the stream shows:
@@ -655,6 +670,8 @@ On the fake runtime, the agent calls each tool its node names, with the example 
 2. `tool_call` / `tool_result` for `repo.read_file`, with the numbered root `pyproject.toml` and its `members = ["packages/*"]`;
 3. `tool_call` / `tool_result` for `repo.search`, with one `packages/<name>/pyproject.toml:1: [project]` hit per package;
 4. `message` and `run_completed`.
+
+For `write-file.json` the writer node `writer` reads `pyproject.toml`, then `repo.write_file` answers `wrote NOTES.md (<n> bytes)` and `repo.commit` answers `<sha> on agent/<run-id>/writer: NOTES.md`. The tool node `list` then runs `repo.list_files` on the shared checkout, with no model, and NOTES.md is not in it.
 
 While a run is going, `docker ps --filter label=agentic.run_id` shows its container; afterwards it shows none. With `AGENTIC_RUNTIME=claude`, Claude decides which tools to call and answers from what it finds. On `ask-repo.json` it reads each package's `pyproject.toml` and returns a table of the packages and what each is for.
 

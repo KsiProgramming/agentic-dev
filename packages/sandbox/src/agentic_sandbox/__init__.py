@@ -11,9 +11,16 @@ from agentic_sandbox.protocol import (
     SandboxManager,
 )
 from agentic_sandbox.source import RepoSource, clone_shallow
-from agentic_sandbox.worktree import GIT_SAFETY, Worktree, add_worktree, branch_name
+from agentic_sandbox.worktree import (
+    AGENT_IDENTITY,
+    GIT_SAFETY,
+    Worktree,
+    add_worktree,
+    branch_name,
+)
 
 __all__ = [
+    "AGENT_IDENTITY",
     "DEFAULT_EXEC_TIMEOUT_S",
     "GIT_SAFETY",
     "MAX_OUTPUT_BYTES",

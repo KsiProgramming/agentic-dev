@@ -179,7 +179,8 @@ class DockerSandboxManager:
             yield DockerSandbox(container)
         finally:
             if container is not None or volume is not None:
-                await asyncio.to_thread(_remove, container, volume)
+                # Shielded: a caller cancelled now (a stopping worker) must not skip the removal.
+                await asyncio.shield(asyncio.to_thread(_remove, container, volume))
                 log.info("sandbox %s removed after %.2f s", name, time.monotonic() - started)
 
     async def _clone(self, repo: RepoSource) -> bytes:

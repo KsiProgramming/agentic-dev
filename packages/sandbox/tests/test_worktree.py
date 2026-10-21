@@ -11,6 +11,7 @@ import pytest
 from docker.errors import DockerException
 
 from agentic_sandbox import (
+    AGENT_IDENTITY,
     MAX_PUT_FILE_BYTES,
     FakeSandboxManager,
     RepoSource,
@@ -61,6 +62,17 @@ async def test_a_writer_gets_a_worktree_on_its_own_branch_from_head(sandbox: San
     assert await sh(tree, "git rev-parse --abbrev-ref HEAD") == (0, tree.branch)
     assert await sh(tree, "git log --format=%s") == (0, "init")
     assert await sh(tree, "cat README.md") == (0, "# Hello repo")
+
+
+async def test_the_branch_is_made_under_the_agent_identity(sandbox: Sandbox) -> None:
+    # Without an identity, git looks up the host's full name in DNS, which with no network
+    # stalls every ref update for seconds.
+    tree = await add_worktree(sandbox, RUN_ID, "writer")
+
+    assert await sh(tree, f"git log -g --format='%gn <%ge>' {tree.branch}") == (
+        0,
+        f"{AGENT_IDENTITY[0]} <{AGENT_IDENTITY[1]}>",
+    )
 
 
 async def test_adding_the_same_worktree_again_reuses_it(sandbox: Sandbox) -> None:

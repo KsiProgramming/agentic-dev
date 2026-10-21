@@ -14,7 +14,9 @@ client, and redacted from logs and events while it is held. A workspace with no 
 fails its runs on Claude.
 
 A run with a `repo` gets a sandbox holding a clone of it for its whole duration, and its agents
-get the `repo.*` tools: a read-only `repo` MCP server bound to that sandbox, connected in memory.
+and tool nodes get the `repo.*` tools: a read-only `repo` MCP server bound to that sandbox,
+connected in memory. Each writer node (one whose spec names `repo.write_file` or `repo.commit`)
+gets its own worktree on `agent/<run>/<node>` instead, with the write tools; nothing is pushed.
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
 this host (no isolation).
 """
@@ -49,6 +51,7 @@ from agentic_engine.graph import (
     run_workflow,
 )
 from agentic_engine.logging import configure_logging
+from agentic_engine.spec import writer_node_ids
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
@@ -76,7 +79,7 @@ from agentic_store import (
     release_run,
     renew_lease,
 )
-from agentic_tools.repo import open_repo_tools
+from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 
 log = logging.getLogger("agentic_worker")
 
@@ -333,20 +336,29 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
                 log.warning("run %s has no sandbox: %s", run.id, e)
                 await _fail(run, sink, last_seq, str(e))
                 return "failed"
-            # Entered after the sandbox, so the MCP client closes before the sandbox is destroyed.
-            tools = await stack.enter_async_context(open_repo_tools(sandbox))
+            # Entered after the sandbox, so the MCP clients close before the sandbox is destroyed.
+            writers = writer_node_ids(run.spec.root, WRITE_TOOL_NAMES)
+            tools = await stack.enter_async_context(
+                open_repo_tools(sandbox, run_id=run.id, writers=writers)
+            )
         try:
             runtime = await stack.enter_async_context(worker.open_runtime(run, tools))
         except RunSetupError as e:
             log.warning("run %s cannot start: %s", run.id, e)
             await _fail(run, sink, last_seq, str(e))
             return "failed"
-        return (await _workflow(worker, run, sink, last_seq, runtime)).status
+        return (await _workflow(worker, run, sink, last_seq, runtime, tools)).status
 
 
 async def _workflow(
-    worker: Worker, run: StoredRun, sink: EventSink, last_seq: int, runtime: AgentRuntime
+    worker: Worker,
+    run: StoredRun,
+    sink: EventSink,
+    last_seq: int,
+    runtime: AgentRuntime,
+    tools: ToolExecutor | None,
 ) -> WorkflowRunResult:
+    """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too."""
     if last_seq == 0:
         log.info("run %s started", run.id)
         return await run_workflow(
@@ -356,6 +368,7 @@ async def _workflow(
             run_id=run.id,
             sink=sink,
             checkpointer=worker.checkpointer,
+            tools=tools,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -367,6 +380,7 @@ async def _workflow(
         checkpointer=worker.checkpointer,
         next_seq=last_seq + 1,
         attempt=run.attempt,
+        tools=tools,
     )
 
 

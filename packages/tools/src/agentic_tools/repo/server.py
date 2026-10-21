@@ -24,14 +24,20 @@ from mcp.server.mcpserver.tools import Tool
 from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase
 from pydantic import ConfigDict, Field
 
-from agentic_sandbox import GIT_SAFETY, MAX_PUT_FILE_BYTES, Sandbox, SandboxError
+from agentic_sandbox import (
+    AGENT_IDENTITY,
+    GIT_SAFETY,
+    MAX_PUT_FILE_BYTES,
+    Sandbox,
+    SandboxError,
+)
 from agentic_tools.repo.paths import CONFINE, NOT_FOUND, OUTSIDE, repo_relative
 
 SERVER_NAME = "repo"
 MAX_SEARCH_RESULTS = 500
 WRITE_TOOLS = frozenset({"write_file", "commit"})
 """Tools only a writable server has."""
-COMMIT_AUTHOR = ("agentic-dev agent", "agent@agentic-dev.invalid")
+COMMIT_AUTHOR = AGENT_IDENTITY
 """Who agents' commits are by (author and committer)."""
 
 # Exit codes of the scripts below, on top of those of `CONFINE`.
