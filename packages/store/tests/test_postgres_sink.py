@@ -1,6 +1,6 @@
+import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -9,7 +9,15 @@ from agentic_engine.graph import run_workflow
 from agentic_engine.spec import parse_spec
 from agentic_runtime import Failed, Message, Usage
 from agentic_runtime.fake import FakeRuntime
-from agentic_store import PostgresEventSink, Run, list_run_events
+from agentic_store import (
+    RUN_EVENTS_CHANNEL,
+    PostgresEventSink,
+    Run,
+    create_run,
+    get_run,
+    list_run_events,
+    listen,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +40,7 @@ async def test_two_step_run_writes_ordered_events_to_postgres(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     """Done when (0.5): a run produces ordered events in Postgres."""
-    run_id = uuid4()
+    run_id = await create_run(sessions, two_step_spec(), "go")
     runtime = FakeRuntime(
         {
             "writer": [Message(text="draft"), Usage(input_tokens=3, output_tokens=5)],
@@ -76,7 +84,7 @@ async def test_two_step_run_writes_ordered_events_to_postgres(
 async def test_failed_run_sets_status_failed(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
-    run_id = uuid4()
+    run_id = await create_run(sessions, two_step_spec(), "go")
     runtime = FakeRuntime({"writer": [Failed(error="boom")]})
 
     await run_workflow(
@@ -92,3 +100,31 @@ async def test_failed_run_sets_status_failed(
         run = await session.get(Run, run_id)
     assert run is not None
     assert run.status == "failed"
+
+
+async def test_create_run_stores_spec_and_input_as_queued(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    spec = two_step_spec()
+
+    run_id = await create_run(sessions, spec, "hello")
+    run = await get_run(sessions, run_id)
+
+    assert run is not None
+    assert (run.status, run.spec, run.input) == ("queued", spec, "hello")
+    assert await list_run_events(sessions, run_id) == []
+
+
+async def test_sink_notifies_each_event_on_commit(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str
+) -> None:
+    run_id = await create_run(sessions, two_step_spec(), "go")
+    notifications: asyncio.Queue[str] = asyncio.Queue()
+    async with listen(postgres_url, RUN_EVENTS_CHANNEL, notifications.put_nowait):
+        await run_workflow(
+            two_step_spec(), FakeRuntime(), "go", run_id=run_id, sink=PostgresEventSink(sessions)
+        )
+        count = len(await list_run_events(sessions, run_id))
+        received = [await asyncio.wait_for(notifications.get(), 5) for _ in range(count)]
+
+    assert received == [f"{run_id}:{seq}" for seq in range(1, count + 1)]

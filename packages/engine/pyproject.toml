@@ -1,14 +1,12 @@
 [project]
 name = "agentic-engine"
 version = "0.1.0"
-description = "Orchestration engine and run worker for the Agentic Dev Platform"
+description = "Orchestration engine for the Agentic Dev Platform"
 requires-python = ">=3.12"
 dependencies = [
     "agentic-runtime",
     "langgraph>=1.2.16",
     "pydantic>=2.11",
-    "pydantic-settings>=2.10",
-    "redis>=6.4",
 ]
 
 [build-system]

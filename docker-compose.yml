@@ -47,10 +47,12 @@ services:
       context: .
       dockerfile: packages/api/Dockerfile
     image: agentic-dev/python:dev
-    command: ["python", "-m", "agentic_engine.worker"]
+    command: ["python", "-m", "agentic_worker"]
     environment:
       <<: *db-env
       READY_FILE: /tmp/worker-ready
+      # Runs use the fake runtime for now; this paces its events so a run streams visibly.
+      FAKE_STEP_DELAY_S: ${FAKE_STEP_DELAY_S:-0.5}
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/worker-ready"]
       interval: 2s

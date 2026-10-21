@@ -9,6 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 0.6 runs API: `POST /runs` (inline spec + input → `202` with `run_id` and `events_url`) and `GET /runs/{id}/events`, a Server-Sent Events stream (`fastapi.sse`) that replays stored events after `Last-Event-ID` or `?after=`, follows live ones through Postgres `LISTEN/NOTIFY`, and ends after the final run event. New `agentic_worker` package: the worker takes run ids from a Redis queue (`agentic_store.enqueue_run` / `dequeue_run`) and runs them with `PostgresEventSink`; stopping it cancels the run in flight. Alembic revision `0003_run_spec` stores each run's spec and input. `agentic_store` gains `create_run`, `get_run` and `listen`. `FakeRuntime(default=...)` and `slow_echo_script` pace fake runs (`FAKE_STEP_DELAY_S`).
 - Phase 0.5 run event log: `agentic_engine.events` (`RunEvent`, `EventSink`, `InMemoryEventSink`). `run_workflow(..., run_id=, sink=)` writes run and node lifecycle events plus every agent event, numbered by `seq`, and `WorkflowRunResult` now carries `run_id`. New `agentic_store` package with SQLAlchemy models, `PostgresEventSink` and `list_run_events`. Alembic revision `0002_run_events` adds the `runs` table and the append-only `run_events` table. The migration test now checks models against migrations.
 - Phase 0.4 spec → LangGraph compiler: `agentic_engine.graph` with `compile_workflow` (nested sequences flattened to a chain of agent nodes named by spec id, a node that does not complete ends the run) and `run_workflow` (output of one node becomes the next node's input; returns status, order, per-node results and summed usage). Adds the `langgraph` dependency, typed stubs in `typings/langgraph/`, and `agentic_engine.agent.sum_usage`.
 - Phase 0.3 `AgentRuntime` interface and fake runtime: provider-neutral request and event models (`text_delta`, `message`, `tool_call`, `tool_result`, `usage`, `completed`/`failed`/`cancelled`) with a contract checker in `agentic_runtime`, cooperative cancellation, a scripted `FakeRuntime`, `agentic_engine.agent.run_agent_node`, and a no-network guard for the runtime and engine tests.
@@ -27,5 +28,9 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - GitHub Actions CI: Python, web, API contract drift check, and a compose smoke test with Playwright.
   - This changelog, and a CI check that requires each PR to update it.
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
+
+### Changed
+- The worker moved from `agentic_engine.worker` to the `agentic_worker` package (`python -m agentic_worker`); `agentic_engine` no longer depends on Redis or pydantic-settings.
+- `PostgresEventSink` no longer creates the `runs` row: create it with `create_run` first, and `run_started` moves it from `queued` to `running`.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main

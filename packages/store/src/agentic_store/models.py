@@ -4,7 +4,16 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import JsonValue
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Identity,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -17,12 +26,17 @@ metadata = Base.metadata
 
 
 class Run(Base):
-    """A run's mutable summary. Its history lives in `run_events`."""
+    """A run's mutable summary and what it was started with. Its history lives in `run_events`.
+
+    `status` is `queued` until a worker emits `run_started`, then `running`, then the status of
+    the final run event (`completed`, `failed` or `cancelled`)."""
 
     __tablename__ = "runs"
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     status: Mapped[str] = mapped_column(String(32))
+    spec: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    input: Mapped[str] = mapped_column(Text, server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
