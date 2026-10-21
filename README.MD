@@ -512,6 +512,8 @@ result = await run_workflow(spec, FakeRuntime(), input="Write the overview.")
 result.status, result.order, result.text, result.usage, result.stopped_at
 ```
 
+With a `checkpointer` (any LangGraph saver built with `checkpoint_serde()`), `run_workflow` saves the graph state after each node in the thread named by the run id, and `resume_workflow` carries a cut-off run on from there: nodes that completed are not run again, and the node that was cut off runs again from its start. See [Durable runs](#durable-runs).
+
 LangGraph ships no type information, so `typings/langgraph/` holds minimal stubs for the parts the engine uses; extend them when you use more of its API.
 
 ## Run event log
@@ -557,6 +559,30 @@ The stream shows `run_started`, `node_started`, a series of `text_delta` frames 
 
 Each API process holds one Postgres `LISTEN` connection that wakes the streams of a run when it gets a new event. A wake-up only means "read again": streams re-read `run_events` after their last `seq`, so a lost notification never loses an event.
 
+## Durable runs
+A run survives its worker (AC-8). After each node, the graph state is checkpointed in Postgres with the LangGraph Postgres checkpointer (`langgraph-checkpoint-postgres`, tables from Alembic revision `0006_checkpoints`), in the thread named by the run id. When a worker dies, another worker resumes the run after its last completed node:
+- **Leases.** A worker claims a run before running it (`runs.worker_id`, `lease_expires_at`, `attempt`) and renews the lease every 10 s while the run goes on. The Redis queue only announces new runs; Postgres decides who runs what (`agentic_store.lease`).
+- **Reclaim.** Before each queue poll, a worker looks for a `queued` or `running` run whose lease has expired (`LEASE_TTL_S`, 30 s). It claims it (`FOR UPDATE SKIP LOCKED`, so two workers never take the same run) and resumes it.
+- **Events.** The resumed attempt writes `run_resumed` (payload `attempt`, `completed_nodes`), then the usual node and run events. `seq` carries on from the last stored event. Events of the lost attempt stay in the log, including those of the node that was cut off, which runs again from its start (its tokens are spent twice).
+- **Stopping a worker is a drain.** On SIGTERM the worker cancels its run without ending it (no `run_cancelled`) and expires its lease, so the next worker resumes it at once.
+- **Crash loops.** A run claimed more than `MAX_ATTEMPTS` times (3) ends with `run_failed` ("gave up after N attempts").
+
+The worker's checkpointer talks to Postgres through psycopg, whose async driver cannot use Windows' default Proactor event loop. `python -m agentic_worker` therefore runs on a selector loop on Windows, and the worker and API tests give the worker an in-memory saver.
+
+Demo (the phase 1.3 "Done when"): kill the worker in the middle of a three-node run, then start it again.
+
+```bash
+FAKE_STEP_DELAY_S=2 docker compose up -d --build
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json'   -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/three-step-sequence.json), \"input\": \"hello\"}"
+curl -N localhost:8000/runs/<id>/events      # or open http://localhost:3000/runs/<id>
+# once `node_completed step-1` and `node_started step-2` are shown:
+docker compose kill worker                   # SIGKILL: the run stays `running`, no end event
+docker compose up -d worker                  # within LEASE_TTL_S the run is resumed
+curl -s localhost:8000/runs/<id>/events
+```
+
+The stream shows `run_resumed` with `"attempt": 2, "completed_nodes": ["step-1"]`, then `node_started step-2`, `step-3` and `run_completed`. `step-1` has exactly one `node_completed`, and `seq` runs from 1 with no gaps. With `docker compose stop worker` in place of `kill`, the run is resumed as soon as a worker is back.
+
 ## Sandbox
 A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents get the read-only repo tools, which run in there. A spec whose nodes use `repo.*` tools is rejected with `422` if the run has no `repo`.
 
@@ -578,7 +604,7 @@ How it works (`agentic_sandbox`):
   - drops all capabilities and sets `no-new-privileges`;
   - runs as uid 1000, with memory, CPU and PID limits;
   - holds the clone root-owned, so agents can read it but not change it yet (write tools come in phase 1.6).
-- **Lifecycle.** The container and volume are removed when the run ends, whether it completes, fails or is cancelled. The worker also removes leftovers at startup. A clone that fails ends the run with `run_failed` and a message that names no host path.
+- **Lifecycle.** The container and volume are removed when the run ends, whether it completes, fails or is cancelled. A worker removes leftovers at startup, except those of runs other workers hold a lease on. A resumed run gets a fresh sandbox: opening it first removes the one its earlier attempt left. A clone that fails ends the run with `run_failed` and a message that names no host path.
 - **Fake backend** (`SANDBOX_BACKEND=fake`, the default outside compose). It uses a temp directory on the worker host and isolates nothing, so use it only for tests and trusted repos.
 
 In compose, the worker mounts the host's Docker socket to start sandbox containers. That gives it control of the host's Docker, which is acceptable for local development; production isolation comes in phase 9.2. On Linux, set `DOCKER_GID` in `.env` to the socket's group (`stat -c %g /var/run/docker.sock`); Docker Desktop needs nothing. Compose also mounts this project's own git history read-only at `/samples/agentic-dev.git` as a demo repo.

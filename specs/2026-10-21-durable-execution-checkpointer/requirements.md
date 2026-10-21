@@ -68,7 +68,7 @@ Principles and stack choices that apply:
 | Lease timing | TTL 30 s, heartbeat every 10 s, both set in `WorkerSettings` | A killed worker's run is picked up within about 30 s locally. Tests can shorten both. |
 | Checkpointer | `AsyncPostgresSaver` from `langgraph-checkpoint-postgres`, `thread_id = run_id` | The tech stack fixes it. Resuming is `ainvoke(None, config)` on the same thread (LangGraph docs, "Resuming after an error"). |
 | Driver | psycopg for the saver, next to asyncpg for SQLAlchemy | The saver needs psycopg. Both read the same `DATABASE_URL`, so there is no new setting. |
-| Checkpoint schema | Alembic migration that calls the saver's `setup()` | This was the user's choice. One `alembic upgrade head` creates everything, and workers never run DDL. |
+| Checkpoint schema | Alembic migration that replays the saver's versioned `MIGRATIONS` (what `setup()` runs), frozen at the saver version | This was the user's choice. One `alembic upgrade head` creates everything, and workers never run DDL. A test flags a saver upgrade that needs a new revision. |
 | Engine API | Checkpointer is injected. The engine imports only `langgraph.checkpoint.base` | This was the user's choice. Engine tests use `InMemorySaver`, and the engine stays free of Postgres. |
 | Event log across attempts | Append only. `seq` continues from the max stored `seq`. `run_resumed` marks the boundary. The interrupted node's events from the first attempt stay | Transparency (6). The monitor (0.8) shows what really happened. |
 | Granularity | Per node (LangGraph super-step) | It meets AC-8 ("resumes after the last completed node") with no changes to the runtime. |
@@ -78,5 +78,6 @@ Principles and stack choices that apply:
 
 ## Open questions
 - ~~**Serializing `RunState`:** the state holds `AgentNodeResult` Pydantic models. Check that LangGraph's `JsonPlusSerializer` round-trips them in the installed version, including any allow-list for msgpack types.~~ Resolved in group 1: it round-trips them, but logs that unregistered types "will be blocked in a future version". `agentic_engine.graph.checkpoint_serde()` lists `AgentNodeResult` in `allowed_msgpack_modules`, which also works under `LANGGRAPH_STRICT_MSGPACK=true`. Every saver is built with it.
-- **Coverage of lease and reclaim:** the user chose engine unit tests plus the manual compose demo. The lease SQL (claim, renew, reclaim with `SKIP LOCKED`) is therefore proven only by the demo. Small store tests can be added later if it regresses.
-- **Downgrading the checkpoint migration:** the saver owns its table list and has its own `checkpoint_migrations` table. The downgrade drops the tables that are known at the pinned version.
+- **Coverage of lease and reclaim:** the user chose engine unit tests plus the manual compose demo. The worker drain test covers claim, release and reclaim end to end, but heartbeat renewal and concurrent reclaim (`SKIP LOCKED`) are proven only by the demo. Small store tests can be added later if they regress.
+- ~~**Downgrading the checkpoint migration:**~~ Resolved in group 2: the downgrade drops the four tables of saver 3.2, and `test_migrations` checks the downgrade and upgrade round trip.
+- **Windows:** psycopg's async driver can't use the Proactor loop that Windows tests and the fake sandbox's subprocesses use. Native Windows workers run on a selector loop, worker and API tests use an in-memory saver, and the Postgres saver test runs only on Linux (CI).
