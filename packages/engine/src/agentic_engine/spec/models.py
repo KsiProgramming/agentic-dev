@@ -8,6 +8,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from agentic_engine.expr import ExpressionError, compile_condition
+
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
 """Slug used in branch names (`agent/<run>/<node>`), so it must be path- and ref-safe."""
 
@@ -64,7 +66,33 @@ class SequenceNode(_Base):
     steps: list["Node"] = Field(min_length=1)
 
 
-Node = Annotated[AgentNode | ToolNode | GateNode | SequenceNode, Field(discriminator="type")]
+MAX_LOOP_ITERATIONS = 5
+"""The policy default for loop iterations (tech stack). Phase 2.2 makes it configurable."""
+
+
+class LoopNode(_Base):
+    """Runs its body again and again until `until` is true, at most `max_iterations` times.
+
+    Iteration 1 gets the loop's input; each later one gets the previous iteration's output, and
+    the loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's
+    output), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,
+    data}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop
+    normally. The body cannot contain gates, writers, publishers or loops: each is keyed by node
+    id, which repeats in every iteration."""
+
+    type: Literal["loop"]
+    id: NodeId
+    body: "Node"
+    until: NonEmptyStr = Field(
+        description="CEL condition checked after each iteration; true stops the loop.",
+        examples=['last.contains("APPROVED")'],
+    )
+    max_iterations: int = Field(ge=1, le=MAX_LOOP_ITERATIONS)
+
+
+Node = Annotated[
+    AgentNode | ToolNode | GateNode | SequenceNode | LoopNode, Field(discriminator="type")
+]
 
 
 def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
@@ -73,9 +101,14 @@ def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
     Paths use the JSON field names, e.g. `root.steps[1].steps[0]`.
     """
     yield path, node
-    if isinstance(node, SequenceNode):
-        for i, step in enumerate(node.steps):
-            yield from iter_nodes(step, f"{path}.steps[{i}]")
+    match node:
+        case SequenceNode():
+            for i, step in enumerate(node.steps):
+                yield from iter_nodes(step, f"{path}.steps[{i}]")
+        case LoopNode():
+            yield from iter_nodes(node.body, f"{path}.body")
+        case _:
+            pass
 
 
 def node_tools(node: Node) -> list[str]:
@@ -85,7 +118,7 @@ def node_tools(node: Node) -> list[str]:
             return list(node.tools)
         case ToolNode():
             return [node.tool]
-        case GateNode() | SequenceNode():
+        case GateNode() | SequenceNode() | LoopNode():
             return []
 
 
@@ -104,7 +137,7 @@ def publish_gate_errors(root: Node) -> list[str]:
     errors: list[str] = []
     seen: list[Node] = []
     for _, node in iter_nodes(root):
-        if isinstance(node, SequenceNode):
+        if isinstance(node, SequenceNode | LoopNode):
             continue
         for tool in sorted(PUBLISH_TOOLS.intersection(node_tools(node))):
             if not isinstance(node, ToolNode):
@@ -132,6 +165,42 @@ def _publish_errors(node: "ToolNode", earlier: list[Node]) -> list[str]:
             "a human approves what is published"
         ]
     return []
+
+
+def loop_errors(root: Node) -> list[str]:
+    """Why the loops under `root` cannot run, in run order (depth first); empty if they can. A
+    loop's `until` must be a valid condition, and its body must not hold a gate, a writer, a
+    publisher or another loop."""
+    errors: list[str] = []
+    for path, node in iter_nodes(root):
+        if not isinstance(node, LoopNode):
+            continue
+        try:
+            compile_condition(node.until)
+        except ExpressionError as e:
+            errors.append(f"loop {node.id!r} at {path}: invalid until: {e}")
+        for inner_path, inner in iter_nodes(node.body, f"{path}.body"):
+            if reason := _not_in_loop(inner):
+                errors.append(
+                    f"loop {node.id!r} at {path}: {reason} {inner.id!r} at {inner_path} cannot "
+                    "be inside a loop yet"
+                )
+    return errors
+
+
+def _not_in_loop(node: Node) -> str | None:
+    tools = set(node_tools(node))
+    match node:
+        case GateNode():
+            return "gate"
+        case LoopNode():
+            return "loop"
+        case _ if tools & PUBLISH_TOOLS:
+            return "publisher"
+        case _ if tools & WRITE_TOOLS:
+            return "writer"
+        case _:
+            return None
 
 
 def writer_node_ids(root: Node, write_tools: Collection[str] = WRITE_TOOLS) -> set[str]:
@@ -163,6 +232,12 @@ class WorkflowSpec(_Base):
                     "node ids must be unique"
                 )
             seen[node.id] = path
+        return self
+
+    @model_validator(mode="after")
+    def _loops_can_run(self) -> Self:
+        if errors := loop_errors(self.root):
+            raise ValueError("; ".join(errors))
         return self
 
     @model_validator(mode="after")

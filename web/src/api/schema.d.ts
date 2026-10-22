@@ -436,6 +436,36 @@ export interface components {
             install_url: string;
         };
         JsonValue: unknown;
+        /**
+         * LoopNode
+         * @description Runs its body again and again until `until` is true, at most `max_iterations` times.
+         *
+         *     Iteration 1 gets the loop's input; each later one gets the previous iteration's output, and
+         *     the loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's
+         *     output), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,
+         *     data}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop
+         *     normally. The body cannot contain gates, writers, publishers or loops: each is keyed by node
+         *     id, which repeats in every iteration.
+         */
+        LoopNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "loop";
+            /** Id */
+            id: string;
+            /** Body */
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"];
+            /**
+             * Until
+             * @description CEL condition checked after each iteration; true stops the loop.
+             * @example last.contains("APPROVED")
+             */
+            until: string;
+            /** Max Iterations */
+            max_iterations: number;
+        };
         /** PutClaudeConnection */
         PutClaudeConnection: {
             /**
@@ -507,7 +537,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"])[];
         };
         /**
          * ToolNode
@@ -565,7 +595,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"];
         };
         /** WorkspaceOut */
         WorkspaceOut: {

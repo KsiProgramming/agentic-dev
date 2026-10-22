@@ -1,0 +1,35 @@
+{
+  "spec_version": "0",
+  "id": "nested-loop",
+  "name": "Loop in a loop",
+  "root": {
+    "type": "loop",
+    "id": "outer",
+    "body": {
+      "type": "loop",
+      "id": "inner",
+      "body": {
+        "type": "sequence",
+        "id": "round",
+        "steps": [
+          {
+            "type": "agent",
+            "id": "draft",
+            "role": "Technical writer",
+            "instructions": "Write a short project summary from the input. If the input is review feedback, revise the summary to address it."
+          },
+          {
+            "type": "agent",
+            "id": "review",
+            "role": "Reviewer",
+            "instructions": "Review the summary. Reply APPROVED if it is clear and accurate; otherwise list what to fix."
+          }
+        ]
+      },
+      "until": "last.contains(\"APPROVED\")",
+      "max_iterations": 3
+    },
+    "until": "last.contains(\"APPROVED\")",
+    "max_iterations": 3
+  }
+}
