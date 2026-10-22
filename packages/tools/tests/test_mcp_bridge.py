@@ -17,7 +17,12 @@ async def test_offers_the_repo_tools_with_their_schemas(sandbox: Sandbox) -> Non
     async with open_repo_tools(sandbox) as tools:
         definitions = {d.name: d for d in tools.definitions()}
 
-    assert sorted(definitions) == ["repo.list_files", "repo.read_file", "repo.search"]
+    assert sorted(definitions) == [
+        "repo.list_files",
+        "repo.list_modules",
+        "repo.read_file",
+        "repo.search",
+    ]
     read = definitions["repo.read_file"]
     assert read.description.startswith("Read a text file from the repository.")
     assert read.input_schema["required"] == ["path"]
@@ -102,3 +107,11 @@ async def test_claude_reads_a_file_through_the_repo_server(sandbox: Sandbox) -> 
     assert sent_back["content"] == result.output
     offered = sorted(t["name"] for t in mock.requests[0]["tools"])
     assert offered == ["repo__list_files", "repo__read_file", "repo__search"]
+
+
+async def test_structured_results_become_the_output_data(sandbox: Sandbox) -> None:
+    async with open_repo_tools(sandbox) as tools:
+        output = await tools.call("repo.list_modules", {})
+
+    assert not output.is_error
+    assert output.data == {"modules": [{"path": "src", "kind": "directory"}], "truncated": False}

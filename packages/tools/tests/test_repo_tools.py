@@ -13,7 +13,7 @@ from agentic_runtime.testing import MockClaude, collect_and_check, text_reply, t
 from agentic_sandbox import Sandbox
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 
-READS = ["repo.list_files", "repo.read_file", "repo.search"]
+READS = ["repo.list_files", "repo.list_modules", "repo.read_file", "repo.search"]
 
 
 async def sh(box: Sandbox, script: str) -> tuple[int, str]:

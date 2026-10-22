@@ -1,7 +1,8 @@
 """The `repo` MCP server: tools over one run's sandbox.
 
 `build_repo_server(sandbox)` is called per run, so its tools can only reach that run's clone. It
-has the read tools (`list_files`, `read_file`, `search`). A writer node's server is built on its
+has the read tools (`list_files`, `read_file`, `search`, and `list_modules`, whose result is
+structured so a `map` can fan out over it). A writer node's server is built on its
 worktree (`agentic_sandbox.Worktree`) with `writable=True` and also has `write_file` and
 `commit`, which change only that worktree and commit on its branch.
 
@@ -16,12 +17,13 @@ import posixpath
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated, Any
+from fnmatch import fnmatchcase
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from agentic_sandbox import (
     AGENT_IDENTITY,
@@ -57,6 +59,8 @@ class RepoLimits:
     max_scan_lines: int = 2000
     max_write_bytes: int = MAX_PUT_FILE_BYTES
     max_commit_paths: int = 50
+    max_modules: int = 40
+    """The `map` item cap (40 agents spawned), so a map can always go over the whole list."""
 
 
 # Lists the directory to depth `$2`: directories, a marker line, then the rest.
@@ -144,6 +148,85 @@ _COMMIT_SCRIPT = f"""
 git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD &&
   {_GIT} -c core.quotePath=false diff-tree --root --no-commit-id --name-only -r HEAD
 """
+
+type ModuleKind = Literal["python", "node", "go", "rust", "java", "dotnet", "directory", "repo"]
+
+# Manifest file names (or `*.ext` patterns) and the module kind each marks, in priority order.
+_MANIFESTS: tuple[tuple[str, ModuleKind], ...] = (
+    ("pyproject.toml", "python"),
+    ("package.json", "node"),
+    ("go.mod", "go"),
+    ("Cargo.toml", "rust"),
+    ("pom.xml", "java"),
+    ("*.csproj", "dotnet"),
+)
+# Directories that never hold a module: dependencies, build output and existing docs. Hidden
+# directories are skipped too.
+_SKIPPED_DIRS = ("node_modules", "vendor", "dist", "build", "target", "venv", "docs")
+_MANIFEST_DEPTH = 3
+
+# Prints the manifests in directories down to `_MANIFEST_DEPTH` levels, a marker line, then the
+# top-level directories. No user argument reaches the script.
+_FIND_NAMES = " -o ".join(f"-name '{name}'" for name, _ in _MANIFESTS)
+_FIND_SKIPPED = " -o ".join(f"-name {name}" for name in ("'.*'", *_SKIPPED_DIRS))
+_MODULES_SCRIPT = f"""
+find . -mindepth 1 -maxdepth {_MANIFEST_DEPTH + 1} \\( -type d \\( {_FIND_SKIPPED} \\) -prune \\) \\
+  -o -type f \\( {_FIND_NAMES} \\) -print || exit 1
+echo ::dirs::
+find . -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print || exit 1
+"""
+
+
+class Module(BaseModel):
+    path: str = Field(description="The module's directory, relative to the repository root.")
+    kind: ModuleKind = Field(
+        description="What marks it: its manifest's ecosystem, `directory` for a top-level "
+        "directory of a repo with no manifests, `repo` for the whole repository."
+    )
+
+
+class ModulesOut(BaseModel):
+    """The repository's modules, sorted by path."""
+
+    modules: list[Module]
+    truncated: bool = Field(description="True when more modules were found than are listed.")
+
+
+def _manifest_kind(name: str) -> ModuleKind | None:
+    return next((kind for pattern, kind in _MANIFESTS if fnmatchcase(name, pattern)), None)
+
+
+def _find_modules(stdout: str) -> list[Module]:
+    """Modules from `_MODULES_SCRIPT`'s output: each directory with a manifest (the root only
+    when nothing below it has one, as a workspace root just groups its members); else each
+    top-level directory; else the whole repository."""
+    manifests, _, dirs = stdout.partition("::dirs::")
+    kinds: dict[str, ModuleKind] = {}
+    for line in manifests.splitlines():
+        if not line.startswith("./"):
+            continue
+        directory, name = posixpath.split(line[2:])
+        kind = _manifest_kind(name)
+        current = kinds.get(directory or ".")
+        if kind is not None and (current is None or _rank(kind) < _rank(current)):
+            kinds[directory or "."] = kind
+    if len(kinds) > 1:
+        kinds.pop(".", None)
+    if kinds:
+        return [Module(path=path, kind=kind) for path, kind in sorted(kinds.items())]
+    top = sorted(
+        line[2:]
+        for line in dirs.splitlines()
+        if line.startswith("./") and line[2:] not in _SKIPPED_DIRS
+    )
+    if top:
+        return [Module(path=path, kind="directory") for path in top]
+    return [Module(path=".", kind="repo")]
+
+
+def _rank(kind: ModuleKind) -> int:
+    return next(i for i, (_, k) in enumerate(_MANIFESTS) if k == kind)
+
 
 _HIT = re.compile(r"^\./(.+?):(\d+):(.*)$")
 _ERE_SPECIAL = re.compile(r"([\\.\[\]()*+?{}|^$])")
@@ -307,6 +390,30 @@ class _RepoTools:
             lines.append(f"(truncated: showing the first {len(shown)} matches)")
         return "\n".join(lines)
 
+    async def list_modules(
+        self,
+        include: Annotated[
+            list[Annotated[str, Field(min_length=1, max_length=200)]] | None,
+            Field(
+                max_length=20,
+                description="Glob patterns over module paths (e.g. `packages/*`); only modules "
+                "matching one are listed. Omit to list them all.",
+            ),
+        ] = None,
+    ) -> ModulesOut:
+        """List the repository's modules: each directory (down to three levels) with a project
+        manifest such as pyproject.toml, package.json, go.mod, Cargo.toml, pom.xml or *.csproj.
+        A repository with none lists its top-level directories instead. Dependencies, build
+        output, docs and hidden directories are skipped."""
+        result = await self._sandbox.exec(["sh", "-c", _MODULES_SCRIPT, "list_modules"])
+        if result.exit_code != 0 or "::dirs::" not in result.stdout:
+            raise ToolError("could not list the modules")
+        modules = _find_modules(result.stdout)
+        if include:
+            modules = [m for m in modules if any(fnmatchcase(m.path, g) for g in include)]
+        cap = self._limits.max_modules
+        return ModulesOut(modules=modules[:cap], truncated=len(modules) > cap)
+
     async def _binary_files(self, files: list[str]) -> set[str]:
         if not files:
             return set()
@@ -395,6 +502,7 @@ def build_repo_server(
         _tool(tools.list_files, {"path": "."}),
         _tool(tools.read_file, {"path": "pyproject.toml", "end_line": 60}),
         _tool(tools.search, {"pattern": "[project]", "max_results": 20}),
+        strict_tool(tools.list_modules, {"include": ["packages/*"]}, structured=True),
     ]
     if not writable:
         return MCPServer(
