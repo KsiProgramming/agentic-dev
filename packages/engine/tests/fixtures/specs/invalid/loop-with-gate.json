@@ -1,0 +1,28 @@
+{
+  "spec_version": "0",
+  "id": "loop-with-gate",
+  "name": "Gate in a loop",
+  "root": {
+    "type": "loop",
+    "id": "revise",
+    "body": {
+      "type": "sequence",
+      "id": "round",
+      "steps": [
+        {
+          "type": "agent",
+          "id": "draft",
+          "role": "Technical writer",
+          "instructions": "Write a short project summary from the input. If the input is review feedback, revise the summary to address it."
+        },
+        {
+          "type": "gate",
+          "id": "check",
+          "title": "Approve the draft"
+        }
+      ]
+    },
+    "until": "last.contains(\"APPROVED\")",
+    "max_iterations": 3
+  }
+}

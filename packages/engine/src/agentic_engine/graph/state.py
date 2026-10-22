@@ -17,17 +17,28 @@ def merge_results(
     return {**left, **right}
 
 
+def merge_counts(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
+    """Reducer for `RunState.iterations`: a loop's update sets its count by loop id."""
+    return {**left, **right}
+
+
 class RunState(TypedDict):
     """What flows through the compiled graph.
 
     `last_text` starts as the run input and is replaced by each node's output, which the next
     node receives as its `AgentRequest.input` (data, never instructions).
+
+    `results` holds each node's latest result; `order` lists every node run, so a node inside a
+    loop appears once per iteration. `iterations` counts each loop's started iterations, and
+    `usage` collects the usage of every node run, which `results` alone would undercount.
     """
 
     input: str
     last_text: str
     results: Annotated[dict[str, AgentNodeResult], merge_results]
     order: Annotated[list[str], operator.add]
+    iterations: Annotated[dict[str, int], merge_counts]
+    usage: Annotated[list[Usage], operator.add]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -36,10 +47,12 @@ class RunUpdate(TypedDict, total=False):
     last_text: str
     results: dict[str, AgentNodeResult]
     order: list[str]
+    iterations: dict[str, int]
+    usage: list[Usage]
 
 
 def initial_state(input: str) -> RunState:
-    return RunState(input=input, last_text=input, results={}, order=[])
+    return RunState(input=input, last_text=input, results={}, order=[], iterations={}, usage=[])
 
 
 type WorkflowRunStatus = AgentNodeStatus | Literal["waiting"]

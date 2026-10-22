@@ -43,6 +43,19 @@ INVALID: dict[str, Rejection] = {
     "open-pr-by-agent": Rejection(
         (), "value_error", "'writer': github.openPR can only be called by a tool node"
     ),
+    "loop-bad-cel": Rejection(
+        (), "value_error", "loop 'revise' at root: invalid until: syntax error at column 15"
+    ),
+    "loop-too-many-iterations": Rejection(("root", "loop", "max_iterations"), "less_than_equal"),
+    "loop-with-gate": Rejection(
+        (), "value_error", "gate 'check' at root.body.steps[1] cannot be inside a loop"
+    ),
+    "loop-with-writer": Rejection(
+        (), "value_error", "writer 'writer' at root.body cannot be inside a loop"
+    ),
+    "nested-loop": Rejection(
+        (), "value_error", "loop 'outer' at root: loop 'inner' at root.body cannot be inside"
+    ),
 }
 
 
@@ -81,10 +94,13 @@ def test_exported_schema_has_discriminated_node_union() -> None:
 
     root = schema["properties"]["root"]
     assert root["discriminator"]["propertyName"] == "type"
-    assert set(root["discriminator"]["mapping"]) == {"agent", "tool", "gate", "sequence"}
+    assert set(root["discriminator"]["mapping"]) == {"agent", "tool", "gate", "sequence", "loop"}
     assert {ref["$ref"] for ref in root["oneOf"]} == {
         "#/$defs/AgentNode",
         "#/$defs/ToolNode",
         "#/$defs/GateNode",
         "#/$defs/SequenceNode",
+        "#/$defs/LoopNode",
     }
+    loop = schema["$defs"]["LoopNode"]["properties"]["max_iterations"]
+    assert (loop["minimum"], loop["maximum"]) == (1, 5)

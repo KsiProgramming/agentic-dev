@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 1.9 `loop` primitive and CEL expressions:
+  - **CEL conditions** (`agentic_engine.expr`, using `cel-python`). `compile_condition` parses a condition once and rejects syntax errors, unknown variables and unknown functions, with the column. `CompiledCondition.evaluate` returns a bool or raises `ExpressionError` with a short message. No custom functions are registered.
+  - **`loop` node.** A spec node (`{"type": "loop", "id", "body", "until", "max_iterations"}`, at most 5 iterations) runs its body until `until` is true or `max_iterations` is reached. Both stops complete the loop, with `stop_reason` and `iterations` in its result. The spec rejects an invalid `until`, and a gate, writer, publisher or loop inside a loop body (`loop_errors`). The exported schema and the API client include it.
+  - **Engine.** The compiler now builds the graph recursively, and a loop adds an entry node, its body and an `<id>.check` node. The new `loop_iteration_started` and `loop_condition_evaluated` events mark each iteration. `RunState` gains `iterations`, which is checkpointed, so a resumed run continues the same iteration. The LangGraph recursion limit is computed from the spec (`recursion_limit`).
+  - **Demo.** New spec fixture `review-loop.json` and a README section on loops.
 - Phase 1.8 `github.openPR` behind a gate:
   - **`github` MCP server** (`agentic_tools.github`). Its one tool, `github.openPR(from_node, title, body?, base?)`, bundles a writer's branch out of the sandbox, pushes it from the worker with an installation token, and opens a pull request. It returns the PR as structured content. The push only creates the branch or finds it already at the same commit, and an open PR from the branch is reused.
   - **Tools.** `RunTools` routes a run's calls to the `repo` and `github` executors. `ToolOutput` gains `data`, filled from MCP structured content. The new `strict_tool` builds the strict, example-carrying tools both servers use.
@@ -82,5 +87,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ### Removed
 - `ANTHROPIC_API_KEY`: the worker no longer reads a Claude key from the environment (settings, compose and `.env.example`). Store it on the Settings page or with `PUT /workspaces/{id}/connections/claude`.
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
+
+### Fixed
+- A run's `usage` now adds up every node run (the new `RunState.usage`, with `Usage` allowed in checkpoints). Before, it counted only each node's latest result, which undercounted loops. `run_resumed`'s `completed_nodes` lists each node once.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main

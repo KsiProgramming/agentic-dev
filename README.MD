@@ -467,11 +467,12 @@ cd web && pnpm gen:api
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Workflow spec
-A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has four node types:
+A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has five node types:
 - `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`);
 - `tool`: one call of a platform tool with fixed arguments and no model, e.g. `{"type": "tool", "id": "list", "tool": "repo.list_files", "args": {"path": "."}}`;
 - `gate`: a pause until a human approves or rejects (`title`, optional `prompt`); see [Gates](#gates);
-- `sequence`: its `steps`, in order.
+- `sequence`: its `steps`, in order;
+- `loop`: its `body`, again and again until a CEL condition (`until`) is true, at most `max_iterations` times; see [Loops](#loops).
 
 Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
 
@@ -511,7 +512,7 @@ The runtime and engine test suites block all non-loopback network access (`agent
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
 
 ## Engine
-`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. In v0, nested `sequence`s are flattened depth first into one chain of `agent`, `tool` and `gate` nodes, each named by its spec node id. The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run.
+`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, and a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.
 
 A `tool` node calls the `ToolExecutor` passed as `run_workflow(..., tools=)` (the worker passes the same per-run tools its agents get). It writes one `tool_call` and one `tool_result` event, and its output text becomes the next node's input. An error result, an exception or a run without tools fails the node.
 
@@ -681,6 +682,24 @@ curl -s -X POST localhost:8000/runs/<id>/approvals -H 'content-type: application
 ```
 
 Rejecting instead ends the run `cancelled` with no branch or PR on GitHub. Without the gate, `POST /runs` answers `422` and names the publishing node.
+
+## Loops
+A `loop` node runs its `body` again and again until its `until` condition is true or it has run `max_iterations` times (phase 1.9). The typical use is a writer and a reviewer going back and forth ([review-loop.json](packages/engine/tests/fixtures/specs/valid/review-loop.json)):
+
+```json
+{
+  "type": "loop", "id": "revise", "max_iterations": 3,
+  "until": "last.contains(\"APPROVED\")",
+  "body": { "type": "sequence", "id": "round", "steps": [ { "type": "agent", "id": "draft", "...": "..." }, { "type": "agent", "id": "review", "...": "..." } ] }
+}
+```
+
+- **Input and output.** Iteration 1 gets the loop's input. Each later iteration gets the previous iteration's output (in the example, the review), and the loop's output is the output of its last iteration.
+- **Conditions** are [CEL](https://cel.dev), run with `cel-python` (`agentic_engine.expr`). After each iteration, `until` can read `last` (string: the body's output), `iteration` (int: iterations completed, from 1) and `results` (map: node id → `{status, text, data}`, each node's latest result). For example: `last.contains("APPROVED")`, `last.matches("(?i)approved")`, `results.review.data.score >= 8`, `iteration >= 2 && results.lint.status == "completed"`. Only CEL's standard functions and macros are available, and no platform code can be called. `matches` uses RE2, which runs in linear time. A condition is limited to 1,000 characters, and it is checked when the spec is validated: a syntax error, an unknown variable or an unknown function (for example `lowerAscii`, which `cel-python` lacks) is rejected with its column.
+- **Stopping.** The loop stops when `until` is true (`stop_reason: "condition"`) or after `max_iterations` (`"max_iterations"`). Either way it completes and the run goes on. `max_iterations` is required and at most 5 (the policy default; phase 2.2 makes it configurable). If a body node fails, the run stops there. If `until` cannot be evaluated (for example `results.missing.text`), the loop fails with the CEL error.
+- **Not inside a loop, yet:** gates, writers, publishers and other loops. Approvals and writer branches are keyed by node id, which would repeat in every iteration. The spec is rejected, and the error names the node and its path.
+- **Events.** `node_started` for the loop, then for each iteration `loop_iteration_started` (`iteration`), the body's usual events and `loop_condition_evaluated` (`iteration`, `result`), and finally `node_completed` (`stop_reason`, `iterations`) or `node_failed` (`error`).
+- **Durability.** The iteration count is checkpointed, so a run cut off in iteration 2 resumes in iteration 2. The LangGraph step limit is computed from the spec (`recursion_limit`), so a run can never take more steps than its loops allow.
 
 ## Sandbox
 A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents and tool nodes get the repo tools, which run in there. A spec whose nodes (agent or tool) use `repo.*` tools is rejected with `422` if the run has no `repo`.
