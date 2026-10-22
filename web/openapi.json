@@ -1068,6 +1068,12 @@
               },
               {
                 "$ref": "#/components/schemas/LoopNode"
+              },
+              {
+                "$ref": "#/components/schemas/MapNode"
+              },
+              {
+                "$ref": "#/components/schemas/ReduceNode"
               }
             ],
             "title": "Body",
@@ -1077,6 +1083,8 @@
                 "agent": "#/components/schemas/AgentNode",
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
+                "map": "#/components/schemas/MapNode",
+                "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
               }
@@ -1109,6 +1117,84 @@
         ],
         "title": "LoopNode",
         "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id \u2192 `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration."
+      },
+      "MapNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "map",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "over": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Over",
+            "description": "CEL expression that evaluates to the list of items.",
+            "examples": [
+              "results.list_modules.data.modules"
+            ]
+          },
+          "body": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentNode"
+              },
+              {
+                "$ref": "#/components/schemas/ToolNode"
+              },
+              {
+                "$ref": "#/components/schemas/GateNode"
+              },
+              {
+                "$ref": "#/components/schemas/SequenceNode"
+              },
+              {
+                "$ref": "#/components/schemas/LoopNode"
+              },
+              {
+                "$ref": "#/components/schemas/MapNode"
+              },
+              {
+                "$ref": "#/components/schemas/ReduceNode"
+              }
+            ],
+            "title": "Body",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "agent": "#/components/schemas/AgentNode",
+                "gate": "#/components/schemas/GateNode",
+                "loop": "#/components/schemas/LoopNode",
+                "map": "#/components/schemas/MapNode",
+                "reduce": "#/components/schemas/ReduceNode",
+                "sequence": "#/components/schemas/SequenceNode",
+                "tool": "#/components/schemas/ToolNode"
+              }
+            }
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Max Concurrency"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "over",
+          "body",
+          "max_concurrency"
+        ],
+        "title": "MapNode",
+        "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. A map has at most\n`MAX_AGENTS_SPAWNED` items; one that does not complete fails the map."
       },
       "PutClaudeConnection": {
         "properties": {
@@ -1163,6 +1249,114 @@
           "redis"
         ],
         "title": "Readiness"
+      },
+      "ReduceAgent": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Role"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Instructions"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "claude"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Unset means the workspace default."
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "instructions"
+        ],
+        "title": "ReduceAgent",
+        "description": "The agent a `reduce` node with the `agent` strategy runs, as for an `agent` node."
+      },
+      "ReduceNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "reduce",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "From",
+            "description": "The map whose outputs are combined."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "concat",
+              "agent"
+            ],
+            "title": "Strategy"
+          },
+          "separator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Separator",
+            "description": "`concat` only: what goes between outputs (default two newlines)."
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReduceAgent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`agent` only, and required."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "from",
+          "strategy"
+        ],
+        "title": "ReduceNode",
+        "description": "Combines the outputs of the map `from`, which runs before it, in item order.\n\n`concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON\narray `[{\"item\": \u2026, \"output\": \u2026}]` (data, never instructions)."
       },
       "RepoOut": {
         "properties": {
@@ -1267,6 +1461,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/LoopNode"
+                },
+                {
+                  "$ref": "#/components/schemas/MapNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ReduceNode"
                 }
               ],
               "discriminator": {
@@ -1275,6 +1475,8 @@
                   "agent": "#/components/schemas/AgentNode",
                   "gate": "#/components/schemas/GateNode",
                   "loop": "#/components/schemas/LoopNode",
+                  "map": "#/components/schemas/MapNode",
+                  "reduce": "#/components/schemas/ReduceNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "tool": "#/components/schemas/ToolNode"
                 }
@@ -1416,6 +1618,12 @@
               },
               {
                 "$ref": "#/components/schemas/LoopNode"
+              },
+              {
+                "$ref": "#/components/schemas/MapNode"
+              },
+              {
+                "$ref": "#/components/schemas/ReduceNode"
               }
             ],
             "title": "Root",
@@ -1425,6 +1633,8 @@
                 "agent": "#/components/schemas/AgentNode",
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
+                "map": "#/components/schemas/MapNode",
+                "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
               }
@@ -1469,7 +1679,7 @@
       },
       "RunEvent": {
         "additionalProperties": false,
-        "description": "One row of the run event log. For agent events, `type` is the `AgentEvent` type and\n`payload` is the serialised event; payloads are data, never instructions.",
+        "description": "One row of the run event log. For agent events, `type` is the `AgentEvent` type and\n`payload` is the serialised event; payloads are data, never instructions. The events of a\nnode inside a map also carry `item`, the index of the item it ran for.",
         "properties": {
           "run_id": {
             "format": "uuid",

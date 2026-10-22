@@ -4,7 +4,7 @@ import operator
 from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from agentic_engine.agent import AgentNodeResult, AgentNodeStatus
 from agentic_runtime import Usage
@@ -22,6 +22,17 @@ def merge_counts(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
     return {**left, **right}
 
 
+def merge_map_results(
+    left: dict[str, dict[str, AgentNodeResult]], right: dict[str, dict[str, AgentNodeResult]]
+) -> dict[str, dict[str, AgentNodeResult]]:
+    """Reducer for `RunState.map_results`: an item's update adds its result by map id, then by
+    item index, so a map's items can finish in any order and at the same time."""
+    merged = dict(left)
+    for map_id, items in right.items():
+        merged[map_id] = {**merged.get(map_id, {}), **items}
+    return merged
+
+
 class RunState(TypedDict):
     """What flows through the compiled graph.
 
@@ -31,6 +42,10 @@ class RunState(TypedDict):
     `results` holds each node's latest result; `order` lists every node run, so a node inside a
     loop appears once per iteration. `iterations` counts each loop's started iterations, and
     `usage` collects the usage of every node run, which `results` alone would undercount.
+
+    `map_results` holds, per map, the result of its body for each item, keyed by the item's index
+    as a string (checkpoints keep string keys). The nodes inside a map body are not in `results`
+    or `order`: their ids repeat for every item.
     """
 
     input: str
@@ -39,6 +54,7 @@ class RunState(TypedDict):
     order: Annotated[list[str], operator.add]
     iterations: Annotated[dict[str, int], merge_counts]
     usage: Annotated[list[Usage], operator.add]
+    map_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -49,10 +65,27 @@ class RunUpdate(TypedDict, total=False):
     order: list[str]
     iterations: dict[str, int]
     usage: list[Usage]
+    map_results: dict[str, dict[str, AgentNodeResult]]
+
+
+class MapItem(TypedDict):
+    """What a map sends the worker that runs its body for one item."""
+
+    index: int
+    item: JsonValue
+    item_input: str
 
 
 def initial_state(input: str) -> RunState:
-    return RunState(input=input, last_text=input, results={}, order=[], iterations={}, usage=[])
+    return RunState(
+        input=input,
+        last_text=input,
+        results={},
+        order=[],
+        iterations={},
+        usage=[],
+        map_results={},
+    )
 
 
 type WorkflowRunStatus = AgentNodeStatus | Literal["waiting"]

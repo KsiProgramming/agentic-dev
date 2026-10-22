@@ -1,0 +1,23 @@
+{
+  "spec_version": "0",
+  "id": "reduce-from-non-map",
+  "name": "Reduce from an agent",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Writer",
+        "instructions": "Describe the module named by your input."
+      },
+      {
+        "type": "reduce",
+        "id": "join",
+        "from": "writer",
+        "strategy": "concat"
+      }
+    ]
+  }
+}

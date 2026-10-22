@@ -467,12 +467,14 @@ cd web && pnpm gen:api
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Workflow spec
-A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has five node types:
+A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has seven node types:
 - `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`);
 - `tool`: one call of a platform tool with fixed arguments and no model, e.g. `{"type": "tool", "id": "list", "tool": "repo.list_files", "args": {"path": "."}}`;
 - `gate`: a pause until a human approves or rejects (`title`, optional `prompt`); see [Gates](#gates);
 - `sequence`: its `steps`, in order;
-- `loop`: its `body`, again and again until a CEL condition (`until`) is true, at most `max_iterations` times; see [Loops](#loops).
+- `loop`: its `body`, again and again until a CEL condition (`until`) is true, at most `max_iterations` times; see [Loops](#loops);
+- `map`: its `body` once per item of a CEL list (`over`), at most `max_concurrency` at a time; see [Map and reduce](#map-and-reduce);
+- `reduce`: the outputs of an earlier map (`from`), combined by `concat` or by an `agent`; see [Map and reduce](#map-and-reduce).
 
 Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
 
@@ -512,7 +514,7 @@ The runtime and engine test suites block all non-loopback network access (`agent
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
 
 ## Engine
-`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, and a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.
+`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)), and a `map` adds an entry node, a worker that LangGraph's `Send` starts once per item, and a join node (see [Map and reduce](#map-and-reduce)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.
 
 A `tool` node calls the `ToolExecutor` passed as `run_workflow(..., tools=)` (the worker passes the same per-run tools its agents get). It writes one `tool_call` and one `tool_result` event, and its output text becomes the next node's input. An error result, an exception or a run without tools fails the node.
 
@@ -700,6 +702,26 @@ A `loop` node runs its `body` again and again until its `until` condition is tru
 - **Not inside a loop, yet:** gates, writers, publishers and other loops. Approvals and writer branches are keyed by node id, which would repeat in every iteration. The spec is rejected, and the error names the node and its path.
 - **Events.** `node_started` for the loop, then for each iteration `loop_iteration_started` (`iteration`), the body's usual events and `loop_condition_evaluated` (`iteration`, `result`), and finally `node_completed` (`stop_reason`, `iterations`) or `node_failed` (`error`).
 - **Durability.** The iteration count is checkpointed, so a run cut off in iteration 2 resumes in iteration 2. The LangGraph step limit is computed from the spec (`recursion_limit`), so a run can never take more steps than its loops allow.
+
+## Map and reduce
+A `map` node runs its `body` once per item of a list, several items at a time, and a `reduce` node combines the items' outputs (phase 1.10). [map-modules.json](packages/engine/tests/fixtures/specs/valid/map-modules.json) describes three modules two at a time, then joins the descriptions:
+
+```json
+{ "type": "sequence", "id": "main", "steps": [
+  { "type": "map", "id": "describe", "max_concurrency": 2,
+    "over": "[\"packages/api\", \"packages/engine\", \"web\"]",
+    "body": { "type": "agent", "id": "module-writer", "...": "..." } },
+  { "type": "reduce", "id": "join", "from": "describe", "strategy": "concat", "separator": "\n\n---\n\n" }
+] }
+```
+
+- **Items.** `over` is a CEL expression (see [Loops](#loops) for the sandbox) that must evaluate to a list. It can read `last` (string: the map's input) and `results` (map: node id → `{status, text, data}`), so a map can go over a tool's structured output, e.g. `results.list_modules.data.modules`, or over a literal list. It is checked when the spec is validated and evaluated when the map starts. Each item is its body's input: a string as is, any other value as JSON.
+- **Concurrency.** `max_concurrency` is required, from 1 to 8 (the policy limit on agents alive). The map's items start together, and a semaphore lets at most `max_concurrency` of them run at once. A map has at most 40 items (the policy limit on agents spawned); with more, or if `over` fails or is not a list, the map fails before any item runs. Phase 2.2 makes both limits configurable.
+- **Body.** Only `agent`, `tool` and `sequence` nodes. A sequence runs in order for each item, each step on the previous step's output. Gates, writers, publishers, loops, maps and reduces cannot be inside a map yet: approvals and writer branches are keyed by node id, which would repeat for every item, and parallel writers need the integration branch of phase 5.3. A map cannot be inside a loop either.
+- **Output.** The map's result keeps the item order, whatever order the items finish in: its text is the outputs joined by a blank line, and its `data` is `{"items": [...], "outputs": [...]}`. Nodes inside the body are not in `result.results` or `result.order`, since their ids repeat, but their usage counts. A map with no items completes with empty output. If an item's body does not complete, the other items in flight finish, then the map fails (`item <index> <node> failed: <error>`) and the run stops there.
+- **Reduce.** `{"type": "reduce", "id", "from": "<map id>", "strategy": ...}` must come after the map it names. `concat` joins the outputs with `separator` (default a blank line) and calls no model. `agent` takes `"agent": {"role", "instructions", "provider"?, "model"?}` and runs one agent turn whose input is the JSON array `[{"item": ..., "output": ...}]`, in item order (data, never instructions). [map-reduce-agent.json](packages/engine/tests/fixtures/specs/valid/map-reduce-agent.json) has a two-step body and an agent reduce.
+- **Events.** `node_started` for the map (`items`), then per item `map_item_started` (`index`, `item`), the body's usual events, each with `item` (the index) in its payload, and `map_item_completed` (`index`, `status`, `error`), and finally `node_completed` (`items`) or the map's failure (`error`). Items that run at once interleave their events; `seq` still orders them all. A reduce writes the events of an agent node.
+- **Durability.** LangGraph checkpoints each finished item, so a run cut off mid-map runs again only the items that had not finished. The map adds three LangGraph steps whatever its item count.
 
 ## Sandbox
 A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents and tool nodes get the repo tools, which run in there. A spec whose nodes (agent or tool) use `repo.*` tools is rejected with `422` if the run has no `repo`.

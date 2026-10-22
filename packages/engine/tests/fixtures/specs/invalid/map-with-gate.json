@@ -1,0 +1,28 @@
+{
+  "spec_version": "0",
+  "id": "map-with-gate",
+  "name": "Gate in a map",
+  "root": {
+    "type": "map",
+    "id": "each",
+    "over": "[\"packages/api\", \"packages/engine\", \"web\"]",
+    "body": {
+      "type": "sequence",
+      "id": "per-item",
+      "steps": [
+        {
+          "type": "agent",
+          "id": "writer",
+          "role": "Writer",
+          "instructions": "Describe the module named by your input."
+        },
+        {
+          "type": "gate",
+          "id": "check",
+          "title": "OK?"
+        }
+      ]
+    },
+    "max_concurrency": 2
+  }
+}

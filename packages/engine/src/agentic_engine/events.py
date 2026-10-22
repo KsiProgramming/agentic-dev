@@ -31,6 +31,10 @@ LOOP_ITERATION_STARTED: Final = "loop_iteration_started"
 """A loop starts an iteration: `iteration` (from 1)."""
 LOOP_CONDITION_EVALUATED: Final = "loop_condition_evaluated"
 """A loop checked its `until` after an iteration: `iteration`, `result`."""
+MAP_ITEM_STARTED: Final = "map_item_started"
+"""A map starts running its body for one item: `index` (from 0), `item`."""
+MAP_ITEM_COMPLETED: Final = "map_item_completed"
+"""A map's body ended for one item: `index`, `status`, and `error` if it did not complete."""
 PR_OPENED: Final = "pr_opened"
 """A publishing tool node opened a pull request: `url`, `number`, `head`, `base`, `commit`."""
 
@@ -44,7 +48,8 @@ RUN_END_STATUS: Final[dict[str, RunStatus]] = {
 
 class RunEvent(BaseModel):
     """One row of the run event log. For agent events, `type` is the `AgentEvent` type and
-    `payload` is the serialised event; payloads are data, never instructions."""
+    `payload` is the serialised event; payloads are data, never instructions. The events of a
+    node inside a map also carry `item`, the index of the item it ran for."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -57,7 +62,9 @@ class RunEvent(BaseModel):
 
     def agent_event(self) -> AgentEvent:
         """The `AgentEvent` this row holds. Raises `ValidationError` for lifecycle events."""
-        return agent_event_adapter.validate_python(self.payload)
+        return agent_event_adapter.validate_python(
+            {k: v for k, v in self.payload.items() if k != "item"}
+        )
 
 
 class EventSink(Protocol):
@@ -98,7 +105,11 @@ class RunEventLog:
         *,
         node_id: str | None = None,
         payload: dict[str, JsonValue] | None = None,
+        item: int | None = None,
     ) -> None:
+        """Write one event. `item` tags the event of a node that runs inside a map."""
+        if item is not None:
+            payload = {**(payload or {}), "item": item}
         # `seq` is taken before the await, so it follows emit order.
         self._seq += 1
         await self._sink.emit(
@@ -112,7 +123,10 @@ class RunEventLog:
             )
         )
 
-    async def agent_event(self, node_id: str, event: AgentEvent) -> None:
+    async def agent_event(self, node_id: str, event: AgentEvent, item: int | None = None) -> None:
         await self.emit(
-            event.type, node_id=node_id, payload=agent_event_adapter.dump_python(event, mode="json")
+            event.type,
+            node_id=node_id,
+            payload=agent_event_adapter.dump_python(event, mode="json"),
+            item=item,
         )

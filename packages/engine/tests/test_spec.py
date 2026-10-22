@@ -56,6 +56,31 @@ INVALID: dict[str, Rejection] = {
     "nested-loop": Rejection(
         (), "value_error", "loop 'outer' at root: loop 'inner' at root.body cannot be inside"
     ),
+    "map-bad-cel": Rejection(
+        (), "value_error", "map 'each' at root: invalid over: syntax error at column 26"
+    ),
+    "map-too-concurrent": Rejection(("root", "map", "max_concurrency"), "less_than_equal"),
+    "map-with-gate": Rejection(
+        (), "value_error", "gate 'check' at root.body.steps[1] cannot be inside a map"
+    ),
+    "map-with-writer": Rejection(
+        (), "value_error", "writer 'writer' at root.body cannot be inside a map"
+    ),
+    "nested-map": Rejection(
+        (), "value_error", "map 'outer' at root: map 'inner' at root.body cannot be inside"
+    ),
+    "reduce-unknown-from": Rejection(
+        (), "value_error", "reduce 'join' at root.steps[1]: `from` 'eaches' is not a map that runs"
+    ),
+    "reduce-from-non-map": Rejection(
+        (), "value_error", "reduce 'join' at root.steps[1]: `from` 'writer' is not a map that runs"
+    ),
+    "reduce-before-map": Rejection(
+        (), "value_error", "reduce 'join' at root.steps[0]: `from` 'each' is not a map that runs"
+    ),
+    "reduce-agent-missing": Rejection(
+        ("root", "sequence", "steps", 1, "reduce"), "value_error", "the agent strategy needs"
+    ),
 }
 
 
@@ -94,13 +119,28 @@ def test_exported_schema_has_discriminated_node_union() -> None:
 
     root = schema["properties"]["root"]
     assert root["discriminator"]["propertyName"] == "type"
-    assert set(root["discriminator"]["mapping"]) == {"agent", "tool", "gate", "sequence", "loop"}
+    assert set(root["discriminator"]["mapping"]) == {
+        "agent",
+        "tool",
+        "gate",
+        "sequence",
+        "loop",
+        "map",
+        "reduce",
+    }
     assert {ref["$ref"] for ref in root["oneOf"]} == {
         "#/$defs/AgentNode",
         "#/$defs/ToolNode",
         "#/$defs/GateNode",
         "#/$defs/SequenceNode",
         "#/$defs/LoopNode",
+        "#/$defs/MapNode",
+        "#/$defs/ReduceNode",
     }
     loop = schema["$defs"]["LoopNode"]["properties"]["max_iterations"]
     assert (loop["minimum"], loop["maximum"]) == (1, 5)
+    concurrency = schema["$defs"]["MapNode"]["properties"]["max_concurrency"]
+    assert (concurrency["minimum"], concurrency["maximum"]) == (1, 8)
+    reduce = schema["$defs"]["ReduceNode"]
+    assert "from" in reduce["required"]
+    assert reduce["properties"]["strategy"]["enum"] == ["concat", "agent"]

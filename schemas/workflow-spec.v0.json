@@ -121,6 +121,8 @@
               "agent": "#/$defs/AgentNode",
               "gate": "#/$defs/GateNode",
               "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "reduce": "#/$defs/ReduceNode",
               "sequence": "#/$defs/SequenceNode",
               "tool": "#/$defs/ToolNode"
             },
@@ -141,6 +143,12 @@
             },
             {
               "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
             }
           ],
           "title": "Body"
@@ -181,6 +189,196 @@
       "title": "LoopNode",
       "type": "object"
     },
+    "MapNode": {
+      "additionalProperties": false,
+      "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. A map has at most\n`MAX_AGENTS_SPAWNED` items; one that does not complete fails the map.",
+      "properties": {
+        "body": {
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentNode",
+              "gate": "#/$defs/GateNode",
+              "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "reduce": "#/$defs/ReduceNode",
+              "sequence": "#/$defs/SequenceNode",
+              "tool": "#/$defs/ToolNode"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentNode"
+            },
+            {
+              "$ref": "#/$defs/ToolNode"
+            },
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/SequenceNode"
+            },
+            {
+              "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
+            }
+          ],
+          "title": "Body"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "max_concurrency": {
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Max Concurrency",
+          "type": "integer"
+        },
+        "over": {
+          "description": "CEL expression that evaluates to the list of items.",
+          "examples": [
+            "results.list_modules.data.modules"
+          ],
+          "minLength": 1,
+          "title": "Over",
+          "type": "string"
+        },
+        "type": {
+          "const": "map",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "over",
+        "body",
+        "max_concurrency"
+      ],
+      "title": "MapNode",
+      "type": "object"
+    },
+    "ReduceAgent": {
+      "additionalProperties": false,
+      "description": "The agent a `reduce` node with the `agent` strategy runs, as for an `agent` node.",
+      "properties": {
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "instructions"
+      ],
+      "title": "ReduceAgent",
+      "type": "object"
+    },
+    "ReduceNode": {
+      "additionalProperties": false,
+      "description": "Combines the outputs of the map `from`, which runs before it, in item order.\n\n`concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON\narray `[{\"item\": …, \"output\": …}]` (data, never instructions).",
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReduceAgent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`agent` only, and required."
+        },
+        "from": {
+          "description": "The map whose outputs are combined.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "From",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "separator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`concat` only: what goes between outputs (default two newlines).",
+          "title": "Separator"
+        },
+        "strategy": {
+          "enum": [
+            "concat",
+            "agent"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "type": {
+          "const": "reduce",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "from",
+        "strategy"
+      ],
+      "title": "ReduceNode",
+      "type": "object"
+    },
     "SequenceNode": {
       "additionalProperties": false,
       "description": "Runs its steps in order.",
@@ -197,6 +395,8 @@
                 "agent": "#/$defs/AgentNode",
                 "gate": "#/$defs/GateNode",
                 "loop": "#/$defs/LoopNode",
+                "map": "#/$defs/MapNode",
+                "reduce": "#/$defs/ReduceNode",
                 "sequence": "#/$defs/SequenceNode",
                 "tool": "#/$defs/ToolNode"
               },
@@ -217,6 +417,12 @@
               },
               {
                 "$ref": "#/$defs/LoopNode"
+              },
+              {
+                "$ref": "#/$defs/MapNode"
+              },
+              {
+                "$ref": "#/$defs/ReduceNode"
               }
             ]
           },
@@ -309,6 +515,8 @@
           "agent": "#/$defs/AgentNode",
           "gate": "#/$defs/GateNode",
           "loop": "#/$defs/LoopNode",
+          "map": "#/$defs/MapNode",
+          "reduce": "#/$defs/ReduceNode",
           "sequence": "#/$defs/SequenceNode",
           "tool": "#/$defs/ToolNode"
         },
@@ -329,6 +537,12 @@
         },
         {
           "$ref": "#/$defs/LoopNode"
+        },
+        {
+          "$ref": "#/$defs/MapNode"
+        },
+        {
+          "$ref": "#/$defs/ReduceNode"
         }
       ],
       "title": "Root"

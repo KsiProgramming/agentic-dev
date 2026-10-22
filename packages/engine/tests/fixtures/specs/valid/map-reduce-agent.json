@@ -1,0 +1,46 @@
+{
+  "spec_version": "0",
+  "id": "map-reduce-agent",
+  "name": "Summarise modules, then write an overview",
+  "description": "Each module is read and summarised by a two-step body, three modules at a time; an agent then writes one overview from all the summaries.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "map",
+        "id": "summarise",
+        "over": "[\"api\", \"engine\", \"runtime\", \"tools\"]",
+        "body": {
+          "type": "sequence",
+          "id": "per-module",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "reader",
+              "role": "Code reader",
+              "instructions": "List the main responsibilities of the module named by your input."
+            },
+            {
+              "type": "agent",
+              "id": "summariser",
+              "role": "Technical writer",
+              "instructions": "Turn the list you receive into a one-paragraph summary."
+            }
+          ]
+        },
+        "max_concurrency": 3
+      },
+      {
+        "type": "reduce",
+        "id": "overview",
+        "from": "summarise",
+        "strategy": "agent",
+        "agent": {
+          "role": "Architect",
+          "instructions": "Write an architecture overview from the module summaries you receive as a JSON array of {item, output}."
+        }
+      }
+    ]
+  }
+}
