@@ -46,6 +46,7 @@ from agentic_engine.events import (
 from agentic_engine.expr import CompiledList, ExpressionError, compile_condition, compile_list
 from agentic_engine.gate import run_gate_node
 from agentic_engine.graph.checkpoint import Checkpointer
+from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.graph.state import MapItem, RunState, RunUpdate
 from agentic_engine.spec import (
     MAX_AGENTS_SPAWNED,
@@ -217,8 +218,12 @@ async def _run_step(
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
     a map)."""
 
-    async def on_event(event: AgentEvent) -> None:
+    async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item)
+
+    # Streamed text is merged so the log gets at most one `text_delta` per 250 ms.
+    buffer = DeltaBuffer(write)
+    on_event = buffer.emit
 
     async def run() -> AgentNodeResult:
         match node:
@@ -233,7 +238,10 @@ async def _run_step(
     if not isinstance(node, GateNode):
         await log.emit(NODE_STARTED, node_id=node.id, item=item)
     try:
-        result = await run()
+        try:
+            result = await run()
+        finally:
+            await buffer.close()
     except asyncio.CancelledError:
         await log.emit(NODE_CANCELLED, node_id=node.id, item=item)
         raise
