@@ -3,7 +3,7 @@
   "id": "bad",
   "name": "Unknown node type",
   "root": {
-    "type": "gate",
-    "id": "approve"
+    "type": "router",
+    "id": "route"
   }
 }

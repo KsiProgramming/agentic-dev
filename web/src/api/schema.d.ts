@@ -322,6 +322,30 @@ export interface components {
             events_url: string;
         };
         /**
+         * GateNode
+         * @description A human decision point: the run pauses here until someone approves or rejects. Its input
+         *     (the previous node's output) is shown to the approver and passes through unchanged.
+         */
+        GateNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "gate";
+            /** Id */
+            id: string;
+            /**
+             * Title
+             * @description What the approver is asked to decide.
+             */
+            title: string;
+            /**
+             * Prompt
+             * @description More guidance for the approver, shown with the input.
+             */
+            prompt?: string | null;
+        };
+        /**
          * GithubErrorDetail
          * @description The `detail` of a 409 from the repos endpoint: `code` says what the user should do.
          */
@@ -425,7 +449,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["SequenceNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"])[];
         };
         /**
          * ToolNode
@@ -483,7 +507,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["SequenceNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"];
         };
         /** WorkspaceOut */
         WorkspaceOut: {
