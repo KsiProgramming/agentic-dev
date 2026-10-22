@@ -48,7 +48,7 @@ Tech-stack choices that apply:
     - a join node `<map>.join` that records the map's result and logs `node_completed`.
   - A per-map `asyncio.Semaphore(max_concurrency)` in the worker keeps at most N items in flight.
   - Item outputs go into `RunState.map_results[map_id][index]` through a reducer, so they are checkpointed per item and ordered by item index whatever order they finish in.
-  - The map's output text is the item outputs joined by `"\n\n"`. Its `data` is `{"items": n, "outputs": [...]}`.
+  - The map's output text is the item outputs joined by `"\n\n"`. Its `data` is `{"items": [...], "outputs": [...]}`, with the item values and outputs in item order.
   - If any item does not complete, the map fails with the failing index and the run stops at the map. Other items already in flight finish first.
   - Body node results are not written into `RunState.results`, because their ids repeat across items. Only their usage is added to `RunState.usage`.
   - Reduce has two strategies:
@@ -74,7 +74,6 @@ Tech-stack choices that apply:
 - Workspace-configurable limits: 2.2. The caps of 8 and 40 are hard-coded here.
 - Tolerating partial failure (`on_item_failure: continue`): not needed for 1.11. Revisit in 3.x.
 - Showing map children in the monitor graph: 2.5 and 5.4. The event list shows them as events.
-- A test that resumes mid-map. LangGraph keeps the writes of finished `Send` tasks, but the user chose engine tests without a resume test for this phase.
 
 ## Decisions
 | Decision | Choice | Rationale |
@@ -91,5 +90,6 @@ Tech-stack choices that apply:
 | Internal node names | `<map>.item` and `<map>.join` | `NodeId` forbids `.`, as for `<loop>.check` in 1.9. |
 
 ## Open questions
-- Should the map's own output text be the joined outputs or a JSON array? Proposal: joined text, so a following agent reads it naturally. Reduce reads the structured `map_results` either way.
-- Should the reduce agent's input include each item's value next to its output? Proposal: yes, `[{item, output}]`, so the agent knows which module each output belongs to.
+- ~~Should the map's own output text be the joined outputs or a JSON array?~~ Resolved: the outputs joined by a blank line, so a following agent reads them naturally. The map's `data` holds `items` and `outputs`, and reduce reads that.
+- ~~Should the reduce agent's input include each item's value next to its output?~~ Resolved: yes, `[{item, output}]`, so the agent knows which module each output belongs to.
+- No platform tool returns a module list as structured data yet. The `repo` tools return text, and CEL has no `split`. So the fixtures use a literal list in `over`, and the Done-when test uses a fake `repo.list_modules` tool that returns `data.modules`. Phase 1.11 needs a way to list modules: a tool that returns structured content, or an agent with structured output.

@@ -29,6 +29,7 @@ User choice: engine unit tests on the fake runtime are the proof for this phase.
   - Each item has one `map_item_started` and one `map_item_completed`.
   - Body events carry `payload.item`.
   - `seq` runs 1..n with no gaps.
+- [ ] `test_map.py`, resume (added during implementation): after a cut-off once item 0 has finished, `resume_workflow` runs only items 1 and 2 again (AC-8).
 - [ ] `test_map.py`, usage: the run's usage sums every item's usage and the reduce agent's usage.
 - [ ] The existing engine, store, API, worker and sandbox suites still pass. Tests change only where the `Node` union widened.
 - [ ] `ruff check`, `ruff format --check`, and strict `pyright`/`mypy` are clean across the workspace.

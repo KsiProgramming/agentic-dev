@@ -1,0 +1,31 @@
+{
+  "spec_version": "0",
+  "id": "map-modules",
+  "name": "Describe each module, then join",
+  "description": "A writer describes three modules, two at a time; their descriptions are joined in module order.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "map",
+        "id": "describe",
+        "over": "[\"packages/api\", \"packages/engine\", \"web\"]",
+        "body": {
+          "type": "agent",
+          "id": "module-writer",
+          "role": "Technical writer",
+          "instructions": "Write a short description of the repository module whose path is your input."
+        },
+        "max_concurrency": 2
+      },
+      {
+        "type": "reduce",
+        "id": "join",
+        "from": "describe",
+        "strategy": "concat",
+        "separator": "\n\n---\n\n"
+      }
+    ]
+  }
+}

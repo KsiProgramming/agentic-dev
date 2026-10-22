@@ -1,21 +1,22 @@
-"""Sandboxed CEL conditions (`loop.until`; later `router` and input mapping).
+"""Sandboxed CEL expressions: conditions (`loop.until`; later `router`) and lists (`map.over`).
 
-A condition is CEL text from the spec, run with `cel-python`. It can only read the variables it is
-given and call CEL's standard functions and macros: no custom functions are registered, so a
-condition never runs platform code, and `matches` uses RE2, which runs in linear time. The values
+An expression is CEL text from the spec, run with `cel-python`. It can only read the variables it
+is given and call CEL's standard functions and macros: no custom functions are registered, so an
+expression never runs platform code, and `matches` uses RE2, which runs in linear time. The values
 it reads (an agent's output, a tool's data) are data, never instructions.
 
-`compile_condition` parses a condition once and checks that it names only known variables and
-functions, so a bad condition fails when the spec is validated, not mid-run.
+`compile_condition` and `compile_list` parse an expression once and check that it names only
+known variables and functions, so a bad expression fails when the spec is validated, not mid-run.
 """
 
+import json
 from collections.abc import Mapping
 from typing import Final, cast
 
 import celpy
 import lark
 from celpy import celtypes
-from celpy.adapter import json_to_cel
+from celpy.adapter import CELJSONEncoder, json_to_cel
 from celpy.celparser import CELParseError
 from celpy.evaluation import CELEvalError, CELSyntaxError, CELUnsupportedError, base_functions
 from pydantic import JsonValue
@@ -29,13 +30,17 @@ CONDITION_VARIABLES: Final = frozenset({"last", "iteration", "results"})
 ran), `iteration` (int, iterations completed, from 1) and `results` (map: node id → `{status,
 text, data}`, the latest result of each node run so far)."""
 
+LIST_VARIABLES: Final = frozenset({"last", "results"})
+"""What a map's `over` can read: `last` (string, the map's input) and `results` (as for a
+condition)."""
+
 _MACROS: Final = frozenset({"has", "all", "exists", "exists_one", "map", "filter"})
 _FUNCTIONS: Final = frozenset(n for n in base_functions if not n.startswith("_") and n != "!_")
 _BINDING_MACROS: Final = frozenset({"all", "exists", "exists_one", "map", "filter"})
 
 
 class ExpressionError(ValueError):
-    """A condition that does not parse, names something unknown, or fails when evaluated."""
+    """An expression that does not parse, names something unknown, or fails when evaluated."""
 
     def __init__(self, source: str, message: str, column: int | None = None) -> None:
         where = f" at column {column}" if column is not None else ""
@@ -45,21 +50,14 @@ class ExpressionError(ValueError):
         self.column = column
 
 
-class CompiledCondition:
-    """A parsed and checked condition, ready to evaluate many times."""
+class CompiledExpression:
+    """A parsed and checked expression, ready to evaluate many times."""
 
     def __init__(self, source: str, program: celpy.Runner) -> None:
         self.source = source
         self._program = program
 
-    def evaluate(self, *, last: str, iteration: int, results: Mapping[str, JsonValue]) -> bool:
-        """Evaluate against the loop's state. Raises `ExpressionError` if evaluation fails or the
-        result is not a bool."""
-        activation: dict[str, celtypes.Value] = {
-            "last": celtypes.StringType(last),
-            "iteration": celtypes.IntType(iteration),
-            "results": json_to_cel(dict(results)),
-        }
+    def _evaluate(self, activation: dict[str, celtypes.Value]) -> celtypes.Value:
         try:
             value = self._program.evaluate(activation)
         except CELEvalError as e:
@@ -68,11 +66,42 @@ class CompiledCondition:
             raise ExpressionError(self.source, str(e)) from e
         if isinstance(value, CELEvalError):
             raise ExpressionError(self.source, _eval_message(value))
+        return value
+
+
+class CompiledCondition(CompiledExpression):
+    """A condition: an expression that must evaluate to a bool."""
+
+    def evaluate(self, *, last: str, iteration: int, results: Mapping[str, JsonValue]) -> bool:
+        """Evaluate against the loop's state. Raises `ExpressionError` if evaluation fails or the
+        result is not a bool."""
+        value = self._evaluate(
+            {
+                "last": celtypes.StringType(last),
+                "iteration": celtypes.IntType(iteration),
+                "results": json_to_cel(dict(results)),
+            }
+        )
         if not isinstance(value, celtypes.BoolType):
             raise ExpressionError(
                 self.source, f"condition must be a bool, got {type(value).__name__}"
             )
         return bool(value)
+
+
+class CompiledList(CompiledExpression):
+    """A list expression: one that must evaluate to a list, whose items are returned as JSON."""
+
+    def evaluate(self, *, last: str, results: Mapping[str, JsonValue]) -> list[JsonValue]:
+        """Evaluate against the run's state. Raises `ExpressionError` if evaluation fails or the
+        result is not a list."""
+        value = self._evaluate(
+            {"last": celtypes.StringType(last), "results": json_to_cel(dict(results))}
+        )
+        if not isinstance(value, celtypes.ListType):
+            raise ExpressionError(self.source, f"must be a list, got {type(value).__name__}")
+        items = json.loads(json.dumps(value, cls=CELJSONEncoder))
+        return cast(list[JsonValue], items)
 
 
 _environment: celpy.Environment | None = None
@@ -91,9 +120,18 @@ def compile_condition(
 ) -> CompiledCondition:
     """Parse `source` and check it only names `variables` and CEL's standard functions. Raises
     `ExpressionError` with the column of the problem, if known."""
+    return CompiledCondition(source, _compile(source, variables, "condition"))
+
+
+def compile_list(source: str, variables: frozenset[str] = LIST_VARIABLES) -> CompiledList:
+    """As `compile_condition`, for an expression that must evaluate to a list."""
+    return CompiledList(source, _compile(source, variables, "expression"))
+
+
+def _compile(source: str, variables: frozenset[str], kind: str) -> celpy.Runner:
     if len(source) > MAX_EXPRESSION_LENGTH:
         raise ExpressionError(
-            source[:40] + "…", f"condition is longer than {MAX_EXPRESSION_LENGTH} characters"
+            source[:40] + "…", f"{kind} is longer than {MAX_EXPRESSION_LENGTH} characters"
         )
     env = _env()
     try:
@@ -101,7 +139,7 @@ def compile_condition(
     except CELParseError as e:
         raise ExpressionError(source, "syntax error", e.column) from e
     _check_names(source, ast, variables)
-    return CompiledCondition(source, env.program(ast))  # pyright: ignore[reportUnknownMemberType]
+    return env.program(ast)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _check_names(source: str, ast: _Ast, variables: frozenset[str]) -> None:

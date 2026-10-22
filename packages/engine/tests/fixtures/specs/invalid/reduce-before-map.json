@@ -1,0 +1,29 @@
+{
+  "spec_version": "0",
+  "id": "reduce-before-map",
+  "name": "Reduce first",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "reduce",
+        "id": "join",
+        "from": "each",
+        "strategy": "concat"
+      },
+      {
+        "type": "map",
+        "id": "each",
+        "over": "[\"packages/api\", \"packages/engine\", \"web\"]",
+        "body": {
+          "type": "agent",
+          "id": "writer",
+          "role": "Writer",
+          "instructions": "Describe the module named by your input."
+        },
+        "max_concurrency": 2
+      }
+    ]
+  }
+}

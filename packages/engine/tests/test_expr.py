@@ -1,13 +1,23 @@
-"""Sandboxed CEL conditions (phase 1.9)."""
+"""Sandboxed CEL conditions (phase 1.9) and list expressions (phase 1.10)."""
 
 import pytest
 from pydantic import JsonValue
 
-from agentic_engine.expr import MAX_EXPRESSION_LENGTH, ExpressionError, compile_condition
+from agentic_engine.expr import (
+    MAX_EXPRESSION_LENGTH,
+    ExpressionError,
+    compile_condition,
+    compile_list,
+)
 
 RESULTS: dict[str, JsonValue] = {
     "draft": {"status": "completed", "text": "v2", "data": None},
     "review": {"status": "completed", "text": "APPROVED", "data": {"score": 9}},
+    "list_modules": {
+        "status": "completed",
+        "text": "api\nengine",
+        "data": {"modules": ["api", "engine", "web"], "meta": {"depth": 1}},
+    },
 }
 
 
@@ -82,3 +92,38 @@ def test_evaluation_error_is_short_and_clear() -> None:
 
     assert "no such member in mapping: 'missing'" in exc.value.message
     assert "activation" not in str(exc.value)
+
+
+def items(source: str, *, last: str = "brief") -> list[JsonValue]:
+    return compile_list(source).evaluate(last=last, results=RESULTS)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("results.list_modules.data.modules", ["api", "engine", "web"]),
+        ('["a", "b"]', ["a", "b"]),
+        ("[]", []),
+        ('[1, true, {"k": null}]', [1, True, {"k": None}]),
+        ('results.list_modules.data.modules.filter(m, m != "web")', ["api", "engine"]),
+        ("[last, last]", ["brief", "brief"]),
+        ("[results.list_modules.data.meta]", [{"depth": 1}]),
+    ],
+)
+def test_list_evaluates_to_json(source: str, expected: list[JsonValue]) -> None:
+    assert items(source) == expected
+
+
+def test_list_must_be_a_list() -> None:
+    with pytest.raises(ExpressionError, match="must be a list, got StringType"):
+        items("results.list_modules.text")
+
+
+def test_list_cannot_read_iteration() -> None:
+    with pytest.raises(ExpressionError, match=r"unknown variable 'iteration' \(known: last, re"):
+        compile_list("[iteration]")
+
+
+def test_list_evaluation_error_is_clear() -> None:
+    with pytest.raises(ExpressionError, match="no such member in mapping: 'modules'"):
+        items("results.review.data.modules")

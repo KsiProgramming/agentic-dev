@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 1.10 `map` and `reduce` primitives:
+  - **`map` node.** A spec node (`{"type": "map", "id", "over", "body", "max_concurrency"}`) runs its body once per item of the CEL list `over`, at most `max_concurrency` (1 to 8) at a time and at most 40 items. Its result keeps item order (`data`: `items`, `outputs`). The body can hold only agent, tool and sequence nodes, and a map cannot be inside a loop (`map_errors`, `loop_errors`).
+  - **`reduce` node.** A spec node (`{"type": "reduce", "id", "from", "strategy"}`) combines the outputs of an earlier map: `concat` (optional `separator`) or `agent` (`agent`: role, instructions, provider, model), whose input is the JSON array `[{item, output}]`.
+  - **CEL lists.** `compile_list` and `CompiledList.evaluate` (`agentic_engine.expr`) evaluate an expression over `last` and `results` to a JSON list.
+  - **Engine.** A map compiles to an entry node, an `<id>.item` worker started once per item with LangGraph `Send`, and an `<id>.join` node. `RunState` gains `map_results`, checkpointed per item. The new `map_item_started` and `map_item_completed` events wrap each item, and the events of nodes inside a map carry `item`. The spec limits `MAX_AGENTS_ALIVE` (8) and `MAX_AGENTS_SPAWNED` (40) are named constants.
+  - **Demo.** New spec fixtures `map-modules.json` and `map-reduce-agent.json`, and a README section on map and reduce. The exported schema and the API client include both nodes.
 - Phase 1.9 `loop` primitive and CEL expressions:
   - **CEL conditions** (`agentic_engine.expr`, using `cel-python`). `compile_condition` parses a condition once and rejects syntax errors, unknown variables and unknown functions, with the column. `CompiledCondition.evaluate` returns a bool or raises `ExpressionError` with a short message. No custom functions are registered.
   - **`loop` node.** A spec node (`{"type": "loop", "id", "body", "until", "max_iterations"}`, at most 5 iterations) runs its body until `until` is true or `max_iterations` is reached. Both stops complete the loop, with `stop_reason` and `iterations` in its result. The spec rejects an invalid `until`, and a gate, writer, publisher or loop inside a loop body (`loop_errors`). The exported schema and the API client include it.

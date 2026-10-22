@@ -1,0 +1,20 @@
+{
+  "spec_version": "0",
+  "id": "map-with-writer",
+  "name": "Writer in a map",
+  "root": {
+    "type": "map",
+    "id": "each",
+    "over": "[\"packages/api\", \"packages/engine\", \"web\"]",
+    "body": {
+      "type": "agent",
+      "id": "writer",
+      "role": "Writer",
+      "instructions": "Describe the module named by your input.",
+      "tools": [
+        "repo.write_file"
+      ]
+    },
+    "max_concurrency": 2
+  }
+}

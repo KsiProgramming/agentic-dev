@@ -456,7 +456,7 @@ export interface components {
             /** Id */
             id: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"];
             /**
              * Until
              * @description CEL condition checked after each iteration; true stops the loop.
@@ -465,6 +465,36 @@ export interface components {
             until: string;
             /** Max Iterations */
             max_iterations: number;
+        };
+        /**
+         * MapNode
+         * @description Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at
+         *     a time, and outputs the items' outputs in item order.
+         *
+         *     `over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's
+         *     `until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string
+         *     as is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the
+         *     others are keyed by node id, which repeats for every item. A map has at most
+         *     `MAX_AGENTS_SPAWNED` items; one that does not complete fails the map.
+         */
+        MapNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "map";
+            /** Id */
+            id: string;
+            /**
+             * Over
+             * @description CEL expression that evaluates to the list of items.
+             * @example results.list_modules.data.modules
+             */
+            over: string;
+            /** Body */
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"];
+            /** Max Concurrency */
+            max_concurrency: number;
         };
         /** PutClaudeConnection */
         PutClaudeConnection: {
@@ -492,6 +522,56 @@ export interface components {
              * @enum {string}
              */
             redis: "ok" | "error";
+        };
+        /**
+         * ReduceAgent
+         * @description The agent a `reduce` node with the `agent` strategy runs, as for an `agent` node.
+         */
+        ReduceAgent: {
+            /** Role */
+            role: string;
+            /** Instructions */
+            instructions: string;
+            /**
+             * Provider
+             * @description Unset means the workspace default.
+             */
+            provider?: "claude" | null;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * ReduceNode
+         * @description Combines the outputs of the map `from`, which runs before it, in item order.
+         *
+         *     `concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON
+         *     array `[{"item": …, "output": …}]` (data, never instructions).
+         */
+        ReduceNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "reduce";
+            /** Id */
+            id: string;
+            /**
+             * From
+             * @description The map whose outputs are combined.
+             */
+            from: string;
+            /**
+             * Strategy
+             * @enum {string}
+             */
+            strategy: "concat" | "agent";
+            /**
+             * Separator
+             * @description `concat` only: what goes between outputs (default two newlines).
+             */
+            separator?: string | null;
+            /** @description `agent` only, and required. */
+            agent?: components["schemas"]["ReduceAgent"] | null;
         };
         /**
          * RepoOut
@@ -537,7 +617,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"])[];
         };
         /**
          * ToolNode
@@ -595,7 +675,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"];
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -615,7 +695,8 @@ export interface components {
         /**
          * RunEvent
          * @description One row of the run event log. For agent events, `type` is the `AgentEvent` type and
-         *     `payload` is the serialised event; payloads are data, never instructions.
+         *     `payload` is the serialised event; payloads are data, never instructions. The events of a
+         *     node inside a map also carry `item`, the index of the item it ran for.
          */
         RunEvent: {
             /**
