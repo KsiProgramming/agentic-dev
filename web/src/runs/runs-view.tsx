@@ -9,8 +9,9 @@ import { apiBaseUrl } from "@/api/client";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Button } from "@/components/ui/button";
-import { DEFAULT_WORKSPACE_ID } from "@/settings/claude-connection";
+import { DEFAULT_WORKSPACE_ID } from "@/workspace";
 
+import { NewRunSheet } from "./new-run/new-run-sheet";
 import { filtersToQuery, isFiltered, NO_FILTERS, parseFilters, type RunFilters } from "./filters";
 import { RunFiltersBar } from "./run-filters";
 import { RunsList } from "./runs-list";
@@ -52,6 +53,8 @@ export function RunsView({
   );
 
   const [announcement, setAnnouncement] = useState("");
+  const [newRun, setNewRun] = useState(false);
+  const [newRunTemplate, setNewRunTemplate] = useState<string | null>(null);
   useRunsStream({
     workspaceId,
     baseUrl,
@@ -77,13 +80,19 @@ export function RunsView({
         title="Runs"
         description="Every run in this workspace, newest first."
         actions={
-          <Button asChild>
-            <Link href="/templates">
-              <PlusIcon aria-hidden="true" data-icon="inline-start" />
-              New run
-            </Link>
+          <Button type="button" onClick={() => setNewRun(true)}>
+            <PlusIcon aria-hidden="true" data-icon="inline-start" />
+            New run
           </Button>
         }
+      />
+      <NewRunSheet
+        open={newRun}
+        onOpenChange={setNewRun}
+        templateId={newRunTemplate}
+        onTemplateChange={setNewRunTemplate}
+        workspaceId={workspaceId}
+        baseUrl={baseUrl}
       />
       <RunFiltersBar
         filters={filters}

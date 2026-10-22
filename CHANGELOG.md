@@ -9,6 +9,16 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 2.6 (part A) start screen and settings:
+  - **Start screen.** `/templates` is a gallery of template cards from `GET /templates`, each with a "Requires" line showing which connections are there. A card (or `?template=<id>`, or "New run" on the Runs page) opens the "New run" sheet (`web/src/runs/new-run/`):
+    - a "Before you start" checklist of the connections the template needs, with the Claude key entered in place and GitHub connected through an install that comes back to the sheet;
+    - a searchable repo combobox, with the last used repo preselected and an "Add repos on GitHub" link;
+    - the template's options, generated from its JSON Schema (`web/src/forms/schema-form/`), checked with zod and `react-hook-form`; a server 422 is shown on the option it names.
+  - **Settings.** Claude and GitHub are connection cards with a status (Connected, Not connected, Needs attention, Unavailable). Remove and Disconnect ask for confirmation in a dialog, the GitHub card lists its repositories on demand and links to "Manage on GitHub", and a removed installation offers Reconnect.
+  - **API.** `PUT …/connections/claude` checks the key with Anthropic first (one `models.list` call): `422 invalid_key`, `502 verify_unavailable`, nothing stored. `GET /templates` lists the connections each template `requires`. GitHub connections have a `manage_url` (Alembic `0012_connection_account_type`), and the install accepts a `return_to` page.
+  - **Fakes for dev and e2e.** `AGENTIC_GITHUB=fake` stands in a GitHub App whose repos are bare repos seeded in compose (`scripts/seed_fixture_repos.sh`), and `CLAUDE_KEY_CHECK=fake` accepts `sk-ant-test-*` keys. Both are refused with `AGENTIC_ENV=production`; CI's e2e job turns them on, and a Playwright global setup connects the workspace with them.
+  - **Components.** shadcn `Command`, `Popover`, `Dialog`, `Field`, `Checkbox` and `Separator`; TanStack Query hooks for templates, connections and repos (`web/src/api/queries.ts`).
+  - **Removed** the "Sample run" JSON form and the hard-coded docs card from `/templates` (`POST /runs` still accepts a `workflow`).
 - Phase 2.5 run console v2 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
   - **Run console.** `/runs/{id}` (`web/src/runs/console/`) shows a header (live status, workflow, repo and branch, started, live duration, PR link, Copy run id, Cancel) and two tabs, Timeline and Raw events, kept in the URL (`?tab=raw`).
   - **Timeline.**

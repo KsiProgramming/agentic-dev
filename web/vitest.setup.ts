@@ -10,3 +10,6 @@ globalThis.ResizeObserver ??= class {
   unobserve() {}
   disconnect() {}
 };
+
+// The command menu (cmdk) scrolls the active item into view; jsdom has no layout.
+Element.prototype.scrollIntoView ??= function () {};

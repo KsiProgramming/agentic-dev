@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { DOCS_DEMO, pretendConnections } from "./connections";
 import { startRun, GATE, WRITER } from "./runs";
 
 /** Every page renders in the shell with no horizontal page scroll (roadmap 2.2), and the main
@@ -65,9 +66,38 @@ test("runs", async ({ page }) => {
 
 test("templates", async ({ page }) => {
   await page.goto("/templates");
-  await expect(page.getByRole("button", { name: "Start sample run" })).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0); // the docs card has loaded
+  await expect(page.getByTestId("template-card").first()).toBeVisible();
+  await expect(page.getByRole("status")).toHaveCount(0); // the gallery has loaded
   await checkPage(page, "templates");
+});
+
+/** The sheet is a dialog over the page: it must fit the viewport too, and scroll inside. */
+async function checkSheet(page: Page, name: string) {
+  const sheet = page.getByTestId("new-run-sheet");
+  await expect(sheet).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  const box = (await sheet.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  await expect(sheet.getByRole("button", { name: "Start run" })).toBeInViewport();
+  await screenshot(page, name);
+}
+
+test("the New run sheet, ready to start", async ({ page }) => {
+  await page.goto("/templates?template=generate-docs");
+  const sheet = page.getByTestId("new-run-sheet");
+  await sheet.getByRole("combobox", { name: "Repository" }).click();
+  await page.getByRole("option", { name: new RegExp(DOCS_DEMO) }).click();
+  await sheet.getByLabel("Extra instructions (optional)").fill("Keep each page short.");
+  await checkSheet(page, "new-run-sheet");
+});
+
+test("the New run sheet, before connecting", async ({ page }) => {
+  await pretendConnections(page, "none");
+  await page.goto("/templates?template=generate-docs");
+  await expect(page.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+  await checkSheet(page, "new-run-sheet-checklist");
 });
 
 test("settings", async ({ page }) => {
@@ -75,6 +105,21 @@ test("settings", async ({ page }) => {
   await expect(page.getByTestId("claude-status")).toBeVisible();
   await expect(page.getByTestId("github-status")).toBeVisible();
   await checkPage(page, "settings");
+});
+
+test("settings, not connected", async ({ page }) => {
+  await pretendConnections(page, "none");
+  await page.goto("/settings");
+  await expect(page.getByLabel("Claude API key")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Install GitHub App" })).toBeVisible();
+  await checkPage(page, "settings-not-connected");
+});
+
+test("settings, GitHub needs attention", async ({ page }) => {
+  await pretendConnections(page, "github-gone");
+  await page.goto("/settings");
+  await expect(page.getByRole("button", { name: "Reconnect" })).toBeVisible();
+  await checkPage(page, "settings-needs-attention");
 });
 
 test("a finished run", async ({ page, request }) => {

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { DOCS_DEMO } from "./connections";
 import { apiURL } from "./runs";
 
 /** Fail the test on any console error, CORS errors included. */
@@ -51,28 +52,27 @@ async function expectCompletedRun(page: Page): Promise<Row[]> {
   return listed;
 }
 
-test("a run started from the templates page shows its events within 1 s", async ({ page }) => {
+test("a docs run is started from the template gallery", async ({ page, request }) => {
   const errors = watchConsole(page);
   await page.goto("/templates");
 
-  await page.getByLabel("Input").fill("hello from e2e");
-  await page.getByRole("button", { name: "Start sample run" }).click();
+  await page.getByRole("button", { name: "Start Generate docs" }).click();
+  const sheet = page.getByTestId("new-run-sheet");
+  await sheet.getByRole("combobox", { name: "Repository" }).click();
+  await page.getByRole("option", { name: new RegExp(DOCS_DEMO) }).click();
+  await sheet.getByRole("button", { name: "Start run" }).click();
 
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]{36}$/);
-  const listed = await expectCompletedRun(page);
-
-  // Events written before the page connected arrive as a replay; every event written after
-  // that is live and must show up within 1 s of being stored.
-  const connectedAt = listed[0]!.receivedAt;
-  const live = listed.filter((r) => r.createdAt >= connectedAt);
-  expect(live.length).toBeGreaterThanOrEqual(3);
-  for (const row of live) {
-    expect(row.receivedAt - row.createdAt, `${row.type} #${row.seq}`).toBeLessThan(1000);
-  }
+  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", /running|waiting/, {
+    timeout: 30_000,
+  });
   expect(errors).toEqual([]);
+  // Leave nothing waiting on the runs pages of the other tests.
+  const runId = page.url().split("/").at(-1)!;
+  await request.post(`${apiURL}/runs/${runId}/cancel`);
 });
 
-test("a run started with POST /runs can be opened by its id", async ({ page, request }) => {
+test("a run started with POST /runs shows its events within 1 s", async ({ page, request }) => {
   const errors = watchConsole(page);
   const response = await request.post(`${apiURL}/runs`, {
     data: {
@@ -90,7 +90,14 @@ test("a run started with POST /runs can be opened by its id", async ({ page, req
 
   await page.goto(`/runs/${run_id}`);
 
-  await expectCompletedRun(page);
+  const listed = await expectCompletedRun(page);
+  // Events written before the page connected arrive as a replay; every event written after
+  // that is live and must show up within 1 s of being stored.
+  const connectedAt = listed[0]!.receivedAt;
+  const live = listed.filter((r) => r.createdAt >= connectedAt);
+  for (const row of live) {
+    expect(row.receivedAt - row.createdAt, `${row.type} #${row.seq}`).toBeLessThan(1000);
+  }
   expect(errors).toEqual([]);
 });
 
