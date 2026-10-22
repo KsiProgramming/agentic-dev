@@ -116,6 +116,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun
+         * @description Queue a new run with the same workflow spec, input, repo and workspace as the ended run
+         *     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
+         *     not changed. The spec is the one the original ran, even if its template has changed since.
+         */
+        post: operations["rerunRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/approvals": {
         parameters: {
             query?: never;
@@ -228,8 +250,8 @@ export interface paths {
         get?: never;
         /**
          * Put Claude
-         * @description Store the workspace's Claude API key, encrypted, replacing any stored one. The
-         *     workspace's runs on Claude use it.
+         * @description Check the workspace's Claude API key with Anthropic, then store it, encrypted, replacing
+         *     any stored one. The workspace's runs on Claude use it.
          */
         put: operations["putClaudeConnection"];
         post?: never;
@@ -251,7 +273,8 @@ export interface paths {
         put?: never;
         /**
          * Start Install
-         * @description An install URL for the GitHub App. Installing it links the installation to the workspace.
+         * @description An install URL for the GitHub App. Installing it links the installation to the workspace,
+         *     then sends the browser to `return_to` (the settings page by default).
          */
         post: operations["startGithubInstall"];
         delete?: never;
@@ -270,7 +293,8 @@ export interface paths {
         /**
          * Complete Install
          * @description GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the
-         *     web app's settings page with `github=connected`, or `github=error` and a `reason`.
+         *     page that started the install (the web app's settings page by default) with
+         *     `github=connected`, or `github=error` and a `reason`.
          */
         get: operations["completeGithubInstall"];
         put?: never;
@@ -383,7 +407,10 @@ export interface components {
              * @enum {string}
              */
             decision: "approve" | "reject";
-            /** Comment */
+            /**
+             * Comment
+             * @description Why, recorded with the decision; a rejection's becomes the run's reason.
+             */
             comment?: string | null;
         };
         /** ApprovalResponse */
@@ -423,6 +450,17 @@ export interface components {
             status: "cancelling";
         };
         /**
+         * ConnectionErrorDetail
+         * @description The `detail` of a refused connection: `code` says what went wrong (`invalid_key`,
+         *     `verify_unavailable`), `message` says it for people.
+         */
+        ConnectionErrorDetail: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /**
          * ConnectionOut
          * @description A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.
          *
@@ -443,6 +481,11 @@ export interface components {
             key_hint?: string | null;
             /** Account Login */
             account_login?: string | null;
+            /**
+             * Manage Url
+             * @description GitHub: the installation's settings page, where its owner picks the repos it reaches. Unset for connections made before the account type was recorded.
+             */
+            manage_url?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -714,6 +757,8 @@ export interface components {
             /** Ref */
             ref?: string | null;
         };
+        /** @enum {string} */
+        Requirement: "claude" | "github";
         /** RunDetail */
         RunDetail: {
             /**
@@ -846,6 +891,14 @@ export interface components {
             /** Steps */
             steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"])[];
         };
+        /** StartInstall */
+        StartInstall: {
+            /**
+             * Return To
+             * @description Where the web app lands after the install, e.g. `/templates?template=generate-docs`. Defaults to the settings page.
+             */
+            return_to?: string | null;
+        };
         /** TemplateOut */
         TemplateOut: {
             /** Id */
@@ -861,6 +914,11 @@ export interface components {
             parameters: {
                 [key: string]: unknown;
             };
+            /**
+             * Requires
+             * @description Connections the workspace needs to run it: `claude` for its agents, `github` for a repo from the GitHub App's installation.
+             */
+            requires: components["schemas"]["Requirement"][];
         };
         /**
          * TemplateRun
@@ -1229,6 +1287,51 @@ export interface operations {
             };
         };
     };
+    rerunRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateRunResponse"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     approveRun: {
         parameters: {
             query?: never;
@@ -1455,13 +1558,22 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description `invalid_key`: Anthropic refused the key. (Or the body is invalid.) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ConnectionErrorDetail"];
+                };
+            };
+            /** @description `verify_unavailable`: Anthropic could not be reached to check the key; nothing was stored */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionErrorDetail"];
                 };
             };
             /** @description No master key is configured */
@@ -1518,7 +1630,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartInstall"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

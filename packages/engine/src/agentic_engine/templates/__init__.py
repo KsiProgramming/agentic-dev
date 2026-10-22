@@ -7,12 +7,16 @@ for now; saved and versioned templates come later (4.7, 8.9).
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, JsonValue
 
 from agentic_engine.spec import WorkflowSpec
 from agentic_engine.templates.docs import DocsParams, build_docs_spec
+
+type Requirement = Literal["claude", "github"]
+"""A connection a workspace needs before it can run a template: `claude` for its agents,
+`github` for a repo picked from the GitHub App's installation and for `github.*` tools."""
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,7 @@ class Template[P: BaseModel]:
     description: str
     params: type[P]
     build: Callable[[P], WorkflowSpec]
+    requires: tuple[Requirement, ...] = ()
 
     def parameters_schema(self) -> dict[str, Any]:
         """The JSON Schema of the template's options."""
@@ -40,6 +45,7 @@ TEMPLATES: tuple[Template[Any], ...] = (
         "request after you approve.",
         params=DocsParams,
         build=build_docs_spec,
+        requires=("claude", "github"),
     ),
 )
 
@@ -48,4 +54,11 @@ def get_template(template_id: str) -> Template[Any] | None:
     return next((t for t in TEMPLATES if t.id == template_id), None)
 
 
-__all__ = ["TEMPLATES", "DocsParams", "Template", "build_docs_spec", "get_template"]
+__all__ = [
+    "TEMPLATES",
+    "DocsParams",
+    "Requirement",
+    "Template",
+    "build_docs_spec",
+    "get_template",
+]

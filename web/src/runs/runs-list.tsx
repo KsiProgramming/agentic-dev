@@ -1,10 +1,17 @@
 "use client";
 
-import { ExternalLinkIcon } from "lucide-react";
+import { EllipsisIcon, ExternalLinkIcon, RotateCcwIcon } from "lucide-react";
 import Link from "next/link";
 
 import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -15,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { canRerun, RerunOf, useRerun } from "./rerun";
 import {
   badgeStatus,
   formatAbsolute,
@@ -46,6 +54,47 @@ function PrLink({ url }: { url: string }) {
   );
 }
 
+/** A waiting run's way to its decision: the console, where the gate is reviewed. */
+function ReviewLink({ run }: { run: RunSummary }) {
+  if (run.status !== "waiting") return null;
+  return (
+    <Button asChild size="xs" variant="outline" className="relative z-10">
+      <Link href={`/runs/${run.id}`}>
+        Review
+        <span className="sr-only"> {run.workflow.name}</span>
+      </Link>
+    </Button>
+  );
+}
+
+/** A run's other actions, in a "⋯" menu: Rerun, for an ended run. */
+function RunMenu({ run, baseUrl }: { run: RunSummary; baseUrl?: string }) {
+  const rerun = useRerun({ workspaceId: run.workspace_id, baseUrl });
+  if (!canRerun(badgeStatus(run.status))) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="relative z-10"
+          disabled={rerun.isPending}
+          aria-label={`Actions for ${run.workflow.name} ${run.id.slice(0, 8)}`}
+        >
+          <EllipsisIcon aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => rerun.mutate(run.id)}>
+          <RotateCcwIcon aria-hidden="true" />
+          Rerun
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function Started({ run, now }: { run: RunSummary; now: number }) {
   const at = run.started_at ?? run.created_at;
   return (
@@ -74,10 +123,12 @@ export function RunsTable({
   runs,
   now,
   label,
+  baseUrl,
 }: {
   runs: RunSummary[];
   now: number;
   label: string;
+  baseUrl?: string;
 }) {
   return (
     <Table aria-label={label} className="text-[13px]">
@@ -89,18 +140,27 @@ export function RunsTable({
           <TableHead>Started</TableHead>
           <TableHead>Duration</TableHead>
           <TableHead>Pull request</TableHead>
+          <TableHead className="w-10">
+            <span className="sr-only">Actions</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {runs.map((run) => (
           <TableRow key={run.id} data-run-id={run.id} className="relative">
             <TableCell>
-              <StatusBadge status={badgeStatus(run.status)} />
+              <div className="flex items-center gap-2">
+                <StatusBadge status={badgeStatus(run.status)} />
+                <ReviewLink run={run} />
+              </div>
             </TableCell>
             <TableCell className="max-w-72 truncate">
               <Link href={`/runs/${run.id}`} className={STRETCHED}>
                 {run.workflow.name}
               </Link>
+              {run.rerun_of ? (
+                <RerunOf runId={run.rerun_of} className="block text-xs text-muted-foreground" />
+              ) : null}
             </TableCell>
             <TableCell>
               <Repo run={run} />
@@ -118,6 +178,9 @@ export function RunsTable({
                 <span className="text-muted-foreground">—</span>
               )}
             </TableCell>
+            <TableCell className="text-right">
+              <RunMenu run={run} baseUrl={baseUrl} />
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -126,15 +189,21 @@ export function RunsTable({
 }
 
 /** One run as a card, below `md`. The card opens the run. */
-export function RunCard({ run, now }: { run: RunSummary; now: number }) {
+export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; baseUrl?: string }) {
   return (
     <Card size="sm" data-run-id={run.id} className="relative px-3 hover:bg-muted/50">
       <div className="flex items-start justify-between gap-2">
         <Link href={`/runs/${run.id}`} className={cn(STRETCHED, "min-w-0 truncate")}>
           {run.workflow.name}
         </Link>
-        <StatusBadge status={badgeStatus(run.status)} className="shrink-0" />
+        <div className="flex shrink-0 items-center gap-1">
+          <StatusBadge status={badgeStatus(run.status)} />
+          <RunMenu run={run} baseUrl={baseUrl} />
+        </div>
       </div>
+      {run.rerun_of ? (
+        <RerunOf runId={run.rerun_of} className="text-xs text-muted-foreground" />
+      ) : null}
       <Repo run={run} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Started run={run} now={now} />
@@ -143,22 +212,35 @@ export function RunCard({ run, now }: { run: RunSummary; now: number }) {
           <Duration run={run} now={now} />
         </span>
         {run.pr_url ? <PrLink url={run.pr_url} /> : null}
+        <span className="ml-auto">
+          <ReviewLink run={run} />
+        </span>
       </div>
     </Card>
   );
 }
 
 /** Runs as a table from `md` and as cards below. */
-export function RunsList({ runs, now, label }: { runs: RunSummary[]; now: number; label: string }) {
+export function RunsList({
+  runs,
+  now,
+  label,
+  baseUrl,
+}: {
+  runs: RunSummary[];
+  now: number;
+  label: string;
+  baseUrl?: string;
+}) {
   return (
     <>
       <div className="hidden md:block">
-        <RunsTable runs={runs} now={now} label={label} />
+        <RunsTable runs={runs} now={now} label={label} baseUrl={baseUrl} />
       </div>
       <ul aria-label={label} className="flex flex-col gap-2 md:hidden">
         {runs.map((run) => (
           <li key={run.id}>
-            <RunCard run={run} now={now} />
+            <RunCard run={run} now={now} baseUrl={baseUrl} />
           </li>
         ))}
       </ul>

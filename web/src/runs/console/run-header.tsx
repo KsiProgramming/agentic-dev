@@ -9,6 +9,7 @@ import { StatusBadge, type RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+import { RerunOf } from "../rerun";
 import { formatAbsolute, formatDuration, formatRelative, repoLabel } from "../summaries";
 import type { RunDetail } from "../use-run-detail";
 
@@ -85,6 +86,11 @@ export function RunHeader({
               <span data-testid="run-duration" className="tabular-nums">
                 {formatDuration(facts.durationMs)}
               </span>
+            </Meta>
+          ) : null}
+          {run?.rerun_of ? (
+            <Meta>
+              <RerunOf runId={run.rerun_of} />
             </Meta>
           ) : null}
           {facts.prUrl ? (

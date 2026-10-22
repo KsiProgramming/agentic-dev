@@ -9,7 +9,7 @@ export interface RunFilters {
 
 export const NO_FILTERS: RunFilters = { status: [], template: null, repo: null };
 
-/** The templates a run can be filtered by. There is no templates API yet (2.8). */
+/** The templates a run can be filtered by until `GET /templates` answers (or if it fails). */
 export const TEMPLATE_OPTIONS = [{ id: "generate-docs", label: "Generate docs" }] as const;
 
 function isStatus(value: string): value is ApiRunStatus {

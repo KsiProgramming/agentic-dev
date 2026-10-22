@@ -88,6 +88,21 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - **Tables on desktop, cards on mobile:** a list keeps its columns at ≥ 768 px and turns into stacked cards below that.
 - **States:** every data view has a skeleton loader, an empty state (icon, one sentence, primary action) and an error state (message plus Retry).
 
+### Start and settings
+
+- **Template gallery (`/templates`):** one card per template from `GET /templates`, showing an icon, name, description and a "Requires" line with one chip per connection (Claude, GitHub). Each chip shows connected or missing. Clicking a card opens the "New run" sheet; `/templates?template=<id>` opens it directly.
+- **"New run" sheet:** a side sheet (right, 480 px) from 768 px, and a full-height bottom sheet below that. It is opened from a gallery card or from the "New run" action in the Runs page header (which adds a template picker). From top to bottom it shows:
+  - a "Before you start" checklist of the template's required connections, with a Claude key entered inline and GitHub connected through the install flow;
+  - the repo;
+  - the template's fields;
+  - a sticky footer with Cancel and Start run.
+
+  Start run stays disabled until every required connection is there.
+- **Template fields:** rendered from the template's JSON Schema, never hand-coded per template. Each field has a label (`title`), help text (`description`) and an inline error under it. Client checks mirror the schema's limits. A server 422 is shown on the field it names. An unsupported schema shows an error state, not a partial form.
+- **Combobox (repo picker):** a button that opens a searchable list (Command + Popover). Each repo shows `owner/name` in mono, a lock icon if private, and its default branch. It is keyboard first: type to filter, arrows, Enter. The last used repo is preselected if it is still listed. The list ends with an "Add repos on GitHub" link.
+- **Form errors:** on the field, in `--destructive` text with an icon, tied to it by `aria-describedby`. Form-level errors (network, 5xx) go in an `Alert` above the footer. Submit buttons show a spinner and are disabled while pending.
+- **Connection card (Settings):** icon, name and a one-line purpose; a status badge (Connected green, Not connected grey, Needs attention amber), the account or key hint, and actions on the right (stacked below on mobile). Disconnect and Remove ask for confirmation in a dialog. A provider the server cannot use (no GitHub App configured) shows a muted card with the reason and no action.
+
 ### Run console
 
 - **Header:** status badge, workflow name, repo and branch, started time and duration, and the PR link once opened. Actions: Rerun, Cancel, Copy run id.
@@ -97,7 +112,14 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
   - Usage and cost appear as a quiet footer line.
 - **Raw events tab:** the event table, with filters by type and node. Consecutive chunks of one message are folded into one row (expandable to the chunks). It is kept for debugging and audit.
 - **Graph tab:** added in 3.5.
-- **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with the gate title, a one-line summary, "Review details" (opens a side sheet with the full summary or diff) and Approve and Reject buttons. Reject asks for an optional comment. The bar never covers content: the page reserves padding for it. The browser tab title gets a "● Needs approval" prefix.
+- **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with:
+  - the gate title;
+  - a one-line summary: the gate's prompt, else the first line of its artifact;
+  - "Review details", which opens a sheet with the full summary or diff (side sheet from 768 px, bottom sheet below);
+  - Approve and Reject buttons.
+
+  Reject asks for an optional comment in a dialog. The bar never covers content: the page reserves padding for it. It sits above content and below dialogs, sheets and the open nav drawer. Under 768 px its buttons stack to full width. Keyboard: `A` approves and `R` opens Reject, except while focus is in a field or a dialog is open. The timeline's waiting step shows a short "Waiting for approval" marker instead of the decision.
+- **Waiting signals:** while a gate is waiting, the run's tab title is "● Needs approval · Run <id8>". While any run in the workspace waits, every other page's title gets an "(N) ● Needs approval · " prefix, and "Runs" in the sidebar (and the mobile menu button) shows a count badge. Approvals are made on the console only: the runs list links waiting runs to it with "Review".
 - **Live updates:** while a run executes, a live line at the end of the timeline says where it is and what it is doing ("writer · Reading `src/app.ts`…"). The page opens at the top; auto-scroll follows new content only once the user is at the bottom. Otherwise a "Jump to latest" pill appears.
 
 ### Interaction and accessibility

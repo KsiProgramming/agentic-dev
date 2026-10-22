@@ -21,17 +21,36 @@ from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.routes import router as runs_router
 from agentic_api.settings import Settings
 from agentic_api.templates.routes import router as templates_router
+from agentic_api.workspaces.claude_keys import (
+    AnthropicKeyVerifier,
+    ClaudeKeyVerifier,
+    FakeKeyVerifier,
+)
 from agentic_api.workspaces.routes import router as workspaces_router
 from agentic_engine.events import RunEvent
-from agentic_github import GithubApp, GithubAppConfig, GithubConfigError
+from agentic_github import (
+    FakeGithubApp,
+    GithubApp,
+    GithubAppConfig,
+    GithubConfigError,
+    GithubPlatform,
+)
 from agentic_secrets import LocalKeyProvider, install_redaction
 
 # Loggers with their own handlers when uvicorn serves the app; the rest propagate to root.
 _LOGGERS_WITH_HANDLERS = ("", "uvicorn", "uvicorn.error", "uvicorn.access")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+class FakeInProductionError(RuntimeError):
+    """A fake meant for dev and tests is configured with `AGENTIC_ENV=production`."""
+
+
+def create_app(
+    settings: Settings | None = None, *, claude_keys: ClaudeKeyVerifier | None = None
+) -> FastAPI:
+    """Tests pass `claude_keys`; otherwise the settings choose how Claude keys are checked."""
     settings = settings or Settings()
+    _refuse_fakes_in_production(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
@@ -67,6 +86,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         LocalKeyProvider.from_file(settings.master_key_file) if settings.master_key_file else None
     )
     app.state.github = _github_app(settings)
+    app.state.claude_keys = claude_keys or (
+        FakeKeyVerifier() if settings.claude_key_check == "fake" else AnthropicKeyVerifier()
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -83,9 +105,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-def _github_app(settings: Settings) -> GithubApp | None:
-    """The GitHub App, if its id and slug are set. A missing or unreadable private key then fails
-    here, at startup."""
+def _refuse_fakes_in_production(settings: Settings) -> None:
+    if settings.env != "production":
+        return
+    for name, fake in (
+        ("AGENTIC_GITHUB", settings.github == "fake"),
+        ("CLAUDE_KEY_CHECK", settings.claude_key_check == "fake"),
+    ):
+        if fake:
+            raise FakeInProductionError(f"{name}=fake is not allowed with AGENTIC_ENV=production")
+
+
+def _github_app(settings: Settings) -> GithubPlatform | None:
+    """The GitHub App, if its id and slug are set (or the fake one). A missing or unreadable
+    private key then fails here, at startup."""
+    if settings.github == "fake":
+        return FakeGithubApp(settings.api_base_url)
     if settings.github_app_id is None or settings.github_app_slug is None:
         return None
     if settings.github_app_private_key_file is None:

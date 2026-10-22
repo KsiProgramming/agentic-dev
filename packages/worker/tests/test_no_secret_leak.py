@@ -30,7 +30,8 @@ from agentic_worker.main import WorkerSettings, run
 pytestmark = pytest.mark.integration
 
 SPEC = Path(__file__).resolve().parents[2] / "engine/tests/fixtures/specs/valid/single-agent.json"
-CANARY = f"sk-ant-canary-{uuid4().hex}"
+# A test key, so the API's fake key check accepts it without calling Anthropic.
+CANARY = f"sk-ant-test-canary-{uuid4().hex}"
 
 
 def leaked(haystack: str | bytes) -> list[str]:
@@ -66,7 +67,12 @@ async def api(
     postgres_url: str, redis_url: str, master_key: Path
 ) -> AsyncIterator[httpx.AsyncClient]:
     app = create_app(
-        Settings(database_url=postgres_url, redis_url=redis_url, master_key_file=master_key)
+        Settings(
+            database_url=postgres_url,
+            redis_url=redis_url,
+            master_key_file=master_key,
+            claude_key_check="fake",
+        )
     )
     async with (
         app.router.lifespan_context(app),

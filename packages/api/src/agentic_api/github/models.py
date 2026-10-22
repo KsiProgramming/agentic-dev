@@ -1,6 +1,23 @@
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from agentic_github import RepoInfo
+
+
+class StartInstall(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    return_to: Annotated[
+        str | None,
+        Field(
+            max_length=500,
+            # A path of the web app only, never another origin (`//host`, `/\host`).
+            pattern=r"^/([^/\\\s]\S*)?$",
+            description="Where the web app lands after the install, e.g. "
+            "`/templates?template=generate-docs`. Defaults to the settings page.",
+        ),
+    ] = None
 
 
 class InstallUrlOut(BaseModel):

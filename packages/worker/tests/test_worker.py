@@ -76,6 +76,7 @@ async def worker(
     master_key_file: Path | None = None,
     github: GithubPublisher | None = None,
     github_remote: Callable[[str], str] | None = None,
+    **more_settings: Any,
 ) -> AsyncGenerator[asyncio.Event]:
     """A worker running in this event loop; yields its stop event and stops it on exit.
 
@@ -91,6 +92,7 @@ async def worker(
         queue_poll_s=0.1,
         runtime="claude" if claude else "fake",
         master_key_file=master_key_file,
+        **more_settings,
     )
     task = asyncio.create_task(
         run(
@@ -1032,3 +1034,57 @@ async def test_done_when_a_docs_run_opens_a_pr(
 def test_the_engine_and_the_tool_servers_agree_on_tool_names() -> None:
     assert WRITE_TOOLS == WRITE_TOOL_NAMES
     assert PUBLISH_TOOLS == PUBLISH_TOOL_NAMES
+
+
+async def test_the_fake_github_app_clones_and_publishes_local_fixture_repos(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """With `AGENTIC_GITHUB=fake` (dev and e2e tests), a docs run on a fake repo clones its bare
+    repo under the sandbox root, runs on the default fake runtime, and after approval pushes the
+    writer's branch there and opens a numbered pull request, with no call to GitHub."""
+    fixtures = tmp_path / "fixtures"
+    make_repo(tmp_path / "src", DOCS_REPO)
+    bare = fixtures / "e2e-org" / "docs-demo.git"
+    bare_remote(tmp_path / "src", bare)
+    workspace_id = await new_workspace(sessions)
+    await put_github_connection(sessions, workspace_id, 1, "e2e-org", "Organization")
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        sandboxes=FakeSandboxManager(local_root=fixtures),
+        agentic_github="fake",
+        sandbox_local_root=fixtures,
+    ):
+        run_id = await create_run(
+            sessions,
+            build_docs_spec(DocsParams()),
+            "",
+            RepoSource(url="https://github.com/e2e-org/docs-demo"),
+            workspace_id=workspace_id,
+        )
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+            await wait_for_status(sessions, run_id, "waiting")
+            await record_approval(sessions, run_id, "approve", GateDecision(decision="approve"))
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    (opened,) = [e for e in events if e.type == "pr_opened"]
+    assert opened.payload["url"] == "https://github.com/e2e-org/docs-demo/pull/1"
+    assert remote_branches(bare) == [f"agent/{run_id}/writer"]
+
+
+def test_the_fake_github_app_is_refused_in_production(tmp_path: Path) -> None:
+    from agentic_worker.main import ConfigError, build_github
+
+    settings = WorkerSettings.model_validate(
+        {"github": "fake", "sandbox_local_root": tmp_path, "env": "production"}
+    )
+
+    with pytest.raises(ConfigError, match="AGENTIC_ENV=production"):
+        build_github(settings)

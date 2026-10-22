@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { DOCS_DEMO, pretendConnections } from "./connections";
 import { GATE, startRun, WRITER } from "./runs";
 
 /** WCAG 2.2 AA, as the mission's UI quality target asks. */
@@ -37,8 +38,29 @@ for (const colorScheme of ["light", "dark"] as const) {
 
     test("templates has no serious a11y issues", async ({ page }) => {
       await open(page, "/templates");
-      await expect(page.getByRole("button", { name: "Start sample run" })).toBeVisible();
-      await expect(page.getByRole("status")).toHaveCount(0); // the docs card has loaded
+      await expect(page.getByTestId("template-card").first()).toBeVisible();
+      await expect(page.getByRole("status")).toHaveCount(0); // the gallery has loaded
+      await expectNoSeriousIssues(page);
+    });
+
+    test("the New run sheet has no serious a11y issues", async ({ page }) => {
+      await open(page, "/templates?template=generate-docs");
+      const sheet = page.getByTestId("new-run-sheet");
+      await sheet.getByRole("combobox", { name: "Repository" }).click();
+      await expect(page.getByRole("option", { name: new RegExp(DOCS_DEMO) })).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.getByRole("option", { name: new RegExp(DOCS_DEMO) }).click();
+      await sheet.getByLabel("Output dir (optional)").fill("not valid!");
+      await sheet.getByRole("button", { name: "Start run" }).click();
+      await expect(sheet.getByRole("alert")).toBeVisible();
+      await expectNoSeriousIssues(page);
+    });
+
+    test("the New run checklist has no serious a11y issues", async ({ page }) => {
+      await pretendConnections(page, "none");
+      await open(page, "/templates?template=generate-docs");
+      await page.getByRole("button", { name: "Add key" }).click();
+      await expect(page.getByLabel("Claude API key")).toBeVisible();
       await expectNoSeriousIssues(page);
     });
 
@@ -46,6 +68,26 @@ for (const colorScheme of ["light", "dark"] as const) {
       await open(page, "/settings");
       await expect(page.getByTestId("claude-status")).toBeVisible();
       await expect(page.getByTestId("github-status")).toBeVisible();
+      await page.getByRole("button", { name: /repositories accessible/ }).click();
+      await expectNoSeriousIssues(page);
+      await page.getByRole("button", { name: "Disconnect" }).click();
+      await expect(page.getByRole("alertdialog")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+    });
+
+    test("settings, not connected or needing attention, has no serious a11y issues", async ({
+      page,
+    }) => {
+      await pretendConnections(page, "none");
+      await open(page, "/settings");
+      await page.getByRole("button", { name: "Save key" }).click();
+      await expect(page.getByRole("alert")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.unrouteAll();
+      await pretendConnections(page, "github-gone");
+      await page.reload();
+      await expect(page.getByRole("button", { name: "Reconnect" })).toBeVisible();
       await expectNoSeriousIssues(page);
     });
 
@@ -61,7 +103,33 @@ for (const colorScheme of ["light", "dark"] as const) {
     test("a run waiting at a gate has no serious a11y issues", async ({ page, request }) => {
       const runId = await startRun(request, [WRITER, GATE]);
       await open(page, `/runs/${runId}`);
-      await expect(page.getByTestId("gate-panel")).toBeVisible({ timeout: 30_000 });
+      const dock = page.getByTestId("approval-dock");
+      await expect(dock).toBeVisible({ timeout: 30_000 });
+      await expectNoSeriousIssues(page);
+
+      await dock.getByRole("button", { name: "Review details" }).click();
+      await expect(page.getByTestId("gate-details")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+
+      await dock.getByRole("button", { name: /Reject/ }).click();
+      await expect(page.getByRole("dialog", { name: /Reject/ })).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+    });
+
+    test("a finished run's Rerun and the runs list menu have no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(request, [WRITER]);
+      await open(page, `/runs/${runId}`);
+      await expect(page.getByRole("button", { name: "Rerun" })).toBeVisible({ timeout: 30_000 });
+      await expectNoSeriousIssues(page);
+      await open(page, "/runs");
+      const row = page.locator(`[data-run-id="${runId}"]`).filter({ visible: true });
+      await row.getByRole("button", { name: /^Actions for/ }).click();
+      await expect(page.getByRole("menuitem", { name: "Rerun" })).toBeVisible();
       await expectNoSeriousIssues(page);
     });
 
@@ -112,6 +180,31 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Escape");
     await expect(drawer).toBeHidden();
     await expect(button).toBeFocused();
+  });
+
+  test("a gate is decided from the keyboard: R opens Reject, Escape closes it, A approves", async ({
+    page,
+    request,
+  }) => {
+    const runId = await startRun(request, [WRITER, GATE]);
+    await page.goto(`/runs/${runId}`);
+    const dock = page.getByTestId("approval-dock");
+    await expect(dock).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveTitle(/^● Needs approval · Run /);
+
+    await page.keyboard.press("r");
+    const dialog = page.getByRole("dialog", { name: /Reject/ });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Comment (optional)")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+
+    await page.keyboard.press("a");
+    await expect(dock).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
+      timeout: 30_000,
+    });
+    await expect(page).not.toHaveTitle(/Needs approval · Run /);
   });
 
   test("the theme menu works from the keyboard", async ({ page }) => {

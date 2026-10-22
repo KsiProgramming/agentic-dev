@@ -49,9 +49,7 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 | 2.3 | Run summaries API: `GET /runs` (newest first, cursor pagination, filter by status/template/repo) and `GET /runs/{id}` (status, workflow, repo, input, timings, PR URL, failure reason, waiting gate, `rerun_of`) | The API lists past runs with status taken from the event log | ✅ Done ([#24](https://github.com/KsiProgramming/agentic-dev/pull/24)) |
 | 2.4 | Runs page (new home): list of runs with status, workflow, repo, started, duration and PR link; table on desktop, cards on mobile; filters; live status; "Needs approval" first | User finds any past run and sees whether it succeeded, failed or is waiting | ✅ Done ([#25](https://github.com/KsiProgramming/agentic-dev/pull/25)) |
 | 2.5 | Run console v2: header (status, repo, workflow, duration, actions), node timeline grouped by node and map item, streamed text merged into one growing message per agent turn, tool calls as collapsible cards with formatted JSON, raw event log in a "Raw events" tab | A docs run shows one message block per agent turn, not one row per chunk | ✅ Done ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)) |
-| 2.6 | Approval dock: a sticky bottom bar whenever a gate is waiting, with title, summary, "Review details" sheet, Approve and Reject (with comment); waiting runs get a badge in the runs list and the page title | The gate is visible without scrolling at every viewport, on desktop and mobile | — |
-| 2.7 | Rerun: `POST /runs/{id}/rerun` starts a new run with the same workflow, input and repo and links `rerun_of`; a Rerun button on failed, cancelled and completed runs | A failed run is rerun from the console or the runs list, and the new run links back to the original | — |
-| 2.8 | Start screen and settings redesign: template gallery cards, a "New run" sheet with a repo combobox and form validation, settings as connection cards with clear connected/missing states | A user starts a docs run and connects Claude and GitHub without reading any help text | — |
+| 2.6 | Start, approve and rerun: **start screen** (template gallery cards, a "New run" sheet with a repo combobox and form validation) and **settings** as connection cards with clear connected/missing states; **approval dock**, a sticky bottom bar whenever a gate is waiting, with title, summary, "Review details" sheet, Approve and Reject (with comment), and a waiting badge in the runs list and the page title; **rerun**, `POST /runs/{id}/rerun` starts a new run with the same workflow, input and repo and links `rerun_of`, with a Rerun button on failed, cancelled and completed runs | A user connects Claude and GitHub and starts a docs run without reading any help text; its gate is visible and approved without scrolling at every viewport, desktop and mobile; a failed run is rerun from the console or the runs list, and the new run links back to the original | ✅ Done ([#28](https://github.com/KsiProgramming/agentic-dev/pull/28)) |
 
 ## Milestone 3: Policies, cost and monitor
 
@@ -88,7 +86,7 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 | 5.5 | Container nodes (map, parallel, loop) drawn with children inside | Nested flow is editable visually | — |
 | 5.6 | Live validation on canvas (incompatible ports blocked, errors on nodes) | Invalid connections cannot be made | — |
 | 5.7 | Versions: history, visual diff, restore, run any version | User restores and runs an older version | — |
-| 5.8 | Start screen v2: provider picker and "Blank canvas" added to the 2.8 start screen | A user starts a canvas workflow without touching JSON | — |
+| 5.8 | Start screen v2: provider picker and "Blank canvas" added to the 2.6 start screen | A user starts a canvas workflow without touching JSON | — |
 
 ## Milestone 6: Dynamic orchestration and composites
 

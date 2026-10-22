@@ -366,6 +366,56 @@
         }
       }
     },
+    "/runs/{run_id}/rerun": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Rerun",
+        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since.",
+        "operationId": "rerunRun",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRunResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "409": {
+            "description": "The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/approvals": {
       "post": {
         "tags": [
@@ -663,7 +713,7 @@
           "workspaces"
         ],
         "summary": "Put Claude",
-        "description": "Store the workspace's Claude API key, encrypted, replacing any stored one. The\nworkspace's runs on Claude use it.",
+        "description": "Check the workspace's Claude API key with Anthropic, then store it, encrypted, replacing\nany stored one. The workspace's runs on Claude use it.",
         "operationId": "putClaudeConnection",
         "parameters": [
           {
@@ -701,18 +751,28 @@
           "404": {
             "description": "No workspace with this id"
           },
-          "503": {
-            "description": "No master key is configured"
-          },
           "422": {
-            "description": "Validation Error",
+            "description": "`invalid_key`: Anthropic refused the key. (Or the body is invalid.)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ConnectionErrorDetail"
                 }
               }
             }
+          },
+          "502": {
+            "description": "`verify_unavailable`: Anthropic could not be reached to check the key; nothing was stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionErrorDetail"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No master key is configured"
           }
         }
       },
@@ -760,7 +820,7 @@
           "github"
         ],
         "summary": "Start Install",
-        "description": "An install URL for the GitHub App. Installing it links the installation to the workspace.",
+        "description": "An install URL for the GitHub App. Installing it links the installation to the workspace,\nthen sends the browser to `return_to` (the settings page by default).",
         "operationId": "startGithubInstall",
         "parameters": [
           {
@@ -774,6 +834,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StartInstall"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -810,7 +887,7 @@
           "github"
         ],
         "summary": "Complete Install",
-        "description": "GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the\nweb app's settings page with `github=connected`, or `github=error` and a `reason`.",
+        "description": "GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the\npage that started the install (the web app's settings page by default) with\n`github=connected`, or `github=error` and a `reason`.",
         "operationId": "completeGithubInstall",
         "parameters": [
           {
@@ -1099,13 +1176,15 @@
           "comment": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Comment"
+            "title": "Comment",
+            "description": "Why, recorded with the decision; a rejection's becomes the run's reason."
           }
         },
         "additionalProperties": false,
@@ -1171,6 +1250,25 @@
         ],
         "title": "CancelResponse"
       },
+      "ConnectionErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ConnectionErrorDetail",
+        "description": "The `detail` of a refused connection: `code` says what went wrong (`invalid_key`,\n`verify_unavailable`), `message` says it for people."
+      },
       "ConnectionOut": {
         "properties": {
           "id": {
@@ -1207,6 +1305,18 @@
               }
             ],
             "title": "Account Login"
+          },
+          "manage_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manage Url",
+            "description": "GitHub: the installation's settings page, where its owner picks the repos it reaches. Unset for connections made before the account type was recorded."
           },
           "created_at": {
             "type": "string",
@@ -1804,6 +1914,13 @@
         "title": "RepoSource",
         "description": "The repo a run works on: an `https://` URL or a local path, at `ref` (default branch if\nunset)."
       },
+      "Requirement": {
+        "type": "string",
+        "enum": [
+          "claude",
+          "github"
+        ]
+      },
       "RunDetail": {
         "properties": {
           "id": {
@@ -2202,6 +2319,27 @@
         "title": "SequenceNode",
         "description": "Runs its steps in order."
       },
+      "StartInstall": {
+        "properties": {
+          "return_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^/([^/\\\\\\s]\\S*)?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return To",
+            "description": "Where the web app lands after the install, e.g. `/templates?template=generate-docs`. Defaults to the settings page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StartInstall"
+      },
       "TemplateOut": {
         "properties": {
           "id": {
@@ -2221,6 +2359,14 @@
             "type": "object",
             "title": "Parameters",
             "description": "JSON Schema of the template's options."
+          },
+          "requires": {
+            "items": {
+              "$ref": "#/components/schemas/Requirement"
+            },
+            "type": "array",
+            "title": "Requires",
+            "description": "Connections the workspace needs to run it: `claude` for its agents, `github` for a repo from the GitHub App's installation."
           }
         },
         "type": "object",
@@ -2228,7 +2374,8 @@
           "id",
           "name",
           "description",
-          "parameters"
+          "parameters",
+          "requires"
         ],
         "title": "TemplateOut"
       },

@@ -30,6 +30,10 @@ and opens a pull request. The sandbox never holds a credential and has no networ
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
 this host (no isolation).
 
+With `AGENTIC_GITHUB=fake` (local dev and end-to-end tests, never `AGENTIC_ENV=production`), the
+GitHub App is a stand-in: the fake repos (`agentic_github.FAKE_REPOS`) are cloned from, and
+pushed to, bare repos under `SANDBOX_LOCAL_ROOT`, and pull requests are only numbered.
+
 A user can cancel a run (`POST /runs/{id}/cancel`): the worker running it checks every
 `CANCEL_POLL_S`, cancels its graph and writes `run_cancelled`; a cancelled run that is claimed
 (queued, or paused at a gate) is ended at once, and a sandbox it kept is removed.
@@ -68,18 +72,22 @@ from agentic_engine.graph import (
 from agentic_engine.logging import configure_logging
 from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools, writer_node_ids
 from agentic_github import (
+    FAKE_REPOS,
+    FakeGithubApp,
     GithubApiError,
     GithubApp,
     GithubAppConfig,
     GithubConfigError,
+    GithubPlatform,
     InstallationNotFoundError,
     auth_env,
+    fixture_path,
     repo_full_name,
 )
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
-from agentic_sandbox import FakeSandboxManager, SandboxError, SandboxManager
+from agentic_sandbox import FakeSandboxManager, RepoSource, SandboxError, SandboxManager
 from agentic_sandbox.docker_backend import DEFAULT_IMAGE
 from agentic_secrets import (
     KeyProvider,
@@ -160,6 +168,13 @@ class WorkerSettings(BaseSettings):
     github_app_id: int | None = None
     github_app_slug: str | None = None
     github_app_private_key_file: Path | None = None
+    # `fake` stands in a local GitHub App for dev and e2e tests (env `AGENTIC_GITHUB`); its repos
+    # are bare repos under `sandbox_local_root`.
+    github: Literal["app", "fake"] = Field(default="app", validation_alias="agentic_github")
+    # `production` refuses the fake GitHub App (env `AGENTIC_ENV`).
+    env: Literal["development", "production"] = Field(
+        default="development", validation_alias="agentic_env"
+    )
 
 
 type RuntimeFactory = Callable[[ToolExecutor | None], AgentRuntime]
@@ -264,8 +279,14 @@ def run_runtimes(
     return open_claude
 
 
-def build_github(settings: WorkerSettings) -> GithubApp | None:
-    """The platform's GitHub App, if its id and slug are set."""
+def build_github(settings: WorkerSettings) -> GithubPlatform | None:
+    """The platform's GitHub App, if its id and slug are set (or the fake one)."""
+    if settings.github == "fake":
+        if settings.env == "production":
+            raise ConfigError("AGENTIC_GITHUB=fake is not allowed with AGENTIC_ENV=production")
+        if settings.sandbox_local_root is None:
+            raise ConfigError("AGENTIC_GITHUB=fake needs SANDBOX_LOCAL_ROOT, where its repos are")
+        return FakeGithubApp(api_base_url="")
     if settings.github_app_id is None or settings.github_app_slug is None:
         return None
     if settings.github_app_private_key_file is None:
@@ -277,6 +298,28 @@ def build_github(settings: WorkerSettings) -> GithubApp | None:
     except GithubConfigError as e:
         raise ConfigError(str(e)) from None
     return GithubApp(config)
+
+
+_FAKE_REPO_NAMES = frozenset(r.full_name for r in FAKE_REPOS)
+
+
+def fake_github_remote(fixtures: Path) -> Callable[[str], str]:
+    """Pushes to the fake GitHub App's repos go to their bare repos under `fixtures`."""
+    return lambda full_name: fixture_path(fixtures, full_name).as_uri()
+
+
+def fake_clone_source(fixtures: Path) -> Callable[[RepoSource], RepoSource]:
+    """The fake GitHub App's repos are cloned from their bare repos under `fixtures`; any other
+    repo from where it is."""
+
+    def source(repo: RepoSource) -> RepoSource:
+        full_name = repo_full_name(repo.url)
+        if full_name not in _FAKE_REPO_NAMES:
+            return repo
+        assert full_name is not None
+        return RepoSource(url=str(fixture_path(fixtures, full_name)), ref=repo.ref)
+
+    return source
 
 
 def build_sandboxes(
@@ -314,6 +357,8 @@ class Worker:
     github: GithubPublisher | None = None
     # Where a repo's branches are pushed, by `owner/name`; GitHub unless a test points elsewhere.
     github_remote: Callable[[str], str] | None = None
+    # Where a run's repo is cloned from; the repo itself unless the fake GitHub App stands in.
+    clone_source: Callable[[RepoSource], RepoSource] | None = None
 
 
 class AttemptSink:
@@ -457,7 +502,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
                     sandbox = await stack.enter_async_context(
                         worker.sandboxes.open(
                             run.id,
-                            run.repo,
+                            worker.clone_source(run.repo) if worker.clone_source else run.repo,
                             reuse=decision is not None,
                             git_env=auth_env(token) if token is not None else None,
                         )
@@ -648,6 +693,7 @@ async def run(
                 )
             if app is not None:
                 stack.callback(app.close)
+            fixtures = settings.sandbox_local_root if settings.github == "fake" else None
             worker = Worker(
                 settings,
                 sessions,
@@ -655,7 +701,9 @@ async def run(
                 sandboxes,
                 checkpointer,
                 github=github or app,
-                github_remote=github_remote,
+                github_remote=github_remote
+                or (fake_github_remote(fixtures) if fixtures is not None else None),
+                clone_source=fake_clone_source(fixtures) if fixtures is not None else None,
             )
             await redis.ping()  # pyright: ignore[reportUnknownMemberType]
             log.info("worker ready")

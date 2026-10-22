@@ -1,38 +1,23 @@
 "use client";
 
-import { CircleCheckIcon, CircleDashedIcon } from "lucide-react";
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { SparklesIcon } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
-import { createApiClient } from "@/api/client";
-import type { components } from "@/api/schema";
-import { LoadingState } from "@/components/states";
+import { useConnections, useRemoveClaudeKey } from "@/api/queries";
+import { ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { DEFAULT_WORKSPACE_ID } from "@/workspace";
 
-type Connection = components["schemas"]["ConnectionOut"];
+import { ClaudeKeyForm } from "./claude-key-form";
+import { ConfirmButton } from "./confirm-dialog";
+import { ConnectionCard } from "./connection-card";
 
-/** The workspace every run belongs to until there are users (mirrors the API's default). */
-export const DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
+const PURPOSE = "Agents run on Claude with this workspace's API key.";
 
-type Loaded = { state: "loading" } | { state: "ready"; connection: Connection | null };
-
-function detailOf(error: unknown): string | null {
-  if (error && typeof error === "object" && "detail" in error && typeof error.detail === "string") {
-    return error.detail;
-  }
-  return null;
-}
-
-function failure(err: unknown): string {
-  if (err instanceof TypeError) return "Could not reach the API.";
-  return err instanceof Error ? err.message : String(err);
-}
-
-/** Stores, replaces or removes the workspace's Claude API key. The key is write only: once
- * saved, only its last 4 characters are shown. */
+/** The Claude connection card: stores, replaces or removes the workspace's API key. The key is
+ * write only: once saved, only its last 4 characters are shown. */
 export function ClaudeConnection({
   baseUrl,
   workspaceId = DEFAULT_WORKSPACE_ID,
@@ -40,171 +25,93 @@ export function ClaudeConnection({
   baseUrl?: string;
   workspaceId?: string;
 }) {
-  const keyId = useId();
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
-  const [apiKey, setApiKey] = useState("");
-  const [pending, setPending] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const path = { params: { path: { workspace_id: workspaceId } } };
+  const connections = useConnections({ workspaceId, baseUrl });
+  const remove = useRemoveClaudeKey({ workspaceId, baseUrl });
+  const [replacing, setReplacing] = useState(false);
 
-  useEffect(() => {
-    let live = true;
-    createApiClient(baseUrl)
-      .GET("/workspaces/{workspace_id}/connections", {
-        params: { path: { workspace_id: workspaceId } },
-      })
-      .then(({ data, response }) => {
-        if (!data) throw new Error(`Could not load the connection (HTTP ${response.status}).`);
-        if (live) {
-          setLoaded({
-            state: "ready",
-            connection: data.find((c) => c.provider === "claude") ?? null,
-          });
-        }
-      })
-      .catch((err: unknown) => {
-        if (live) {
-          setError(failure(err));
-          setLoaded({ state: "ready", connection: null });
-        }
-      });
-    return () => {
-      live = false;
-    };
-  }, [baseUrl, workspaceId]);
-
-  async function onSave(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setPending(true);
-    setError(null);
-    try {
-      const {
-        data,
-        error: body,
-        response,
-      } = await createApiClient(baseUrl).PUT("/workspaces/{workspace_id}/connections/claude", {
-        ...path,
-        body: { api_key: apiKey },
-      });
-      if (!data) {
-        throw new Error(
-          response.status === 422
-            ? "That does not look like an API key."
-            : (detailOf(body) ?? `The API refused the key (HTTP ${response.status}).`),
-        );
-      }
-      setLoaded({ state: "ready", connection: data });
-      setApiKey("");
-      toast.success("Claude key saved.");
-    } catch (err) {
-      setError(failure(err));
-    } finally {
-      setPending(false);
-    }
+  if (connections.isPending) {
+    return (
+      <ConnectionCard icon={SparklesIcon} title="Claude" purpose={PURPOSE} testId="claude-card">
+        <LoadingState rows={2} label="Loading the Claude connection…" />
+      </ConnectionCard>
+    );
+  }
+  if (connections.isError) {
+    return (
+      <ConnectionCard icon={SparklesIcon} title="Claude" purpose={PURPOSE} testId="claude-card">
+        <ErrorState
+          message={connections.error.message}
+          onRetry={() => void connections.refetch()}
+        />
+      </ConnectionCard>
+    );
   }
 
-  async function onRemove() {
-    setPending(true);
-    setError(null);
-    try {
-      const { response } = await createApiClient(baseUrl).DELETE(
-        "/workspaces/{workspace_id}/connections/claude",
-        path,
-      );
-      if (!response.ok && response.status !== 404) {
-        throw new Error(`Could not remove the key (HTTP ${response.status}).`);
-      }
-      setLoaded({ state: "ready", connection: null });
-      setConfirming(false);
-      toast.success("Claude key removed.");
-    } catch (err) {
-      setError(failure(err));
-    } finally {
-      setPending(false);
-    }
+  const connection = connections.data.find((c) => c.provider === "claude") ?? null;
+  if (connection === null) {
+    return (
+      <ConnectionCard
+        icon={SparklesIcon}
+        title="Claude"
+        purpose={PURPOSE}
+        status="missing"
+        detail={<span className="text-muted-foreground">Runs fail until a key is saved.</span>}
+        testId="claude-card"
+      >
+        <ClaudeKeyForm workspaceId={workspaceId} baseUrl={baseUrl} />
+      </ConnectionCard>
+    );
   }
-
-  if (loaded.state === "loading") {
-    return <LoadingState rows={2} label="Loading the Claude connection…" />;
-  }
-  const { connection } = loaded;
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-3">
-      <p data-testid="claude-status" className="flex items-start gap-2">
-        {connection ? (
+    <ConnectionCard
+      icon={SparklesIcon}
+      title="Claude"
+      purpose={PURPOSE}
+      status="connected"
+      detail={
+        <span data-testid="claude-status">
+          Key ending in <span className="font-mono">…{connection.key_hint}</span>, updated{" "}
+          {new Date(connection.updated_at).toLocaleString()}.
+        </span>
+      }
+      actions={
+        replacing ? null : (
           <>
-            <CircleCheckIcon
-              aria-hidden="true"
-              className="mt-0.5 size-4 shrink-0 text-status-succeeded"
+            <Button type="button" variant="outline" onClick={() => setReplacing(true)}>
+              Replace key
+            </Button>
+            <ConfirmButton
+              label="Remove key"
+              title="Remove the Claude key?"
+              description="Runs on Claude fail until a new key is saved."
+              confirmLabel="Remove key"
+              disabled={remove.isPending}
+              onConfirm={() =>
+                remove.mutate(undefined, {
+                  onSuccess: () => toast.success("Claude key removed."),
+                })
+              }
             />
-            <span>
-              Claude key ending in <span className="font-mono">…{connection.key_hint}</span>,
-              updated {new Date(connection.updated_at).toLocaleString()}.
-            </span>
           </>
-        ) : (
-          <>
-            <CircleDashedIcon
-              aria-hidden="true"
-              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-            />
-            <span>No Claude key stored. Runs on Claude fail until one is.</span>
-          </>
-        )}
-      </p>
-      <form onSubmit={onSave} className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={keyId}>Claude API key</Label>
-          <Input
-            id={keyId}
-            type="password"
-            autoComplete="off"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-ant-…"
-            className="font-mono"
-          />
-        </div>
-        <Button type="submit" disabled={pending || apiKey.trim() === ""} className="self-start">
-          {connection ? "Replace key" : "Save key"}
-        </Button>
-      </form>
-      {connection && !confirming ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setConfirming(true)}
-          disabled={pending}
-          className="self-start text-destructive hover:text-destructive"
-        >
-          Remove key
-        </Button>
+        )
+      }
+      testId="claude-card"
+    >
+      {replacing ? (
+        <ClaudeKeyForm
+          workspaceId={workspaceId}
+          baseUrl={baseUrl}
+          submitLabel="Replace key"
+          onSaved={() => setReplacing(false)}
+          onCancel={() => setReplacing(false)}
+        />
       ) : null}
-      {connection && confirming ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span>Remove the stored key?</span>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            onClick={onRemove}
-            disabled={pending}
-          >
-            Confirm remove
-          </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)}>
-            Cancel
-          </Button>
-        </div>
-      ) : null}
-      {error ? (
+      {remove.isError ? (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{remove.error.message}</AlertDescription>
         </Alert>
       ) : null}
-    </div>
+    </ConnectionCard>
   );
 }

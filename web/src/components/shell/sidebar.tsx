@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+import { countLabel, useWaitingCount } from "./attention";
 import { isActive, NAV_ITEMS } from "./nav";
 
 type WorkspaceName = { state: "loading" } | { state: "ready"; name: string | null };
@@ -44,9 +45,32 @@ function CurrentNavLinks(props: NavLinksProps) {
   return <NavLinks pathname={usePathname()} {...props} />;
 }
 
+/** The runs waiting at a gate, on "Runs": a count, or a dot on the icon rail. */
+function WaitingBadge({ count, rail }: { count: number; rail: boolean }) {
+  if (count === 0) return null;
+  const text = `${countLabel(count)} ${count === 1 ? "needs" : "need"} approval`;
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        data-testid="runs-waiting-badge"
+        className={cn(
+          "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-status-waiting-muted px-1.5 text-xs font-semibold text-status-waiting tabular-nums",
+          rail &&
+            "lg:max-xl:absolute lg:max-xl:top-1 lg:max-xl:right-1 lg:max-xl:h-2 lg:max-xl:min-w-2 lg:max-xl:bg-status-waiting lg:max-xl:p-0 lg:max-xl:text-[0px]",
+        )}
+      >
+        {countLabel(count)}
+      </span>
+      <span className="sr-only">, {text}</span>
+    </>
+  );
+}
+
 /** The main sections; the one containing `pathname` is marked current. */
 function NavLinks({ pathname, rail, onNavigate }: NavLinksProps & { pathname: string | null }) {
   const railHidden = rail ? "lg:max-xl:sr-only" : undefined;
+  const waiting = useWaitingCount();
   return (
     <ul className="flex flex-col gap-0.5">
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
@@ -57,13 +81,14 @@ function NavLinks({ pathname, rail, onNavigate }: NavLinksProps & { pathname: st
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex h-9 items-center gap-2.5 rounded-md px-2.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+              "relative flex h-9 items-center gap-2.5 rounded-md px-2.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
               active && "bg-muted text-foreground",
               rail && "lg:max-xl:justify-center",
             )}
           >
             <Icon aria-hidden="true" className="size-4 shrink-0" />
             <span className={railHidden}>{label}</span>
+            {href === "/runs" ? <WaitingBadge count={waiting} rail={rail} /> : null}
           </Link>
         );
         return (

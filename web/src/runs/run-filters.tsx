@@ -15,6 +15,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
+import { useTemplates } from "@/api/queries";
+
 import { isFiltered, NO_FILTERS, TEMPLATE_OPTIONS, type RunFilters } from "./filters";
 import { API_RUN_STATUSES, repoLabel, statusLabel } from "./summaries";
 
@@ -88,6 +90,9 @@ export function RunFiltersBar({
   const templateId = useId();
   const repoId = useId();
   const repos = useRepoOptions(workspaceId, baseUrl);
+  const templates = useTemplates({ baseUrl });
+  const templateOptions =
+    templates.data?.map((t) => ({ id: t.id, label: t.name })) ?? TEMPLATE_OPTIONS;
   const repoOptions = repos.data
     ? [...new Set([...(filters.repo ? [filters.repo] : []), ...repos.data])]
     : filters.repo
@@ -110,7 +115,7 @@ export function RunFiltersBar({
         onChange={(e) => onChange({ ...filters, template: e.target.value || null })}
       >
         <NativeSelectOption value="">Any template</NativeSelectOption>
-        {TEMPLATE_OPTIONS.map((t) => (
+        {templateOptions.map((t) => (
           <NativeSelectOption key={t.id} value={t.id}>
             {t.label}
           </NativeSelectOption>

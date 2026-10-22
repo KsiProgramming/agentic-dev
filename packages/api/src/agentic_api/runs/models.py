@@ -100,11 +100,14 @@ class CreateRunRequest(BaseModel):
         return self.workflow
 
     def uses_github(self) -> bool:
-        return any(
-            tool.startswith("github.")
-            for _, node in iter_nodes(self.spec().root)
-            for tool in node_tools(node)
-        )
+        return uses_github(self.spec())
+
+
+def uses_github(spec: WorkflowSpec) -> bool:
+    """Whether a node of `spec` names a `github.*` tool."""
+    return any(
+        tool.startswith("github.") for _, node in iter_nodes(spec.root) for tool in node_tools(node)
+    )
 
 
 class CreateRunResponse(BaseModel):
@@ -118,7 +121,11 @@ class ApprovalRequest(BaseModel):
 
     node_id: str = Field(description="The gate the run is waiting at.")
     decision: Literal["approve", "reject"]
-    comment: str | None = None
+    comment: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Why, recorded with the decision; a rejection's becomes the run's reason.",
+    )
 
 
 class ApprovalResponse(BaseModel):

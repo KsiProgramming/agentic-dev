@@ -34,6 +34,8 @@ RUN useradd --create-home --uid 10001 app
 # Mount point of the master key volume; a new named volume takes this owner, so `app` can
 # write the key there (compose `keygen`).
 RUN mkdir /secrets && chown app:app /secrets && chmod 700 /secrets
+# Mount point of the fake GitHub App's repos (compose `fixtures`), which the worker pushes to.
+RUN mkdir -p /samples/e2e-org && chown app:app /samples/e2e-org
 COPY --from=build /app/.venv /app/.venv
 COPY packages/api/alembic.ini /app/api/alembic.ini
 COPY packages/api/alembic /app/api/alembic
