@@ -51,7 +51,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Runs
+         * @description The workspace's runs, newest first, one page at a time. Filters combine; `status` may be
+         *     given several times. Status, timings, PR URL and the waiting gate come from each run's
+         *     events.
+         */
+        get: operations["listRuns"];
         put?: never;
         /**
          * Create
@@ -61,6 +67,26 @@ export interface paths {
          *     refused with `422`.
          */
         post: operations["createRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get
+         * @description One run's summary, with its `input` and, if it failed, why.
+         */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -628,6 +654,123 @@ export interface components {
             /** Ref */
             ref?: string | null;
         };
+        /** RunDetail */
+        RunDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            status: components["schemas"]["RunStatus"];
+            workflow: components["schemas"]["WorkflowRef"];
+            /**
+             * Template Id
+             * @description The template the workflow was built from.
+             */
+            template_id: string | null;
+            repo: components["schemas"]["RepoSource"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Pr Url
+             * @description The last pull request the run opened.
+             */
+            pr_url: string | null;
+            /** @description Set while the run waits at a gate. */
+            waiting_gate: components["schemas"]["WaitingGate"] | null;
+            /**
+             * Rerun Of
+             * @description The run this one repeats.
+             */
+            rerun_of: string | null;
+            /** Input */
+            input: string;
+            /**
+             * Failure Reason
+             * @description Why the run failed, if it did.
+             */
+            failure_reason: string | null;
+            /**
+             * Duration Ms
+             * @description From start to end; `null` until the run has ended.
+             */
+            readonly duration_ms: number | null;
+        };
+        /** @enum {string} */
+        RunStatus: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+        /**
+         * RunSummary
+         * @description A run as the runs list shows it. Status, timings, PR URL and the waiting gate come from
+         *     the run's events.
+         */
+        RunSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            status: components["schemas"]["RunStatus"];
+            workflow: components["schemas"]["WorkflowRef"];
+            /**
+             * Template Id
+             * @description The template the workflow was built from.
+             */
+            template_id: string | null;
+            repo: components["schemas"]["RepoSource"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Pr Url
+             * @description The last pull request the run opened.
+             */
+            pr_url: string | null;
+            /** @description Set while the run waits at a gate. */
+            waiting_gate: components["schemas"]["WaitingGate"] | null;
+            /**
+             * Rerun Of
+             * @description The run this one repeats.
+             */
+            rerun_of: string | null;
+            /**
+             * Duration Ms
+             * @description From start to end; `null` until the run has ended.
+             */
+            readonly duration_ms: number | null;
+        };
+        /** RunSummaryPage */
+        RunSummaryPage: {
+            /** Items */
+            items: components["schemas"]["RunSummary"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page.
+             */
+            next_cursor: string | null;
+        };
         /**
          * SequenceNode
          * @description Runs its steps in order.
@@ -715,6 +858,23 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WaitingGate */
+        WaitingGate: {
+            /**
+             * Node Id
+             * @description The gate node the run is paused at.
+             */
+            node_id: string;
+            /** Title */
+            title?: string | null;
+        };
+        /** WorkflowRef */
+        WorkflowRef: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /**
          * WorkflowSpec
@@ -839,6 +999,52 @@ export interface operations {
             };
         };
     };
+    listRuns: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+                /** @description Only runs with one of these statuses. */
+                status?: components["schemas"]["RunStatus"][] | null;
+                /** @description Only runs of this template id. */
+                template?: string | null;
+                /** @description Only runs on this repo URL. */
+                repo?: string | null;
+                /** @description `next_cursor` of the previous page. */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSummaryPage"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid filter, `limit` or `cursor` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     createRun: {
         parameters: {
             query?: never;
@@ -870,6 +1076,44 @@ export interface operations {
             };
             /** @description The workflow uses `github.*` tools, but the workspace has no GitHub connection */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

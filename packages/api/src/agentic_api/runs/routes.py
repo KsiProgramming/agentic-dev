@@ -15,19 +15,29 @@ from agentic_api.runs.models import (
     ApprovalResponse,
     CreateRunRequest,
     CreateRunResponse,
+    RunDetail,
+    RunStatus,
+    RunSummary,
+    RunSummaryPage,
+    WaitingGate,
+    WorkflowRef,
 )
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
+    InvalidCursorError,
     RunNotFoundError,
+    RunSummaryRow,
     create_run,
     enqueue_run,
     get_github_installation,
     get_run,
+    get_run_summary,
     get_workspace,
     list_run_events,
+    list_run_summaries,
     record_approval,
 )
 
@@ -70,6 +80,82 @@ async def existing_run(run_id: UUID, request: Request) -> UUID:
     return run_id
 
 
+def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "workspace_id": row.workspace_id,
+        "status": row.status,
+        "workflow": WorkflowRef(id=row.workflow_id, name=row.workflow_name),
+        "template_id": row.template_id,
+        "repo": row.repo,
+        "created_at": row.created_at,
+        "started_at": row.started_at,
+        "finished_at": row.finished_at,
+        "pr_url": row.pr_url,
+        "waiting_gate": WaitingGate.model_validate(row.waiting_gate) if row.waiting_gate else None,
+        "rerun_of": row.rerun_of,
+    }
+
+
+@router.get(
+    "",
+    operation_id="listRuns",
+    responses={
+        404: {"description": "No workspace with this id"},
+        422: {"description": "Invalid filter, `limit` or `cursor`"},
+    },
+)
+async def list_runs(
+    request: Request,
+    workspace_id: Annotated[
+        UUID | None, Query(description="Default: the default workspace.")
+    ] = None,
+    run_status: Annotated[
+        list[RunStatus] | None,
+        Query(alias="status", description="Only runs with one of these statuses."),
+    ] = None,
+    template: Annotated[str | None, Query(description="Only runs of this template id.")] = None,
+    repo: Annotated[str | None, Query(description="Only runs on this repo URL.")] = None,
+    cursor: Annotated[str | None, Query(description="`next_cursor` of the previous page.")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> RunSummaryPage:
+    """The workspace's runs, newest first, one page at a time. Filters combine; `status` may be
+    given several times. Status, timings, PR URL and the waiting gate come from each run's
+    events."""
+    sessions = _sessions(request)
+    workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
+    if await get_workspace(sessions, workspace_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
+    try:
+        rows, next_cursor = await list_run_summaries(
+            sessions,
+            workspace_id,
+            statuses=run_status or (),
+            template_id=template,
+            repo_url=repo,
+            cursor=cursor,
+            limit=limit,
+        )
+    except InvalidCursorError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    return RunSummaryPage(
+        items=[RunSummary(**_summary_fields(row)) for row in rows], next_cursor=next_cursor
+    )
+
+
+@router.get(
+    "/{run_id}",
+    operation_id="getRun",
+    responses={404: {"description": "No run with this id"}},
+)
+async def get(run_id: UUID, request: Request) -> RunDetail:
+    """One run's summary, with its `input` and, if it failed, why."""
+    row = await get_run_summary(_sessions(request), run_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+    return RunDetail(**_summary_fields(row), input=row.input, failure_reason=row.failure_reason)
+
+
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
@@ -98,7 +184,14 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
             "the workflow uses github.* tools, but the workspace has no GitHub connection; "
             "install the GitHub App first",
         )
-    run_id = await create_run(sessions, body.spec(), body.input, body.repo, workspace_id)
+    run_id = await create_run(
+        sessions,
+        body.spec(),
+        body.input,
+        body.repo,
+        workspace_id,
+        template_id=body.template.id if body.template else None,
+    )
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))

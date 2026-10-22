@@ -28,9 +28,10 @@ async def create_run(
     input: str = "",
     repo: RepoSource | None = None,
     workspace_id: UUID = DEFAULT_WORKSPACE_ID,
+    template_id: str | None = None,
 ) -> UUID:
-    """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`; returns its
-    id. The workspace must exist."""
+    """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
+    template `spec` was built from if any; returns its id. The workspace must exist."""
     run_id = uuid4()
     async with sessions.begin() as session:
         session.add(
@@ -41,6 +42,8 @@ async def create_run(
                 spec=spec.model_dump(mode="json"),
                 input=input,
                 repo=repo.model_dump(mode="json") if repo else None,
+                repo_url=repo.url if repo else None,
+                template_id=template_id,
             )
         )
     return run_id
