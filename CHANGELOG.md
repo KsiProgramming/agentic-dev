@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 1.11 "Generate docs" template (AC-1):
+  - **`repo.list_modules` tool.** Lists a repo's modules (directories with a manifest, else top-level directories) as structured content, filtered by `include` globs and capped at 40, so a `map` can go over them.
+  - **Templates** (`agentic_engine.templates`). A `Template` turns options (a Pydantic model, exported as JSON Schema) into a workflow spec. The first one, `generate-docs` (`DocsParams`: `output_dir`, `include`, `extra_instructions`), lists the modules, documents them in a map of read-only agents (4 at a time), joins the pages, has one writer commit them and an index under `output_dir`, then opens a PR after a gate.
+  - **API.** `GET /templates` lists the templates and their option schemas. `POST /runs` takes `template` (`id`, `parameters`) instead of `workflow` and stores the spec it builds; bad options get `422` with their path.
+  - **Web.** The home page has a "Generate docs" card (repo picker and options), shown once GitHub is connected. The run page shows a waiting gate with Approve and Reject buttons and links the pull request a run opened. The monitor now receives gate, loop, map and `pr_opened` events, which it dropped before.
 - Phase 1.10 `map` and `reduce` primitives ([#19](https://github.com/KsiProgramming/agentic-dev/pull/19)):
   - **`map` node.** A spec node (`{"type": "map", "id", "over", "body", "max_concurrency"}`) runs its body once per item of the CEL list `over`, at most `max_concurrency` (1 to 8) at a time and at most 40 items. Its result keeps item order (`data`: `items`, `outputs`). The body can hold only agent, tool and sequence nodes, and a map cannot be inside a loop (`map_errors`, `loop_errors`).
   - **`reduce` node.** A spec node (`{"type": "reduce", "id", "from", "strategy"}`) combines the outputs of an earlier map: `concat` (optional `separator`) or `agent` (`agent`: role, instructions, provider, model), whose input is the JSON array `[{item, output}]`.

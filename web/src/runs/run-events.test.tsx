@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { RunEvents } from "./run-events";
@@ -66,4 +66,61 @@ test("an unknown run says so", async () => {
 
   await waitFor(() => expect(screen.getByText("Run not found.")).toBeDefined());
   expect(screen.getByTestId("run-status").textContent).toBe("not found");
+});
+
+test("a waiting gate can be approved", async () => {
+  const fetch = vi.fn<(r: Request) => Promise<Response>>(async () =>
+    Response.json(
+      { run_id: RUN_ID, node_id: "summarizer", decision: "approve", status: "queued" },
+      { status: 202 },
+    ),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const source = renderRun();
+
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit(
+      runEvent(2, "gate_waiting", { title: "Open a PR?", prompt: null, artifact: "<b>x</b>" }),
+    );
+  });
+
+  const panel = screen.getByTestId("gate-panel");
+  expect(panel.textContent).toContain("Open a PR?");
+  expect(panel.textContent).toContain("<b>x</b>");
+  expect(panel.querySelector("b")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+  await screen.findByText(/Approved/);
+  const request = fetch.mock.calls[0]?.[0] as Request;
+  expect(request.url).toBe(`http://api.test/runs/${RUN_ID}/approvals`);
+  expect(await request.json()).toEqual({ node_id: "summarizer", decision: "approve" });
+
+  act(() => source.emit(runEvent(3, "gate_decided", { decision: "approve" })));
+  expect(screen.queryByTestId("gate-panel")).toBeNull();
+});
+
+test("a refused decision shows an error", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ detail: "already decided" }, { status: 409 })),
+  );
+  const source = renderRun();
+  act(() => source.emit(runEvent(1, "gate_waiting", { title: "Go?" })));
+
+  fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+
+  expect((await screen.findByRole("alert")).textContent).toContain("HTTP 409");
+});
+
+test("an opened pull request is linked", () => {
+  const source = renderRun();
+
+  act(() => {
+    source.emit(runEvent(1, "pr_opened", { url: "https://github.com/acme/api/pull/3" }));
+    source.emit(runEvent(2, "run_completed"));
+  });
+
+  const link = screen.getByRole("link", { name: "https://github.com/acme/api/pull/3" });
+  expect(link.getAttribute("href")).toBe("https://github.com/acme/api/pull/3");
 });

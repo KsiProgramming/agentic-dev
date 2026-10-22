@@ -55,9 +55,10 @@ export interface paths {
         put?: never;
         /**
          * Create
-         * @description Queue a run of `workflow` with `input` for its first node, working on `repo` if given.
-         *     Stream it from `events_url`. A workflow that publishes (`github.openPR`) must have a gate
-         *     between the writer and the publishing node, or it is refused with `422`.
+         * @description Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first
+         *     node, working on `repo` if given. Stream it from `events_url`. A workflow that publishes
+         *     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
+         *     refused with `422`.
          */
         post: operations["createRun"];
         delete?: never;
@@ -249,6 +250,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Templates
+         * @description The workflow templates a run can start from (`POST /runs` with `template`).
+         */
+        get: operations["listTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -349,7 +370,10 @@ export interface components {
         };
         /** CreateRunRequest */
         CreateRunRequest: {
-            workflow: components["schemas"]["WorkflowSpec"];
+            /** @description The workflow to run. Give this or `template`, not both. */
+            workflow?: components["schemas"]["WorkflowSpec"] | null;
+            /** @description A template to build the workflow from. Give this or `workflow`, not both. */
+            template?: components["schemas"]["TemplateRun"] | null;
             /**
              * Input
              * @default
@@ -618,6 +642,40 @@ export interface components {
             id: string;
             /** Steps */
             steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"])[];
+        };
+        /** TemplateOut */
+        TemplateOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Parameters
+             * @description JSON Schema of the template's options.
+             */
+            parameters: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * TemplateRun
+         * @description A run of a template (`GET /templates`) with its options.
+         */
+        TemplateRun: {
+            /**
+             * Id
+             * @description The template's id, e.g. `generate-docs`.
+             */
+            id: string;
+            /**
+             * Parameters
+             * @description The template's options, as its `parameters` schema describes.
+             */
+            parameters?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
         };
         /**
          * ToolNode
@@ -1232,6 +1290,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateOut"][];
                 };
             };
         };

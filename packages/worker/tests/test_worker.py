@@ -8,7 +8,7 @@ import subprocess
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import docker
@@ -25,8 +25,10 @@ from agentic_engine.gate import GateDecision
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.spec import PUBLISH_TOOLS, WRITE_TOOLS, WorkflowSpec, parse_spec
-from agentic_runtime import AgentRuntime, ClaudeRuntime, Failed, ToolExecutor
-from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
+from agentic_engine.templates import DocsParams, build_docs_spec
+from agentic_engine.templates.docs import PAGE_SEPARATOR
+from agentic_runtime import AgentRuntime, ClaudeRuntime, Completed, Failed, Message, ToolExecutor
+from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script
 from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
 from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
 from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
@@ -860,6 +862,134 @@ async def test_a_publishing_run_without_a_github_connection_fails_cleanly(
     assert failed.payload == {"error": "workspace has no GitHub connection"}
     assert sandboxes.git_envs == []  # failed before cloning
     assert github.tokens_issued == 0
+
+
+DOCS_REPO = {
+    "README.md": "# Acme\n",
+    "pyproject.toml": "[tool.uv.workspace]\n",
+    "packages/api/pyproject.toml": "[project]\nname = 'api'\n",
+    "packages/engine/pyproject.toml": "[project]\nname = 'engine'\n",
+    "web/package.json": "{}\n",
+}
+DOCS_MODULES = ["packages/api", "packages/engine", "web"]
+
+
+def docs_page(input: str) -> Script:
+    """A module agent's reply: a page for the module its input names."""
+    path = json.loads(input)["path"]
+    return [Message(text=f"<!-- module: {path} -->\n# {path}\n\nWhat {path} does."), ECHO_USAGE]
+
+
+def docs_writer() -> Script:
+    pages = {f"docs/{m.replace('/', '-')}.md": f"# {m}\n" for m in DOCS_MODULES}
+    writes = [
+        CallTool("repo.write_file", {"path": path, "content": content})
+        for path, content in {"docs/README.md": "# Docs\n", **pages}.items()
+    ]
+    return [
+        *writes,
+        CallTool("repo.commit", {"message": "docs: generate module documentation"}),
+        Message(text="committed the docs"),
+        ECHO_USAGE,
+        Completed(),
+    ]
+
+
+def remote_files(bare: Path, branch: str) -> list[str]:
+    out = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", branch],
+        cwd=bare,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.split()
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+async def test_done_when_a_docs_run_opens_a_pr(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    decision: Literal["approve", "reject"],
+) -> None:
+    """Phase 1.11 (AC-1) on fakes: the "Generate docs" template lists the modules of a repo on
+    GitHub, documents each in a map, and its writer commits the pages; the run waits at the
+    gate with nothing pushed. Approval opens a pull request with the docs; rejection pushes
+    nothing."""
+    repos = tmp_path / "repos"
+    make_repo(repos / "acme", DOCS_REPO)
+    remote = bare_remote(repos / "acme", tmp_path / "remote.git")
+    github = FakeGithub(GITHUB_TOKEN)
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "acme")}
+    )
+    workspace_id = await new_workspace(sessions)
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+    runtimes: list[FakeRuntime] = []
+
+    def make_runtime(tools: ToolExecutor | None) -> AgentRuntime:
+        runtimes.append(FakeRuntime({"writer": docs_writer()}, default=docs_page, tools=tools))
+        return runtimes[-1]
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=make_runtime,
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: remote,
+    ):
+        run_id = await create_run(
+            sessions,
+            build_docs_spec(DocsParams()),
+            "",
+            RepoSource(url=GITHUB_URL),
+            workspace_id=workspace_id,
+        )
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+            await wait_for_status(sessions, run_id, "waiting")
+            assert github.pulls == []
+            assert remote_branches(tmp_path / "remote.git") == []
+
+            await record_approval(
+                sessions,
+                run_id,
+                "approve",
+                GateDecision(decision=decision),
+            )
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        ended = "completed" if decision == "approve" else "cancelled"
+        await wait_for_status(sessions, run_id, ended)
+
+    events = await list_run_events(sessions, run_id)
+    (listed,) = [e for e in events if e.type == "tool_result" and e.node_id == "list_modules"]
+    assert listed.payload["is_error"] is False
+    items = [e.payload["index"] for e in events if e.type == "map_item_completed"]
+    assert len(items) == 3 and all(i in items for i in (0, 1, 2))
+    (writer_request,) = [r for rt in runtimes for r in rt.requests if r.node_id == "writer"]
+    pages = writer_request.input.split(PAGE_SEPARATOR)
+    assert [p.splitlines()[0] for p in pages] == [f"<!-- module: {m} -->" for m in DOCS_MODULES]
+
+    branch = f"agent/{run_id}/writer"
+    if decision == "reject":
+        assert github.pulls == []
+        assert remote_branches(tmp_path / "remote.git") == []
+        return
+    (opened,) = [e for e in events if e.type == "pr_opened"]
+    assert opened.payload["head"] == branch
+    assert github.pulls[0]["title"] == "docs: generate module documentation"
+    assert set(remote_files(tmp_path / "remote.git", branch)) >= {
+        "docs/README.md",
+        "docs/packages-api.md",
+        "docs/packages-engine.md",
+        "docs/web.md",
+    }
 
 
 def test_the_engine_and_the_tool_servers_agree_on_tool_names() -> None:
