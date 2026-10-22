@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Merge rules and roadmap board:
+- Merge rules and roadmap board ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)):
   - **Merging to main.** `scripts/setup_repo_rules.py` sets the repository to squash merges only (PR title and body as the commit, branch deleted after merge) and adds a ruleset on `main` with no bypass: changes go through a PR, every `ci.yml` and `pr-checks.yml` job must pass on a branch up to date with `main`, conversations resolved, no force push or deletion. `scripts/test_setup_repo_rules.py` keeps the required checks in step with the workflows.
   - **`open-pr` skill.** Opens a PR the way the rules want (changelog entry, labels, phase issue, watched checks) and leaves the merge to a person.
   - **Roadmap board.** `scripts/sync_roadmap_board.py` turns `specs/roadmap.md` into GitHub milestones, one issue per phase, `type:`/`area:`/`milestone:<n>` labels and a Projects board; `roadmap-board.yml` reruns it when the roadmap changes on `main` (needs `ROADMAP_BOARD_TOKEN`).
@@ -141,7 +141,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
-- The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it.
+- The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)).
 - Phase 2.5 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
   - The engine writes at most one `text_delta` per node (and map item) every 250 ms (`agentic_engine.graph.deltas.DeltaBuffer`). The first chunk of a burst is written at once and the rest are joined. Any other event of the node, its end and cancellation write the pending text first, so order and the joined text are unchanged.
   - `run_cancelled` takes its `reason` from the cancel message (`task.cancel("…")`); a bare cancel still says `caller cancelled`.
