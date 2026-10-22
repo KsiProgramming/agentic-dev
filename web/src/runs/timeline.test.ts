@@ -1,0 +1,223 @@
+import { describe, expect, it } from "vitest";
+
+import docsRun from "./fixtures/docs-run.json";
+import { runEvent } from "./testing";
+import { buildTimeline, foldDeltas, type MessageTurn, type Step, type ToolTurn } from "./timeline";
+import type { RunEvent } from "./types";
+
+const events = docsRun as RunEvent[];
+
+function messages(step: Step): MessageTurn[] {
+  return step.turns.filter((t): t is MessageTurn => t.kind === "message");
+}
+
+function event(
+  seq: number,
+  type: string,
+  nodeId: string | null,
+  payload: RunEvent["payload"] = {},
+): RunEvent {
+  return { ...runEvent(seq, type, payload), node_id: nodeId };
+}
+
+describe("buildTimeline on a recorded docs run", () => {
+  const timeline = buildTimeline(events);
+
+  it("lists one step per top-level node, in run order", () => {
+    expect(timeline.steps.map((s) => s.id)).toEqual([
+      "list_modules",
+      "document",
+      "combine",
+      "revise",
+      "approve",
+    ]);
+    expect(timeline.steps.every((s) => s.status === "completed")).toBe(true);
+    expect(timeline.workflowName).toBe("Generate docs");
+  });
+
+  it("nests the map's items under the map node, each with its own steps", () => {
+    const map = timeline.steps[1]!;
+    expect(map.items?.map((i) => [i.index, i.item, i.status])).toEqual([
+      [0, "packages/api", "completed"],
+      [1, "packages/engine", "completed"],
+      [2, "web", "completed"],
+    ]);
+    expect(map.items?.every((i) => i.steps.map((s) => s.id).join() === "module-writer")).toBe(true);
+  });
+
+  it("shows one message block per agent turn, not one per chunk", () => {
+    const writer = timeline.steps[1]!.items![0]!.steps[0]!;
+    // Turn 1: text, then a tool call; turn 2: text that the final `message` replaces.
+    expect(writer.turns.map((t) => t.kind)).toEqual(["message", "tool", "message"]);
+    const [plan, page] = messages(writer);
+    expect(plan).toMatchObject({
+      text: "I will look at the files of `packages/api` first.",
+      final: false,
+      chunks: 3,
+    });
+    expect(page).toMatchObject({
+      text: "# packages/api\n\nThis module holds the **api** code.\n\n- Entry point\n- Tests\n",
+      final: true,
+      chunks: 5,
+    });
+    const deltas = events.filter((e) => e.type === "text_delta").length;
+    const blocks = [
+      ...timeline.steps.flatMap((s) => [
+        ...s.turns,
+        ...(s.items ?? []).flatMap((i) => i.steps.flatMap((x) => x.turns)),
+        ...(s.iterations ?? []).flatMap((i) => i.steps.flatMap((x) => x.turns)),
+      ]),
+    ].filter((t) => t.kind === "message").length;
+    // 3 writers × 2 turns + 2 reviewer turns, from many more chunks.
+    expect(blocks).toBe(8);
+    expect(deltas).toBeGreaterThan(blocks * 2);
+  });
+
+  it("pairs each tool call with its result in one card", () => {
+    const listModules = timeline.steps[0]!;
+    const card = listModules.turns[0] as ToolTurn;
+    expect(card).toMatchObject({ kind: "tool", name: "repo.list_modules", status: "completed" });
+    expect(card.output).toContain("packages/engine");
+  });
+
+  it("keeps loop iterations apart, with their condition result", () => {
+    const loop = timeline.steps[3]!;
+    expect(loop.iterations?.map((i) => [i.index, i.conditionMet, i.steps[0]?.id])).toEqual([
+      [1, false, "reviewer"],
+      [2, true, "reviewer"],
+    ]);
+    expect(loop.iterations?.[1]?.steps[0]?.usage).toEqual({ inputTokens: 900, outputTokens: 40 });
+  });
+
+  it("records the gate's title and decision", () => {
+    expect(timeline.steps[4]!.gate).toEqual({
+      title: "Open the docs PR?",
+      decision: "approve",
+      comment: null,
+    });
+  });
+
+  it("gives the same result for a prefix replayed twice (duplicate seq ignored)", () => {
+    const twice = buildTimeline([...events.slice(0, 20), ...events.slice(10)]);
+    expect(twice).toEqual(timeline);
+  });
+});
+
+describe("buildTimeline turn rules", () => {
+  it("grows one message while chunks stream, and the message replaces it", () => {
+    const streaming = buildTimeline([
+      event(1, "node_started", "a"),
+      event(2, "text_delta", "a", { text: "Hel" }),
+      event(3, "text_delta", "a", { text: "lo wor" }),
+      event(4, "text_delta", "a", { text: "ld" }),
+    ]);
+    expect(streaming.steps[0]!.turns).toEqual([
+      { kind: "message", key: 2, text: "Hello world", final: false, chunks: 3 },
+    ]);
+
+    const done = buildTimeline([
+      event(1, "node_started", "a"),
+      event(2, "text_delta", "a", { text: "Hel" }),
+      event(3, "message", "a", { text: "Hello." }),
+    ]);
+    expect(done.steps[0]!.turns).toEqual([
+      { kind: "message", key: 2, text: "Hello.", final: true, chunks: 1 },
+    ]);
+  });
+
+  it("adds a message with no chunks before it as its own turn", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "a"),
+      event(2, "tool_call", "a", { call_id: "c1", name: "repo.search", arguments: { q: "x" } }),
+      event(3, "tool_result", "a", { call_id: "c1", output: "none" }),
+      event(4, "message", "a", { text: "Nothing found." }),
+    ]);
+    expect(timeline.steps[0]!.turns.map((t) => t.kind)).toEqual(["tool", "message"]);
+  });
+
+  it("shows a tool call without a result as running, and an error result as failed", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "a"),
+      event(2, "tool_call", "a", { call_id: "c1", name: "repo.read_file" }),
+      event(3, "tool_result", "a", { call_id: "c1", output: "no such file", is_error: true }),
+      event(4, "tool_call", "a", { call_id: "c2", name: "repo.read_file" }),
+    ]);
+    const [first, second] = timeline.steps[0]!.turns as ToolTurn[];
+    expect(first).toMatchObject({ status: "failed", output: "no such file" });
+    expect(second).toMatchObject({ status: "running", output: null });
+  });
+
+  it("ignores unknown event types", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "a"),
+      event(2, "something_new", "a", { x: 1 }),
+    ]);
+    expect(timeline.steps[0]!.turns).toEqual([]);
+  });
+
+  it("shows a failed node's error, and ends nodes cut off by the run's end", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "a"),
+      event(2, "failed", "a", { error: "model refused" }),
+      event(3, "node_failed", "a", { error: "model refused" }),
+      event(4, "node_started", "b"),
+      event(5, "run_cancelled", null, { reason: "cancelled by user" }),
+    ]);
+    expect(timeline.steps.map((s) => [s.id, s.status, s.error])).toEqual([
+      ["a", "failed", "model refused"],
+      ["b", "cancelled", null],
+    ]);
+  });
+
+  it("marks a step waiting at a gate", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "gate"),
+      event(2, "gate_waiting", "gate", { title: "Ship it?" }),
+    ]);
+    expect(timeline.steps[0]).toMatchObject({ status: "waiting", gate: { title: "Ship it?" } });
+  });
+
+  it("offers only GitHub pull request URLs as links", () => {
+    const ok = buildTimeline([
+      event(1, "pr_opened", "publish", { url: "https://github.com/acme/docs/pull/7" }),
+    ]);
+    const bad = buildTimeline([event(1, "pr_opened", "publish", { url: "javascript:alert(1)" })]);
+    expect(ok.steps[0]!.prUrl).toBe("https://github.com/acme/docs/pull/7");
+    expect(bad.steps[0]!.prUrl).toBeNull();
+  });
+});
+
+describe("foldDeltas", () => {
+  it("folds consecutive chunks of one node and item into one row with the full text", () => {
+    const rows = foldDeltas(events);
+    const textRows = rows.filter((r) => r.kind === "text");
+    expect(textRows).toHaveLength(8);
+    expect(textRows[1]).toMatchObject({
+      nodeId: "module-writer",
+      item: 0,
+      text: "# packages/api\n\nThis module holds the **api** code.\n\n- Entry point\n- Tests\n",
+    });
+    expect(rows.some((r) => r.kind === "event" && r.event.type === "text_delta")).toBe(false);
+    // Every event is still there, folded or not.
+    const count = rows.reduce((n, r) => n + (r.kind === "text" ? r.events.length : 1), 0);
+    expect(count).toBe(events.length);
+  });
+
+  it("breaks the fold on another event, node or map item", () => {
+    const rows = foldDeltas([
+      event(1, "text_delta", "a", { text: "one " }),
+      event(2, "text_delta", "a", { text: "two" }),
+      event(3, "text_delta", "b", { text: "other node" }),
+      event(4, "text_delta", "b", { text: "item 1", item: 1 }),
+      event(5, "usage", "b", {}),
+      event(6, "text_delta", "b", { text: "after" }),
+    ]);
+    expect(rows.map((r) => (r.kind === "text" ? r.text : r.event.type))).toEqual([
+      "one two",
+      "other node",
+      "item 1",
+      "usage",
+      "after",
+    ]);
+  });
+});

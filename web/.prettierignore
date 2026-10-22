@@ -6,3 +6,5 @@ test-results/
 # Generated (pnpm gen:api)
 openapi.json
 src/api/schema.d.ts
+# Generated (uv run python scripts/record_console_fixture.py)
+src/runs/fixtures/docs-run.json
