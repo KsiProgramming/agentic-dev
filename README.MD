@@ -467,9 +467,10 @@ cd web && pnpm gen:api
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Workflow spec
-A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has three node types:
+A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has four node types:
 - `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`);
 - `tool`: one call of a platform tool with fixed arguments and no model, e.g. `{"type": "tool", "id": "list", "tool": "repo.list_files", "args": {"path": "."}}`;
+- `gate`: a pause until a human approves or rejects (`title`, optional `prompt`); see [Gates](#gates);
 - `sequence`: its `steps`, in order.
 
 Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
@@ -510,7 +511,7 @@ The runtime and engine test suites block all non-loopback network access (`agent
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
 
 ## Engine
-`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. In v0, nested `sequence`s are flattened depth first into one chain of `agent` and `tool` nodes, each named by its spec node id. The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run.
+`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. In v0, nested `sequence`s are flattened depth first into one chain of `agent`, `tool` and `gate` nodes, each named by its spec node id. The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run.
 
 A `tool` node calls the `ToolExecutor` passed as `run_workflow(..., tools=)` (the worker passes the same per-run tools its agents get). It writes one `tool_call` and one `tool_result` event, and its output text becomes the next node's input. An error result, an exception or a run without tools fails the node.
 
@@ -521,12 +522,14 @@ result.status, result.order, result.text, result.usage, result.stopped_at
 
 With a `checkpointer` (any LangGraph saver built with `checkpoint_serde()`), `run_workflow` saves the graph state after each node in the thread named by the run id, and `resume_workflow` carries a cut-off run on from there: nodes that completed are not run again, and the node that was cut off runs again from its start. See [Durable runs](#durable-runs).
 
+A `gate` node pauses the run: `run_workflow` returns status `waiting` with `waiting_at` the gate, and `resume_workflow(..., decision=GateDecision(...))` continues it. See [Gates](#gates).
+
 LangGraph ships no type information, so `typings/langgraph/` holds minimal stubs for the parts the engine uses; extend them when you use more of its API.
 
 ## Run event log
 Every run writes one ordered stream of events (`agentic_engine.events.RunEvent`): `run_started`, then for each node `node_started`, the node's agent events and `node_completed` / `node_failed` / `node_cancelled`, then `run_completed` / `run_failed` / `run_cancelled`. `seq` numbers the events 1, 2, … per run. Agent events keep their `AgentEvent` type, and their `payload` is the serialised event (`event.agent_event()` parses it back).
 
-The engine has no database code. It hands events to an `EventSink` passed to `run_workflow`. Tests use `InMemoryEventSink`. `agentic_store.PostgresEventSink` writes each event to the append-only `run_events` table in its own transaction, keeps the run's status in `runs` (`queued` → `running` → final status), and sends `pg_notify('run_events', '<run_id>:<seq>')` with each insert. The run's row must exist first:
+The engine has no database code. It hands events to an `EventSink` passed to `run_workflow`. Tests use `InMemoryEventSink`. `agentic_store.PostgresEventSink` writes each event to the append-only `run_events` table in its own transaction, keeps the run's status in `runs` (`queued` → `running` → final status, with `waiting` while paused at a gate), and sends `pg_notify('run_events', '<run_id>:<seq>')` with each insert. The run's row must exist first:
 
 ```python
 sessions = async_sessionmaker(create_async_engine(database_url), expire_on_commit=False)
@@ -600,7 +603,7 @@ A run survives its worker (AC-8). After each node, the graph state is checkpoint
 - **Reclaim.** Before each queue poll, a worker looks for a `queued` or `running` run whose lease has expired (`LEASE_TTL_S`, 30 s). It claims it (`FOR UPDATE SKIP LOCKED`, so two workers never take the same run) and resumes it.
 - **Events.** The resumed attempt writes `run_resumed` (payload `attempt`, `completed_nodes`), then the usual node and run events. `seq` carries on from the last stored event. Events of the lost attempt stay in the log, including those of the node that was cut off, which runs again from its start (its tokens are spent twice).
 - **Stopping a worker is a drain.** On SIGTERM the worker cancels its run without ending it (no `run_cancelled`) and expires its lease, so the next worker resumes it at once.
-- **Crash loops.** A run claimed more than `MAX_ATTEMPTS` times (3) ends with `run_failed` ("gave up after N attempts").
+- **Crash loops.** A run claimed more than `MAX_ATTEMPTS` times (3) ends with `run_failed` ("gave up after N attempts"). A gate decision starts the count again.
 
 The worker's checkpointer talks to Postgres through psycopg, whose async driver cannot use Windows' default Proactor event loop. `python -m agentic_worker` therefore runs on a selector loop on Windows, and the worker and API tests give the worker an in-memory saver.
 
@@ -617,6 +620,26 @@ curl -s localhost:8000/runs/<id>/events
 ```
 
 The stream shows `run_resumed` with `"attempt": 2, "completed_nodes": ["step-1"]`, then `node_started step-2`, `step-3` and `run_completed`. `step-1` has exactly one `node_completed`, and `seq` runs from 1 with no gaps. With `docker compose stop worker` in place of `kill`, the run is resumed as soon as a worker is back.
+
+## Gates
+A `gate` node pauses a run until a human decides; it is how irreversible steps (push, PR, repo creation) will be put behind an approval. Its input, the previous node's output, is shown to the approver and passed on unchanged:
+
+```json
+{ "type": "gate", "id": "gate", "title": "Approve the notes", "prompt": "Check the summary first." }
+```
+
+- **Pause.** The gate is a LangGraph `interrupt()`, so the paused state lives in the run's checkpoint (a spec with a gate needs a checkpointer). The run writes `node_started` and `gate_waiting` (payload `title`, `prompt`, `artifact`) for the gate and becomes `waiting`. The worker releases it and takes other runs; a waiting run is never reclaimed. Its sandbox is kept (`SandboxManager.keep`), so what writers committed before the gate is still there afterwards, and the worker's startup sweep spares it.
+- **Decide.** `POST /runs/{id}/approvals` with `{"node_id", "decision": "approve" | "reject", "comment"?}` records the decision in the `approvals` table (one per gate and run) and queues the run again. It returns `202`, `404` for an unknown run, `409` if the run is not waiting at that gate or the gate was already decided, and `422` for any other decision.
+- **Continue.** A worker claims the run, opens its kept sandbox (`open(..., reuse=True)`; a fresh one if it is gone) and resumes it with the decision (`resume_workflow(..., decision=)`). The stream carries on with `run_resumed`, then `gate_decided` (`decision`, `comment`, `decided_by`). Approve completes the gate and the next node runs; reject cancels the gate and the run ends `run_cancelled` with `stopped_at` the gate. A decision gives the run a fresh `MAX_ATTEMPTS` budget.
+
+Demo (the phase 1.7 "Done when"), with the stack running:
+
+```bash
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json'   -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/gate-approval.json), \"input\": \"go\", \"repo\": {\"url\": \"https://github.com/octocat/Hello-World.git\"}}"
+curl -N localhost:8000/runs/<id>/events      # stops after gate_waiting; the run is "waiting"
+curl -s -X POST localhost:8000/runs/<id>/approvals -H 'content-type: application/json'   -d '{"node_id": "gate", "decision": "approve"}'
+# the stream goes on: run_resumed, gate_decided, node_completed gate, the `list` node, run_completed
+```
 
 ## Sandbox
 A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents and tool nodes get the repo tools, which run in there. A spec whose nodes (agent or tool) use `repo.*` tools is rejected with `422` if the run has no `repo`.
