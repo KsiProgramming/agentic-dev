@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agentic_runtime import AgentEvent, agent_event_adapter
 
-type RunStatus = Literal["running", "completed", "failed", "cancelled"]
+type RunStatus = Literal["running", "waiting", "completed", "failed", "cancelled"]
 
 RUN_STARTED: Final = "run_started"
 RUN_RESUMED: Final = "run_resumed"
@@ -25,6 +25,8 @@ NODE_STARTED: Final = "node_started"
 NODE_COMPLETED: Final = "node_completed"
 NODE_FAILED: Final = "node_failed"
 NODE_CANCELLED: Final = "node_cancelled"
+GATE_WAITING: Final = "gate_waiting"
+GATE_DECIDED: Final = "gate_decided"
 
 RUN_END_STATUS: Final[dict[str, RunStatus]] = {
     RUN_COMPLETED: "completed",

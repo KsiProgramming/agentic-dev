@@ -28,8 +28,8 @@ Built engine first. Each group leaves the project working and CI green.
 - [ ] `graph/run.py`:
   - After `ainvoke`, check `aget_state(config).interrupts`.
   - If the run paused, emit `node_started` and `gate_waiting` (`title`, `prompt`, `artifact`) for the pending gate, and return `WorkflowRunResult(status="waiting", waiting_at=<gate id>)`.
-  - Add `continue_workflow(spec, runtime, decision, *, run_id, sink, checkpointer, next_seq, attempt, tools)`. It emits `run_resumed` and invokes `Command(resume=decision.model_dump())`.
-  - `resume_workflow` on a run paused at an interrupt with no decision reports `waiting` again, without emitting anything twice.
+  - `resume_workflow` takes an optional `decision: GateDecision`. On a run paused at a gate it emits `run_resumed` and invokes `Command(resume=decision.model_dump())`. (A separate `continue_workflow` was planned; one optional parameter turned out to be enough.)
+  - `resume_workflow` on a paused run with no decision (a worker died right after the pause) runs the gate again, which pauses again and announces the pause again. This is the same as a cut-off node running again in 1.3, and it keeps the run status right.
 - [ ] `graph/state.py`: add `"waiting"` to `WorkflowRunResult.status` and a `waiting_at: str | None` field.
 - [ ] Tests in `packages/engine/tests/test_gate.py` (fake runtime, `InMemorySaver`):
   - A run stops at the gate with events `… node_started(gate), gate_waiting`, status `waiting`, and the next node not run.
@@ -73,7 +73,7 @@ Built engine first. Each group leaves the project working and CI green.
 
 ## 6. Worker: pause, then continue
 - [ ] `agentic_worker/main.py`:
-  - `_workflow` calls `continue_workflow` when `pending_decision(run)` is set, `resume_workflow` when `attempt > 1`, and `run_workflow` otherwise.
+  - `_workflow` calls `resume_workflow(…, decision=…)` when `pending_decision(run)` is set, `resume_workflow` when `attempt > 1`, and `run_workflow` otherwise.
   - A `waiting` result keeps the sandbox, and `process_run` releases the lease as for an ended run. Set `lease_expires_at` to NULL, so the expired-lease reclaim never picks the run up.
   - The run is opened with `reuse=True` whenever a sandbox for it may exist (`attempt > 1` or a pending decision).
 - [ ] `build_sandboxes`: the startup sweep's `keep` set adds the ids of `waiting` runs.

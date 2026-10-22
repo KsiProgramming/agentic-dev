@@ -16,13 +16,13 @@ User choice: engine unit tests are the required new tests for this phase. They r
   - The `gate_waiting` payload has `title`, `prompt` and `artifact` (the agent's output).
   - The tool node has not run.
 - [ ] `test_gate.py`, approve:
-  - `continue_workflow` with `approve` emits `run_resumed`, `gate_decided`, `node_completed(gate)`, the tool node's events and `run_completed`.
+  - `resume_workflow(decision=approve)` emits `run_resumed`, `gate_decided`, `node_completed(gate)`, the tool node's events and `run_completed`.
   - The tool node received the pre-gate text.
 - [ ] `test_gate.py`, reject:
-  - `continue_workflow` with `reject` and a comment emits `gate_decided` and `node_cancelled(gate)`, then `run_cancelled` with `stopped_at="gate"`.
+  - `resume_workflow(decision=reject)` and a comment emits `gate_decided` and `node_cancelled(gate)`, then `run_cancelled` with `stopped_at="gate"`.
   - The tool node never runs.
 - [ ] `test_gate.py`, no duplicates: across the pause and the continue, `seq` is 1..n with no gaps. `node_started(gate)` and `gate_waiting` each appear exactly once.
-- [ ] `test_gate.py`, idempotent wait: `resume_workflow` on a paused run with no decision returns `waiting` again and emits no second `gate_waiting`.
+- [ ] `test_gate.py`, resume without a decision: `resume_workflow` on a paused run with no decision returns `waiting` again, announces the pause again (`run_resumed`, `node_started`, `gate_waiting`) and runs nothing else. A later approval still completes the run.
 - [ ] `test_gate.py`, two gates: a spec with two gates pauses twice and completes after two approvals.
 - [ ] The existing engine, store, API, worker and sandbox suites still pass. No existing test is changed to fit, except where the `Node` union or the status literals widened.
 - [ ] `ruff check`, `ruff format --check`, and strict `pyright`/`mypy` are clean across the workspace.

@@ -1,7 +1,7 @@
 """The LangGraph state of a workflow run, and the summary `run_workflow` returns."""
 
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -42,15 +42,21 @@ def initial_state(input: str) -> RunState:
     return RunState(input=input, last_text=input, results={}, order=[])
 
 
+type WorkflowRunStatus = AgentNodeStatus | Literal["waiting"]
+
+
 class WorkflowRunResult(BaseModel):
-    """The outcome of a run. `stopped_at` names the node that did not complete, if any."""
+    """The outcome of a run, or of one stretch of it. `stopped_at` names the node that did not
+    complete, if any; a `waiting` run is paused at the gate `waiting_at` until it is continued
+    with a decision."""
 
     model_config = ConfigDict(frozen=True)
 
     run_id: UUID
-    status: AgentNodeStatus
+    status: WorkflowRunStatus
     text: str
     order: list[str]
     results: dict[str, AgentNodeResult]
     usage: Usage | None
     stopped_at: str | None = None
+    waiting_at: str | None = None

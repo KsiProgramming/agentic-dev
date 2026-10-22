@@ -37,7 +37,7 @@ Tech-stack choices that apply: LangGraph `interrupt()` for `gate`, with `Command
 - **Engine:**
   - A gate compiles to a LangGraph node whose first statement is `interrupt(...)`. LangGraph runs the node again from its start on resume, so nothing is emitted before that line.
   - When the graph stops at an interrupt, `run_workflow` and `resume_workflow` emit `node_started` and `gate_waiting` and return a `WorkflowRunResult` with status `waiting`. The `gate_waiting` payload has `title`, `prompt` and the gate's input text as `artifact`.
-  - A new `continue_workflow(…, decision)` resumes the graph with `Command(resume=decision)`.
+  - `resume_workflow(…, decision=…)` resumes the graph with `Command(resume=decision)`.
   - The gate node then emits `gate_decided` (`decision`, `comment`, `decided_by`).
   - On approve it emits `node_completed`, and the run continues.
   - On reject it emits `node_cancelled`, and the run ends `cancelled` with `stopped_at=<gate id>`.
@@ -52,7 +52,7 @@ Tech-stack choices that apply: LangGraph `interrupt()` for `gate`, with `Command
   - It returns `422` for a bad decision value.
 - **Worker:**
   - When a run ends `waiting`, the worker releases its lease and keeps the sandbox.
-  - It claims a re-queued run through the existing claim path. If the run has a recorded decision for its pending gate, the worker calls `continue_workflow`.
+  - It claims a re-queued run through the existing claim path. If the run has a recorded decision for its pending gate, the worker passes it to `resume_workflow`.
 - **Sandbox kept across the pause:**
   - The `SandboxManager` gets `keep`/`attach` behaviour. On a pause, the container and volume (labelled `agentic.run_id`) are left running, and resuming reattaches to them. If they are gone, a fresh sandbox is created and the 1.3 rule applies.
   - `RepoTools` reuses a writer's existing worktree and branch instead of failing on `worktree add -b`.
