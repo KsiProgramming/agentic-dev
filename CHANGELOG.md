@@ -2,13 +2,17 @@
 
 All notable changes to this project are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Every pull request adds its changes under `[Unreleased]` before it is merged.** CI enforces this; add the `skip-changelog` label only to PRs with no user- or developer-visible change (for example a typo fix). On release, `[Unreleased]` is renamed to the version and date.
+**Every pull request adds its changes under `[Unreleased]` before it is merged.** CI enforces this on every PR, with no skip label, and `main` only accepts squash merges whose checks have all passed (see `scripts/setup_repo_rules.py`). On release, `[Unreleased]` is renamed to the version and date.
 
 Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`. Write one line per change and link the PR.
 
 ## [Unreleased]
 
 ### Added
+- Merge rules and roadmap board ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)):
+  - **Merging to main.** `scripts/setup_repo_rules.py` sets the repository to squash merges only (PR title and body as the commit, branch deleted after merge) and adds a ruleset on `main` with no bypass: changes go through a PR, every `ci.yml` and `pr-checks.yml` job must pass on a branch up to date with `main`, conversations resolved, no force push or deletion. `scripts/test_setup_repo_rules.py` keeps the required checks in step with the workflows.
+  - **`open-pr` skill.** Opens a PR the way the rules want (changelog entry, labels, phase issue, watched checks) and leaves the merge to a person.
+  - **Roadmap board.** `scripts/sync_roadmap_board.py` turns `specs/roadmap.md` into GitHub milestones, one issue per phase, `type:`/`area:`/`milestone:<n>` labels and a Projects board; `roadmap-board.yml` reruns it when the roadmap changes on `main` (needs `ROADMAP_BOARD_TOKEN`).
 - Phase 2.6 (part C) rerun ([#28](https://github.com/KsiProgramming/agentic-dev/pull/28)):
   - **API.** `POST /runs/{id}/rerun` (`202`; `404` unknown; `409` if the run has not ended, or its workflow uses `github.*` tools and GitHub is no longer connected) queues a new run with the original's spec, input, repo, workspace, template and options, and `rerun_of` set to it (`agentic_store.create_rerun`). The original is not changed. Template runs now keep their options in `runs.template_parameters` (Alembic `0013_run_template_parameters`) for a later "Edit and rerun".
   - **UI.** Failed and cancelled runs have a Rerun button in the console header (secondary on succeeded runs), and ended runs a "⋯" menu with Rerun in the runs list; both open the new run. A rerun shows "Rerun of <id>" in its header and list row. The runs list's template filter comes from `GET /templates`.
@@ -137,6 +141,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)).
 - Phase 2.5 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
   - The engine writes at most one `text_delta` per node (and map item) every 250 ms (`agentic_engine.graph.deltas.DeltaBuffer`). The first chunk of a burst is written at once and the rest are joined. Any other event of the node, its end and cancellation write the pending text first, so order and the joined text are unchanged.
   - `run_cancelled` takes its `reason` from the cancel message (`task.cancel("…")`); a bare cancel still says `caller cancelled`.

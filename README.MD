@@ -834,7 +834,15 @@ Open `http://localhost:3000/templates` to start the "Generate docs" template (se
 The browser calls the API directly (`NEXT_PUBLIC_API_URL`, default `http://localhost:8000`) and reads `GET /runs/{id}/events` with `EventSource`, so the API must allow the web app's origin: `CORS_ORIGINS` is a JSON list, and compose sets it to `["http://localhost:${WEB_PORT}"]`. The `RunEvent` type the page uses is generated from the OpenAPI spec like the rest of the client. The Playwright test `web/e2e/monitor.spec.ts` checks the roadmap target: every live event shows up in the browser less than 1 s after it was stored.
 
 ## Changelog
-Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `Changelog` CI check fails otherwise; label the PR `skip-changelog` only when it has no notable change.
+Every pull request records its changes under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) before merge. The `CHANGELOG.md updated` CI check fails otherwise, on every PR.
 
 ## Roadmap status
 A PR that implements a roadmap phase (it touches a `specs/<date>-<slug>/` folder whose `requirements.md` names the phase) must set that phase's Status in [specs/roadmap.md](specs/roadmap.md) to `✅ Done ([#<pr>](<pr-url>))`. On PRs from this repository the `Roadmap phase marked done` CI job does this for you: it commits the Status change to the PR branch, then checks it. PRs from forks only get the check. To do it locally before pushing, use the `complete-phase` Claude Code skill (`python scripts/check_roadmap.py origin/main HEAD --mark-done <pr-url>`). Label planning-only PRs `skip-roadmap`.
+
+## Merging to main
+`main` takes changes only through pull requests, merged with **Squash and merge** (the PR title and body become the commit). A PR merges once every job of `ci.yml` and `pr-checks.yml` has run and passed on a branch up to date with `main`, and nobody bypasses that. The `open-pr` Claude Code skill walks through it: changelog entry, labels, phase issue, push, watch the checks; a person merges.
+
+These rules live in GitHub settings, applied by `python scripts/setup_repo_rules.py` (repo admin, after `gh auth login`; `--dry-run` prints them). Run it again after adding or renaming a CI job; `scripts/test_setup_repo_rules.py` fails until its list of required checks matches the workflows.
+
+## Roadmap board
+`python scripts/sync_roadmap_board.py` mirrors [specs/roadmap.md](specs/roadmap.md) on GitHub: one milestone per roadmap milestone, one `roadmap-phase` issue per phase (closed when the phase is `✅ Done`), `type:`, `area:` and `milestone:<n>` labels, and the "agentic-dev roadmap" Projects board with every phase issue on it. It needs `gh auth refresh -s project`; `--dry-run` writes nothing. The roadmap is the source of truth: running it again updates titles, milestones, states and the board's Status (Todo, Done; cards moved to In Progress stay there). On `main`, `roadmap-board.yml` runs it whenever the roadmap changes, if the `ROADMAP_BOARD_TOKEN` secret (a token with the `repo` and `project` scopes) is set.

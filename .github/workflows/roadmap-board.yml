@@ -1,0 +1,33 @@
+name: Roadmap board
+
+# Keeps the phase issues, milestones and the Projects board in step with specs/roadmap.md.
+on:
+  push:
+    branches: [main]
+    paths: [specs/roadmap.md]
+  workflow_dispatch:
+
+concurrency:
+  group: roadmap-board
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync roadmap to GitHub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Sync labels, milestones, issues and the project
+        # The default token cannot write to a user's Projects board, so this needs a token with
+        # the repo and project scopes (classic PAT) in ROADMAP_BOARD_TOKEN.
+        env:
+          GH_TOKEN: ${{ secrets.ROADMAP_BOARD_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::ROADMAP_BOARD_TOKEN is not set; run 'python scripts/sync_roadmap_board.py' locally instead."
+            exit 0
+          fi
+          python3 scripts/sync_roadmap_board.py
