@@ -52,8 +52,11 @@ Principles that apply:
   - A `tool` node whose result carries a PR emits `pr_opened` (`node_id`, `url`, `number`, `head`, `base`) before `node_completed`.
   - `github.openPR` counts as a **write** tool for grants. It is not a writer: it gets no worktree.
 - **Gate rule (spec level):**
-  - `POST /runs` returns `422` if a node using `github.openPR` has no `gate` before it in sequence order, or if `from_node` does not name an earlier writer node.
-  - A `github.*` tool also needs the run's `repo` to be a GitHub URL, and the workspace needs a GitHub connection. If either is missing, `POST /runs` returns `409`.
+  - `POST /runs` returns `422` in any of these cases:
+    - A node using `github.openPR` has no `gate` between its `from_node` writer and itself, in run order.
+    - `from_node` does not name an earlier writer node.
+    - An agent lists `github.openPR`.
+  - A `github.*` tool also needs the run's `repo` to be a GitHub URL; if it isn't, the request gets `422`. The workspace also needs a GitHub connection; without one, it gets `409`.
 - **Private repo clone:**
   - When the run's repo is a GitHub URL and the workspace has an installation, the worker clones with an installation token.
   - The token is passed through the environment and never written to the `.git/config` that is tarred into the sandbox.
@@ -89,6 +92,9 @@ Principles that apply:
 | Token handling | `SecretStr`, registered for redaction, passed through env, never through argv or a config file | No secrets in logs (1.4), and nothing left behind in temp repos or the sandbox. |
 | Where GitHub settings live | The same `GITHUB_APP_*` settings and PEM mount as the API, now also given to the worker | One platform App (1.5). |
 | Validation | respx-mocked GitHub, a local bare repo as the push remote, plus one manual demo on a real dev App | User choice. CI stays offline, and the demo proves "Done when" for real. |
+| Gate rule, as built | The gate must sit **between the writer (`from_node`) and the publishing node**, and only a tool node may publish. The check is a `WorkflowSpec` validator (`publish_gate_errors`). | It is stronger than "a gate before it": the approver must see what the writer produced. Living in the spec, it holds for every consumer (API, canvas, Architect), not only `POST /runs`. |
+| Repo not on GitHub | `422`, not `409` | It is a problem with the request body, not with the workspace's state. A missing connection is still `409`. |
+| Retries | Pushing the same commit again is a no-op, and an open PR from the branch is reused | A run resumed after its worker died runs `openPR` again (AC-8). It must not fail on its own earlier work. |
 
 ## Open questions
 - ~~**Shallow base on the host:** is a `--depth 1` fetch of the base enough for `git fetch <bundle>` to resolve the bundle's prerequisite commit, even when the base branch has moved since the clone?~~ Resolved in groups 1–2: yes. The sandbox bundles `<clone HEAD>..<branch>` from its shallow clone, and the push fetches that exact SHA with `--depth 1` before fetching the bundle. `test_push_works_after_the_base_branch_moved` covers a base that has moved, and `test_a_branch_bundles_onto_the_clone_head` covers the Docker sandbox. Pushing the same commit again is a no-op, so a retried node succeeds.
