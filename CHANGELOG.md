@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 1.7 `gate` primitive and approvals:
+- Phase 1.7 `gate` primitive and approvals ([#16](https://github.com/KsiProgramming/agentic-dev/pull/16)):
   - **`gate` node.** A spec node (`{"type": "gate", "id", "title", "prompt"?}`) pauses the run with a LangGraph `interrupt()` until a human decides (`agentic_engine.gate`, `GateDecision`). The run writes `node_started` and the new `gate_waiting` event (`title`, `prompt`, `artifact`), and `run_workflow` returns status `waiting` with `waiting_at`. `resume_workflow` takes `decision=`: the gate writes `gate_decided`, then approve continues and reject ends the run `cancelled` at the gate. A spec with a gate needs a checkpointer. The exported schema and the API client include it.
   - **Approvals.** Alembic `0009_approvals` adds the `approvals` table. `agentic_store` gains `record_approval`, `pending_decision`, `waiting_run_ids` and their errors. Runs get the `waiting` status; `run_resumed` now sets a run back to `running`. A decision resets the run's `attempt` count.
   - **API.** New `POST /runs/{id}/approvals` (`202`, `404`, `409`, `422`), which queues the run again.
