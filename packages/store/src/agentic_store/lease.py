@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_store.models import Run
 from agentic_store.runs import StoredRun, stored_run
 
+# A `waiting` run (paused at a gate) is not live: no worker holds it and none may reclaim it; a
+# decision queues it again (`agentic_store.approvals`).
 LIVE_STATUSES = ("queued", "running")
 
 

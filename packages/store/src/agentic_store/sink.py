@@ -5,19 +5,33 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_engine.events import RUN_END_STATUS, RUN_STARTED, RunEvent
+from agentic_engine.events import (
+    GATE_WAITING,
+    RUN_END_STATUS,
+    RUN_RESUMED,
+    RUN_STARTED,
+    RunEvent,
+    RunStatus,
+)
 from agentic_store.models import Run, RunEventRow
 
 RUN_EVENTS_CHANNEL = "run_events"
 """Postgres `NOTIFY` channel; the payload of each notification is `<run_id>:<seq>`."""
+
+RUN_STATUS: dict[str, RunStatus] = {
+    RUN_STARTED: "running",
+    RUN_RESUMED: "running",
+    GATE_WAITING: "waiting",
+}
+"""The run status each non-final event sets; the final ones are `RUN_END_STATUS`."""
 
 
 class PostgresEventSink:
     """An `EventSink` that writes each event in its own transaction, so a live run is visible
     while it runs, and notifies `RUN_EVENTS_CHANNEL` when that transaction commits.
 
-    The run's row must exist (see `create_run`): `run_started` sets it to `running` and the
-    final run event sets its end status."""
+    The run's row must exist (see `create_run`): `run_started` and `run_resumed` set it to
+    `running`, `gate_waiting` to `waiting`, and the final run event sets its end status."""
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
@@ -34,7 +48,7 @@ class PostgresEventSink:
                     created_at=event.created_at,
                 )
             )
-            status = "running" if event.type == RUN_STARTED else RUN_END_STATUS.get(event.type)
+            status = RUN_STATUS.get(event.type) or RUN_END_STATUS.get(event.type)
             if status:
                 await session.execute(
                     update(Run)

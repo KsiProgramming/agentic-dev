@@ -1,5 +1,14 @@
 """Postgres persistence (models, runs, the run event sink) and the Redis run queue."""
 
+from agentic_store.approvals import (
+    AlreadyDecidedError,
+    ApprovalError,
+    RunNotFoundError,
+    RunNotWaitingError,
+    WrongGateError,
+    pending_decision,
+    record_approval,
+)
 from agentic_store.checkpoint import open_checkpointer
 from agentic_store.connections import (
     GITHUB,
@@ -25,6 +34,7 @@ from agentic_store.lease import (
 from agentic_store.models import (
     CONNECTION_COLUMNS_CHECK,
     DEFAULT_WORKSPACE_ID,
+    Approval,
     Base,
     Connection,
     Run,
@@ -48,16 +58,22 @@ __all__ = [
     "GITHUB",
     "RUN_EVENTS_CHANNEL",
     "RUN_QUEUE",
+    "AlreadyDecidedError",
+    "Approval",
+    "ApprovalError",
     "Base",
     "Connection",
     "ConnectionInfo",
     "PostgresEventSink",
     "Run",
     "RunEventRow",
+    "RunNotFoundError",
+    "RunNotWaitingError",
     "StoredRun",
     "Workspace",
     "WorkspaceInfo",
     "WorkspaceNotFoundError",
+    "WrongGateError",
     "claim_run",
     "create_run",
     "delete_connection",
@@ -75,9 +91,11 @@ __all__ = [
     "max_event_seq",
     "metadata",
     "open_checkpointer",
+    "pending_decision",
     "put_connection",
     "put_github_connection",
     "reclaim_expired_run",
+    "record_approval",
     "release_run",
     "renew_lease",
 ]

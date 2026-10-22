@@ -37,10 +37,14 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0008_github_connections"
-    assert {"runs", "run_events", "workspaces", "connections"} | CHECKPOINT_TABLES <= set(
-        table_names
-    )
+    assert version == "0009_approvals"
+    assert {
+        "runs",
+        "run_events",
+        "workspaces",
+        "connections",
+        "approvals",
+    } | CHECKPOINT_TABLES <= set(table_names)
     # The migrations match the `agentic_store` models.
     await asyncio.to_thread(command.check, config)
 
