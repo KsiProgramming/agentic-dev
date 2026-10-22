@@ -391,12 +391,12 @@ export function buildTimeline(events: readonly RunEvent[]): Timeline {
 }
 
 /** One row of the Raw events tab: an event, or consecutive chunks of one message folded. */
-export type RawRow =
-  | { kind: "event"; event: RunEvent }
+export type RawRow<E extends RunEvent = RunEvent> =
+  | { kind: "event"; event: E }
   | {
       kind: "text";
       /** The chunks, in order. */
-      events: RunEvent[];
+      events: [E, ...E[]];
       /** The chunks joined: the message as it was streamed. */
       text: string;
       nodeId: string | null;
@@ -408,8 +408,8 @@ export type RawRow =
  * streamed message reads as one paragraph rather than one row per chunk. Any other event, or a
  * chunk of another node or item, ends the fold.
  */
-export function foldDeltas(events: readonly RunEvent[]): RawRow[] {
-  const rows: RawRow[] = [];
+export function foldDeltas<E extends RunEvent>(events: readonly E[]): RawRow<E>[] {
+  const rows: RawRow<E>[] = [];
   for (const event of events) {
     const last = rows.at(-1);
     if (event.type !== "text_delta") {
