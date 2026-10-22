@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 1.10 `map` and `reduce` primitives:
+- Phase 1.10 `map` and `reduce` primitives ([#19](https://github.com/KsiProgramming/agentic-dev/pull/19)):
   - **`map` node.** A spec node (`{"type": "map", "id", "over", "body", "max_concurrency"}`) runs its body once per item of the CEL list `over`, at most `max_concurrency` (1 to 8) at a time and at most 40 items. Its result keeps item order (`data`: `items`, `outputs`). The body can hold only agent, tool and sequence nodes, and a map cannot be inside a loop (`map_errors`, `loop_errors`).
   - **`reduce` node.** A spec node (`{"type": "reduce", "id", "from", "strategy"}`) combines the outputs of an earlier map: `concat` (optional `separator`) or `agent` (`agent`: role, instructions, provider, model), whose input is the JSON array `[{item, output}]`.
   - **CEL lists.** `compile_list` and `CompiledList.evaluate` (`agentic_engine.expr`) evaluate an expression over `last` and `results` to a JSON list.
