@@ -149,3 +149,20 @@ async def test_reopening_a_run_replaces_the_sandbox_it_left(
 
 def test_the_docker_manager_implements_the_protocol(client: docker.DockerClient) -> None:
     _: SandboxManager = DockerSandboxManager(client)
+
+
+async def test_a_kept_sandbox_is_reopened_as_it_was(
+    client: docker.DockerClient, manager: DockerSandboxManager, repos: Path
+) -> None:
+    """A run paused at a gate keeps its container and volume; the attempt that continues it
+    attaches to them again, with what was written before the gate."""
+    run_id, repo = uuid4(), RepoSource(url=str(repos / "hello"))
+    async with manager.open(run_id, repo) as box:
+        written = await box.exec(["sh", "-c", "echo before > /workspace/worktrees/marker"])
+        assert written.exit_code == 0
+        manager.keep(run_id)
+    assert len(labelled(client, run_id)) == 2
+
+    async with manager.open(run_id, repo, reuse=True) as box:
+        assert (await box.exec(["cat", "/workspace/worktrees/marker"])).stdout == "before\n"
+    assert labelled(client, run_id) == []

@@ -87,3 +87,44 @@ async def test_an_unknown_command_reports_an_error(repos: Path, tmp_path: Path) 
 
 def test_the_fake_manager_implements_the_protocol() -> None:
     _: SandboxManager = FakeSandboxManager()
+
+
+async def test_a_kept_sandbox_is_reopened_as_it_was(repos: Path, tmp_path: Path) -> None:
+    """A run paused at a gate keeps its sandbox; the attempt that continues it gets it back."""
+    sandboxes, run_id = manager(repos, tmp_path), uuid4()
+    repo = RepoSource(url=str(repos / "hello"))
+    async with sandboxes.open(run_id, repo) as box:
+        marker = Path(box.worktrees_dir) / "writer.txt"
+        await asyncio.to_thread(marker.write_text, "written before the gate")
+        sandboxes.keep(run_id)
+    assert await asyncio.to_thread(marker.exists)
+
+    async with sandboxes.open(run_id, repo, reuse=True) as box:
+        assert Path(box.worktrees_dir) / "writer.txt" == marker
+        assert await asyncio.to_thread(marker.read_text) == "written before the gate"
+
+    assert list((tmp_path / "sandboxes").iterdir()) == []
+
+
+async def test_reuse_without_a_kept_sandbox_creates_a_fresh_one(
+    repos: Path, tmp_path: Path
+) -> None:
+    async with manager(repos, tmp_path).open(
+        uuid4(), RepoSource(url=str(repos / "hello")), reuse=True
+    ) as box:
+        assert (Path(box.workdir) / "README.md").is_file()
+
+    assert list((tmp_path / "sandboxes").iterdir()) == []
+
+
+async def test_opening_without_reuse_replaces_a_kept_sandbox(repos: Path, tmp_path: Path) -> None:
+    """A run resumed after its worker died starts from a fresh clone (phase 1.3)."""
+    sandboxes, run_id = manager(repos, tmp_path), uuid4()
+    repo = RepoSource(url=str(repos / "hello"))
+    async with sandboxes.open(run_id, repo) as box:
+        marker = Path(box.worktrees_dir) / "writer.txt"
+        await asyncio.to_thread(marker.write_text, "left behind")
+        sandboxes.keep(run_id)
+
+    async with sandboxes.open(run_id, repo):
+        assert not await asyncio.to_thread(marker.exists)

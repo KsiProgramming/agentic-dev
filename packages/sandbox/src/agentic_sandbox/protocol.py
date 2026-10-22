@@ -5,7 +5,8 @@ change. Writer nodes get their own git worktree under `worktrees_dir` (`agentic_
 and file contents reach the sandbox through `put_file`. Commands run with `workdir`, or a worktree,
 as their current directory. The manager owns the lifecycle: `open()` creates the sandbox and
 clones the repo, and leaving the context destroys it, whether the run succeeded, failed or was
-cancelled.
+cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and the attempt that
+continues it opens it again (`open(..., reuse=True)`).
 """
 
 from collections.abc import Sequence
@@ -62,10 +63,22 @@ class Sandbox(Protocol):
 
 
 class SandboxManager(Protocol):
-    def open(self, run_id: UUID, repo: RepoSource) -> AbstractAsyncContextManager[Sandbox]:
-        """Create a sandbox for `run_id` holding a shallow clone of `repo`; destroy it on exit.
+    def open(
+        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+    ) -> AbstractAsyncContextManager[Sandbox]:
+        """Create a sandbox for `run_id` holding a shallow clone of `repo`; destroy it on exit,
+        unless `keep(run_id)` was called meanwhile.
+
+        Without `reuse`, a sandbox the run already has (left by an attempt that died) is replaced
+        by a fresh one. With `reuse`, the one it kept is opened again as it was, with its writers'
+        worktrees and commits; if there is none, a fresh one is created.
 
         Raises `SandboxError` if the sandbox cannot be created or the repo cannot be cloned."""
+        ...
+
+    def keep(self, run_id: UUID) -> None:
+        """Leave the run's open sandbox in place when its context exits (a run paused at a
+        gate), so a later `open(..., reuse=True)` gets it back."""
         ...
 
 

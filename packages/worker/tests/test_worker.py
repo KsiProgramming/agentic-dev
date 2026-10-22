@@ -293,10 +293,15 @@ class RecordingSandboxes:
         self._inner, self._order, self._inspect = inner, order if order is not None else [], inspect
         self.closed = asyncio.Event()
 
+    def keep(self, run_id: UUID) -> None:
+        self._inner.keep(run_id)
+
     @asynccontextmanager
-    async def open(self, run_id: UUID, repo: RepoSource) -> AsyncGenerator[Sandbox]:
+    async def open(
+        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+    ) -> AsyncGenerator[Sandbox]:
         try:
-            async with self._inner.open(run_id, repo) as box:
+            async with self._inner.open(run_id, repo, reuse=reuse) as box:
                 try:
                     yield box
                 finally:
