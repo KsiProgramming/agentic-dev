@@ -8,7 +8,8 @@ import { buildTimeline, type ToolTurn } from "../timeline";
 import type { RunEvent } from "../types";
 import { AgentMessage } from "./agent-message";
 import { StepList } from "./step-view";
-import { ToolCard } from "./tool-card";
+import { ToolCallGroup, ToolCallRow } from "./tool-calls";
+import { describeTool, summarizeTools } from "./tool-describe";
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");
 
@@ -24,12 +25,18 @@ describe("AgentMessage", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("shows raw HTML as text and never renders it", () => {
+  it("drops raw HTML and comments, never rendering them", () => {
     const { container } = render(
-      <AgentMessage text={'Hi <script>alert(1)</script> <img src=x onerror="alert(2)"> there'} />,
+      <AgentMessage
+        text={
+          '<!-- module: src -->\nHi <script>alert(1)</script> <img src=x onerror="alert(2)"> there'
+        }
+      />,
     );
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("img")).toBeNull();
+    expect(container.textContent).not.toContain("module: src");
+    expect(container.textContent).toContain("Hi");
   });
 
   it("drops Markdown images, so no remote URL is fetched", () => {
@@ -69,37 +76,123 @@ describe("JsonView", () => {
   });
 });
 
-describe("ToolCard", () => {
-  const turn: ToolTurn = {
+function tool(overrides: Partial<ToolTurn> = {}): ToolTurn {
+  return {
     kind: "tool",
     key: 1,
     callId: "c1",
-    name: "repo.list_files",
-    arguments: { path: "src" },
-    output: '{"files": ["a.ts"]}',
+    name: "repo.read_file",
+    arguments: { path: "src/app.ts" },
+    output: '{"text": "x"}',
     status: "completed",
     startedAt: "2026-10-22T12:00:00Z",
     endedAt: "2026-10-22T12:00:02Z",
+    ...overrides,
   };
+}
 
-  it("is collapsed until opened, then shows the arguments and the result", () => {
-    render(<ToolCard turn={turn} />);
-    const trigger = screen.getByRole("button", { name: /repo\.list_files/ });
+describe("describeTool", () => {
+  it("says what each repo tool did, and what it is doing", () => {
+    expect(describeTool("repo.read_file", { path: "a.ts" })).toMatchObject({
+      done: "Read",
+      doing: "Reading",
+      target: "a.ts",
+    });
+    expect(describeTool("repo.list_files", { path: "." }).target).toBe("repository root");
+    expect(describeTool("repo.search", { pattern: "Item" })).toMatchObject({
+      done: "Searched for",
+      target: "Item",
+    });
+    expect(describeTool("repo.commit", { message: "docs: add\n\nbody" }).target).toBe("docs: add");
+    expect(describeTool("custom.tool", { q: "x" })).toMatchObject({
+      done: "Called custom.tool",
+      target: "x",
+    });
+  });
+
+  it("sums up a group of calls", () => {
+    const turns = [
+      tool(),
+      tool({ key: 2 }),
+      tool({ key: 3, name: "repo.list_files", arguments: { path: "src" } }),
+      tool({ key: 4, name: "repo.search", arguments: { pattern: "x" } }),
+    ];
+    expect(summarizeTools(turns)).toBe("Read 2 files, listed 1 folder, ran 1 search");
+  });
+});
+
+describe("ToolCallRow", () => {
+  it("is one line until opened, then shows the arguments and the result", () => {
+    render(
+      <ul>
+        <ToolCallRow turn={tool()} />
+      </ul>,
+    );
+    const trigger = screen.getByRole("button", { name: /Read src\/app\.ts/ });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Arguments")).toBeNull();
     fireEvent.click(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("group", { name: "repo.list_files arguments" })).toBeTruthy();
-    expect(screen.getByRole("group", { name: "repo.list_files result" }).textContent).toContain(
-      '"a.ts"',
+    expect(screen.getByRole("group", { name: "repo.read_file arguments" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "repo.read_file result" }).textContent).toContain(
+      '"x"',
     );
   });
 
-  it("shows plain-text output as text, and an error result as failed", () => {
-    render(<ToolCard turn={{ ...turn, output: "no such file", status: "failed" }} />);
-    expect(screen.getByTestId("tool-card").dataset.status).toBe("failed");
-    fireEvent.click(screen.getByRole("button", { name: /repo\.list_files/ }));
-    expect(screen.getByLabelText("repo.list_files result").textContent).toBe("no such file");
+  it("marks a failed call and shows its plain-text output", () => {
+    render(
+      <ul>
+        <ToolCallRow turn={tool({ output: "no such file", status: "failed" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("tool-call").dataset.status).toBe("failed");
+    const trigger = screen.getByRole("button", { name: /Read src\/app\.ts failed/ });
+    fireEvent.click(trigger);
+    expect(screen.getByLabelText("repo.read_file result").textContent).toBe("no such file");
+  });
+
+  it("says what a call in flight is doing", () => {
+    render(
+      <ul>
+        <ToolCallRow turn={tool({ status: "running", output: null, endedAt: null })} />
+      </ul>,
+    );
+    expect(screen.getByRole("button").textContent).toContain("Reading");
+  });
+});
+
+describe("ToolCallGroup", () => {
+  const turns = [
+    tool(),
+    tool({ key: 2, arguments: { path: "src/b.ts" }, endedAt: "2026-10-22T12:00:05Z" }),
+    tool({ key: 3, name: "repo.list_files", arguments: { path: "src" }, status: "failed" }),
+  ];
+
+  it("collapses consecutive calls into one summary line", () => {
+    render(<ToolCallGroup turns={turns} />);
+    const summary = screen.getByRole("button", { name: /Read 2 files, listed 1 folder/ });
+    expect(summary.textContent).toContain("1 failed");
+    expect(summary.textContent).toContain("3 tool calls");
+    expect(screen.queryAllByTestId("tool-call")).toHaveLength(0);
+    fireEvent.click(summary);
+    expect(screen.getAllByTestId("tool-call")).toHaveLength(3);
+  });
+
+  it("shows the call in flight while the group runs", () => {
+    render(
+      <ToolCallGroup
+        turns={[
+          tool(),
+          tool({
+            key: 2,
+            arguments: { path: "src/b.ts" },
+            status: "running",
+            output: null,
+            endedAt: null,
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByRole("button").textContent).toContain("Reading src/b.ts…");
   });
 });
 
@@ -116,7 +209,9 @@ describe("StepList on the recorded docs run", () => {
     ]);
     const first = within(items[0]!);
     expect(first.getAllByTestId("agent-message")).toHaveLength(2);
-    expect(first.getAllByTestId("tool-card")).toHaveLength(1);
+    expect(first.getAllByTestId("tool-group")).toHaveLength(1);
+    // A one-step item is not headed twice.
+    expect(first.queryByRole("heading", { name: "module-writer" })).toBeNull();
     // 3 writers × 2 turns + 2 review turns.
     expect(screen.getAllByTestId("agent-message")).toHaveLength(8);
     // The page's Markdown heading renders inside the second message.

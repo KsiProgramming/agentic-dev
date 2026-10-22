@@ -49,8 +49,9 @@ const COMPONENTS: Components = {
 };
 
 /**
- * One agent turn's text as Markdown. Raw HTML in it is shown as text, never rendered, and images
- * are dropped (an image URL would make the browser fetch it): the text is data, not a page.
+ * One agent turn's text as Markdown. Raw HTML in it (e.g. `<!-- module: src -->` markers) is
+ * dropped, never rendered, and so are images (an image URL would make the browser fetch it): the
+ * text is data, not a page.
  */
 export function AgentMessage({
   text,
@@ -70,7 +71,12 @@ export function AgentMessage({
         className,
       )}
     >
-      <Markdown remarkPlugins={[remarkGfm]} components={COMPONENTS} disallowedElements={["img"]}>
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={COMPONENTS}
+        disallowedElements={["img"]}
+        skipHtml
+      >
         {text}
       </Markdown>
       {streaming ? (

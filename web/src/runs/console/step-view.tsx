@@ -6,10 +6,19 @@ import type { ReactNode } from "react";
 import { StatusBadge } from "@/components/status-badge";
 
 import { formatDuration } from "../summaries";
-import type { Iteration, MapItem, Step, StepStatus, TokenUsage, Turn } from "../timeline";
+import type {
+  Iteration,
+  MapItem,
+  MessageTurn,
+  Step,
+  StepStatus,
+  TokenUsage,
+  ToolTurn,
+  Turn,
+} from "../timeline";
 import { AgentMessage } from "./agent-message";
 import { stepBadge } from "./step-status";
-import { ToolCard } from "./tool-card";
+import { ToolCallGroup } from "./tool-calls";
 
 export interface StepViewOptions {
   /** The time, for the duration of what is still running. */
@@ -25,8 +34,24 @@ function elapsed(startedAt: string, endedAt: string | null, now: number): string
   return formatDuration(Math.max(0, end - Date.parse(startedAt)));
 }
 
-function itemLabel(item: unknown, index: number): string {
+/** What a map item is called: a string item as is, an object by its `path`, `name` or `id`
+ * (with its `kind`, if any), anything else as JSON. */
+function itemLabel(item: unknown, index: number): ReactNode {
   if (typeof item === "string") return item;
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const fields = item as Record<string, unknown>;
+    const name = [fields.path, fields.name, fields.id].find((v) => typeof v === "string");
+    if (typeof name === "string") {
+      return (
+        <>
+          {name}
+          {typeof fields.kind === "string" ? (
+            <span className="ml-2 font-sans font-normal text-muted-foreground">{fields.kind}</span>
+          ) : null}
+        </>
+      );
+    }
+  }
   if (item === undefined) return `Item ${index + 1}`;
   return JSON.stringify(item);
 }
@@ -69,9 +94,18 @@ function UsageFooter({ usage }: { usage: TokenUsage }) {
   );
 }
 
-function TurnView({ turn, live }: { turn: Turn; live: boolean }) {
-  if (turn.kind === "tool") return <ToolCard turn={turn} />;
-  return <AgentMessage text={turn.text} streaming={live && !turn.final} />;
+type Segment = { kind: "message"; turn: MessageTurn } | { kind: "tools"; turns: ToolTurn[] };
+
+/** The turns with consecutive tool calls gathered, so they show as one group. */
+function segments(turns: Turn[]): Segment[] {
+  const out: Segment[] = [];
+  for (const turn of turns) {
+    const last = out.at(-1);
+    if (turn.kind === "message") out.push({ kind: "message", turn });
+    else if (last?.kind === "tools") last.turns.push(turn);
+    else out.push({ kind: "tools", turns: [turn] });
+  }
+  return out;
 }
 
 function IterationView({ iteration, options }: { iteration: Iteration; options: StepViewOptions }) {
@@ -103,7 +137,18 @@ function MapItemView({ item, options }: { item: MapItem; options: StepViewOption
         level="item"
       />
       {item.error ? <ErrorLine error={item.error} /> : null}
-      <StepList steps={item.steps} options={options} />
+      {item.steps.length === 1 ? (
+        // One step per item (the usual map body): the item's header is enough.
+        <div
+          data-testid="step"
+          data-node-id={item.steps[0]!.id}
+          className="flex min-w-0 flex-col gap-3"
+        >
+          <StepBody step={item.steps[0]!} options={options} />
+        </div>
+      ) : (
+        <StepList steps={item.steps} options={options} />
+      )}
     </li>
   );
 }
@@ -117,9 +162,68 @@ function ErrorLine({ error }: { error: string }) {
   );
 }
 
-/** One node of the run: its status line, then what it did, in order. */
-export function StepView({ step, options }: { step: Step; options: StepViewOptions }) {
+/** What a node did, in order: messages, tool calls, nested items and iterations. */
+function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
   const live = step.status === "running";
+  return (
+    <>
+      {segments(step.turns).map((segment) =>
+        segment.kind === "message" ? (
+          <AgentMessage
+            key={segment.turn.key}
+            text={segment.turn.text}
+            streaming={live && !segment.turn.final}
+          />
+        ) : (
+          <ToolCallGroup key={segment.turns[0]!.key} turns={segment.turns} />
+        ),
+      )}
+      {step.items && step.items.length > 0 ? (
+        <ol aria-label={`Items of ${step.id}`} className="flex flex-col gap-3">
+          {step.items.map((item) => (
+            <MapItemView key={item.index} item={item} options={options} />
+          ))}
+        </ol>
+      ) : null}
+      {step.iterations && step.iterations.length > 0 ? (
+        <ol aria-label={`Iterations of ${step.id}`} className="flex flex-col gap-4">
+          {step.iterations.map((iteration) => (
+            <IterationView key={iteration.index} iteration={iteration} options={options} />
+          ))}
+        </ol>
+      ) : null}
+      {step.gate ? (
+        <p className="text-[13px]">
+          <span className="font-medium">{step.gate.title}</span>
+          {step.gate.decision ? (
+            <span className="text-muted-foreground">
+              {" "}
+              · {step.gate.decision === "approve" ? "Approved" : "Rejected"}
+              {step.gate.comment ? `: ${step.gate.comment}` : ""}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+      {options.extra?.(step)}
+      {step.prUrl ? (
+        <a
+          href={step.prUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex w-fit items-center gap-1 font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline"
+        >
+          {step.prUrl}
+          <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        </a>
+      ) : null}
+      {step.error ? <ErrorLine error={step.error} /> : null}
+      {step.usage ? <UsageFooter usage={step.usage} /> : null}
+    </>
+  );
+}
+
+/** One node of the run: its status line, then what it did. */
+export function StepView({ step, options }: { step: Step; options: StepViewOptions }) {
   return (
     <li
       data-testid="step"
@@ -136,49 +240,7 @@ export function StepView({ step, options }: { step: Step; options: StepViewOptio
         level="step"
       />
       <div className="flex min-w-0 flex-col gap-3 border-l pl-4">
-        {step.turns.map((turn) => (
-          <TurnView key={turn.key} turn={turn} live={live} />
-        ))}
-        {step.items && step.items.length > 0 ? (
-          <ol aria-label={`Items of ${step.id}`} className="flex flex-col gap-3">
-            {step.items.map((item) => (
-              <MapItemView key={item.index} item={item} options={options} />
-            ))}
-          </ol>
-        ) : null}
-        {step.iterations && step.iterations.length > 0 ? (
-          <ol aria-label={`Iterations of ${step.id}`} className="flex flex-col gap-4">
-            {step.iterations.map((iteration) => (
-              <IterationView key={iteration.index} iteration={iteration} options={options} />
-            ))}
-          </ol>
-        ) : null}
-        {step.gate ? (
-          <p className="text-[13px]">
-            <span className="font-medium">{step.gate.title}</span>
-            {step.gate.decision ? (
-              <span className="text-muted-foreground">
-                {" "}
-                · {step.gate.decision === "approve" ? "Approved" : "Rejected"}
-                {step.gate.comment ? `: ${step.gate.comment}` : ""}
-              </span>
-            ) : null}
-          </p>
-        ) : null}
-        {options.extra?.(step)}
-        {step.prUrl ? (
-          <a
-            href={step.prUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex w-fit items-center gap-1 font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline"
-          >
-            {step.prUrl}
-            <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
-          </a>
-        ) : null}
-        {step.error ? <ErrorLine error={step.error} /> : null}
-        {step.usage ? <UsageFooter usage={step.usage} /> : null}
+        <StepBody step={step} options={options} />
       </div>
     </li>
   );
