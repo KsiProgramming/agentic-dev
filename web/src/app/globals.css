@@ -137,10 +137,10 @@
     @apply font-sans;
   }
   body {
-    @apply bg-background text-foreground text-sm antialiased;
+    @apply bg-background text-sm text-foreground antialiased;
   }
   :focus-visible {
-    @apply outline-ring outline-2 outline-offset-2;
+    @apply outline-2 outline-offset-2 outline-ring;
   }
 }
 
