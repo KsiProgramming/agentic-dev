@@ -1,15 +1,21 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 
 import { createApiClient } from "@/api/client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 import { sampleSpec } from "./sample-spec";
 
 /** Starts a run of the sample workflow and opens its event page. */
 export function StartRunForm({ baseUrl }: { baseUrl?: string }) {
   const router = useRouter();
+  const inputId = useId();
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,31 +43,37 @@ export function StartRunForm({ baseUrl }: { baseUrl?: string }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex w-full max-w-md flex-col gap-3">
-      <p className="text-sm text-gray-600">
-        Runs <span className="font-medium">{sampleSpec.name}</span>, a one-agent workflow.
-      </p>
-      <label className="flex flex-col gap-1 text-sm">
-        Input
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Text for the first agent"
-          className="rounded border px-2 py-1"
-        />
-      </label>
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded bg-black px-3 py-1.5 text-white disabled:opacity-50"
-      >
-        {pending ? "Starting…" : "Start sample run"}
-      </button>
-      {error ? (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
-    </form>
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <h2>Sample run</h2>
+        </CardTitle>
+        <CardDescription>
+          Runs <span className="font-medium text-foreground">{sampleSpec.name}</span>, a one-agent
+          workflow.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor={inputId}>Input</Label>
+            <Input
+              id={inputId}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Text for the first agent"
+            />
+          </div>
+          <Button type="submit" disabled={pending} className="self-start">
+            {pending ? "Starting…" : "Start sample run"}
+          </Button>
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+        </form>
+      </CardContent>
+    </Card>
   );
 }

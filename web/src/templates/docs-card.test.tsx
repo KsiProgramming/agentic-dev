@@ -141,3 +141,18 @@ test("an uninstalled app counts as not connected", async () => {
 
   expect(await screen.findByRole("link", { name: /install the GitHub App/ })).toBeDefined();
 });
+
+test("a failed repo load can be retried", async () => {
+  let calls = 0;
+  api({
+    "GET /connections": () => (++calls === 1 ? json(500, {}) : json(200, [GITHUB])),
+    "GET /repos": () => json(200, REPOS),
+  });
+  render(<DocsCard baseUrl="http://api.test" />);
+
+  expect((await screen.findByRole("alert")).textContent).toContain("HTTP 500");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  expect(await screen.findByLabelText("Repository")).toBeDefined();
+  expect(screen.queryByRole("alert")).toBeNull();
+});

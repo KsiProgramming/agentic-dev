@@ -64,10 +64,11 @@ export function ErrorState({
   className?: string;
 }) {
   return (
-    <Alert variant="destructive" data-slot="error-state" className={className}>
+    // Only the message is announced, not the Retry label: the alert role sits on the message.
+    <Alert variant="destructive" role={undefined} data-slot="error-state" className={className}>
       <CircleAlertIcon aria-hidden="true" />
       <AlertDescription className="flex flex-wrap items-center justify-between gap-2 text-destructive">
-        <span>{message}</span>
+        <span role="alert">{message}</span>
         {onRetry ? (
           <Button type="button" variant="outline" size="sm" onClick={onRetry}>
             <RotateCwIcon aria-hidden="true" data-icon="inline-start" />
