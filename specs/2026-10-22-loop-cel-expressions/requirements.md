@@ -55,7 +55,7 @@ Tech-stack choices that apply:
   - The input of iteration 1 is the loop's input. Each later iteration gets the previous iteration's body output. The loop's output is the output of its last iteration.
   - If a body node does not complete, the run ends as it does today, with `stopped_at` set to that node.
   - If the `until` condition fails to evaluate, the loop node fails with the CEL error.
-  - The `recursion_limit` is computed from the spec, using step count × max iterations plus a margin, so LangGraph's default of 25 never cuts off a valid loop.
+  - The `recursion_limit` is computed from the spec, using step count × max iterations plus a margin. LangGraph's own default turned out to be 10,007, not 25, so this is a tight runtime backstop on the spec's bounds rather than a fix for a cut-off.
 - **Events:**
   - `node_started(loop)` once.
   - `loop_iteration_started` (`iteration`) before each pass.
@@ -92,5 +92,5 @@ Tech-stack choices that apply:
 | Check node name | `<loop id>` plus a separator that `NodeId` forbids (for example `.check`) | `NodeId` allows `_` and `-`, so a suffix such as `__check` could collide with a user node. LangGraph reserves `:` and `\|`, so the separator must avoid those too. |
 
 ## Open questions
-- Should `contains` ignore case? Proposal: no. Keep CEL standard, and document `last.lowerAscii()` if `cel-python` supports it.
+- ~~Should `contains` ignore case?~~ Resolved: `cel-python` has no `lowerAscii`. Case-insensitive checks use `last.matches("(?i)approved")` (RE2).
 - `results` holds only the latest iteration. Is a history (`history[i].last`) needed before 6.6? Proposal: no, revisit in 6.6.
