@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 
+import { QueryProvider } from "@/components/query-provider";
 import { AppShell } from "@/components/shell/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -22,7 +23,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" suppressHydrationWarning className={cn(inter.variable, jetbrainsMono.variable)}>
       <body>
         <ThemeProvider>
-          <AppShell>{children}</AppShell>
+          <QueryProvider>
+            <AppShell>{children}</AppShell>
+          </QueryProvider>
           <Toaster />
         </ThemeProvider>
       </body>

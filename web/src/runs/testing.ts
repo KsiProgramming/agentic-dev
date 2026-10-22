@@ -1,3 +1,4 @@
+import type { RunSummary } from "./summaries";
 import type { RunEvent } from "./types";
 
 type Listener = (message: MessageEvent<string>) => void;
@@ -39,6 +40,20 @@ export class FakeEventSource {
     for (const listener of this.listeners.get(event.type) ?? []) listener(message);
   }
 
+  /** The connection opens (or opens again after a drop). */
+  open() {
+    this.readyState = FakeEventSource.OPEN;
+    for (const listener of this.listeners.get("open") ?? []) listener(new MessageEvent("open"));
+  }
+
+  /** Deliver one named SSE frame with `data` as its JSON payload. */
+  send(type: string, data: unknown) {
+    if (this.readyState === FakeEventSource.CLOSED) return;
+    this.readyState = FakeEventSource.OPEN;
+    const message = new MessageEvent("message", { data: JSON.stringify(data) });
+    for (const listener of this.listeners.get(type) ?? []) listener(message);
+  }
+
   /** A connection error; `readyState` says whether the browser would retry. */
   fail(readyState: number = FakeEventSource.CONNECTING) {
     this.readyState = readyState;
@@ -54,5 +69,25 @@ export function runEvent(seq: number, type: string, payload: RunEvent["payload"]
     node_id: type.startsWith("run_") ? null : "summarizer",
     payload,
     created_at: new Date(Date.UTC(2026, 9, 21, 12, 0, seq)).toISOString(),
+  };
+}
+
+/** A run summary as `GET /runs` lists it; `overrides` change any field. */
+export function runSummary(overrides: Partial<RunSummary> = {}): RunSummary {
+  return {
+    id: "00000000-0000-0000-0000-0000000000a1",
+    workspace_id: "00000000-0000-0000-0000-000000000001",
+    status: "completed",
+    workflow: { id: "generate-docs", name: "Generate docs" },
+    template_id: "generate-docs",
+    repo: { url: "https://github.com/acme/docs", ref: null },
+    created_at: "2026-10-22T09:59:58Z",
+    started_at: "2026-10-22T10:00:00Z",
+    finished_at: "2026-10-22T10:02:05Z",
+    duration_ms: 125_000,
+    pr_url: null,
+    waiting_gate: null,
+    rerun_of: null,
+    ...overrides,
   };
 }
