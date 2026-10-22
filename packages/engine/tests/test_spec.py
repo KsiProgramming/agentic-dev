@@ -31,6 +31,18 @@ INVALID: dict[str, Rejection] = {
     "unknown-provider": Rejection(("root", "agent", "provider"), "literal_error"),
     "tool-node-missing-tool": Rejection(("root", "tool", "tool"), "missing"),
     "gate-missing-title": Rejection(("root", "sequence", "steps", 1, "gate", "title"), "missing"),
+    "open-pr-without-gate": Rejection(
+        (), "value_error", "'publish': github.openPR must come after a gate that follows 'writer'"
+    ),
+    "open-pr-gate-before-writer": Rejection(
+        (), "value_error", "must come after a gate that follows 'writer'"
+    ),
+    "open-pr-unknown-from-node": Rejection(
+        (), "value_error", "`from_node` 'editor' is not a node that runs before it"
+    ),
+    "open-pr-by-agent": Rejection(
+        (), "value_error", "'writer': github.openPR can only be called by a tool node"
+    ),
 }
 
 

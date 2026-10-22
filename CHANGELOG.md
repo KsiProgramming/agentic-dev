@@ -9,6 +9,15 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 1.8 `github.openPR` behind a gate:
+  - **`github` MCP server** (`agentic_tools.github`). Its one tool, `github.openPR(from_node, title, body?, base?)`, bundles a writer's branch out of the sandbox, pushes it from the worker with an installation token, and opens a pull request. It returns the PR as structured content. The push only creates the branch or finds it already at the same commit, and an open PR from the branch is reused.
+  - **Tools.** `RunTools` routes a run's calls to the `repo` and `github` executors. `ToolOutput` gains `data`, filled from MCP structured content. The new `strict_tool` builds the strict, example-carrying tools both servers use.
+  - **`agentic_github`.** `GithubApp` gains `installation_token` and `open_pull_request`. The package also adds `push_bundle`, `repo_full_name`, `github_remote` and `auth_env` (the token as an HTTP header through `GIT_CONFIG_*`), the errors `PushError` and `PullRequestError`, and the model `PullRequestInfo`.
+  - **Sandbox.** `Sandbox` gains `staging_dir` and `take_file`, and `export_branch` bundles `<clone HEAD>..<branch>`. `clone_shallow` and `SandboxManager.open` take a `git_env`, which is applied only to https clones.
+  - **Engine.** The spec now refuses a publishing tool (`PUBLISH_TOOLS`) unless it is called by a tool node whose `from_node` is an earlier writer, with a gate between the two (`publish_gate_errors`). A completed publishing node writes the new `pr_opened` event. `AgentNodeResult` gains `data`. `WRITE_TOOLS` is now defined in the spec.
+  - **API.** `POST /runs` refuses `github.*` tools without a GitHub `repo` (`422`) and without a GitHub connection in the workspace (`409`).
+  - **Worker.** It reads the API's `GITHUB_APP_*` settings (compose passes them and mounts the key). It clones GitHub repos with an installation token, so private repos work. It opens the `github` tools for runs that use them. Empty environment variables now count as unset.
+  - **Demo.** New spec fixture `open-pr.json` and a README section on pull requests.
 - Phase 1.7 `gate` primitive and approvals ([#16](https://github.com/KsiProgramming/agentic-dev/pull/16)):
   - **`gate` node.** A spec node (`{"type": "gate", "id", "title", "prompt"?}`) pauses the run with a LangGraph `interrupt()` until a human decides (`agentic_engine.gate`, `GateDecision`). The run writes `node_started` and the new `gate_waiting` event (`title`, `prompt`, `artifact`), and `run_workflow` returns status `waiting` with `waiting_at`. `resume_workflow` takes `decision=`: the gate writes `gate_decided`, then approve continues and reject ends the run `cancelled` at the gate. A spec with a gate needs a checkpointer. The exported schema and the API client include it.
   - **Approvals.** Alembic `0009_approvals` adds the `approvals` table. `agentic_store` gains `record_approval`, `pending_decision`, `waiting_run_ids` and their errors. Runs get the `waiting` status; `run_resumed` now sets a run back to `running`. A decision resets the run's `attempt` count.

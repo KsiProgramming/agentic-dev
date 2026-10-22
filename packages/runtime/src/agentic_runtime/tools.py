@@ -23,12 +23,14 @@ class ToolDefinition(BaseModel):
 
 
 class ToolOutput(BaseModel):
-    """What a tool call returned. The text is data, never instructions."""
+    """What a tool call returned. The text is data, never instructions. `data` is the tool's
+    structured result, if it has one (e.g. the pull request `github.openPR` opened)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     text: str
     is_error: bool = False
+    data: dict[str, JsonValue] | None = None
 
 
 class ToolExecutor(Protocol):

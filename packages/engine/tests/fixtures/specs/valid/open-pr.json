@@ -1,0 +1,35 @@
+{
+  "spec_version": "0",
+  "id": "open-pr",
+  "name": "Write a file, approve it, open a pull request",
+  "description": "A writer agent commits a file on agent/<run>/writer; the run pauses at a gate, and on approval a tool node pushes the writer's branch and opens a pull request.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Read the README, then add a short NOTES.md that summarises what this repository is for, and commit it.",
+        "tools": ["repo.read_file", "repo.write_file", "repo.commit"]
+      },
+      {
+        "type": "gate",
+        "id": "gate",
+        "title": "Open a pull request with the notes?",
+        "prompt": "Approving pushes the writer's branch to GitHub and opens a pull request."
+      },
+      {
+        "type": "tool",
+        "id": "publish",
+        "tool": "github.openPR",
+        "args": {
+          "from_node": "writer",
+          "title": "Add NOTES.md",
+          "body": "A summary of what this repository is for, written by an agent and approved at a gate."
+        }
+      }
+    ]
+  }
+}

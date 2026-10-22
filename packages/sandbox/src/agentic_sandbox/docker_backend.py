@@ -4,7 +4,7 @@ The repo is cloned on the worker and copied into a per-run volume mounted at `/w
 container has no network, a read-only root filesystem, no capabilities and runs as a non-root
 user. The checkout at `/workspace/repo` is owned by root, so agents can read it but not change
 it. Its `.git`, `/workspace/worktrees` (writer nodes' worktrees) and `/workspace/.incoming` (files
-on their way in) belong to the sandbox user, so writers can commit on their own branch. Every
+on their way in or out) belong to the sandbox user, so writers can commit on their own branch. Every
 container and volume carries the `agentic.run_id` label, so leftovers can be swept. A run that is
 resumed after its worker died gets a fresh sandbox: `open` first removes the one it left. A run
 paused at a gate keeps its container and volume (`keep`), and `open(..., reuse=True)` attaches
@@ -14,6 +14,7 @@ docker-py is blocking, so its calls run in threads.
 """
 
 import asyncio
+import contextlib
 import io
 import logging
 import math
@@ -22,7 +23,7 @@ import shutil
 import tarfile
 import tempfile
 import time
-from collections.abc import AsyncGenerator, Collection, Sequence
+from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,7 @@ from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.protocol import (
     DEFAULT_EXEC_TIMEOUT_S,
     MAX_PUT_FILE_BYTES,
+    MAX_TAKE_FILE_BYTES,
     ExecResult,
     decode_capped,
 )
@@ -124,6 +126,25 @@ class DockerSandbox:
             raise SandboxError("could not copy the file into the sandbox")
         return f"{INCOMING_DIR}/{name}"
 
+    @property
+    def staging_dir(self) -> str:
+        return INCOMING_DIR
+
+    async def take_file(self, path: str) -> bytes:
+        name = posixpath.basename(path)
+        if posixpath.normpath(path) != path or posixpath.dirname(path) != INCOMING_DIR or not name:
+            raise ValueError("only files directly in the staging directory can be taken")
+        try:
+            return await asyncio.to_thread(_get_file, self._container, path)
+        except NotFound:
+            raise SandboxError("no such file in the sandbox") from None
+        except DockerException as e:
+            log.warning("sandbox take_file failed: %s", e)
+            raise SandboxError("the sandbox is not available") from e
+        finally:
+            with contextlib.suppress(DockerException):
+                await asyncio.to_thread(self._exec, ["rm", "-f", "--", path], REPO_DIR)
+
 
 def _checked_cwd(cwd: str | None) -> str:
     """`cwd` (default the checkout) if it is the checkout or a directory under the worktrees."""
@@ -160,7 +181,12 @@ class DockerSandboxManager:
 
     @asynccontextmanager
     async def open(
-        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
     ) -> AsyncGenerator[DockerSandbox]:
         name = f"agentic-sandbox-{run_id}"
         started = time.monotonic()
@@ -172,7 +198,7 @@ class DockerSandboxManager:
                 container, volume = kept
                 log.info("sandbox %s reopened in %.2f s", name, time.monotonic() - started)
             else:
-                container, volume = await self._create_fresh(name, run_id, repo)
+                container, volume = await self._create_fresh(name, run_id, repo, git_env)
                 log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
             yield DockerSandbox(container)
         finally:
@@ -185,9 +211,9 @@ class DockerSandboxManager:
                 log.info("sandbox %s removed after %.2f s", name, time.monotonic() - started)
 
     async def _create_fresh(
-        self, name: str, run_id: UUID, repo: RepoSource
+        self, name: str, run_id: UUID, repo: RepoSource, git_env: Mapping[str, str] | None
     ) -> tuple[Container, Volume]:
-        archive = await self._clone(repo)
+        archive = await self._clone(repo, git_env)
         volume: Volume | None = None
         container: Container | None = None
         try:
@@ -222,12 +248,14 @@ class DockerSandboxManager:
             return None
         return container, volume
 
-    async def _clone(self, repo: RepoSource) -> bytes:
+    async def _clone(self, repo: RepoSource, git_env: Mapping[str, str] | None) -> bytes:
         """A tar of the sandbox's `/workspace`: a shallow clone of `repo` at `repo/`, and the
         empty `worktrees/` and `.incoming/`."""
         staging = Path(tempfile.mkdtemp(prefix="agentic-clone-"))
         try:
-            await clone_shallow(repo, staging / "repo", local_root=self._local_root)
+            await clone_shallow(
+                repo, staging / "repo", local_root=self._local_root, git_env=git_env
+            )
             return await asyncio.to_thread(_workspace_tar, staging / "repo")
         finally:
             await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)
@@ -269,6 +297,23 @@ class DockerSandboxManager:
 
 def _put_archive(container: Container, archive: bytes, path: str) -> bool:
     return container.put_archive(path, archive)  # pyright: ignore[reportUnknownMemberType]
+
+
+def _get_file(container: Container, path: str) -> bytes:
+    """The regular file `path` in the container, read through `docker cp`, if it is at most
+    `MAX_TAKE_FILE_BYTES`."""
+    chunks, stat = container.get_archive(path)
+    size = int((stat or {}).get("size", 0))
+    if size > MAX_TAKE_FILE_BYTES:
+        raise SandboxError(f"file too large to take from the sandbox: {size} bytes")
+    archive = b"".join(chunks)
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        member = next(iter(tar), None)
+        if member is None or not member.isfile():
+            raise SandboxError("not a regular file in the sandbox")
+        extracted = tar.extractfile(member)
+        assert extracted is not None
+        return extracted.read()
 
 
 def _workspace_tar(clone: Path) -> bytes:

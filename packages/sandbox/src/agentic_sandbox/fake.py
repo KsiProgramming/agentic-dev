@@ -12,7 +12,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -21,6 +21,7 @@ from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.protocol import (
     DEFAULT_EXEC_TIMEOUT_S,
     MAX_PUT_FILE_BYTES,
+    MAX_TAKE_FILE_BYTES,
     ExecResult,
     decode_capped,
 )
@@ -85,6 +86,26 @@ class FakeSandbox:
         await asyncio.to_thread(path.write_bytes, data)
         return path.as_posix()
 
+    @property
+    def staging_dir(self) -> str:
+        return (self._root / ".incoming").as_posix()
+
+    async def take_file(self, path: str) -> bytes:
+        return await asyncio.to_thread(self._take_file, Path(path))
+
+    def _take_file(self, file: Path) -> bytes:
+        if file.parent.resolve() != (self._root / ".incoming").resolve() or file.is_symlink():
+            raise ValueError("only files directly in the staging directory can be taken")
+        try:
+            size = file.stat().st_size
+            if size > MAX_TAKE_FILE_BYTES:
+                raise SandboxError(f"file too large to take from the sandbox: {size} bytes")
+            return file.read_bytes()
+        except OSError:
+            raise SandboxError("no such file in the sandbox") from None
+        finally:
+            file.unlink(missing_ok=True)
+
     def _checked_cwd(self, cwd: str | None) -> Path:
         """`cwd` (default the clone) if it is the clone or a directory under the worktrees."""
         if cwd is None:
@@ -114,7 +135,12 @@ class FakeSandboxManager:
 
     @asynccontextmanager
     async def open(
-        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
     ) -> AsyncGenerator[FakeSandbox]:
         root = self._base_dir / f"agentic-sandbox-{run_id}"
         self._kept.discard(run_id)
@@ -122,7 +148,9 @@ class FakeSandboxManager:
             if not (reuse and await asyncio.to_thread((root / "repo").is_dir)):
                 await asyncio.to_thread(_remove_dir, root)
                 await asyncio.to_thread(root.mkdir, parents=True)
-                await clone_shallow(repo, root / "repo", local_root=self._local_root)
+                await clone_shallow(
+                    repo, root / "repo", local_root=self._local_root, git_env=git_env
+                )
                 (root / "worktrees").mkdir()
                 (root / ".incoming").mkdir()
             yield FakeSandbox(root)

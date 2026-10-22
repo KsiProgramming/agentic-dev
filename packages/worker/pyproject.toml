@@ -5,6 +5,7 @@ description = "Run worker for the Agentic Dev Platform: executes queued runs"
 requires-python = ">=3.12"
 dependencies = [
     "agentic-engine",
+    "agentic-github",
     "agentic-runtime",
     "agentic-sandbox",
     "agentic-secrets",

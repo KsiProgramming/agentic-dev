@@ -161,3 +161,13 @@ def repos_page(repos: list[dict[str, Any]], *, total_count: int | None = None) -
 def token_payload(token: str) -> dict[str, Any]:
     expires = datetime.now(UTC) + timedelta(hours=1)
     return {"token": token, "expires_at": expires.strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
+def pull_payload(number: int, full_name: str, *, head: str, base: str = "main") -> dict[str, Any]:
+    """The part of a pull request `GithubApp` reads."""
+    return {
+        "number": number,
+        "html_url": f"https://github.com/{full_name}/pull/{number}",
+        "head": {"ref": head},
+        "base": {"ref": base},
+    }

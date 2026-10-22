@@ -27,6 +27,8 @@ NODE_FAILED: Final = "node_failed"
 NODE_CANCELLED: Final = "node_cancelled"
 GATE_WAITING: Final = "gate_waiting"
 GATE_DECIDED: Final = "gate_decided"
+PR_OPENED: Final = "pr_opened"
+"""A publishing tool node opened a pull request: `url`, `number`, `head`, `base`, `commit`."""
 
 RUN_END_STATUS: Final[dict[str, RunStatus]] = {
     RUN_COMPLETED: "completed",

@@ -1,8 +1,11 @@
 import asyncio
+import base64
+import io
 import json
 import logging
 import re
-from collections.abc import AsyncGenerator, Awaitable, Callable
+import subprocess
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -21,14 +24,14 @@ from agentic_engine.events import RunEvent
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
-from agentic_engine.spec import WorkflowSpec, parse_spec
+from agentic_engine.spec import PUBLISH_TOOLS, WRITE_TOOLS, WorkflowSpec, parse_spec
 from agentic_runtime import AgentRuntime, ClaudeRuntime, Failed, ToolExecutor
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
 from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
 from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
 from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
 from agentic_sandbox.testing import ensure_sandbox_image, make_repo
-from agentic_secrets import LocalKeyProvider, generate_key_file
+from agentic_secrets import LocalKeyProvider, generate_key_file, install_redaction
 from agentic_store import (
     Workspace,
     create_run,
@@ -36,9 +39,12 @@ from agentic_store import (
     get_run,
     list_run_events,
     put_connection,
+    put_github_connection,
     record_approval,
 )
-from agentic_tools.repo import COMMIT_AUTHOR, open_repo_tools
+from agentic_tools.github import PUBLISH_TOOL_NAMES, GithubPublisher
+from agentic_tools.repo import COMMIT_AUTHOR, WRITE_TOOL_NAMES, open_repo_tools
+from agentic_tools.testing import FakeGithub, bare_remote
 from agentic_worker.main import RuntimeFactory, WorkerSettings, run
 
 SPECS = Path(__file__).resolve().parents[2] / "engine" / "tests" / "fixtures" / "specs" / "valid"
@@ -65,6 +71,8 @@ async def worker(
     ready_file: Path | None = None,
     claude: MockClaude | None = None,
     master_key_file: Path | None = None,
+    github: GithubPublisher | None = None,
+    github_remote: Callable[[str], str] | None = None,
 ) -> AsyncGenerator[asyncio.Event]:
     """A worker running in this event loop; yields its stop event and stops it on exit.
 
@@ -91,6 +99,8 @@ async def worker(
             make_client=(lambda k: claude.make_client(k.get_secret_value())) if claude else None,
             sandboxes=sandboxes,
             checkpointer=checkpointer,
+            github=github,
+            github_remote=github_remote,
         )
     )
     try:
@@ -303,10 +313,15 @@ class RecordingSandboxes:
 
     @asynccontextmanager
     async def open(
-        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
     ) -> AsyncGenerator[Sandbox]:
         try:
-            async with self._inner.open(run_id, repo, reuse=reuse) as box:
+            async with self._inner.open(run_id, repo, reuse=reuse, git_env=git_env) as box:
                 try:
                     yield box
                 finally:
@@ -683,3 +698,170 @@ async def test_a_writer_s_commit_survives_the_gate(
     name, email = COMMIT_AUTHOR
     assert branch_log.branches == [f"agent/{run_id}/writer"]
     assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
+
+
+GITHUB_URL = "https://github.com/acme/hello"
+GITHUB_TOKEN = "ghs_workertoken0005"
+
+
+class MirroredSandboxes:
+    """Sandboxes whose GitHub repos are cloned from a local mirror (no network), recording the
+    `git_env` each clone was given."""
+
+    def __init__(self, inner: SandboxManager, mirrors: Mapping[str, str]) -> None:
+        self._inner, self._mirrors = inner, mirrors
+        self.git_envs: list[dict[str, str] | None] = []
+        self.closed = asyncio.Event()
+
+    def keep(self, run_id: UUID) -> None:
+        self._inner.keep(run_id)
+
+    @asynccontextmanager
+    async def open(
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
+    ) -> AsyncGenerator[Sandbox]:
+        self.git_envs.append(dict(git_env) if git_env is not None else None)
+        local = RepoSource(url=self._mirrors.get(repo.url, repo.url), ref=repo.ref)
+        try:
+            async with self._inner.open(run_id, local, reuse=reuse) as box:
+                yield box
+        finally:
+            self.closed.set()
+
+
+async def submit_publishing_run(
+    sessions: async_sessionmaker[AsyncSession], redis_url: str, workspace_id: UUID
+) -> UUID:
+    run_id = await create_run(
+        sessions,
+        load_spec("open-pr.json"),
+        "go",
+        RepoSource(url=GITHUB_URL),
+        workspace_id=workspace_id,
+    )
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await enqueue_run(redis, run_id)
+    finally:
+        await redis.aclose()
+    return run_id
+
+
+def remote_branches(bare: Path) -> list[str]:
+    out = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads/agent"],
+        cwd=bare,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return out.stdout.split()
+
+
+@pytest.fixture
+def debug_logs() -> Iterator[io.StringIO]:
+    """Everything logged anywhere, at DEBUG, with the worker's redaction installed."""
+    out = io.StringIO()
+    root = logging.getLogger()
+    handler = logging.StreamHandler(out)
+    handler.setFormatter(JsonFormatter())
+    level = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
+    install_redaction(root)
+    yield out
+    root.removeHandler(handler)
+    root.setLevel(level)
+
+
+async def test_done_when_a_run_opens_a_pr_after_approval(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    debug_logs: io.StringIO,
+) -> None:
+    """Phase 1.8: the writer commits, the run waits at the gate with nothing pushed; after
+    approval the branch is pushed (to a bare repo standing in for GitHub) and a pull request is
+    opened (on a fake GitHub), recorded as `pr_opened`."""
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    remote = bare_remote(repos / "hello", tmp_path / "remote.git")
+    github = FakeGithub(GITHUB_TOKEN)
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+    workspace_id = await new_workspace(sessions)
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=fake_with_tools,
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: remote,
+    ):
+        run_id = await submit_publishing_run(sessions, redis_url, workspace_id)
+        await wait_for_status(sessions, run_id, "waiting")
+        assert github.pulls == []
+        assert remote_branches(tmp_path / "remote.git") == []
+
+        await record_approval(sessions, run_id, "gate", GateDecision(decision="approve"))
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+
+    branch = f"agent/{run_id}/writer"
+    events = await list_run_events(sessions, run_id)
+    (opened,) = [e for e in events if e.type == "pr_opened"]
+    assert opened.node_id == "publish"
+    assert opened.payload["url"] == "https://github.com/acme/hello/pull/1"
+    assert opened.payload["head"] == branch
+    assert opened.payload["base"] == "main"
+    assert remote_branches(tmp_path / "remote.git") == [branch]
+    assert github.pulls[0]["title"] == "Add NOTES.md"
+    # Both attempts cloned (or reopened) with the token as a header, never in an event.
+    assert all(env is not None and "GIT_CONFIG_VALUE_0" in env for env in sandboxes.git_envs)
+    assert not any(GITHUB_TOKEN in json.dumps(e.payload) for e in events)
+    # Nor in the logs, plain or as the header git sends.
+    header = base64.b64encode(f"x-access-token:{GITHUB_TOKEN}".encode()).decode()
+    assert debug_logs.getvalue(), "nothing was logged, so the log check proves nothing"
+    assert GITHUB_TOKEN not in debug_logs.getvalue()
+    assert header not in debug_logs.getvalue()
+
+
+async def test_a_publishing_run_without_a_github_connection_fails_cleanly(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    github = FakeGithub(GITHUB_TOKEN)
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+    workspace_id = await new_workspace(sessions)
+
+    async with worker(
+        postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes, github=github
+    ):
+        run_id = await submit_publishing_run(sessions, redis_url, workspace_id)
+        await wait_for_status(sessions, run_id, "failed")
+
+    [*_, failed] = await list_run_events(sessions, run_id)
+    assert failed.payload == {"error": "workspace has no GitHub connection"}
+    assert sandboxes.git_envs == []  # failed before cloning
+    assert github.tokens_issued == 0
+
+
+def test_the_engine_and_the_tool_servers_agree_on_tool_names() -> None:
+    assert WRITE_TOOLS == WRITE_TOOL_NAMES
+    assert PUBLISH_TOOLS == PUBLISH_TOOL_NAMES

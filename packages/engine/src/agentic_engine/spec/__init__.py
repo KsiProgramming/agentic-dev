@@ -1,6 +1,8 @@
 """Workflow spec models (v0: `agent`, `tool`, `gate` and `sequence`)."""
 
 from agentic_engine.spec.models import (
+    PUBLISH_TOOLS,
+    WRITE_TOOLS,
     AgentNode,
     GateNode,
     Node,
@@ -10,10 +12,13 @@ from agentic_engine.spec.models import (
     WorkflowSpec,
     iter_nodes,
     node_tools,
+    publish_gate_errors,
     writer_node_ids,
 )
 
 __all__ = [
+    "PUBLISH_TOOLS",
+    "WRITE_TOOLS",
     "AgentNode",
     "GateNode",
     "Node",
@@ -24,6 +29,7 @@ __all__ = [
     "iter_nodes",
     "node_tools",
     "parse_spec",
+    "publish_gate_errors",
     "writer_node_ids",
 ]
 

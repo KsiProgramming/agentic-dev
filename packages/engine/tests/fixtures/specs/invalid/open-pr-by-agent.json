@@ -1,0 +1,18 @@
+{
+  "spec_version": "0",
+  "id": "open-pr-by-agent",
+  "name": "An agent that may publish",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Add NOTES.md, commit it and open a pull request.",
+        "tools": ["repo.write_file", "repo.commit", "github.openPR"]
+      }
+    ]
+  }
+}

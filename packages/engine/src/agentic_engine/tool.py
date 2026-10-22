@@ -32,4 +32,5 @@ async def run_tool_node(
         tool_calls=[call],
         events=[call, result],
         error=output.text if output.is_error else None,
+        data=output.data,
     )

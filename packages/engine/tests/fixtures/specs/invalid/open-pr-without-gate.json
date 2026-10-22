@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "id": "open-pr-without-gate",
+  "name": "Publishes with no gate",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Add NOTES.md and commit it.",
+        "tools": ["repo.write_file", "repo.commit"]
+      },
+      {
+        "type": "tool",
+        "id": "publish",
+        "tool": "github.openPR",
+        "args": { "from_node": "writer", "title": "Add NOTES.md" }
+      }
+    ]
+  }
+}

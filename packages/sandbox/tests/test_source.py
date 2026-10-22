@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import agentic_sandbox.source
 from agentic_sandbox import RepoSource, SandboxError, clone_shallow
 
 
@@ -77,3 +78,48 @@ async def test_an_unknown_ref_fails(repos: Path, tmp_path: Path) -> None:
     source = RepoSource(url=str(repos / "hello"), ref="no-such-branch")
     with pytest.raises(SandboxError, match="could not clone the repo"):
         await clone_shallow(source, tmp_path / "clone", local_root=repos)
+
+
+HEADER = {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "http.extraHeader",
+    "GIT_CONFIG_VALUE_0": "x",
+}
+
+
+class _Captured:
+    def __init__(self) -> None:
+        self.argv: list[str] = []
+        self.env: dict[str, str] = {}
+
+    async def __call__(
+        self, argv: list[str], env: dict[str, str], timeout_s: float, url: str, dest: Path
+    ) -> None:
+        self.argv, self.env = argv, env
+
+
+async def test_git_env_reaches_an_https_clone_through_the_environment_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _Captured()
+    monkeypatch.setattr(agentic_sandbox.source, "_git", captured)
+
+    await clone_shallow(
+        RepoSource(url="https://github.com/acme/private"), tmp_path / "clone", git_env=HEADER
+    )
+
+    assert {k: captured.env[k] for k in HEADER} == HEADER
+    assert not any("extraHeader" in arg or arg == "x" for arg in captured.argv)
+
+
+async def test_git_env_never_reaches_a_local_clone(
+    repos: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _Captured()
+    monkeypatch.setattr(agentic_sandbox.source, "_git", captured)
+
+    await clone_shallow(
+        RepoSource(url=str(repos / "hello")), tmp_path / "clone", local_root=repos, git_env=HEADER
+    )
+
+    assert captured.env.get("GIT_CONFIG_VALUE_0") != "x"

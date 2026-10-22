@@ -585,7 +585,7 @@ Create a dev App once, at <https://github.com/settings/apps/new> (or under an or
 1. **Name** it anything; its URL slug (`github.com/apps/<slug>`) is `GITHUB_APP_SLUG`. **Homepage URL**: `http://localhost:3000`.
 2. **Setup URL**: `http://localhost:8000/github/setup` (the API), and tick **Redirect on update**. Leave "Request user authorization (OAuth) during installation" off.
 3. **Webhook**: untick **Active** (webhooks come in phase 6.6).
-4. **Repository permissions**: Metadata read only is enough to list repos. Later phases need Contents and Pull requests read and write (1.6, 1.8), so grant them now to avoid re-approving the App.
+4. **Repository permissions**: Metadata read only is enough to list repos. Contents and Pull requests read and write are needed to clone private repos and to open pull requests (`github.openPR`, see "Pull requests").
 5. Create it, note its **App ID** (`GITHUB_APP_ID`), then **Generate a private key** and save the downloaded file as `.secrets/github-app.pem` (gitignored).
 6. Set `GITHUB_APP_ID` and `GITHUB_APP_SLUG` in `.env`, run `docker compose up --build api`, open <http://localhost:3000/settings> and click **Install GitHub App**. GitHub asks which repos to grant, then sends you back to Settings, which lists them.
 
@@ -622,7 +622,7 @@ curl -s localhost:8000/runs/<id>/events
 The stream shows `run_resumed` with `"attempt": 2, "completed_nodes": ["step-1"]`, then `node_started step-2`, `step-3` and `run_completed`. `step-1` has exactly one `node_completed`, and `seq` runs from 1 with no gaps. With `docker compose stop worker` in place of `kill`, the run is resumed as soon as a worker is back.
 
 ## Gates
-A `gate` node pauses a run until a human decides; it is how irreversible steps (push, PR, repo creation) will be put behind an approval. Its input, the previous node's output, is shown to the approver and passed on unchanged:
+A `gate` node pauses a run until a human decides; it is how irreversible steps (push and PR now, see "Pull requests"; repo creation later) are put behind an approval. Its input, the previous node's output, is shown to the approver and passed on unchanged:
 
 ```json
 { "type": "gate", "id": "gate", "title": "Approve the notes", "prompt": "Check the summary first." }
@@ -641,6 +641,47 @@ curl -s -X POST localhost:8000/runs/<id>/approvals -H 'content-type: application
 # the stream goes on: run_resumed, gate_decided, node_completed gate, the `list` node, run_completed
 ```
 
+## Pull requests
+A run publishes a writer's branch with the `github.openPR` tool (phase 1.8). It pushes the branch `agent/<run>/<from_node>` to the run's repo on GitHub and opens a pull request from it. A push and a pull request can't be undone, so a human approves them first:
+
+```json
+{ "type": "tool", "id": "publish", "tool": "github.openPR",
+  "args": { "from_node": "writer", "title": "Add NOTES.md", "body": "…", "base": "main" } }
+```
+
+- **The gate rule.** The spec is refused (`422` at `POST /runs`, `agentic_engine.spec.publish_gate_errors`) unless all of these hold:
+  - `github.openPR` is called by a tool node. An agent may not list it.
+  - Its `from_node` names a writer that runs earlier.
+  - A `gate` runs between that writer and the publishing node, so the approver sees what the writer produced.
+- **What the run needs.** The `repo` must be on GitHub (`https://github.com/<owner>/<name>`), or the request gets `422`. The workspace must be linked to the GitHub App (see "GitHub App"), or it gets `409`. The App needs **Contents** and **Pull requests** set to read and write.
+- **Arguments.**
+  - `from_node`: the writer whose branch to publish.
+  - `title`: the PR title.
+  - `body`: optional.
+  - `base`: optional. It defaults to the run's `ref`, or else the branch the run cloned.
+- **How it works.** The `github` MCP server (`agentic_tools.github`) runs in the worker, next to `repo`:
+  1. It takes the writer's commits out of the sandbox as a git bundle of `<clone HEAD>..<branch>` (`agentic_sandbox.export_branch`).
+  2. In a temp repo on the worker, it fetches that base commit from GitHub, then the bundle.
+  3. It pushes the branch with a fresh installation token. The push may only create the branch: a branch of that name with other commits is never overwritten. Pushing the same commit again is a no-op.
+  4. It opens the pull request (`agentic_github.GithubApp.open_pull_request`). If one is already open from that branch, that PR is returned.
+- **Credentials.** The token reaches git as an HTTP header through its environment (`GIT_CONFIG_*`), never through argv, a remote URL or a config file. It is redacted from logs while it is held. The sandbox keeps no network and never sees it.
+- **Events.** The node writes `tool_call`, `tool_result` (the PR as JSON), then `pr_opened` (`url`, `number`, `head`, `base`, `commit`), then `node_completed`. A refused push or PR fails the node with GitHub's or git's reason.
+- **Private repos.** A run whose repo is on GitHub, in a workspace linked to the App, is cloned with an installation token, given the same way. Without one, the clone is anonymous, which works for public repos only.
+
+Demo (the phase 1.8 "Done when"). It needs a dev GitHub App with those permissions, installed on a test repo:
+
+```bash
+docker compose up -d --build     # with GITHUB_APP_ID, GITHUB_APP_SLUG and .secrets/github-app.pem set
+# connect GitHub at http://localhost:3000/settings, then:
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
+  -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/open-pr.json), \"repo\": {\"url\": \"https://github.com/<owner>/<test-repo>\"}}"
+curl -N localhost:8000/runs/<id>/events      # stops after gate_waiting; nothing is pushed yet
+curl -s -X POST localhost:8000/runs/<id>/approvals -H 'content-type: application/json' -d '{"node_id": "gate", "decision": "approve"}'
+# the stream goes on: gate_decided, tool_call github.openPR, pr_opened with the PR's URL, run_completed
+```
+
+Rejecting instead ends the run `cancelled` with no branch or PR on GitHub. Without the gate, `POST /runs` answers `422` and names the publishing node.
+
 ## Sandbox
 A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents and tool nodes get the repo tools, which run in there. A spec whose nodes (agent or tool) use `repo.*` tools is rejected with `422` if the run has no `repo`.
 
@@ -654,18 +695,18 @@ A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref
 
 Every tool skips `.git`, refuses absolute paths and paths that leave the repo (including through symlinks), and passes its arguments to the sandbox as data, never as shell code. Errors come back as error results that name no host path.
 
-**Writers.** A node whose spec names `repo.write_file` or `repo.commit` (in an agent's `tools`, or as a tool node's `tool`) is a writer. On its first call it gets its own git worktree, `/workspace/worktrees/<node>`, on a new branch `agent/<run-id>/<node-id>` made from the clone's `HEAD`, and all its `repo.*` calls go there: it reads its own writes, and the shared checkout and other nodes never see them. Other nodes calling a write tool get an "unknown tool" error. Commits are by `agentic-dev agent <agent@agentic-dev.invalid>`, and git runs with hooks, fsmonitor and signing off and no system or user config, so nothing in the repo can make it run code. Nothing is pushed: the sandbox has no network, and the branch goes when the sandbox does (push and PR, behind a gate, come in phases 1.7 and 1.8). A resumed run gets a fresh sandbox, so its writer runs again on a fresh worktree.
+**Writers.** A node whose spec names `repo.write_file` or `repo.commit` (in an agent's `tools`, or as a tool node's `tool`) is a writer. On its first call it gets its own git worktree, `/workspace/worktrees/<node>`, on a new branch `agent/<run-id>/<node-id>` made from the clone's `HEAD`, and all its `repo.*` calls go there: it reads its own writes, and the shared checkout and other nodes never see them. Other nodes calling a write tool get an "unknown tool" error. Commits are by `agentic-dev agent <agent@agentic-dev.invalid>`, and git runs with hooks, fsmonitor and signing off and no system or user config, so nothing in the repo can make it run code. The sandbox has no network, so nothing leaves it unless a `github.openPR` node publishes the branch after a gate (see "Pull requests"). Otherwise the branch goes when the sandbox does. A resumed run gets a fresh sandbox, so its writer runs again on a fresh worktree. A run paused at a gate is the exception: it keeps its sandbox.
 
 The tools are served by the `repo` MCP server (`agentic_tools.repo`), built with the official MCP Python SDK. The worker builds one read-only server per run, bound to that run's checkout, and one writable server per writer, bound to its worktree, and connects to them in memory (no process or port). `open_repo_tools` returns a `RepoTools` executor that routes each call by the node id the runtime passes to `ToolExecutor.call`, and offers the tools to the agent runtime as `repo.<tool>`. The MCP clients close before the sandbox is removed.
 
 How it works (`agentic_sandbox`):
 - **Repo source.** `url` is an `https://` URL without credentials, or a local path under `SANDBOX_LOCAL_ROOT` (unset by default, so only `https://` is allowed). `ref` is a branch or tag. Other transports, `ext::`, scp-like URLs and option-like values are rejected.
-- **Clone.** The worker runs `git clone --depth 1` itself, with only the https and file protocols enabled and without the user's or system's git config. It then copies the clone into the sandbox, so the sandbox needs no network and never sees credentials.
+- **Clone.** The worker runs `git clone --depth 1` itself, with only the https and file protocols enabled and without the user's or system's git config. For a GitHub repo in a workspace linked to the App, it sends an installation token as an HTTP header through git's environment. It then copies the clone into the sandbox, so the sandbox needs no network and never sees credentials.
 - **Docker backend** (`SANDBOX_BACKEND=docker`, the compose default). There is one container (`SANDBOX_IMAGE`, default `agentic-dev/sandbox:dev`: alpine plus git, built by compose from `packages/sandbox/Dockerfile`, or by hand with `docker build -t agentic-dev/sandbox:dev packages/sandbox`) and one volume per run, both labelled `agentic.run_id`. The container:
   - has no network and a read-only root filesystem;
   - drops all capabilities and sets `no-new-privileges`;
   - runs as uid 1000, with memory, CPU and PID limits;
-  - holds the checkout root-owned, so it can be read but not changed; its `.git`, `/workspace/worktrees` (writers' worktrees) and `/workspace/.incoming` (file contents on their way in, via `Sandbox.put_file`) belong to uid 1000.
+  - holds the checkout root-owned, so it can be read but not changed; its `.git`, `/workspace/worktrees` (writers' worktrees) and `/workspace/.incoming` (file contents on their way in via `Sandbox.put_file`, and branch bundles on their way out via `Sandbox.take_file`) belong to uid 1000.
 - **Lifecycle.** The container and volume are removed when the run ends, whether it completes, fails or is cancelled. A worker removes leftovers at startup, except those of runs other workers hold a lease on. A resumed run gets a fresh sandbox: opening it first removes the one its earlier attempt left. A clone that fails ends the run with `run_failed` and a message that names no host path.
 - **Fake backend** (`SANDBOX_BACKEND=fake`, the default outside compose). It uses a temp directory on the worker host and isolates nothing, so use it only for tests and trusted repos.
 

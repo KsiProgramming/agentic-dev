@@ -16,13 +16,12 @@ import posixpath
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
-from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from agentic_sandbox import (
     AGENT_IDENTITY,
@@ -32,6 +31,7 @@ from agentic_sandbox import (
     SandboxError,
 )
 from agentic_tools.repo.paths import CONFINE, NOT_FOUND, OUTSIDE, repo_relative
+from agentic_tools.strict import strict_tool
 
 SERVER_NAME = "repo"
 MAX_SEARCH_RESULTS = 500
@@ -381,18 +381,8 @@ def _clip(text: str, limit: int) -> str:
 
 
 def _tool(fn: Callable[..., Any], example: dict[str, Any]) -> Tool:
-    """An unstructured (text) tool whose input schema carries one example call. Unknown
-    arguments are rejected rather than ignored, so a model's typo is reported back to it."""
-    tool = Tool.from_function(fn, structured_output=False)
-    base = tool.fn_metadata.arg_model
-    strict = cast(
-        type[ArgModelBase],
-        type(base.__name__, (base,), {"model_config": ConfigDict(extra="forbid")}),
-    )
-    tool.fn_metadata = tool.fn_metadata.model_copy(update={"arg_model": strict})
-    tool.parameters["additionalProperties"] = False
-    tool.parameters["examples"] = [example]
-    return tool
+    """An unstructured (text) tool with strict arguments and one example call."""
+    return strict_tool(fn, example)
 
 
 def build_repo_server(

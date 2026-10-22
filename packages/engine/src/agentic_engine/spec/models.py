@@ -89,7 +89,52 @@ def node_tools(node: Node) -> list[str]:
             return []
 
 
-def writer_node_ids(root: Node, write_tools: Collection[str]) -> set[str]:
+WRITE_TOOLS = frozenset({"repo.write_file", "repo.commit"})
+"""Tools that change a node's own branch in the sandbox: a node naming one is a writer."""
+
+PUBLISH_TOOLS = frozenset({"github.openPR"})
+"""Tools that publish a writer's branch outside the sandbox (push, pull request). They are
+irreversible, so only a tool node may call one, after a gate that follows the writer."""
+
+
+def publish_gate_errors(root: Node) -> list[str]:
+    """Why the publishing nodes under `root` are not safe to run, in run order (depth first);
+    empty if they are. Each must be a tool node whose `from_node` names an earlier writer, with a
+    gate between that writer and itself, so a human approves what is published."""
+    errors: list[str] = []
+    seen: list[Node] = []
+    for _, node in iter_nodes(root):
+        if isinstance(node, SequenceNode):
+            continue
+        for tool in sorted(PUBLISH_TOOLS.intersection(node_tools(node))):
+            if not isinstance(node, ToolNode):
+                errors.append(f"node {node.id!r}: {tool} can only be called by a tool node")
+                continue
+            errors.extend(_publish_errors(node, seen))
+        seen.append(node)
+    return errors
+
+
+def _publish_errors(node: "ToolNode", earlier: list[Node]) -> list[str]:
+    source = node.args.get("from_node")
+    if not isinstance(source, str):
+        return [f"node {node.id!r}: {node.tool} needs `from_node`, the writer to publish"]
+    ids = [n.id for n in earlier]
+    if source not in ids:
+        return [f"node {node.id!r}: `from_node` {source!r} is not a node that runs before it"]
+    writer = earlier[ids.index(source)]
+    if not WRITE_TOOLS.intersection(node_tools(writer)):
+        return [f"node {node.id!r}: `from_node` {source!r} is not a writer"]
+    between = earlier[ids.index(source) + 1 :]
+    if not any(isinstance(n, GateNode) for n in between):
+        return [
+            f"node {node.id!r}: {node.tool} must come after a gate that follows {source!r}, so "
+            "a human approves what is published"
+        ]
+    return []
+
+
+def writer_node_ids(root: Node, write_tools: Collection[str] = WRITE_TOOLS) -> set[str]:
     """The ids of the nodes under `root` that may call one of `write_tools` (each gets its own
     worktree and branch)."""
     return {
@@ -118,4 +163,10 @@ class WorkflowSpec(_Base):
                     "node ids must be unique"
                 )
             seen[node.id] = path
+        return self
+
+    @model_validator(mode="after")
+    def _publish_after_gate(self) -> Self:
+        if errors := publish_gate_errors(self.root):
+            raise ValueError("; ".join(errors))
         return self

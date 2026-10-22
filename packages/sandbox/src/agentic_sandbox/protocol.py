@@ -2,14 +2,15 @@
 
 A sandbox holds a clone of the run's repo at `workdir`, which the sandbox user can read but not
 change. Writer nodes get their own git worktree under `worktrees_dir` (`agentic_sandbox.worktree`),
-and file contents reach the sandbox through `put_file`. Commands run with `workdir`, or a worktree,
+and file contents reach the sandbox through `put_file` (and leave it through `take_file`, e.g. a
+writer's branch as a git bundle). Commands run with `workdir`, or a worktree,
 as their current directory. The manager owns the lifecycle: `open()` creates the sandbox and
 clones the repo, and leaving the context destroys it, whether the run succeeded, failed or was
 cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and the attempt that
 continues it opens it again (`open(..., reuse=True)`).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Protocol
@@ -22,6 +23,8 @@ MAX_OUTPUT_BYTES = 1024 * 1024
 DEFAULT_EXEC_TIMEOUT_S = 30.0
 # The largest file `put_file` takes.
 MAX_PUT_FILE_BYTES = 1024 * 1024
+# The largest file `take_file` hands out (a writer's branch, bundled).
+MAX_TAKE_FILE_BYTES = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -61,17 +64,36 @@ class Sandbox(Protocol):
         `SandboxError` if `data` is over `MAX_PUT_FILE_BYTES`."""
         ...
 
+    @property
+    def staging_dir(self) -> str:
+        """Where staged files live: writable by the sandbox user, outside the clone and its
+        worktrees. Commands may write a file here for `take_file` to hand out."""
+        ...
+
+    async def take_file(self, path: str) -> bytes:
+        """The bytes of the file `path`, directly in `staging_dir`, which is then removed.
+        Raises `ValueError` for any other path, and `SandboxError` if the file is missing or over
+        `MAX_TAKE_FILE_BYTES`."""
+        ...
+
 
 class SandboxManager(Protocol):
     def open(
-        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
     ) -> AbstractAsyncContextManager[Sandbox]:
         """Create a sandbox for `run_id` holding a shallow clone of `repo`; destroy it on exit,
         unless `keep(run_id)` was called meanwhile.
 
         Without `reuse`, a sandbox the run already has (left by an attempt that died) is replaced
         by a fresh one. With `reuse`, the one it kept is opened again as it was, with its writers'
-        worktrees and commits; if there is none, a fresh one is created.
+        worktrees and commits; if there is none, a fresh one is created. `git_env` goes to the
+        clone (`clone_shallow`), e.g. to authenticate to a private repo; the sandbox never sees
+        it.
 
         Raises `SandboxError` if the sandbox cannot be created or the repo cannot be cloned."""
         ...

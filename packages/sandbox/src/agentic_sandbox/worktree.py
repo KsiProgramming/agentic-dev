@@ -91,6 +91,13 @@ class Worktree:
     async def put_file(self, data: bytes) -> str:
         return await self._sandbox.put_file(data)
 
+    @property
+    def staging_dir(self) -> str:
+        return self._sandbox.staging_dir
+
+    async def take_file(self, path: str) -> bytes:
+        return await self._sandbox.take_file(path)
+
 
 async def add_worktree(sandbox: Sandbox, run_id: UUID, node_id: str) -> Worktree:
     """The worktree of `node_id` on `agent/<run-id>/<node-id>`, created from the clone's `HEAD`

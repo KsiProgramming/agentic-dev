@@ -20,7 +20,13 @@ fails its runs on Claude.
 A run with a `repo` gets a sandbox holding a clone of it for its whole duration, and its agents
 and tool nodes get the `repo.*` tools: a read-only `repo` MCP server bound to that sandbox,
 connected in memory. Each writer node (one whose spec names `repo.write_file` or `repo.commit`)
-gets its own worktree on `agent/<run>/<node>` instead, with the write tools; nothing is pushed.
+gets its own worktree on `agent/<run>/<node>` instead, with the write tools.
+
+A run whose repo is on GitHub, in a workspace linked to the platform's GitHub App, is cloned with
+an installation token (so private repos work); the token reaches git through its environment and
+is redacted from logs meanwhile. If its spec uses `github.*` tools, it also gets the `github` MCP
+server: `github.openPR` bundles a writer's branch out of the sandbox, pushes it from this worker
+and opens a pull request. The sandbox never holds a credential and has no network.
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
 this host (no isolation).
 """
@@ -56,7 +62,16 @@ from agentic_engine.graph import (
     run_workflow,
 )
 from agentic_engine.logging import configure_logging
-from agentic_engine.spec import writer_node_ids
+from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools, writer_node_ids
+from agentic_github import (
+    GithubApiError,
+    GithubApp,
+    GithubAppConfig,
+    GithubConfigError,
+    InstallationNotFoundError,
+    auth_env,
+    repo_full_name,
+)
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
@@ -76,6 +91,7 @@ from agentic_store import (
     StoredRun,
     claim_run,
     dequeue_run,
+    get_github_installation,
     leased_run_ids,
     load_secret,
     max_event_seq,
@@ -86,7 +102,9 @@ from agentic_store import (
     renew_lease,
     waiting_run_ids,
 )
+from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
+from agentic_tools.routing import RunTools
 
 log = logging.getLogger("agentic_worker")
 
@@ -96,7 +114,10 @@ def _default_worker_id() -> str:
 
 
 class WorkerSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", validate_by_name=True)
+    # An empty variable (compose passes `${X:-}`) means unset.
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", validate_by_name=True, env_ignore_empty=True
+    )
 
     database_url: str = "postgresql+asyncpg://agentic:agentic@localhost:5432/agentic"
     redis_url: str = "redis://localhost:6379/0"
@@ -125,6 +146,11 @@ class WorkerSettings(BaseSettings):
     lease_heartbeat_s: float = Field(default=10.0, gt=0)
     # Claims of one run before it fails instead of being resumed again (a run that kills workers).
     max_attempts: int = Field(default=3, ge=1)
+    # The platform's GitHub App (the same settings as the API's). Unset, runs clone GitHub repos
+    # anonymously and runs that use `github.*` tools fail.
+    github_app_id: int | None = None
+    github_app_slug: str | None = None
+    github_app_private_key_file: Path | None = None
 
 
 type RuntimeFactory = Callable[[ToolExecutor | None], AgentRuntime]
@@ -229,6 +255,21 @@ def run_runtimes(
     return open_claude
 
 
+def build_github(settings: WorkerSettings) -> GithubApp | None:
+    """The platform's GitHub App, if its id and slug are set."""
+    if settings.github_app_id is None or settings.github_app_slug is None:
+        return None
+    if settings.github_app_private_key_file is None:
+        raise ConfigError("GITHUB_APP_PRIVATE_KEY_FILE must be set with GITHUB_APP_ID")
+    try:
+        config = GithubAppConfig.from_file(
+            settings.github_app_id, settings.github_app_slug, settings.github_app_private_key_file
+        )
+    except GithubConfigError as e:
+        raise ConfigError(str(e)) from None
+    return GithubApp(config)
+
+
 def build_sandboxes(
     settings: WorkerSettings, keep: Collection[str] = frozenset()
 ) -> SandboxManager:
@@ -261,6 +302,9 @@ class Worker:
     open_runtime: RunRuntimes
     sandboxes: SandboxManager
     checkpointer: Checkpointer
+    github: GithubPublisher | None = None
+    # Where a repo's branches are pushed, by `owner/name`; GitHub unless a test points elsewhere.
+    github_remote: Callable[[str], str] | None = None
 
 
 class AttemptSink:
@@ -338,13 +382,26 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
         log.warning("run %s: gave up after %d attempts", run.id, tries)
         await _fail(run, sink, last_seq, f"gave up after {tries} attempts")
         return "failed"
+    try:
+        target = await _github_target(worker, run)
+    except RunSetupError as e:
+        log.warning("run %s cannot start: %s", run.id, e)
+        await _fail(run, sink, last_seq, str(e))
+        return "failed"
     async with contextlib.AsyncExitStack() as stack:
         tools: ToolExecutor | None = None
         if run.repo is not None:
+            token = await _clone_token(worker, run.id, target)
             try:
-                sandbox = await stack.enter_async_context(
-                    worker.sandboxes.open(run.id, run.repo, reuse=decision is not None)
-                )
+                with registered(token) if token is not None else contextlib.nullcontext():
+                    sandbox = await stack.enter_async_context(
+                        worker.sandboxes.open(
+                            run.id,
+                            run.repo,
+                            reuse=decision is not None,
+                            git_env=auth_env(token) if token is not None else None,
+                        )
+                    )
             except SandboxError as e:
                 log.warning("run %s has no sandbox: %s", run.id, e)
                 await _fail(run, sink, last_seq, str(e))
@@ -354,6 +411,14 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             tools = await stack.enter_async_context(
                 open_repo_tools(sandbox, run_id=run.id, writers=writers)
             )
+            if target is not None and uses_github(run.spec):
+                assert worker.github is not None  # `_github_target` checked it
+                publishing = await stack.enter_async_context(
+                    open_github_tools(
+                        worker.github, target, sandbox, run_id=run.id, writers=writers
+                    )
+                )
+                tools = RunTools([tools, publishing])
         try:
             runtime = await stack.enter_async_context(worker.open_runtime(run, tools))
         except RunSetupError as e:
@@ -364,6 +429,54 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
         if result.status == "waiting" and run.repo is not None:
             worker.sandboxes.keep(run.id)
         return result.status
+
+
+def uses_github(spec: WorkflowSpec) -> bool:
+    """Whether a node of `spec` names a `github.*` tool."""
+    return any(
+        tool.startswith("github.") for _, node in iter_nodes(spec.root) for tool in node_tools(node)
+    )
+
+
+async def _github_target(worker: Worker, run: StoredRun) -> GithubTarget | None:
+    """Where the run's repo is on GitHub and through which installation, if it is on GitHub and
+    its workspace is linked to the platform's GitHub App. Raises `RunSetupError` if the run uses
+    `github.*` tools and has no such target."""
+    needed = uses_github(run.spec)
+    full_name = repo_full_name(run.repo.url) if run.repo is not None else None
+    if full_name is None or worker.github is None:
+        if needed and worker.github is None:
+            raise RunSetupError("the GitHub App is not configured on this worker")
+        if needed:
+            raise RunSetupError("the run's repo is not on GitHub")
+        return None
+    installation = await get_github_installation(worker.sessions, run.workspace_id)
+    if installation is None:
+        if needed:
+            raise RunSetupError("workspace has no GitHub connection")
+        return None
+    assert run.repo is not None
+    return GithubTarget(
+        installation_id=installation,
+        full_name=full_name,
+        base=run.repo.ref,
+        remote_url=worker.github_remote(full_name) if worker.github_remote else None,
+    )
+
+
+async def _clone_token(
+    worker: Worker, run_id: UUID, target: GithubTarget | None
+) -> SecretStr | None:
+    """An installation token to clone the run's repo with (private repos need one), or `None`
+    to clone anonymously: the repo is not on GitHub, or no token could be had (the clone then
+    works for public repos only)."""
+    if target is None or worker.github is None:
+        return None
+    try:
+        return await worker.github.installation_token(target.installation_id)
+    except (GithubApiError, InstallationNotFoundError) as e:
+        log.warning("run %s: no GitHub token for the clone (%s); cloning anonymously", run_id, e)
+        return None
 
 
 async def _workflow(
@@ -443,14 +556,17 @@ async def run(
     make_client: ClaudeClientFactory | None = None,
     sandboxes: SandboxManager | None = None,
     checkpointer: Checkpointer | None = None,
+    github: GithubPublisher | None = None,
+    github_remote: Callable[[str], str] | None = None,
 ) -> None:
     """Run abandoned and queued runs until `stop` is set; a run still going then is released
     unfinished, for another worker to resume.
 
     Tests pass `runtime` (used for every run, whatever its tools) or `make_runtime`, or
-    `make_client` for the Claude runtime, and `sandboxes` and `checkpointer`; otherwise they are
-    built from `settings`."""
+    `make_client` for the Claude runtime, and `sandboxes`, `checkpointer` and `github` (with
+    `github_remote`, where branches are pushed); otherwise they are built from `settings`."""
     keys = build_keys(settings)
+    app = build_github(settings) if github is None else None
     redis = Redis.from_url(settings.redis_url)  # pyright: ignore[reportUnknownMemberType]
     db = create_async_engine(settings.database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(db, expire_on_commit=False)
@@ -470,7 +586,17 @@ async def run(
                 checkpointer = await stack.enter_async_context(
                     open_checkpointer(settings.database_url)
                 )
-            worker = Worker(settings, sessions, open_runtime, sandboxes, checkpointer)
+            if app is not None:
+                stack.callback(app.close)
+            worker = Worker(
+                settings,
+                sessions,
+                open_runtime,
+                sandboxes,
+                checkpointer,
+                github=github or app,
+                github_remote=github_remote,
+            )
             await redis.ping()  # pyright: ignore[reportUnknownMemberType]
             log.info("worker ready")
             if settings.ready_file is not None:

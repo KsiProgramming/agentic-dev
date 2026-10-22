@@ -1,52 +1,23 @@
 """Writer worktrees and staged files, on both sandbox backends: the fake one needs `sh` and `git`
 on the host, the Docker one a daemon. Each is skipped where it cannot run."""
 
-import shutil
-from collections.abc import AsyncIterator
-from pathlib import Path
 from uuid import UUID, uuid4
 
-import docker
 import pytest
-from docker.errors import DockerException
 
 from agentic_sandbox import (
     AGENT_IDENTITY,
     MAX_PUT_FILE_BYTES,
-    FakeSandboxManager,
-    RepoSource,
     Sandbox,
     SandboxError,
     SandboxManager,
     add_worktree,
     branch_name,
 )
-from agentic_sandbox.docker_backend import DockerSandboxManager
-from agentic_sandbox.testing import ensure_sandbox_image
 
+# The run the `sandbox` fixture opens (conftest).
 RUN_ID = UUID("00000000-0000-4000-8000-000000000001")
 COMMIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q"]
-
-
-@pytest.fixture(params=["fake", pytest.param("docker", marks=pytest.mark.integration)])
-def backend(request: pytest.FixtureRequest, repos: Path) -> tuple[str, SandboxManager]:
-    if request.param == "fake":
-        if not (shutil.which("sh") and shutil.which("git")):
-            pytest.skip("needs sh and git on the host")
-        return "fake", FakeSandboxManager(local_root=repos)
-    try:
-        client = docker.from_env()
-        client.ping()
-    except DockerException:
-        pytest.skip("no Docker daemon")
-    ensure_sandbox_image(client)
-    return "docker", DockerSandboxManager(client, local_root=repos)
-
-
-@pytest.fixture
-async def sandbox(backend: tuple[str, SandboxManager], repos: Path) -> AsyncIterator[Sandbox]:
-    async with backend[1].open(RUN_ID, RepoSource(url=str(repos / "hello"))) as box:
-        yield box
 
 
 async def sh(box: Sandbox, script: str, cwd: str | None = None) -> tuple[int, str]:

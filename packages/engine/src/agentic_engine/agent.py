@@ -3,7 +3,7 @@
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agentic_engine.spec import AgentNode
 from agentic_runtime import (
@@ -35,6 +35,8 @@ class AgentNodeResult(BaseModel):
     tool_calls: list[ToolCall] = Field(default_factory=list[ToolCall])
     events: list[AgentEvent] = Field(default_factory=list[AgentEvent])
     error: str | None = None
+    # A tool node's structured result, if its tool returned one.
+    data: dict[str, JsonValue] | None = None
 
 
 def to_request(node: AgentNode, input: str) -> AgentRequest:

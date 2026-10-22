@@ -65,7 +65,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow` with `input` for its first node, working on `repo` if given.\nStream it from `events_url`.",
+        "description": "Queue a run of `workflow` with `input` for its first node, working on `repo` if given.\nStream it from `events_url`. A workflow that publishes (`github.openPR`) must have a gate\nbetween the writer and the publishing node, or it is refused with `422`.",
         "operationId": "createRun",
         "requestBody": {
           "content": {
@@ -90,6 +90,9 @@
           },
           "404": {
             "description": "No workspace with this id"
+          },
+          "409": {
+            "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection"
           },
           "422": {
             "description": "Validation Error",
@@ -889,7 +892,7 @@
                 "type": "null"
               }
             ],
-            "description": "The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools."
+            "description": "The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`)."
           },
           "workspace_id": {
             "anyOf": [

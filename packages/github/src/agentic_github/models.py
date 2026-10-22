@@ -18,3 +18,12 @@ class RepoInfo:
     private: bool
     default_branch: str
     html_url: str
+
+
+@dataclass(frozen=True)
+class PullRequestInfo:
+    number: int
+    url: str
+    # Branch names, as GitHub reports them.
+    head: str
+    base: str

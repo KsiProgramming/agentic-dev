@@ -1,11 +1,14 @@
-"""Per-run sandboxes holding a repo clone, and worktrees for the nodes that write to it."""
+"""Per-run sandboxes holding a repo clone, worktrees for the nodes that write to it, and their
+branches bundled for publishing."""
 
+from agentic_sandbox.bundle import BranchBundle, export_branch
 from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.fake import FakeSandbox, FakeSandboxManager
 from agentic_sandbox.protocol import (
     DEFAULT_EXEC_TIMEOUT_S,
     MAX_OUTPUT_BYTES,
     MAX_PUT_FILE_BYTES,
+    MAX_TAKE_FILE_BYTES,
     ExecResult,
     Sandbox,
     SandboxManager,
@@ -25,6 +28,8 @@ __all__ = [
     "GIT_SAFETY",
     "MAX_OUTPUT_BYTES",
     "MAX_PUT_FILE_BYTES",
+    "MAX_TAKE_FILE_BYTES",
+    "BranchBundle",
     "ExecResult",
     "FakeSandbox",
     "FakeSandboxManager",
@@ -36,4 +41,5 @@ __all__ = [
     "add_worktree",
     "branch_name",
     "clone_shallow",
+    "export_branch",
 ]
