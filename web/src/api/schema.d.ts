@@ -56,7 +56,8 @@ export interface paths {
         /**
          * Create
          * @description Queue a run of `workflow` with `input` for its first node, working on `repo` if given.
-         *     Stream it from `events_url`.
+         *     Stream it from `events_url`. A workflow that publishes (`github.openPR`) must have a gate
+         *     between the writer and the publishing node, or it is refused with `422`.
          */
         post: operations["createRun"];
         delete?: never;
@@ -354,7 +355,7 @@ export interface components {
              * @default
              */
             input: string;
-            /** @description The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools. */
+            /** @description The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`). */
             repo?: components["schemas"]["RepoSource"] | null;
             /**
              * Workspace Id
@@ -693,6 +694,13 @@ export interface operations {
             };
             /** @description No workspace with this id */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The workflow uses `github.*` tools, but the workspace has no GitHub connection */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

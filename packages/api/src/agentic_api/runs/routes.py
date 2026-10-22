@@ -24,6 +24,7 @@ from agentic_store import (
     RunNotFoundError,
     create_run,
     enqueue_run,
+    get_github_installation,
     get_run,
     get_workspace,
     list_run_events,
@@ -73,16 +74,29 @@ async def existing_run(run_id: UUID, request: Request) -> UUID:
     "",
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="createRun",
-    responses={404: {"description": "No workspace with this id"}},
+    responses={
+        404: {"description": "No workspace with this id"},
+        409: {
+            "description": "The workflow uses `github.*` tools, but the workspace has no "
+            "GitHub connection"
+        },
+    },
 )
 async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     """Queue a run of `workflow` with `input` for its first node, working on `repo` if given.
-    Stream it from `events_url`."""
+    Stream it from `events_url`. A workflow that publishes (`github.openPR`) must have a gate
+    between the writer and the publishing node, or it is refused with `422`."""
     redis: Redis = request.app.state.redis
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
     if await get_workspace(sessions, workspace_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
+    if body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "the workflow uses github.* tools, but the workspace has no GitHub connection; "
+            "install the GitHub App first",
+        )
     run_id = await create_run(sessions, body.workflow, body.input, body.repo, workspace_id)
     await enqueue_run(redis, run_id)
     return CreateRunResponse(

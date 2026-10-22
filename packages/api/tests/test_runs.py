@@ -29,7 +29,14 @@ from agentic_api.settings import Settings
 from agentic_engine.graph import checkpoint_serde
 from agentic_runtime import AgentRuntime, Failed
 from agentic_runtime.fake import FakeRuntime
-from agentic_store import RUN_QUEUE, Run, get_run
+from agentic_store import (
+    DEFAULT_WORKSPACE_ID,
+    RUN_QUEUE,
+    Run,
+    delete_connection,
+    get_run,
+    put_github_connection,
+)
 from agentic_worker.main import WorkerSettings
 from agentic_worker.main import run as run_worker
 
@@ -435,3 +442,90 @@ async def test_approvals_that_do_not_fit_are_refused(postgres_url: str, redis_ur
     assert bad_decision.status_code == 422
     assert first.status_code == 202
     assert again.status_code == 409
+
+
+GITHUB_REPO = {"url": "https://github.com/acme/hello"}
+
+
+def without_gate() -> dict[str, Any]:
+    spec = spec_json("valid/open-pr.json")
+    spec["root"]["steps"] = [s for s in spec["root"]["steps"] if s["type"] != "gate"]
+    return spec
+
+
+@asynccontextmanager
+async def github_connected(sessions: async_sessionmaker[AsyncSession]) -> AsyncGenerator[None]:
+    """The default workspace linked to a GitHub App installation, for the duration."""
+    await put_github_connection(sessions, DEFAULT_WORKSPACE_ID, 42, "acme")
+    try:
+        yield
+    finally:
+        await delete_connection(sessions, DEFAULT_WORKSPACE_ID, "github")
+
+
+async def test_a_publishing_run_is_queued_when_github_is_connected(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with github_connected(sessions), api(postgres_url, redis_url) as client:
+        response = await client.post(
+            "/runs", json={"workflow": spec_json("valid/open-pr.json"), "repo": GITHUB_REPO}
+        )
+
+    assert response.status_code == 202, response.text
+    # Off the queue again: no later test's worker may try to clone from GitHub.
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await redis.lrem(RUN_QUEUE, 0, response.json()["run_id"])  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        await redis.aclose()
+
+
+async def test_publishing_without_a_gate_is_refused(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runs_before = await count_runs(sessions)
+    async with github_connected(sessions), api(postgres_url, redis_url) as client:
+        response = await client.post(
+            "/runs", json={"workflow": without_gate(), "repo": GITHUB_REPO}
+        )
+
+    assert response.status_code == 422
+    assert "node 'publish': github.openPR must come after a gate that follows 'writer'" in (
+        response.text
+    )
+    assert await count_runs(sessions) == runs_before
+
+
+@pytest.mark.parametrize(
+    ("repo", "message"),
+    [
+        (None, "which need a `repo`"),
+        ({"url": "https://gitlab.com/acme/hello"}, "which need a `repo` on GitHub"),
+    ],
+)
+async def test_publishing_needs_a_repo_on_github(
+    postgres_url: str, redis_url: str, repo: dict[str, Any] | None, message: str
+) -> None:
+    body: dict[str, Any] = {"workflow": spec_json("valid/open-pr.json")}
+    if repo is not None:
+        body["repo"] = repo
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json=body)
+
+    assert response.status_code == 422
+    assert message in response.text
+
+
+async def test_publishing_needs_a_github_connection(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    await delete_connection(sessions, DEFAULT_WORKSPACE_ID, "github")
+    runs_before = await count_runs(sessions)
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post(
+            "/runs", json={"workflow": spec_json("valid/open-pr.json"), "repo": GITHUB_REPO}
+        )
+
+    assert response.status_code == 409
+    assert "no GitHub connection" in response.text
+    assert await count_runs(sessions) == runs_before
