@@ -4,9 +4,9 @@
 > Every existing screen uses only shared components and tokens (no raw palette colours); axe finds no serious issues
 
 ## Automated checks
-- [ ] `web/e2e/a11y.spec.ts`: axe (WCAG 2.0/2.1/2.2 A + AA tags) reports **no serious or critical** violations on `/`, `/settings` and `/runs/{id}`, each in light and dark (6 checks).
+- [ ] `web/e2e/a11y.spec.ts`: axe (WCAG 2.0/2.1/2.2 A + AA tags) reports **no serious or critical** violations on `/`, `/settings`, a finished run, a run waiting at a gate and an unknown run, each in light and dark (10 checks).
 - [ ] Existing Playwright specs (`home.spec.ts`, `monitor.spec.ts`) still pass against the compose stack.
-- [ ] Vitest: new `status-badge.test.tsx` and `states.test.tsx` pass; all existing component tests pass after markup updates, with none deleted.
+- [ ] Vitest: new `status-badge.test.tsx` and `states.test.tsx` pass, plus Retry tests for the docs card, GitHub settings and the run stream; all existing component tests pass after markup updates, with none deleted.
 - [ ] `pnpm lint`, `pnpm format:check`, `pnpm typecheck` green (copied shadcn code included).
 - [ ] Python CI jobs unchanged and green (no backend change expected; `openapi.json` diff check clean).
 

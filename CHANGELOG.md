@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 2.1 design system:
+  - **Tokens.** `web/src/app/globals.css` defines Tailwind v4 semantic tokens for light and dark (zinc neutrals, indigo `--primary` and `--ring`, `--radius: 0.5rem`) and `--status-{queued,running,waiting,succeeded,failed,cancelled}` with a `-muted` background each. Palette values live only in this file.
+  - **Fonts, icons, theme.** Inter for UI text and JetBrains Mono for ids, paths and code via `next/font`; `lucide-react` icons; `next-themes` follows the system theme (the toggle comes with the app shell in 2.2); `sonner` toasts.
+  - **Components.** shadcn/ui primitives in `web/src/components/ui` (Button, Card, Badge, Input, Label, Textarea, NativeSelect, Alert, Skeleton, Table, Sonner). `StatusBadge` shows a status as icon + label. `EmptyState`, `LoadingState` and `ErrorState` (with Retry) give every data view its three states.
+  - **Accessibility checks.** `web/e2e/a11y.spec.ts` runs axe (WCAG 2.2 AA tags) on home, settings, a finished run, a run waiting at a gate and an unknown run, in light and dark, and fails on serious or critical issues.
 - Phase 1.11 "Generate docs" template (AC-1):
   - **`repo.list_modules` tool.** Lists a repo's modules (directories with a manifest, else top-level directories) as structured content, filtered by `include` globs and capped at 40, so a `map` can go over them.
   - **Templates** (`agentic_engine.templates`). A `Template` turns options (a Pydantic model, exported as JSON Schema) into a workflow spec. The first one, `generate-docs` (`DocsParams`: `output_dir`, `include`, `extra_instructions`), lists the modules, documents them in a map of read-only agents (4 at a time), joins the pages, has one writer commit them and an index under `output_dir`, then opens a PR after a gate.
@@ -84,6 +89,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- Phase 2.1: home, run monitor and settings use only shared components and tokens. The run status is a `StatusBadge` (`data-status` holds the status), the event list uses the Table primitive, the gate panel is an amber card with a toast on decision, and failed loads (repos, GitHub, a lost event stream) can be retried.
 - Docker sandboxes run from `agentic-dev/sandbox:dev` instead of `alpine:3.20`. A missing local image is reported with the command that builds it.
 - A Docker sandbox is now removed even when its run is cancelled during teardown. Before, a stopping worker could skip the removal and leave the container until the next startup sweep.
 - The worker no longer shares one Anthropic client between runs: each run on Claude gets its own client, built from its workspace's stored key. `RunRuntimes` opens a runtime per run, and `AttemptSink` redacts live secrets from event payloads.

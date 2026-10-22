@@ -5,17 +5,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { createApiClient } from "@/api/client";
-import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import type { PendingGate } from "./gates";
 
@@ -72,9 +64,6 @@ export function GatePanel({
           <h2>{gate.title}</h2>
         </CardTitle>
         {gate.prompt ? <CardDescription>{gate.prompt}</CardDescription> : null}
-        <CardAction>
-          <StatusBadge status="waiting" label="Needs approval" />
-        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {gate.artifact ? (
