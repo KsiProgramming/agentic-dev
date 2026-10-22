@@ -9,6 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- `specs/ideas.md`, a backlog for ideas not yet on the roadmap (status from Raw to Promoted, one template per idea), seeded with user-authored tools, skills, a repo healer and Markdown upload for definitions.
 - Merge rules and roadmap board ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)):
   - **Merging to main.** `scripts/setup_repo_rules.py` sets the repository to squash merges only (PR title and body as the commit, branch deleted after merge) and adds a ruleset on `main` with no bypass: changes go through a PR, every `ci.yml` and `pr-checks.yml` job must pass on a branch up to date with `main`, conversations resolved, no force push or deletion. `scripts/test_setup_repo_rules.py` keeps the required checks in step with the workflows.
   - **`open-pr` skill.** Opens a PR the way the rules want (changelog entry, labels, phase issue, watched checks) and leaves the merge to a person.
