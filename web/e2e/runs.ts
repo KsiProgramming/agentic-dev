@@ -4,13 +4,17 @@ import { expect, type APIRequestContext } from "@playwright/test";
 export const apiURL = process.env.E2E_API_URL ?? "http://localhost:8000";
 
 /** Starts a run of `steps` in a sequence through the API and returns its id. */
-export async function startRun(request: APIRequestContext, steps: unknown[]): Promise<string> {
+export async function startRun(
+  request: APIRequestContext,
+  steps: unknown[],
+  name = "E2E layout",
+): Promise<string> {
   const response = await request.post(`${apiURL}/runs`, {
     data: {
       workflow: {
         spec_version: "0",
         id: "e2e-layout",
-        name: "E2E layout",
+        name,
         root: { type: "sequence", id: "main", steps },
       },
       input: "hello",
@@ -27,4 +31,13 @@ export const GATE = {
   id: "approve",
   title: "Approve the greeting",
   prompt: "Check it before the run ends.",
+};
+
+/** A loop whose `until` is not a bool: it fails after its first round, and so does the run. */
+export const FAILING = {
+  type: "loop",
+  id: "broken",
+  body: { type: "agent", id: "draft", role: "Writer", instructions: "Say hello." },
+  until: "iteration",
+  max_iterations: 2,
 };

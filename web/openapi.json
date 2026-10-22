@@ -241,6 +241,84 @@
         }
       }
     },
+    "/runs/stream": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Stream Summaries",
+        "description": "Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with\nthe run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,\nincluding new runs. Each frame's `id` is when the run last changed. Only changes after\nconnecting are sent; after a reconnect, list the runs again. The stream stays open.",
+        "operationId": "streamRunSummaries",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/RunSummary"
+                      }
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}": {
       "get": {
         "tags": [

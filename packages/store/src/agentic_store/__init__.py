@@ -56,6 +56,7 @@ from agentic_store.summaries import (
     InvalidCursorError,
     RunSummaryRow,
     get_run_summary,
+    list_changed_run_summaries,
     list_run_summaries,
 )
 
@@ -93,6 +94,7 @@ __all__ = [
     "get_run_summary",
     "get_workspace",
     "leased_run_ids",
+    "list_changed_run_summaries",
     "list_connections",
     "list_run_events",
     "list_run_summaries",

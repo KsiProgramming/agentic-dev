@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 from collections.abc import AsyncIterable
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -36,6 +37,7 @@ from agentic_store import (
     get_run,
     get_run_summary,
     get_workspace,
+    list_changed_run_summaries,
     list_run_events,
     list_run_summaries,
     record_approval,
@@ -46,28 +48,40 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 # Streams re-read the log this often even with no notification, in case one was lost.
 RECHECK_S = 15.0
 
-# Each frame's `data` is a `RunEvent`. FastAPI documents this itself only for plain yielded
-# models, not `ServerSentEvent`, so it is spelled out here (the component is added in app.py).
-_SSE_RUN_EVENTS: dict[str, Any] = {
-    "responses": {
-        "200": {
-            "content": {
-                "text/event-stream": {
-                    "itemSchema": {
-                        "required": ["data"],
-                        "properties": {
-                            "data": {
-                                "type": "string",
-                                "contentMediaType": "application/json",
-                                "contentSchema": {"$ref": "#/components/schemas/RunEvent"},
-                            }
-                        },
+# The summaries stream re-reads changes this far back, so a change committed after a later one
+# (two workers writing at once) is still sent. Changes already sent are not sent again.
+SUMMARY_LOOKBACK = timedelta(seconds=5)
+# After a wake-up the summaries stream waits this long, so a burst of events is read once.
+SUMMARY_COALESCE_S = 0.2
+
+
+def _sse_of(model: str) -> dict[str, Any]:
+    """OpenAPI for an SSE response whose frames carry `model` as `data`. FastAPI documents this
+    itself only for plain yielded models, not `ServerSentEvent`, so it is spelled out here."""
+    return {
+        "responses": {
+            "200": {
+                "content": {
+                    "text/event-stream": {
+                        "itemSchema": {
+                            "required": ["data"],
+                            "properties": {
+                                "data": {
+                                    "type": "string",
+                                    "contentMediaType": "application/json",
+                                    "contentSchema": {"$ref": f"#/components/schemas/{model}"},
+                                }
+                            },
+                        }
                     }
                 }
             }
         }
     }
-}
+
+
+# `RunEvent` is added to the components in app.py.
+_SSE_RUN_EVENTS = _sse_of("RunEvent")
 
 
 def _sessions(request: Request) -> async_sessionmaker[AsyncSession]:
@@ -78,6 +92,18 @@ async def existing_run(run_id: UUID, request: Request) -> UUID:
     if await get_run(_sessions(request), run_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
     return run_id
+
+
+async def existing_workspace(
+    request: Request,
+    workspace_id: Annotated[
+        UUID | None, Query(description="Default: the default workspace.")
+    ] = None,
+) -> UUID:
+    workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
+    if await get_workspace(_sessions(request), workspace_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
+    return workspace_id
 
 
 def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
@@ -141,6 +167,50 @@ async def list_runs(
     return RunSummaryPage(
         items=[RunSummary(**_summary_fields(row)) for row in rows], next_cursor=next_cursor
     )
+
+
+@router.get(
+    "/stream",
+    response_class=EventSourceResponse,
+    operation_id="streamRunSummaries",
+    responses={404: {"description": "No workspace with this id"}},
+    openapi_extra=_sse_of("RunSummary"),
+)
+async def stream_summaries(
+    request: Request, workspace_id: Annotated[UUID, Depends(existing_workspace)]
+) -> AsyncIterable[ServerSentEvent]:
+    """Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with
+    the run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,
+    including new runs. Each frame's `id` is when the run last changed. Only changes after
+    connecting are sent; after a reconnect, list the runs again. The stream stays open."""
+    sessions = _sessions(request)
+    listener: RunEventListener = request.app.state.run_events
+    watermark = datetime.now(UTC)
+    # What was last sent per run, kept while the run is inside the lookback window.
+    sent: dict[UUID, tuple[datetime, RunSummary]] = {}
+    # Subscribe before reading, so a change written in between still wakes us.
+    with listener.subscribe_all() as woke:
+        while True:
+            woke.clear()
+            changed = await list_changed_run_summaries(
+                sessions, workspace_id, since=watermark - SUMMARY_LOOKBACK
+            )
+            for updated_at, row in changed:
+                summary = RunSummary(**_summary_fields(row))
+                if (last := sent.get(row.id)) is None or last[1] != summary:
+                    yield ServerSentEvent(
+                        id=updated_at.isoformat(), event="run_summary", data=summary
+                    )
+                sent[row.id] = (updated_at, summary)
+                watermark = max(watermark, updated_at)
+            sent = {
+                run_id: kept
+                for run_id, kept in sent.items()
+                if kept[0] > watermark - SUMMARY_LOOKBACK
+            }
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(woke.wait(), RECHECK_S)
+            await asyncio.sleep(SUMMARY_COALESCE_S)
 
 
 @router.get(

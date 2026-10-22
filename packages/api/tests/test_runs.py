@@ -6,6 +6,7 @@ over HTTP, the way `curl -N` reads it.
 
 import asyncio
 import contextlib
+import itertools
 import json
 import socket
 import time
@@ -21,18 +22,24 @@ import pytest
 import uvicorn
 from langgraph.checkpoint.memory import InMemorySaver
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_api import create_app
+from agentic_api.runs import routes
 from agentic_api.settings import Settings
+from agentic_engine.events import RunEventLog
 from agentic_engine.graph import checkpoint_serde
+from agentic_engine.spec import parse_spec
 from agentic_runtime import AgentRuntime, Failed
 from agentic_runtime.fake import FakeRuntime
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     RUN_QUEUE,
+    PostgresEventSink,
     Run,
+    Workspace,
+    create_run,
     delete_connection,
     get_run,
     get_run_summary,
@@ -57,17 +64,23 @@ class Frame:
     data: dict[str, Any]
 
 
-async def read_frames(lines: AsyncIterator[str]) -> AsyncIterator[Frame]:
-    """Parse an SSE body into frames, skipping comments (keep-alive pings)."""
+async def read_sse(lines: AsyncIterator[str]) -> AsyncIterator[dict[str, str]]:
+    """Parse an SSE body into the fields of each frame, skipping comments (keep-alive pings)."""
     fields: dict[str, str] = {}
     async for line in lines:
         if line == "":
             if fields:
-                yield Frame(int(fields["id"]), fields["event"], json.loads(fields["data"]))
+                yield fields
             fields = {}
         elif not line.startswith(":"):
             name, _, value = line.partition(":")
             fields[name] = value.removeprefix(" ")
+
+
+async def read_frames(lines: AsyncIterator[str]) -> AsyncIterator[Frame]:
+    """Parse a run's event stream into frames."""
+    async for fields in read_sse(lines):
+        yield Frame(int(fields["id"]), fields["event"], json.loads(fields["data"]))
 
 
 @asynccontextmanager
@@ -590,3 +603,145 @@ async def test_bad_template_runs_are_refused(
     assert response.status_code == 422
     assert message in response.text
     assert await count_runs(sessions) == runs_before
+
+
+# `GET /runs/stream`: live run summaries of a workspace.
+
+
+@asynccontextmanager
+async def summaries(
+    client: httpx.AsyncClient, workspace_id: UUID | None = None
+) -> AsyncGenerator[AsyncIterator[dict[str, Any]]]:
+    """The `RunSummary` of each `run_summary` frame of the workspace's summaries stream."""
+    params = {"workspace_id": str(workspace_id)} if workspace_id else {}
+    async with client.stream("GET", "/runs/stream", params=params) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+        async def frames() -> AsyncIterator[dict[str, Any]]:
+            async for fields in read_sse(response.aiter_lines()):
+                assert fields["event"] == "run_summary"
+                yield json.loads(fields["data"])
+
+        yield frames()
+
+
+async def summaries_until(
+    frames: AsyncIterator[dict[str, Any]], run_id: UUID, status: str
+) -> list[dict[str, Any]]:
+    """Every summary streamed up to the one where `run_id` has `status`."""
+    seen: list[dict[str, Any]] = []
+    async with asyncio.timeout(15):
+        async for summary in frames:
+            seen.append(summary)
+            if summary["id"] == str(run_id) and summary["status"] == status:
+                return seen
+    raise AssertionError(f"the stream ended before {run_id} was {status}")
+
+
+def statuses_of(seen: list[dict[str, Any]], run_id: UUID) -> list[str]:
+    return [s["status"] for s in seen if s["id"] == str(run_id)]
+
+
+@pytest.fixture
+async def workspace(sessions: async_sessionmaker[AsyncSession]) -> UUID:
+    workspace_id = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=workspace_id, name="summaries stream"))
+    return workspace_id
+
+
+async def add_run(sessions: async_sessionmaker[AsyncSession], workspace_id: UUID) -> RunEventLog:
+    """A queued run of `workspace_id` and the log to write its events through the sink."""
+    spec = parse_spec(spec_json("valid/two-step-sequence.json"))
+    run_id = await create_run(sessions, spec, "go", None, workspace_id)
+    return RunEventLog(run_id, PostgresEventSink(sessions))
+
+
+async def test_the_summaries_stream_follows_a_gated_run(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """A run's status changes reach the runs list live: waiting at the gate, then completed
+    after approval. Changes made within one read (queued, running) may arrive as the latest
+    one only."""
+    async with (
+        worker(postgres_url, redis_url),
+        api(postgres_url, redis_url) as client,
+        summaries(client) as frames,
+    ):
+        run_id = await post_gated_run(client)
+        seen = await summaries_until(frames, run_id, "waiting")
+        assert seen[-1]["waiting_gate"] == {"node_id": "gate", "title": "Approve the notes"}
+
+        response = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        assert response.status_code == 202, response.text
+        seen += await summaries_until(frames, run_id, "completed")
+
+    statuses = statuses_of(seen, run_id)
+    assert statuses.index("waiting") < statuses.index("completed")
+    mine = [s for s in seen if s["id"] == str(run_id)]
+    assert all(a != b for a, b in itertools.pairwise(mine)), "a summary was sent twice"
+    assert mine[-1]["waiting_gate"] is None
+    assert mine[-1]["duration_ms"] is not None
+
+
+async def test_the_summaries_stream_skips_unchanged_runs_and_other_workspaces(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, workspace: UUID
+) -> None:
+    other = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=other, name="other"))
+
+    async with api(postgres_url, redis_url) as client, summaries(client, workspace) as frames:
+        log = await add_run(sessions, workspace)
+        elsewhere = await add_run(sessions, other)
+        await log.emit("run_started")
+        await elsewhere.emit("run_started")
+        # Text deltas do not change the summary, so they send nothing.
+        for text in ("a", "b", "c"):
+            await log.emit("text_delta", node_id="draft", payload={"text": text})
+            await asyncio.sleep(0.3)
+        await elsewhere.emit("run_completed")
+        await log.emit("run_completed")
+        seen = await summaries_until(frames, log.run_id, "completed")
+
+    assert {s["id"] for s in seen} == {str(log.run_id)}
+    statuses = statuses_of(seen, log.run_id)
+    assert statuses.count("running") == 1
+    assert statuses[-1] == "completed"
+
+
+async def test_the_summaries_stream_rechecks_without_a_notification(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    workspace: UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lost notification (or one missed while the listener reconnected) delays a change by
+    at most `RECHECK_S`; it is never dropped."""
+    monkeypatch.setattr(routes, "RECHECK_S", 0.3)
+    async with api(postgres_url, redis_url) as client, summaries(client, workspace) as frames:
+        log = await add_run(sessions, workspace)
+        await summaries_until(frames, log.run_id, "queued")
+        # Changed behind the sink's back: no NOTIFY is sent.
+        async with sessions.begin() as session:
+            await session.execute(
+                update(Run)
+                .where(Run.id == log.run_id)
+                .values(status="cancelled", updated_at=func.now())
+            )
+        seen = await summaries_until(frames, log.run_id, "cancelled")
+
+    assert statuses_of(seen, log.run_id) == ["cancelled"]
+
+
+async def test_the_summaries_stream_of_an_unknown_workspace_is_404(
+    postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        response = await client.get("/runs/stream", params={"workspace_id": str(uuid4())})
+
+    assert response.status_code == 404

@@ -130,6 +130,22 @@ async def list_run_summaries(
     return rows[:limit], encode_cursor(last.created_at, last.id)
 
 
+async def list_changed_run_summaries(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, *, since: datetime
+) -> list[tuple[datetime, RunSummaryRow]]:
+    """The workspace's runs whose summary changed after `since`, with when it last changed,
+    oldest change first. `updated_at` moves only with events that change the summary, so a
+    streamed text delta does not list its run again."""
+    query = (
+        _select()
+        .add_columns(Run.updated_at)
+        .where(Run.workspace_id == workspace_id, Run.updated_at > since)
+        .order_by(Run.updated_at, Run.id)
+    )
+    async with sessions() as session:
+        return [(row.updated_at, _summary(row)) for row in await session.execute(query)]
+
+
 async def get_run_summary(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID
 ) -> RunSummaryRow | None:

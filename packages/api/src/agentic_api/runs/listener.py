@@ -21,6 +21,7 @@ class RunEventListener:
         self._database_url = database_url
         self._retry_s = retry_s
         self._subscribers: defaultdict[UUID, set[asyncio.Event]] = defaultdict(set)
+        self._everything: set[asyncio.Event] = set()
 
     @contextlib.contextmanager
     def subscribe(self, run_id: UUID) -> Generator[asyncio.Event]:
@@ -34,6 +35,16 @@ class RunEventListener:
             if not self._subscribers[run_id]:
                 del self._subscribers[run_id]
 
+    @contextlib.contextmanager
+    def subscribe_all(self) -> Generator[asyncio.Event]:
+        """An event that is set whenever any run may have new events."""
+        woke = asyncio.Event()
+        self._everything.add(woke)
+        try:
+            yield woke
+        finally:
+            self._everything.discard(woke)
+
     def notify(self, payload: str) -> None:
         try:
             run_id = UUID(payload.partition(":")[0])
@@ -42,8 +53,12 @@ class RunEventListener:
             return
         for woke in self._subscribers.get(run_id, ()):
             woke.set()
+        for woke in self._everything:
+            woke.set()
 
     def _wake_all(self) -> None:
+        for woke in self._everything:
+            woke.set()
         for subscribers in self._subscribers.values():
             for woke in subscribers:
                 woke.set()
