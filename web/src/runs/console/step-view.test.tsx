@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { JsonView } from "@/components/json-view";
 
 import docsRun from "../fixtures/docs-run.json";
+import { runEvent } from "../testing";
 import { buildTimeline, type ToolTurn } from "../timeline";
 import type { RunEvent } from "../types";
+import { currentActivity } from "./activity";
 import { AgentMessage } from "./agent-message";
 import { StepList } from "./step-view";
 import { ToolCallGroup, ToolCallRow } from "./tool-calls";
@@ -221,10 +223,9 @@ describe("StepList on the recorded docs run", () => {
 
   it("shows loop iterations, usage and the gate decision", () => {
     render(<StepList steps={timeline.steps} options={{ now: NOW }} />);
-    expect(screen.getAllByTestId("iteration").map((i) => i.firstChild?.textContent)).toEqual([
-      "Iteration 1· condition not met",
-      "Iteration 2· condition met",
-    ]);
+    expect(
+      screen.getAllByTestId("iteration").map((i) => i.querySelector("p")?.textContent),
+    ).toEqual(["Iteration 1· condition not met", "Iteration 2· condition met"]);
     expect(screen.getAllByTestId("usage")[0]?.textContent).toBe("1,200 in · 180 out tokens");
     expect(screen.getByText("Open the docs PR?").parentElement?.textContent).toContain("Approved");
   });
@@ -238,5 +239,124 @@ describe("StepList on the recorded docs run", () => {
     );
     const gate = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "approve")!;
     expect(within(gate).getByText("gate panel")).toBeTruthy();
+  });
+});
+
+describe("previews and the rail", () => {
+  const write = tool({
+    key: 5,
+    name: "repo.write_file",
+    arguments: { path: "docs/a.md", content: "# A\n\nline 2\nline 3\nline 4\nline 5\nline 6" },
+  });
+
+  it("previews what a write wrote, and how much more there is", () => {
+    render(
+      <ul>
+        <ToolCallRow turn={write} />
+      </ul>,
+    );
+    const preview = screen.getByTestId("tool-preview");
+    expect(preview.querySelector("pre")?.textContent).toBe("# A\n\nline 2\nline 3");
+    expect(preview.textContent).toContain("+3 more lines");
+  });
+
+  it("previews a failure's error, and nothing for a quiet read", () => {
+    render(
+      <ul>
+        <ToolCallRow turn={tool({ status: "failed", output: "no such file" })} />
+        <ToolCallRow turn={tool({ key: 2 })} />
+      </ul>,
+    );
+    expect(screen.getAllByTestId("tool-preview").map((p) => p.textContent)).toEqual([
+      "no such file",
+    ]);
+  });
+
+  it("keeps a write on its own line instead of in a group of reads", () => {
+    const steps = buildTimeline([
+      { ...runEvent(1, "node_started"), node_id: "w" },
+      ...[2, 3].flatMap((seq) => [
+        {
+          ...runEvent(seq * 2, "tool_call", {
+            call_id: `r${seq}`,
+            name: "repo.read_file",
+            arguments: { path: `f${seq}` },
+          }),
+          node_id: "w",
+        },
+        {
+          ...runEvent(seq * 2 + 1, "tool_result", { call_id: `r${seq}`, output: "x" }),
+          node_id: "w",
+        },
+      ]),
+      {
+        ...runEvent(8, "tool_call", {
+          call_id: "w1",
+          name: "repo.write_file",
+          arguments: { path: "a.md", content: "hi" },
+        }),
+        node_id: "w",
+      },
+      { ...runEvent(9, "tool_result", { call_id: "w1", output: "ok" }), node_id: "w" },
+    ]).steps;
+    render(<StepList steps={steps} options={{ now: NOW }} />);
+    const groups = screen.getAllByTestId("tool-group");
+    expect(groups.map((g) => g.textContent?.includes("Read 2 files"))).toEqual([true, false]);
+    expect(screen.getByTestId("tool-preview").textContent).toBe("hi");
+  });
+
+  it("marks each step's status with an icon and a label for screen readers", () => {
+    const timeline = buildTimeline(docsRun as RunEvent[]);
+    render(<StepList steps={timeline.steps} options={{ now: NOW }} />);
+    const first = screen.getAllByTestId("step")[0]!;
+    expect(first.querySelector(".sr-only")?.textContent).toBe("Done");
+  });
+});
+
+describe("currentActivity", () => {
+  it("says what the latest running step is doing", () => {
+    const timeline = buildTimeline([
+      { ...runEvent(1, "node_started"), node_id: "writer" },
+      {
+        ...runEvent(2, "tool_call", {
+          call_id: "c",
+          name: "repo.read_file",
+          arguments: { path: "a.ts" },
+        }),
+        node_id: "writer",
+      },
+    ]);
+    expect(currentActivity(timeline)).toEqual({
+      where: "writer",
+      doing: "Reading",
+      target: "a.ts",
+      running: 1,
+    });
+  });
+
+  it("names a map item by its path and counts what runs at once", () => {
+    const timeline = buildTimeline([
+      { ...runEvent(1, "node_started"), node_id: "document" },
+      {
+        ...runEvent(2, "map_item_started", { index: 0, item: { path: "src/a" } }),
+        node_id: "document",
+      },
+      { ...runEvent(3, "node_started", { item: 0 }), node_id: "w" },
+      {
+        ...runEvent(4, "map_item_started", { index: 1, item: { path: "src/b" } }),
+        node_id: "document",
+      },
+      { ...runEvent(5, "node_started", { item: 1 }), node_id: "w" },
+      { ...runEvent(6, "text_delta", { text: "Hi", item: 1 }), node_id: "w" },
+    ]);
+    expect(currentActivity(timeline)).toMatchObject({
+      where: "src/b",
+      doing: "Writing",
+      running: 2,
+    });
+  });
+
+  it("is null once nothing runs", () => {
+    expect(currentActivity(buildTimeline(docsRun as RunEvent[]))).toBeNull();
   });
 });

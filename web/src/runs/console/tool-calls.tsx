@@ -7,7 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 import { formatDuration } from "../summaries";
 import type { ToolTurn } from "../timeline";
-import { describeTool, summarizeTools } from "./tool-describe";
+import { describeTool, summarizeTools, toolPreview } from "./tool-describe";
 
 function took(turn: ToolTurn): number | null {
   return turn.endedAt !== null ? Date.parse(turn.endedAt) - Date.parse(turn.startedAt) : null;
@@ -31,11 +31,40 @@ function Chevron({ of }: { of: keyof typeof CHEVRON }) {
   );
 }
 
+const PREVIEW_LINES = 4;
+
+/** The first lines of what a call wrote, or of its error, shown under its line. */
+function Preview({ text, failed }: { text: string; failed: boolean }) {
+  const lines = text.split("\n");
+  const more = lines.length - PREVIEW_LINES;
+  return (
+    <div
+      data-testid="tool-preview"
+      className={
+        failed
+          ? "mt-0.5 mb-1 ml-1.5 rounded-md border border-status-failed/30 bg-status-failed-muted px-3 py-2 font-mono text-xs text-status-failed"
+          : "mt-0.5 mb-1 ml-1.5 rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs"
+      }
+    >
+      <pre className="break-all whitespace-pre-wrap">
+        {lines.slice(0, PREVIEW_LINES).join("\n")}
+      </pre>
+      {more > 0 ? (
+        <p className="mt-1 font-sans text-muted-foreground">
+          +{more} more {more === 1 ? "line" : "lines"}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** One tool call as one quiet line ("Read `src/app.ts`"); opening it shows its arguments and
- * result. Only a call in flight or one that failed gets a status icon. */
+ * result. Only a call in flight or one that failed gets a status icon. A call that changes
+ * something, or that failed, shows a preview of it under its line. */
 export function ToolCallRow({ turn }: { turn: ToolTurn }) {
   const d = describeTool(turn.name, turn.arguments);
   const ms = took(turn);
+  const preview = toolPreview(turn);
   const Icon =
     turn.status === "running" ? LoaderCircleIcon : turn.status === "failed" ? CircleXIcon : d.icon;
   return (
@@ -67,6 +96,7 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
             <Chevron of="call" />
           </span>
         </CollapsibleTrigger>
+        {preview ? <Preview text={preview} failed={turn.status === "failed"} /> : null}
         <CollapsibleContent className="mt-1 mb-2 ml-3.5 flex flex-col gap-2 border-l pl-4">
           <section className="flex flex-col gap-1">
             <h4 className="text-xs font-medium text-muted-foreground">Arguments</h4>

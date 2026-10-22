@@ -141,3 +141,25 @@ export function summarizeTools(turns: ToolTurn[]): string {
     .join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+/**
+ * What a call shows inline, without opening it: the error of a failed call, and what a call
+ * that changes something wrote (a file's content, a commit message, a pull request). Reads,
+ * listings and searches show nothing: they stay one line.
+ */
+export function toolPreview(turn: ToolTurn): string | null {
+  if (turn.status === "failed") return turn.output?.trim() || null;
+  switch (turn.name) {
+    case "repo.write_file":
+      return arg(turn.arguments, "content") || null;
+    case "repo.commit":
+      return arg(turn.arguments, "message") || null;
+    case "github.openPR":
+      return (
+        [arg(turn.arguments, "title"), arg(turn.arguments, "body")].filter(Boolean).join("\n\n") ||
+        null
+      );
+    default:
+      return null;
+  }
+}

@@ -21,6 +21,8 @@ import { useFollowScroll } from "../use-follow-scroll";
 import { useNow } from "../use-now";
 import { runDetailKey, useRunDetail, type RunDetail } from "../use-run-detail";
 import { useRunEvents } from "../use-run-events";
+import { currentActivity } from "./activity";
+import { ActivityLine } from "./activity-line";
 import { CancelRunButton } from "./cancel-run-button";
 import { RawEvents } from "./raw-events";
 import { RunHeader, type HeaderFacts } from "./run-header";
@@ -130,6 +132,7 @@ function Console({
 
   const run = detail.data;
   const facts = headerFacts(status, events, gate, run, timeline, prUrl, now);
+  const activity = status === "live" && !gate ? currentActivity(timeline) : null;
   const failure = run?.status === "failed" ? run.failure_reason : null;
 
   return (
@@ -186,6 +189,7 @@ function Console({
               }}
             />
           )}
+          {activity ? <ActivityLine activity={activity} /> : null}
         </TabsContent>
 
         <TabsContent value="raw" className="pt-2">

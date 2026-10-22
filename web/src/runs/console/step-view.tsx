@@ -4,6 +4,7 @@ import { CircleAlertIcon, ExternalLinkIcon, RepeatIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
+import { cn } from "@/lib/utils";
 
 import { formatDuration } from "../summaries";
 import type {
@@ -17,8 +18,11 @@ import type {
   Turn,
 } from "../timeline";
 import { AgentMessage } from "./agent-message";
+import { itemName } from "./item-name";
+import { DotMarker, IconMarker, Rail, RailItem, StatusMarker } from "./rail";
 import { stepBadge } from "./step-status";
 import { ToolCallGroup } from "./tool-calls";
+import { toolPreview } from "./tool-describe";
 
 export interface StepViewOptions {
   /** The time, for the duration of what is still running. */
@@ -34,29 +38,18 @@ function elapsed(startedAt: string, endedAt: string | null, now: number): string
   return formatDuration(Math.max(0, end - Date.parse(startedAt)));
 }
 
-/** What a map item is called: a string item as is, an object by its `path`, `name` or `id`
- * (with its `kind`, if any), anything else as JSON. */
-function itemLabel(item: unknown, index: number): ReactNode {
-  if (typeof item === "string") return item;
-  if (item && typeof item === "object" && !Array.isArray(item)) {
-    const fields = item as Record<string, unknown>;
-    const name = [fields.path, fields.name, fields.id].find((v) => typeof v === "string");
-    if (typeof name === "string") {
-      return (
-        <>
-          {name}
-          {typeof fields.kind === "string" ? (
-            <span className="ml-2 font-sans font-normal text-muted-foreground">{fields.kind}</span>
-          ) : null}
-        </>
-      );
-    }
-  }
-  if (item === undefined) return `Item ${index + 1}`;
-  return JSON.stringify(item);
-}
+/** Status words next to a title: only what needs attention. A step that is done says so with its
+ * marker alone; one waiting at a gate gets the full badge. */
+const STATUS_TEXT: Record<StepStatus, string> = {
+  running: "text-status-running",
+  waiting: "",
+  completed: "",
+  failed: "text-status-failed",
+  cancelled: "text-status-cancelled",
+};
 
-function StatusLine({
+/** A step's or map item's title line: its name, what needs attention, and how long it took. */
+function TitleLine({
   title,
   status,
   startedAt,
@@ -71,16 +64,26 @@ function StatusLine({
   now: number;
   level: "step" | "item";
 }) {
-  const badge = stepBadge(status);
   const Heading = level === "step" ? "h3" : "h4";
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-      <Heading className="min-w-0 font-mono text-[13px] font-medium break-all">{title}</Heading>
-      <span className="ml-auto flex shrink-0 items-center gap-2 text-[13px]">
-        <span className="text-muted-foreground tabular-nums">
-          {elapsed(startedAt, endedAt, now)}
+    <div className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <Heading
+        className={cn(
+          "min-w-0 font-mono text-[13px] break-all",
+          level === "step" ? "font-medium" : "text-foreground",
+        )}
+      >
+        {title}
+      </Heading>
+      {status === "waiting" ? (
+        <StatusBadge status="waiting" label="Needs approval" />
+      ) : STATUS_TEXT[status] ? (
+        <span aria-hidden="true" className={cn("text-xs", STATUS_TEXT[status])}>
+          {stepBadge(status).label}
         </span>
-        <StatusBadge status={badge.status} label={badge.label} />
+      ) : null}
+      <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+        {elapsed(startedAt, endedAt, now)}
       </span>
     </div>
   );
@@ -96,23 +99,38 @@ function UsageFooter({ usage }: { usage: TokenUsage }) {
 
 type Segment = { kind: "message"; turn: MessageTurn } | { kind: "tools"; turns: ToolTurn[] };
 
-/** The turns with consecutive tool calls gathered, so they show as one group. */
+/**
+ * The turns, with consecutive quiet tool calls (reads, listings, searches) gathered so they show
+ * as one group. A call with a preview (a write, a commit, a failure) stands on its own line.
+ */
 function segments(turns: Turn[]): Segment[] {
   const out: Segment[] = [];
   for (const turn of turns) {
     const last = out.at(-1);
-    if (turn.kind === "message") out.push({ kind: "message", turn });
-    else if (last?.kind === "tools") last.turns.push(turn);
-    else out.push({ kind: "tools", turns: [turn] });
+    if (turn.kind === "message") {
+      out.push({ kind: "message", turn });
+    } else if (toolPreview(turn) !== null) {
+      out.push({ kind: "tools", turns: [turn] });
+    } else if (last?.kind === "tools" && toolPreview(last.turns[0]!) === null) {
+      last.turns.push(turn);
+    } else {
+      out.push({ kind: "tools", turns: [turn] });
+    }
   }
   return out;
 }
 
+/** The marker of a group of tool calls: a spinner while one runs, a cross if one failed, a dot. */
+function ToolsMarker({ turns }: { turns: ToolTurn[] }) {
+  if (turns.some((t) => t.status === "running")) return <StatusMarker status="running" small />;
+  if (turns.some((t) => t.status === "failed")) return <StatusMarker status="failed" small />;
+  return <DotMarker className="bg-status-succeeded" />;
+}
+
 function IterationView({ iteration, options }: { iteration: Iteration; options: StepViewOptions }) {
   return (
-    <li data-testid="iteration" className="flex flex-col gap-2">
-      <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <RepeatIcon aria-hidden="true" className="size-3.5" />
+    <RailItem data-testid="iteration" marker={<IconMarker icon={RepeatIcon} />}>
+      <p className="flex min-h-5 items-center gap-1.5 text-xs font-medium text-muted-foreground">
         Iteration {iteration.index}
         {iteration.conditionMet !== null ? (
           <span className="font-normal">
@@ -120,36 +138,50 @@ function IterationView({ iteration, options }: { iteration: Iteration; options: 
           </span>
         ) : null}
       </p>
-      <StepList steps={iteration.steps} options={options} />
-    </li>
+      <StepList steps={iteration.steps} options={options} className="mt-3" />
+    </RailItem>
   );
 }
 
 function MapItemView({ item, options }: { item: MapItem; options: StepViewOptions }) {
+  const { name, kind } = itemName(item.item, item.index);
   return (
-    <li data-testid="map-item" className="flex flex-col gap-2 rounded-lg border p-3">
-      <StatusLine
-        title={itemLabel(item.item, item.index)}
+    <RailItem
+      data-testid="map-item"
+      data-status={item.status}
+      marker={<StatusMarker status={item.status} small />}
+    >
+      <TitleLine
+        title={
+          <>
+            {name}
+            {kind ? (
+              <span className="ml-2 font-sans font-normal text-muted-foreground">{kind}</span>
+            ) : null}
+          </>
+        }
         status={item.status}
         startedAt={item.startedAt}
         endedAt={item.endedAt}
         now={options.now}
         level="item"
       />
-      {item.error ? <ErrorLine error={item.error} /> : null}
-      {item.steps.length === 1 ? (
-        // One step per item (the usual map body): the item's header is enough.
-        <div
-          data-testid="step"
-          data-node-id={item.steps[0]!.id}
-          className="flex min-w-0 flex-col gap-3"
-        >
-          <StepBody step={item.steps[0]!} options={options} />
-        </div>
-      ) : (
-        <StepList steps={item.steps} options={options} />
-      )}
-    </li>
+      <div className="mt-3 flex min-w-0 flex-col gap-3">
+        {item.error ? <ErrorLine error={item.error} /> : null}
+        {item.steps.length === 1 ? (
+          // One step per item (the usual map body): the item's title is enough.
+          <div
+            data-testid="step"
+            data-node-id={item.steps[0]!.id}
+            className="flex min-w-0 flex-col gap-3"
+          >
+            <StepBody step={item.steps[0]!} options={options} />
+          </div>
+        ) : (
+          <StepList steps={item.steps} options={options} />
+        )}
+      </div>
+    </RailItem>
   );
 }
 
@@ -162,35 +194,41 @@ function ErrorLine({ error }: { error: string }) {
   );
 }
 
-/** What a node did, in order: messages, tool calls, nested items and iterations. */
+/** What a node did, in order, on its own rail: messages, tool calls, map items, iterations;
+ * then its gate, pull request, error and token usage. */
 function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
   const live = step.status === "running";
+  const entries = segments(step.turns);
+  const hasRail =
+    entries.length > 0 || (step.items?.length ?? 0) > 0 || (step.iterations?.length ?? 0) > 0;
   return (
     <>
-      {segments(step.turns).map((segment) =>
-        segment.kind === "message" ? (
-          <AgentMessage
-            key={segment.turn.key}
-            text={segment.turn.text}
-            streaming={live && !segment.turn.final}
-          />
-        ) : (
-          <ToolCallGroup key={segment.turns[0]!.key} turns={segment.turns} />
-        ),
-      )}
-      {step.items && step.items.length > 0 ? (
-        <ol aria-label={`Items of ${step.id}`} className="flex flex-col gap-3">
-          {step.items.map((item) => (
+      {hasRail ? (
+        <Rail>
+          {entries.map((segment) =>
+            segment.kind === "message" ? (
+              <RailItem key={segment.turn.key} marker={<DotMarker />}>
+                <AgentMessage text={segment.turn.text} streaming={live && !segment.turn.final} />
+              </RailItem>
+            ) : (
+              <RailItem
+                key={segment.turns[0]!.key}
+                marker={<ToolsMarker turns={segment.turns} />}
+                // Tool lines have their own padding: line the marker up with their text.
+                markerClassName="top-1"
+                className="pl-5.5"
+              >
+                <ToolCallGroup turns={segment.turns} />
+              </RailItem>
+            ),
+          )}
+          {step.items?.map((item) => (
             <MapItemView key={item.index} item={item} options={options} />
           ))}
-        </ol>
-      ) : null}
-      {step.iterations && step.iterations.length > 0 ? (
-        <ol aria-label={`Iterations of ${step.id}`} className="flex flex-col gap-4">
-          {step.iterations.map((iteration) => (
+          {step.iterations?.map((iteration) => (
             <IterationView key={iteration.index} iteration={iteration} options={options} />
           ))}
-        </ol>
+        </Rail>
       ) : null}
       {step.gate ? (
         <p className="text-[13px]">
@@ -222,16 +260,16 @@ function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
   );
 }
 
-/** One node of the run: its status line, then what it did. */
+/** One node of the run on the run's rail: its status marker and title, then what it did. */
 export function StepView({ step, options }: { step: Step; options: StepViewOptions }) {
   return (
-    <li
+    <RailItem
       data-testid="step"
       data-node-id={step.id}
       data-status={step.status}
-      className="flex min-w-0 flex-col gap-3"
+      marker={<StatusMarker status={step.status} />}
     >
-      <StatusLine
+      <TitleLine
         title={step.id}
         status={step.status}
         startedAt={step.startedAt}
@@ -239,20 +277,28 @@ export function StepView({ step, options }: { step: Step; options: StepViewOptio
         now={options.now}
         level="step"
       />
-      <div className="flex min-w-0 flex-col gap-3 border-l pl-4">
+      <div className="mt-3 flex min-w-0 flex-col gap-3">
         <StepBody step={step} options={options} />
       </div>
-    </li>
+    </RailItem>
   );
 }
 
-export function StepList({ steps, options }: { steps: Step[]; options: StepViewOptions }) {
+export function StepList({
+  steps,
+  options,
+  className,
+}: {
+  steps: Step[];
+  options: StepViewOptions;
+  className?: string;
+}) {
   if (steps.length === 0) return null;
   return (
-    <ol className="flex min-w-0 flex-col gap-5">
+    <Rail className={cn("[--rail-gap:--spacing(6)]", className)}>
       {steps.map((step) => (
         <StepView key={step.id} step={step} options={options} />
       ))}
-    </ol>
+    </Rail>
   );
 }

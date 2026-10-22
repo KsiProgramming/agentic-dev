@@ -36,3 +36,9 @@ Not missing, only deferred. Until 7.6, an uninstalled or suspended App is notice
 ## Notes to keep in mind when challenging
 - The Setup URL (`/github/setup`) is required and already built: it is how the installation id reaches us. Only the OAuth user-authorization callback is missing.
 - User sign-in does not replace the App private key. Runs push and open PRs in the background, possibly hours after approval, as the App bot, using short-lived installation tokens minted from the key. Sign-in controls *who may link and use* a workspace; the App's permissions control *what the platform may do* on GitHub.
+
+## 6. Say why each tool call is made (run console)
+Claude Code shows a one-line intent per tool call ("Bash · Check group summary spans"). The run console (2.5) shows what a call did ("Read `src/app.ts`") but not why.
+
+- **Idea:** add an optional `description` argument to the platform's `repo.*` and `github.*` tools, which agents fill in, and show it next to the call in the console.
+- **Touches:** the tool schemas (`agentic_tools`), the agent instructions, and `web/src/runs/console/tool-describe.ts`. Small enough for its own phase; not part of 2.5.
