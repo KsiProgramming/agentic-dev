@@ -13,20 +13,24 @@ jobs:
   changelog:
     name: CHANGELOG.md updated
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
+    # Every PR, with no skip label: a squash merge to main always lands with its entry.
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Require a CHANGELOG.md entry
+      - name: Require a CHANGELOG.md entry under [Unreleased]
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -qx 'CHANGELOG.md'; then
+          if ! git show "$HEAD_SHA:CHANGELOG.md" | grep -qx '## \[Unreleased\]'; then
+            echo "::error file=CHANGELOG.md::CHANGELOG.md has no '## [Unreleased]' section."
+            exit 1
+          fi
+          if git diff -U0 "$BASE_SHA...$HEAD_SHA" -- CHANGELOG.md | grep -q '^+[^+]'; then
             echo "CHANGELOG.md is updated."
           else
-            echo "::error file=CHANGELOG.md::Add your changes under [Unreleased] in CHANGELOG.md, or label the PR 'skip-changelog' if it has no notable change."
+            echo "::error file=CHANGELOG.md::Add your changes under [Unreleased] in CHANGELOG.md."
             exit 1
           fi
 
