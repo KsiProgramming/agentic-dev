@@ -32,7 +32,7 @@ Strategy: **walking skeleton first**, then grow outward. The milestones follow t
 | 1.5 | GitHub App install + `GET /repos` | User sees repos the app is installed on | ✅ Done ([#14](https://github.com/KsiProgramming/agentic-dev/pull/14)) |
 | 1.6 | `tool` primitive + `repo` write tools + worktree/branch per writer | An agent commits a file to `agent/<run>/<node>` | ✅ Done ([#15](https://github.com/KsiProgramming/agentic-dev/pull/15)) |
 | 1.7 | `gate` primitive (LangGraph interrupt) + `POST /runs/{id}/approvals` | A run pauses at a gate and resumes on approval | ✅ Done ([#16](https://github.com/KsiProgramming/agentic-dev/pull/16)) |
-| 1.8 | `github.openPR` tool behind a gate | A run opens a PR after approval | — |
+| 1.8 | `github.openPR` tool behind a gate | A run opens a PR after approval | ✅ Done ([#17](https://github.com/KsiProgramming/agentic-dev/pull/17)) |
 | 1.9 | `loop` primitive + CEL expressions | A reviewer loop stops on its condition or at max iterations | — |
 | 1.10 | `map` + `reduce` (concat/agent) primitives | Map over 3 modules with max concurrency, then reduce | — |
 | 1.11 | "Generate docs" template | AC-1: connect GitHub, pick a repo, docs run opens a PR | — |
