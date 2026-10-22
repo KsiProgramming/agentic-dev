@@ -73,6 +73,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Summaries
+         * @description Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with
+         *     the run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,
+         *     including new runs. Each frame's `id` is when the run last changed. Only changes after
+         *     connecting are sent; after a reconnect, list the runs again. The stream stays open.
+         */
+        get: operations["streamRunSummaries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}": {
         parameters: {
             query?: never;
@@ -1076,6 +1099,45 @@ export interface operations {
             };
             /** @description The workflow uses `github.*` tools, but the workspace has no GitHub connection */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    streamRunSummaries: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
