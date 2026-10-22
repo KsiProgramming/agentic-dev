@@ -114,7 +114,7 @@ async def test_a_read_only_server_has_no_write_tools(call: CallRepo) -> None:
 async def test_symlinks_out_of_the_worktree_are_refused(
     manager: SandboxManager, repos: Path
 ) -> None:
-    if sys.platform == "win32" and isinstance(manager, FakeSandboxManager):
+    if isinstance(manager, FakeSandboxManager) and sys.platform == "win32":
         pytest.skip("symlinks need privileges on Windows")
     run_id = uuid4()
 
