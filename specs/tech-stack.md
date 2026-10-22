@@ -61,7 +61,57 @@ One `AgentRuntime` interface (start → async iterator of `AgentEvent`, plus can
 | Editors / diffs | Monaco |
 | Data | TanStack Query + SSE (`EventSource`) |
 | API client | Generated from FastAPI's OpenAPI spec |
-| Styling | Tailwind CSS + shadcn/ui |
+| Styling | Tailwind CSS v4 with design tokens as CSS variables (light + dark) |
+| Components | shadcn/ui (Radix primitives, code copied into `web/src/components/ui`) |
+| Icons / fonts | `lucide-react`; Inter (UI) and JetBrains Mono (code, ids) via `next/font` |
+| Toasts / theme | `sonner`, `next-themes` |
+| JSON / Markdown display | Collapsible JSON viewer, `react-markdown` (no raw HTML) for agent messages |
+| A11y / visual checks | `@axe-core/playwright`, Playwright screenshots at 375 / 768 / 1440 px |
+
+## UI design system
+
+The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen is built from these rules. If a phase needs a new pattern, it is added here first.
+
+### Look
+
+- **Style:** modern and minimal, in the spirit of Linear, Vercel and GitHub. Neutral greys (zinc) on white, or on near-black in dark mode, with one accent colour (indigo) for primary actions and focus. Light borders, very small shadows and rounded corners (`--radius: 0.5rem`). No gradients and no decoration.
+- **Colour means status only:** `running` blue, `waiting` amber, `succeeded` green, `failed` red, `cancelled` and `queued` grey. Status is always shown as icon + label, never colour alone.
+- **Tokens:** every colour, radius and shadow is a semantic token (`--background`, `--foreground`, `--muted`, `--border`, `--primary`, `--status-*`). Components never use raw palette classes such as `bg-red-100`.
+- **Type:** Inter at 14 px base for UI text, 13 px for dense tables. JetBrains Mono for ids, paths, code and JSON. Numbers use `tabular-nums`.
+- **Theme:** light, dark and system, switched from the top bar.
+
+### Layout
+
+- **App shell:** a left sidebar (Runs, Templates, Settings; workspace switcher at the top) and a top bar (breadcrumbs, theme, user). The sidebar collapses to icons from 1024 to 1279 px and becomes a drawer below 1024 px.
+- **Breakpoints:** mobile-first. Designed and tested at 375, 768, 1024 and 1440 px. No horizontal page scroll at any width. Wide content (JSON, logs) scrolls inside its own box.
+- **Page header:** title, short description and primary actions on the right. On mobile the actions stack below the title.
+- **Tables on desktop, cards on mobile:** a list keeps its columns at ≥ 768 px and turns into stacked cards below that.
+- **States:** every data view has a skeleton loader, an empty state (icon, one sentence, primary action) and an error state (message plus Retry).
+
+### Run console
+
+- **Header:** status badge, workflow name, repo and branch, started time and duration, and the PR link once opened. Actions: Rerun, Cancel, Copy run id.
+- **Timeline (default tab):** one step per node in run order, with its status icon and duration. Map items are nested under their map node. Inside a step:
+  - Streamed `text_delta` events are **merged on the client** into one growing message per agent turn. The `message` event replaces the merged text when it arrives. A message is rendered as Markdown with HTML disabled, so payloads stay data.
+  - Tool calls appear as collapsible cards (`repo.list_modules`, arguments, result). JSON is pretty-printed, collapsed after 2 levels and copyable.
+  - Usage and cost appear as a quiet footer line.
+- **Raw events tab:** today's event table, with filters by type and node. It is kept for debugging and audit.
+- **Graph tab:** added in 3.5.
+- **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with the gate title, a one-line summary, "Review details" (opens a side sheet with the full summary or diff) and Approve and Reject buttons. Reject asks for an optional comment. The bar never covers content: the page reserves padding for it. The browser tab title gets a "● Needs approval" prefix.
+- **Live updates:** auto-scroll follows new content only while the user is at the bottom. Otherwise a "Jump to latest" pill appears.
+
+### Interaction and accessibility
+
+- WCAG 2.2 AA: visible focus rings, colour contrast ≥ 4.5:1, every action reachable by keyboard, `aria-live="polite"` for run status changes.
+- Destructive actions (Reject, Disconnect, Remove key) ask for confirmation in a dialog. Success and failure of actions are shown with toasts.
+- Motion is short (150–200 ms) and respects `prefers-reduced-motion`.
+
+## Run history and rerun (API contract)
+
+- `GET /runs`: run summaries, newest first, with cursor pagination and filters `status`, `template`, `repo`. Status, timings, PR URL and the waiting gate come from the run's events. They are kept in the `runs` row when events are written, so listing does not scan the log.
+- `GET /runs/{id}`: one summary (the same shape as the list items, plus `input` and `failure_reason`).
+- `POST /runs/{id}/rerun`: creates a **new** run with the same workflow spec, input, repo and workspace. It sets `rerun_of` and returns `CreateRunResponse`. The original run is never changed (the log is append-only). Resuming a failed run from its last completed node, which the checkpointer would allow, is a later option and not part of rerun.
+- **Delta volume:** the Claude adapter keeps streaming `text_delta`. The engine buffers deltas per node and writes at most one merged `text_delta` event every 250 ms. This keeps the log small and the stream live, while the client still merges what it receives.
 
 ## Security & secrets
 
@@ -97,3 +147,6 @@ One `AgentRuntime` interface (start → async iterator of `AgentEvent`, plus can
 | Backend language | Python | Matches LangGraph and has a strong agent/MCP SDK ecosystem. |
 | Frontend | Next.js/TS | As specified by stakeholders. Contracts are shared through JSON Schema. |
 | Hosting | SaaS only | v1 scope (see mission). |
+| UI kit | shadcn/ui + Tailwind tokens (not MUI, Chakra or Ant) | We own the component code, it is accessible through Radix, it gives a modern, neutral enterprise look, and it themes through CSS variables. |
+| Event display | Merge deltas on the client, buffer writes on the server (250 ms) | The append-only log and SSE replay stay unchanged. The UI shows messages, not chunks. |
+| Rerun | A new run linked by `rerun_of` | The log stays immutable and the history stays truthful. Resuming from a checkpoint is a separate, later feature. |
