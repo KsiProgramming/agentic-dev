@@ -970,8 +970,8 @@ async def test_done_when_a_docs_run_opens_a_pr(
     events = await list_run_events(sessions, run_id)
     (listed,) = [e for e in events if e.type == "tool_result" and e.node_id == "list_modules"]
     assert listed.payload["is_error"] is False
-    items = {e.payload["index"] for e in events if e.type == "map_item_completed"}
-    assert items == {0, 1, 2}
+    items = [e.payload["index"] for e in events if e.type == "map_item_completed"]
+    assert len(items) == 3 and all(i in items for i in (0, 1, 2))
     (writer_request,) = [r for rt in runtimes for r in rt.requests if r.node_id == "writer"]
     pages = writer_request.input.split(PAGE_SEPARATOR)
     assert [p.splitlines()[0] for p in pages] == [f"<!-- module: {m} -->" for m in DOCS_MODULES]
