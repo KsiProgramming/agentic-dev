@@ -1,5 +1,7 @@
 "use client";
 
+import { GatePanel } from "./gate-panel";
+import { pendingGate, pullRequestUrl } from "./gates";
 import { summarizePayload } from "./summarize";
 import type { StreamStatus } from "./types";
 import { useRunEvents } from "./use-run-events";
@@ -17,6 +19,8 @@ const STATUS_STYLE: Record<StreamStatus, string> = {
 /** The live event list of one run. Payloads are rendered as text only: they are data. */
 export function RunEvents({ runId, baseUrl }: { runId: string; baseUrl?: string }) {
   const { events, status } = useRunEvents(runId, baseUrl);
+  const gate = status === "live" ? pendingGate(events) : null;
+  const pullRequest = pullRequestUrl(events);
 
   return (
     <section className="mt-4">
@@ -36,6 +40,17 @@ export function RunEvents({ runId, baseUrl }: { runId: string; baseUrl?: string 
         <p className="mt-4 text-gray-600">Run not found.</p>
       ) : status === "error" ? (
         <p className="mt-4 text-red-700">Lost the connection to the event stream.</p>
+      ) : null}
+
+      {gate ? <GatePanel key={gate.nodeId} runId={runId} gate={gate} baseUrl={baseUrl} /> : null}
+
+      {pullRequest ? (
+        <p data-testid="pull-request" className="mt-4 text-sm">
+          Pull request opened:{" "}
+          <a href={pullRequest} target="_blank" rel="noreferrer" className="underline">
+            {pullRequest}
+          </a>
+        </p>
       ) : null}
 
       {events.length === 0 && (status === "connecting" || status === "live") ? (

@@ -23,6 +23,7 @@ export type StreamStatus = "connecting" | "live" | RunOutcome | "not_found" | "e
  */
 export const EVENT_TYPES = [
   "run_started",
+  "run_resumed",
   "run_completed",
   "run_failed",
   "run_cancelled",
@@ -30,6 +31,13 @@ export const EVENT_TYPES = [
   "node_completed",
   "node_failed",
   "node_cancelled",
+  "gate_waiting",
+  "gate_decided",
+  "loop_iteration_started",
+  "loop_condition_evaluated",
+  "map_item_started",
+  "map_item_completed",
+  "pr_opened",
   "text_delta",
   "message",
   "tool_call",

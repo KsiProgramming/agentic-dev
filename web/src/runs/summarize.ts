@@ -31,6 +31,14 @@ export function summarizePayload(event: RunEvent): string {
       return truncate(`${str(payload.name)}(${JSON.stringify(payload.arguments ?? {})})`);
     case "tool_result":
       return truncate(str(payload.output));
+    case "gate_waiting":
+      return truncate(str(payload.title));
+    case "gate_decided":
+      return truncate(
+        [str(payload.decision), str(payload.comment ?? "")].filter(Boolean).join(": "),
+      );
+    case "pr_opened":
+      return truncate(str(payload.url));
     default:
       return Object.keys(payload).length === 0 ? "" : truncate(JSON.stringify(payload));
   }
