@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_store.models import Run
 from agentic_store.runs import StoredRun, stored_run
 
+# A `waiting` run (paused at a gate) is not live: no worker holds it and none may reclaim it; a
+# decision queues it again (`agentic_store.approvals`).
 LIVE_STATUSES = ("queued", "running")
 
 
@@ -78,6 +80,12 @@ async def leased_run_ids(sessions: async_sessionmaker[AsyncSession]) -> set[UUID
             select(Run.id).where(Run.status.in_(LIVE_STATUSES), Run.lease_expires_at > func.now())
         )
         return set(rows)
+
+
+async def waiting_run_ids(sessions: async_sessionmaker[AsyncSession]) -> set[UUID]:
+    """Runs paused at a gate: no worker holds them, but their sandboxes are kept for them."""
+    async with sessions() as session:
+        return set(await session.scalars(select(Run.id).where(Run.status == "waiting")))
 
 
 def _claim(worker_id: str, ttl_s: float) -> Update:

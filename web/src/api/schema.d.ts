@@ -65,6 +65,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve
+         * @description Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
+         *     `cancelled`. The run is queued again; its stream carries on with `gate_decided`.
+         */
+        post: operations["approveRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/events": {
         parameters: {
             query?: never;
@@ -257,6 +278,42 @@ export interface components {
             /** Tools */
             tools?: string[];
         };
+        /** ApprovalRequest */
+        ApprovalRequest: {
+            /**
+             * Node Id
+             * @description The gate the run is waiting at.
+             */
+            node_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            /** Comment */
+            comment?: string | null;
+        };
+        /** ApprovalResponse */
+        ApprovalResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            /**
+             * Status
+             * @default queued
+             * @constant
+             */
+            status: "queued";
+        };
         /**
          * ConnectionOut
          * @description A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.
@@ -320,6 +377,30 @@ export interface components {
             status: "queued";
             /** Events Url */
             events_url: string;
+        };
+        /**
+         * GateNode
+         * @description A human decision point: the run pauses here until someone approves or rejects. Its input
+         *     (the previous node's output) is shown to the approver and passes through unchanged.
+         */
+        GateNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "gate";
+            /** Id */
+            id: string;
+            /**
+             * Title
+             * @description What the approver is asked to decide.
+             */
+            title: string;
+            /**
+             * Prompt
+             * @description More guidance for the approver, shown with the input.
+             */
+            prompt?: string | null;
         };
         /**
          * GithubErrorDetail
@@ -425,7 +506,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["SequenceNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"])[];
         };
         /**
          * ToolNode
@@ -483,7 +564,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["SequenceNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"];
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -612,6 +693,55 @@ export interface operations {
             };
             /** @description No workspace with this id */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approveRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalResponse"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run is not waiting at this gate, or it was already decided */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

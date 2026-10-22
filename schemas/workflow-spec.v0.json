@@ -68,6 +68,48 @@
       "title": "AgentNode",
       "type": "object"
     },
+    "GateNode": {
+      "additionalProperties": false,
+      "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "More guidance for the approver, shown with the input.",
+          "title": "Prompt"
+        },
+        "title": {
+          "description": "What the approver is asked to decide.",
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "gate",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "title"
+      ],
+      "title": "GateNode",
+      "type": "object"
+    },
     "JsonValue": {},
     "SequenceNode": {
       "additionalProperties": false,
@@ -83,6 +125,7 @@
             "discriminator": {
               "mapping": {
                 "agent": "#/$defs/AgentNode",
+                "gate": "#/$defs/GateNode",
                 "sequence": "#/$defs/SequenceNode",
                 "tool": "#/$defs/ToolNode"
               },
@@ -94,6 +137,9 @@
               },
               {
                 "$ref": "#/$defs/ToolNode"
+              },
+              {
+                "$ref": "#/$defs/GateNode"
               },
               {
                 "$ref": "#/$defs/SequenceNode"
@@ -187,6 +233,7 @@
       "discriminator": {
         "mapping": {
           "agent": "#/$defs/AgentNode",
+          "gate": "#/$defs/GateNode",
           "sequence": "#/$defs/SequenceNode",
           "tool": "#/$defs/ToolNode"
         },
@@ -198,6 +245,9 @@
         },
         {
           "$ref": "#/$defs/ToolNode"
+        },
+        {
+          "$ref": "#/$defs/GateNode"
         },
         {
           "$ref": "#/$defs/SequenceNode"

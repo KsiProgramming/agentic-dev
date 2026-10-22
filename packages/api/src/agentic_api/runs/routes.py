@@ -10,15 +10,24 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_api.runs.listener import RunEventListener
-from agentic_api.runs.models import CreateRunRequest, CreateRunResponse
+from agentic_api.runs.models import (
+    ApprovalRequest,
+    ApprovalResponse,
+    CreateRunRequest,
+    CreateRunResponse,
+)
 from agentic_engine.events import RUN_END_STATUS
+from agentic_engine.gate import GateDecision
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
+    ApprovalError,
+    RunNotFoundError,
     create_run,
     enqueue_run,
     get_run,
     get_workspace,
     list_run_events,
+    record_approval,
 )
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -79,6 +88,29 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
     )
+
+
+@router.post(
+    "/{run_id}/approvals",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="approveRun",
+    responses={
+        404: {"description": "No run with this id"},
+        409: {"description": "The run is not waiting at this gate, or it was already decided"},
+    },
+)
+async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> ApprovalResponse:
+    """Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
+    `cancelled`. The run is queued again; its stream carries on with `gate_decided`."""
+    decision = GateDecision(decision=body.decision, comment=body.comment)
+    try:
+        await record_approval(_sessions(request), run_id, body.node_id, decision)
+    except RunNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except ApprovalError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    await enqueue_run(request.app.state.redis, run_id)
+    return ApprovalResponse(run_id=run_id, node_id=body.node_id, decision=body.decision)
 
 
 @router.get(

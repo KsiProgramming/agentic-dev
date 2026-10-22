@@ -5,6 +5,7 @@ over HTTP, the way `curl -N` reads it.
 """
 
 import asyncio
+import contextlib
 import json
 import socket
 import time
@@ -122,7 +123,7 @@ async def post_run(client: httpx.AsyncClient, spec: str = "valid/two-step-sequen
 
 async def stream(
     client: httpx.AsyncClient, run_id: UUID, **kwargs: Any
-) -> AsyncIterator[tuple[float, Frame]]:
+) -> AsyncGenerator[tuple[float, Frame]]:
     """Each frame of a run's event stream with the time it arrived."""
     async with client.stream("GET", f"/runs/{run_id}/events", **kwargs) as response:
         assert response.status_code == 200
@@ -329,3 +330,108 @@ async def test_unsafe_repos_are_rejected(
         )
 
     assert response.status_code == 422
+
+
+def gated_spec() -> dict[str, Any]:
+    """The gate fixture without its `repo.*` tools, so it runs with no sandbox."""
+    spec = spec_json("valid/gate-approval.json")
+    spec["root"]["steps"][0]["tools"] = []
+    spec["root"]["steps"][2] = {"type": "agent", "id": "list", "role": "L", "instructions": "Go."}
+    return spec
+
+
+async def until_waiting(client: httpx.AsyncClient, run_id: UUID) -> list[Frame]:
+    """The run's frames up to its `gate_waiting`; the stream itself stays open."""
+    frames: list[Frame] = []
+    async with asyncio.timeout(15), contextlib.aclosing(stream(client, run_id)) as frames_in:
+        async for _, frame in frames_in:
+            frames.append(frame)
+            if frame.event == "gate_waiting":
+                return frames
+    raise AssertionError(f"the run ended without pausing: {[f.event for f in frames]}")
+
+
+async def post_gated_run(client: httpx.AsyncClient) -> UUID:
+    response = await client.post("/runs", json={"workflow": gated_spec(), "input": "go"})
+    assert response.status_code == 202, response.text
+    return UUID(response.json()["run_id"])
+
+
+async def test_done_when_a_run_pauses_at_a_gate_and_resumes_on_approval(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Done when (1.7): a run pauses at a gate and resumes on approval."""
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_gated_run(client)
+        paused = await until_waiting(client, run_id)
+        run = await get_run(sessions, run_id)
+        assert run is not None and run.status == "waiting"
+
+        response = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        assert response.status_code == 202, response.text
+        assert response.json() == {
+            "run_id": str(run_id),
+            "node_id": "gate",
+            "decision": "approve",
+            "status": "queued",
+        }
+        rest = await collect(client, run_id, headers={"Last-Event-ID": str(paused[-1].id)})
+
+    assert paused[-1].data["node_id"] == "gate"
+    assert paused[-1].data["payload"]["title"] == "Approve the notes"
+    events = [(f.event, f.data["node_id"]) for f in rest if f.event.startswith(("gate_", "run_"))]
+    assert events == [("run_resumed", None), ("gate_decided", "gate"), ("run_completed", None)]
+    assert [f.id for f in paused + rest] == list(range(1, len(paused) + len(rest) + 1))
+    run = await get_run(sessions, run_id)
+    assert run is not None and run.status == "completed"
+
+
+async def test_a_rejected_gate_cancels_the_run(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_gated_run(client)
+        paused = await until_waiting(client, run_id)
+        response = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={"node_id": "gate", "decision": "reject", "comment": "not now"},
+        )
+        assert response.status_code == 202, response.text
+        rest = await collect(client, run_id, headers={"Last-Event-ID": str(paused[-1].id)})
+
+    assert rest[-1].event == "run_cancelled"
+    assert rest[-1].data["payload"] == {"stopped_at": "gate"}
+    assert "list" not in {f.data["node_id"] for f in rest}
+    run = await get_run(sessions, run_id)
+    assert run is not None and run.status == "cancelled"
+
+
+async def test_approvals_that_do_not_fit_are_refused(postgres_url: str, redis_url: str) -> None:
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        unknown = await client.post(
+            f"/runs/{uuid4()}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        run_id = await post_gated_run(client)
+        await until_waiting(client, run_id)
+        wrong_gate = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "writer", "decision": "approve"}
+        )
+        bad_decision = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "maybe"}
+        )
+        first = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        again = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        await collect(client, run_id)
+
+    assert unknown.status_code == 404
+    assert wrong_gate.status_code == 409
+    assert "waiting at gate 'gate', not 'writer'" in wrong_gate.text
+    assert bad_decision.status_code == 422
+    assert first.status_code == 202
+    assert again.status_code == 409

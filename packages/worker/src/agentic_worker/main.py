@@ -6,6 +6,10 @@ checkpointed in Postgres, so when a worker dies its run's lease expires and the 
 looks reclaims it and resumes it after its last completed node (AC-8). A stopping worker cancels
 its run without ending it and releases the lease, so the run is resumed at once elsewhere.
 
+A run that reaches a gate pauses: it becomes `waiting`, the worker releases it and moves on, and
+the run's sandbox is kept. A decision (`POST /runs/{id}/approvals`) queues it again, and the
+worker that claims it opens the kept sandbox and continues the run with the decision.
+
 Each run's spec and input are read from Postgres and its events are written back there
 (`PostgresEventSink`), where the API streams them. Agents run on the fake runtime unless
 `AGENTIC_RUNTIME=claude`, which runs them on Claude with the Claude key stored (encrypted) in the
@@ -43,6 +47,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from agentic_engine.events import RUN_FAILED, EventSink, RunEvent, RunEventLog
+from agentic_engine.gate import GateDecision
 from agentic_engine.graph import (
     Checkpointer,
     WorkflowRunResult,
@@ -75,9 +80,11 @@ from agentic_store import (
     load_secret,
     max_event_seq,
     open_checkpointer,
+    pending_decision,
     reclaim_expired_run,
     release_run,
     renew_lease,
+    waiting_run_ids,
 )
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 
@@ -226,7 +233,7 @@ def build_sandboxes(
     settings: WorkerSettings, keep: Collection[str] = frozenset()
 ) -> SandboxManager:
     """The sandbox backend. For Docker, leftover sandboxes are removed first, except those of the
-    run ids in `keep` (runs other workers are running)."""
+    run ids in `keep` (runs other workers are running, and runs paused at a gate)."""
     if settings.sandbox_backend == "fake":
         return FakeSandboxManager(local_root=settings.sandbox_local_root)
     import docker
@@ -320,8 +327,12 @@ async def _keep_lease(worker: Worker, run_id: UUID, lost: asyncio.Event) -> None
 
 async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
     """Start `run`, or resume it if an earlier attempt wrote events; returns its status. A run
-    with a repo runs inside a sandbox holding it; one that cannot be opened ends the run."""
+    with a repo runs inside a sandbox holding it; one that cannot be opened ends the run.
+
+    A run continued after a gate decision opens the sandbox it kept when it paused, so its
+    writers' commits are still there; a run that pauses at a gate keeps its sandbox."""
     last_seq = await max_event_seq(worker.sessions, run.id)
+    decision = await pending_decision(worker.sessions, run.id) if last_seq else None
     tries = run.attempt - 1
     if tries >= worker.settings.max_attempts:
         log.warning("run %s: gave up after %d attempts", run.id, tries)
@@ -331,7 +342,9 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
         tools: ToolExecutor | None = None
         if run.repo is not None:
             try:
-                sandbox = await stack.enter_async_context(worker.sandboxes.open(run.id, run.repo))
+                sandbox = await stack.enter_async_context(
+                    worker.sandboxes.open(run.id, run.repo, reuse=decision is not None)
+                )
             except SandboxError as e:
                 log.warning("run %s has no sandbox: %s", run.id, e)
                 await _fail(run, sink, last_seq, str(e))
@@ -347,7 +360,10 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             log.warning("run %s cannot start: %s", run.id, e)
             await _fail(run, sink, last_seq, str(e))
             return "failed"
-        return (await _workflow(worker, run, sink, last_seq, runtime, tools)).status
+        result = await _workflow(worker, run, sink, last_seq, runtime, tools, decision)
+        if result.status == "waiting" and run.repo is not None:
+            worker.sandboxes.keep(run.id)
+        return result.status
 
 
 async def _workflow(
@@ -357,8 +373,10 @@ async def _workflow(
     last_seq: int,
     runtime: AgentRuntime,
     tools: ToolExecutor | None,
+    decision: GateDecision | None = None,
 ) -> WorkflowRunResult:
-    """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too."""
+    """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
+    run paused at a gate continues with `decision`."""
     if last_seq == 0:
         log.info("run %s started", run.id)
         return await run_workflow(
@@ -381,6 +399,7 @@ async def _workflow(
         next_seq=last_seq + 1,
         attempt=run.attempt,
         tools=tools,
+        decision=decision,
     )
 
 
@@ -445,8 +464,8 @@ async def run(
             open_runtime = run_runtimes(settings, sessions, keys, make_client or anthropic_client)
         async with contextlib.AsyncExitStack() as stack:
             if sandboxes is None:
-                in_flight = await leased_run_ids(sessions)
-                sandboxes = build_sandboxes(settings, keep={str(i) for i in in_flight})
+                keep = await leased_run_ids(sessions) | await waiting_run_ids(sessions)
+                sandboxes = build_sandboxes(settings, keep={str(i) for i in keep})
             if checkpointer is None:
                 checkpointer = await stack.enter_async_context(
                     open_checkpointer(settings.database_url)

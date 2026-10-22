@@ -85,7 +85,9 @@ class Run(Base):
     """A run's mutable summary and what it was started with. Its history lives in `run_events`.
 
     `status` is `queued` until a worker emits `run_started`, then `running`, then the status of
-    the final run event (`completed`, `failed` or `cancelled`).
+    the final run event (`completed`, `failed` or `cancelled`). A run paused at a gate is
+    `waiting` (no worker holds it); a decision sets it back to `queued`, and `run_resumed` to
+    `running`.
 
     The worker running a run holds its lease (`worker_id`, `lease_expires_at`) and renews it
     while alive. A `queued` or `running` run whose lease has expired was abandoned: another worker
@@ -127,3 +129,23 @@ class RunEventRow(Base):
     node_id: Mapped[str | None] = mapped_column(String(64))
     payload: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Approval(Base):
+    """A human decision at a gate of a run, `approve` or `reject`; the paused run continues with
+    it. One per gate and run: gates inside loops and maps will need an iteration key."""
+
+    __tablename__ = "approvals"
+    __table_args__ = (
+        UniqueConstraint("run_id", "node_id", name="uq_approvals_run_id_node_id"),
+        CheckConstraint("decision IN ('approve', 'reject')", name="ck_approvals_decision"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"))
+    node_id: Mapped[str] = mapped_column(String(64))
+    decision: Mapped[str] = mapped_column(String(16))
+    comment: Mapped[str | None] = mapped_column(Text)
+    # Who decided; unset until users and auth exist.
+    decided_by: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

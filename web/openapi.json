@@ -104,6 +104,66 @@
         }
       }
     },
+    "/runs/{run_id}/approvals": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Approve",
+        "description": "Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it\n`cancelled`. The run is queued again; its stream carries on with `gate_decided`.",
+        "operationId": "approveRun",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "409": {
+            "description": "The run is not waiting at this gate, or it was already decided"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/events": {
       "get": {
         "tags": [
@@ -683,6 +743,75 @@
         "title": "AgentNode",
         "description": "One agent turn: a role and instructions run on a provider."
       },
+      "ApprovalRequest": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "The gate the run is waiting at."
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node_id",
+          "decision"
+        ],
+        "title": "ApprovalRequest"
+      },
+      "ApprovalResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision"
+          },
+          "status": {
+            "type": "string",
+            "const": "queued",
+            "title": "Status",
+            "default": "queued"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "node_id",
+          "decision"
+        ],
+        "title": "ApprovalResponse"
+      },
       "ConnectionOut": {
         "properties": {
           "id": {
@@ -807,6 +936,47 @@
           "events_url"
         ],
         "title": "CreateRunResponse"
+      },
+      "GateNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "gate",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title",
+            "description": "What the approver is asked to decide."
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "More guidance for the approver, shown with the input."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "title"
+        ],
+        "title": "GateNode",
+        "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged."
       },
       "GithubErrorDetail": {
         "properties": {
@@ -1017,6 +1187,9 @@
                   "$ref": "#/components/schemas/ToolNode"
                 },
                 {
+                  "$ref": "#/components/schemas/GateNode"
+                },
+                {
                   "$ref": "#/components/schemas/SequenceNode"
                 }
               ],
@@ -1024,6 +1197,7 @@
                 "propertyName": "type",
                 "mapping": {
                   "agent": "#/components/schemas/AgentNode",
+                  "gate": "#/components/schemas/GateNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "tool": "#/components/schemas/ToolNode"
                 }
@@ -1158,6 +1332,9 @@
                 "$ref": "#/components/schemas/ToolNode"
               },
               {
+                "$ref": "#/components/schemas/GateNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               }
             ],
@@ -1166,6 +1343,7 @@
               "propertyName": "type",
               "mapping": {
                 "agent": "#/components/schemas/AgentNode",
+                "gate": "#/components/schemas/GateNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
               }

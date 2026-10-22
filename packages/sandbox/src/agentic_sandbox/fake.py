@@ -98,25 +98,44 @@ class FakeSandbox:
 
 
 class FakeSandboxManager:
-    """Implements `SandboxManager`: one temp directory per run, removed on exit.
+    """Implements `SandboxManager`: one directory per run, `agentic-sandbox-<run-id>` under
+    `base_dir` (default: the system temp directory), removed on exit unless kept.
 
     `local_root` is the only directory local repo paths may come from (none if unset).
     """
 
     def __init__(self, *, local_root: Path | None = None, base_dir: Path | None = None) -> None:
         self._local_root = local_root
-        self._base_dir = base_dir
+        self._base_dir = base_dir or Path(tempfile.gettempdir())
+        self._kept: set[UUID] = set()
+
+    def keep(self, run_id: UUID) -> None:
+        self._kept.add(run_id)
 
     @asynccontextmanager
-    async def open(self, run_id: UUID, repo: RepoSource) -> AsyncGenerator[FakeSandbox]:
-        root = Path(tempfile.mkdtemp(prefix=f"agentic-sandbox-{run_id}-", dir=self._base_dir))
+    async def open(
+        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+    ) -> AsyncGenerator[FakeSandbox]:
+        root = self._base_dir / f"agentic-sandbox-{run_id}"
+        self._kept.discard(run_id)
         try:
-            await clone_shallow(repo, root / "repo", local_root=self._local_root)
-            (root / "worktrees").mkdir()
-            (root / ".incoming").mkdir()
+            if not (reuse and await asyncio.to_thread((root / "repo").is_dir)):
+                await asyncio.to_thread(_remove_dir, root)
+                await asyncio.to_thread(root.mkdir, parents=True)
+                await clone_shallow(repo, root / "repo", local_root=self._local_root)
+                (root / "worktrees").mkdir()
+                (root / ".incoming").mkdir()
             yield FakeSandbox(root)
         finally:
-            await asyncio.to_thread(shutil.rmtree, root, onexc=_make_writable_and_retry)
+            if run_id in self._kept:
+                self._kept.discard(run_id)
+            else:
+                await asyncio.to_thread(_remove_dir, root)
+
+
+def _remove_dir(root: Path) -> None:
+    if root.exists():
+        shutil.rmtree(root, onexc=_make_writable_and_retry)
 
 
 def _make_writable_and_retry(func: Callable[[str], object], path: str, exc: BaseException) -> None:

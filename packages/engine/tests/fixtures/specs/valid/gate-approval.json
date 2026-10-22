@@ -1,0 +1,31 @@
+{
+  "spec_version": "0",
+  "id": "gate-approval",
+  "name": "Write a file, then wait for approval",
+  "description": "A writer agent commits a file on agent/<run>/writer; the run then pauses at a gate until someone approves or rejects, and on approval a tool node lists the writer's worktree.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Read the README, then add a short NOTES.md that summarises what this repository is for, and commit it.",
+        "tools": ["repo.read_file", "repo.write_file", "repo.commit"]
+      },
+      {
+        "type": "gate",
+        "id": "gate",
+        "title": "Approve the notes",
+        "prompt": "Check the writer's summary before the run continues."
+      },
+      {
+        "type": "tool",
+        "id": "list",
+        "tool": "repo.list_files",
+        "args": { "path": ".", "max_depth": 1 }
+      }
+    ]
+  }
+}

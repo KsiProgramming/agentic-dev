@@ -44,6 +44,18 @@ class ToolNode(_Base):
     )
 
 
+class GateNode(_Base):
+    """A human decision point: the run pauses here until someone approves or rejects. Its input
+    (the previous node's output) is shown to the approver and passes through unchanged."""
+
+    type: Literal["gate"]
+    id: NodeId
+    title: NonEmptyStr = Field(description="What the approver is asked to decide.")
+    prompt: str | None = Field(
+        default=None, description="More guidance for the approver, shown with the input."
+    )
+
+
 class SequenceNode(_Base):
     """Runs its steps in order."""
 
@@ -52,7 +64,7 @@ class SequenceNode(_Base):
     steps: list["Node"] = Field(min_length=1)
 
 
-Node = Annotated[AgentNode | ToolNode | SequenceNode, Field(discriminator="type")]
+Node = Annotated[AgentNode | ToolNode | GateNode | SequenceNode, Field(discriminator="type")]
 
 
 def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
@@ -73,7 +85,7 @@ def node_tools(node: Node) -> list[str]:
             return list(node.tools)
         case ToolNode():
             return [node.tool]
-        case SequenceNode():
+        case GateNode() | SequenceNode():
             return []
 
 

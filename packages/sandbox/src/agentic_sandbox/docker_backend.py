@@ -6,7 +6,9 @@ user. The checkout at `/workspace/repo` is owned by root, so agents can read it 
 it. Its `.git`, `/workspace/worktrees` (writer nodes' worktrees) and `/workspace/.incoming` (files
 on their way in) belong to the sandbox user, so writers can commit on their own branch. Every
 container and volume carries the `agentic.run_id` label, so leftovers can be swept. A run that is
-resumed after its worker died gets a fresh sandbox: `open` first removes the one it left.
+resumed after its worker died gets a fresh sandbox: `open` first removes the one it left. A run
+paused at a gate keeps its container and volume (`keep`), and `open(..., reuse=True)` attaches
+to them again.
 
 docker-py is blocking, so its calls run in threads.
 """
@@ -151,37 +153,74 @@ class DockerSandboxManager:
         self._image = image
         self._limits = limits or SandboxLimits()
         self._local_root = local_root
+        self._kept: set[UUID] = set()
+
+    def keep(self, run_id: UUID) -> None:
+        self._kept.add(run_id)
 
     @asynccontextmanager
-    async def open(self, run_id: UUID, repo: RepoSource) -> AsyncGenerator[DockerSandbox]:
+    async def open(
+        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+    ) -> AsyncGenerator[DockerSandbox]:
         name = f"agentic-sandbox-{run_id}"
         started = time.monotonic()
         volume: Volume | None = None
         container: Container | None = None
+        self._kept.discard(run_id)
         try:
-            archive = await self._clone(repo)
-            try:
-                if leftovers := await asyncio.to_thread(
-                    _sweep, self._client, f"{RUN_LABEL}={run_id}"
-                ):
-                    log.info("sandbox %s: removed %d left by an earlier attempt", name, leftovers)
-                volume = await asyncio.to_thread(
-                    self._client.volumes.create, name=name, labels={RUN_LABEL: str(run_id)}
-                )
-                container = await asyncio.to_thread(self._create, name, run_id)
-                if not await asyncio.to_thread(_put_archive, container, archive, WORKSPACE):
-                    raise SandboxError("could not copy the repo into the sandbox")
-                await asyncio.to_thread(container.start)
-            except DockerException as e:
-                log.warning("sandbox %s could not be created: %s", name, e)
-                raise SandboxError("could not create the sandbox container") from e
-            log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
+            if reuse and (kept := await asyncio.to_thread(self._reopen, name)):
+                container, volume = kept
+                log.info("sandbox %s reopened in %.2f s", name, time.monotonic() - started)
+            else:
+                container, volume = await self._create_fresh(name, run_id, repo)
+                log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
             yield DockerSandbox(container)
         finally:
-            if container is not None or volume is not None:
+            if run_id in self._kept:
+                self._kept.discard(run_id)
+                log.info("sandbox %s kept for the run to continue", name)
+            elif container is not None or volume is not None:
                 # Shielded: a caller cancelled now (a stopping worker) must not skip the removal.
                 await asyncio.shield(asyncio.to_thread(_remove, container, volume))
                 log.info("sandbox %s removed after %.2f s", name, time.monotonic() - started)
+
+    async def _create_fresh(
+        self, name: str, run_id: UUID, repo: RepoSource
+    ) -> tuple[Container, Volume]:
+        archive = await self._clone(repo)
+        volume: Volume | None = None
+        container: Container | None = None
+        try:
+            if leftovers := await asyncio.to_thread(_sweep, self._client, f"{RUN_LABEL}={run_id}"):
+                log.info("sandbox %s: removed %d left by an earlier attempt", name, leftovers)
+            volume = await asyncio.to_thread(
+                self._client.volumes.create, name=name, labels={RUN_LABEL: str(run_id)}
+            )
+            container = await asyncio.to_thread(self._create, name, run_id)
+            if not await asyncio.to_thread(_put_archive, container, archive, WORKSPACE):
+                raise SandboxError("could not copy the repo into the sandbox")
+            await asyncio.to_thread(container.start)
+        except DockerException as e:
+            log.warning("sandbox %s could not be created: %s", name, e)
+            await asyncio.shield(asyncio.to_thread(_remove, container, volume))
+            raise SandboxError("could not create the sandbox container") from e
+        except BaseException:
+            await asyncio.shield(asyncio.to_thread(_remove, container, volume))
+            raise
+        return container, volume
+
+    def _reopen(self, name: str) -> tuple[Container, Volume] | None:
+        """The run's kept container (started again if it stopped) and volume; `None` if either
+        is gone, and the run gets a fresh sandbox."""
+        try:
+            container = self._client.containers.get(name)
+            volume = self._client.volumes.get(name)
+            if container.status != "running":
+                container.start()
+        except DockerException as e:
+            log.info("sandbox %s cannot be reopened (%s); creating a fresh one", name, e)
+            return None
+        return container, volume
 
     async def _clone(self, repo: RepoSource) -> bytes:
         """A tar of the sandbox's `/workspace`: a shallow clone of `repo` at `repo/`, and the

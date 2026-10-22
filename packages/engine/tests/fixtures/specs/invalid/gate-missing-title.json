@@ -1,0 +1,13 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Gate without a title",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      { "type": "agent", "id": "writer", "role": "Writer", "instructions": "Write." },
+      { "type": "gate", "id": "gate" }
+    ]
+  }
+}

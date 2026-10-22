@@ -1,16 +1,17 @@
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Self
+from typing import Any, Self
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.types import StateSnapshot
+from langgraph.types import Command, StateSnapshot
 
 class DrawableGraph:
     nodes: Mapping[str, object]
 
 class CompiledStateGraph[StateT]:
+    checkpointer: BaseCheckpointSaver[str] | None
     async def ainvoke(
-        self, input: StateT | None, config: RunnableConfig | None = None
+        self, input: StateT | Command[Any] | None, config: RunnableConfig | None = None
     ) -> StateT: ...
     async def aget_state(self, config: RunnableConfig) -> StateSnapshot: ...
     def get_graph(self) -> DrawableGraph: ...

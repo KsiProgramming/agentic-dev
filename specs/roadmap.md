@@ -31,7 +31,7 @@ Strategy: **walking skeleton first**, then grow outward. The milestones follow t
 | 1.4 | Workspaces + connections; encrypted secrets (local KMS) | A Claude key is stored encrypted and used by a run; it never appears in logs | ✅ Done ([#13](https://github.com/KsiProgramming/agentic-dev/pull/13)) |
 | 1.5 | GitHub App install + `GET /repos` | User sees repos the app is installed on | ✅ Done ([#14](https://github.com/KsiProgramming/agentic-dev/pull/14)) |
 | 1.6 | `tool` primitive + `repo` write tools + worktree/branch per writer | An agent commits a file to `agent/<run>/<node>` | ✅ Done ([#15](https://github.com/KsiProgramming/agentic-dev/pull/15)) |
-| 1.7 | `gate` primitive (LangGraph interrupt) + `POST /runs/{id}/approvals` | A run pauses at a gate and resumes on approval | — |
+| 1.7 | `gate` primitive (LangGraph interrupt) + `POST /runs/{id}/approvals` | A run pauses at a gate and resumes on approval | ✅ Done ([#16](https://github.com/KsiProgramming/agentic-dev/pull/16)) |
 | 1.8 | `github.openPR` tool behind a gate | A run opens a PR after approval | — |
 | 1.9 | `loop` primitive + CEL expressions | A reviewer loop stops on its condition or at max iterations | — |
 | 1.10 | `map` + `reduce` (concat/agent) primitives | Map over 3 modules with max concurrency, then reduce | — |
