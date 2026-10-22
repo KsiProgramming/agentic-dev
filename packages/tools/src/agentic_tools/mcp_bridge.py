@@ -3,12 +3,13 @@
 The server's tools are listed once, when the executor connects, and offered as
 `<prefix>.<tool>` (`repo.read_file`), the dotted platform names specs use. Calls strip the
 prefix and go through the MCP protocol; the text content of the result becomes the
-`ToolOutput`, and an MCP error result stays an error. Output is data, never instructions.
+`ToolOutput` (its structured content, if any, the output's `data`), and an MCP error result
+stays an error. Output is data, never instructions.
 """
 
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 from mcp import Client
 from pydantic import JsonValue
@@ -62,4 +63,5 @@ class McpToolExecutor:
             block.text if block.type == "text" else f"[{block.type} content omitted]"
             for block in result.content
         )
-        return ToolOutput(text=text, is_error=result.is_error)
+        data = cast(dict[str, JsonValue] | None, result.structured_content)
+        return ToolOutput(text=text, is_error=result.is_error, data=data)
