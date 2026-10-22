@@ -635,7 +635,7 @@ A `gate` node pauses a run until a human decides; it is how irreversible steps (
 Demo (the phase 1.7 "Done when"), with the stack running:
 
 ```bash
-curl -s -X POST localhost:8000/runs -H 'content-type: application/json'   -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/gate-approval.json), \"input\": \"go\", \"repo\": {\"url\": \"https://github.com/octocat/Hello-World.git\"}}"
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json'   -d "{\"workflow\": $(cat packages/engine/tests/fixtures/specs/valid/gate-approval.json), \"input\": \"go\", \"repo\": {\"url\": \"/samples/agentic-dev.git\"}}"
 curl -N localhost:8000/runs/<id>/events      # stops after gate_waiting; the run is "waiting"
 curl -s -X POST localhost:8000/runs/<id>/approvals -H 'content-type: application/json'   -d '{"node_id": "gate", "decision": "approve"}'
 # the stream goes on: run_resumed, gate_decided, node_completed gate, the `list` node, run_completed
