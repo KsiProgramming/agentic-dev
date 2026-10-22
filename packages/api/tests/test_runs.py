@@ -35,6 +35,7 @@ from agentic_store import (
     Run,
     delete_connection,
     get_run,
+    get_run_summary,
     put_github_connection,
 )
 from agentic_worker.main import WorkerSettings
@@ -554,6 +555,8 @@ async def test_a_template_run_stores_the_spec_it_builds(
     assert run is not None
     assert run.spec.id == "generate-docs"
     assert "`documentation/README.md`" in run.spec.model_dump_json()
+    summary = await get_run_summary(sessions, UUID(run_id))
+    assert summary is not None and summary.template_id == "generate-docs"
 
 
 @pytest.mark.parametrize(

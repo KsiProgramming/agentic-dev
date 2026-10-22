@@ -1,7 +1,16 @@
+from datetime import datetime
 from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    ValidationError,
+    computed_field,
+    model_validator,
+)
 
 from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools
 from agentic_engine.templates import get_template
@@ -117,3 +126,52 @@ class ApprovalResponse(BaseModel):
     node_id: str
     decision: Literal["approve", "reject"]
     status: Literal["queued"] = "queued"
+
+
+type RunStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled"]
+
+
+class WorkflowRef(BaseModel):
+    id: str
+    name: str
+
+
+class WaitingGate(BaseModel):
+    node_id: str = Field(description="The gate node the run is paused at.")
+    title: str | None = None
+
+
+class RunSummary(BaseModel):
+    """A run as the runs list shows it. Status, timings, PR URL and the waiting gate come from
+    the run's events."""
+
+    id: UUID
+    workspace_id: UUID
+    status: RunStatus
+    workflow: WorkflowRef
+    template_id: str | None = Field(description="The template the workflow was built from.")
+    repo: RepoSource | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    pr_url: str | None = Field(description="The last pull request the run opened.")
+    waiting_gate: WaitingGate | None = Field(description="Set while the run waits at a gate.")
+    rerun_of: UUID | None = Field(description="The run this one repeats.")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def duration_ms(self) -> int | None:
+        """From start to end; `null` until the run has ended."""
+        if self.started_at is None or self.finished_at is None:
+            return None
+        return round((self.finished_at - self.started_at).total_seconds() * 1000)
+
+
+class RunDetail(RunSummary):
+    input: str
+    failure_reason: str | None = Field(description="Why the run failed, if it did.")
+
+
+class RunSummaryPage(BaseModel):
+    items: list[RunSummary]
+    next_cursor: str | None = Field(description="Pass as `cursor` for the next page.")

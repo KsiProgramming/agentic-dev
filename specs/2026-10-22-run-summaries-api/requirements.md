@@ -31,7 +31,7 @@ Principles and choices that apply:
 - **Projection in `PostgresEventSink`**, same transaction as the event insert:
   - first `run_started` → `started_at` (kept on later attempts).
   - `run_completed` / `run_failed` / `run_cancelled` → `finished_at`.
-  - `run_failed` → `failure_reason` from `payload.error`.
+  - `node_failed` with an `error` → `failure_reason = "node <id>: <error>"`; `run_failed` with an `error` (the engine or worker itself failed) → that error. A node failure's `run_failed` carries only `stopped_at`, so the node's error is the reason. `run_completed` / `run_cancelled` clear it.
   - `pr_opened` → `pr_url` from `payload.url` (last one wins).
   - `gate_waiting` → `waiting_gate`; `gate_decided`, `run_resumed` and final events → `waiting_gate = null`.
 - **Store queries** in `agentic_store`: `list_run_summaries(workspace_id, status?, template?, repo?, cursor?, limit)` and `get_run_summary(run_id)`.

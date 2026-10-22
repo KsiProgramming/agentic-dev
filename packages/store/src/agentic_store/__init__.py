@@ -52,6 +52,12 @@ from agentic_store.sink import (
     list_run_events,
     max_event_seq,
 )
+from agentic_store.summaries import (
+    InvalidCursorError,
+    RunSummaryRow,
+    get_run_summary,
+    list_run_summaries,
+)
 
 __all__ = [
     "CONNECTION_COLUMNS_CHECK",
@@ -65,11 +71,13 @@ __all__ = [
     "Base",
     "Connection",
     "ConnectionInfo",
+    "InvalidCursorError",
     "PostgresEventSink",
     "Run",
     "RunEventRow",
     "RunNotFoundError",
     "RunNotWaitingError",
+    "RunSummaryRow",
     "StoredRun",
     "Workspace",
     "WorkspaceInfo",
@@ -82,10 +90,12 @@ __all__ = [
     "enqueue_run",
     "get_github_installation",
     "get_run",
+    "get_run_summary",
     "get_workspace",
     "leased_run_ids",
     "list_connections",
     "list_run_events",
+    "list_run_summaries",
     "list_workspaces",
     "listen",
     "load_secret",

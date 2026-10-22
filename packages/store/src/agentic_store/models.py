@@ -91,7 +91,12 @@ class Run(Base):
 
     The worker running a run holds its lease (`worker_id`, `lease_expires_at`) and renews it
     while alive. A `queued` or `running` run whose lease has expired was abandoned: another worker
-    may claim it and resume it from its checkpoint. `attempt` counts claims (0 = never claimed)."""
+    may claim it and resume it from its checkpoint. `attempt` counts claims (0 = never claimed).
+
+    The summary columns (`started_at`, `finished_at`, `pr_url`, `failure_reason`, `waiting_gate`)
+    are a projection of the run's events, written by `PostgresEventSink` with each event, so
+    listing runs never scans the log. `template_id` and `repo_url` are set at creation, and
+    `rerun_of` links a rerun to the run it repeats."""
 
     __tablename__ = "runs"
     __table_args__ = (
@@ -99,6 +104,10 @@ class Run(Base):
             "ix_runs_lease_expires_at",
             "lease_expires_at",
             postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+        # Listing runs, newest first.
+        Index(
+            "ix_runs_workspace_created", "workspace_id", text("created_at DESC"), text("id DESC")
         ),
     )
 
@@ -112,6 +121,16 @@ class Run(Base):
     worker_id: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempt: Mapped[int] = mapped_column(Integer, server_default="0")
+    # The template the spec was built from, if any (e.g. `generate-docs`).
+    template_id: Mapped[str | None] = mapped_column(String(128))
+    repo_url: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pr_url: Mapped[str | None] = mapped_column(Text)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    # `{node_id, title}` of the gate the run is paused at.
+    waiting_gate: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    rerun_of: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
