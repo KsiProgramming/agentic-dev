@@ -44,7 +44,7 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 
 | # | Phase | Done when | Status |
 |---|---|---|---|
-| 2.1 | Design system: Tailwind v4 tokens (light + dark), shadcn/ui primitives, Inter + JetBrains Mono, lucide icons, status badge, empty/loading/error states | Every existing screen uses only shared components and tokens (no raw palette colours); axe finds no serious issues | — |
+| 2.1 | Design system: Tailwind v4 tokens (light + dark), shadcn/ui primitives, Inter + JetBrains Mono, lucide icons, status badge, empty/loading/error states | Every existing screen uses only shared components and tokens (no raw palette colours); axe finds no serious issues | ✅ Done ([#22](https://github.com/KsiProgramming/agentic-dev/pull/22)) |
 | 2.2 | App shell: sidebar (Runs, Templates, Settings) + top bar (workspace, theme toggle), drawer under 1024 px, page header with breadcrumbs and actions | Every page renders in the shell at 375, 768 and 1440 px with no horizontal scroll (Playwright screenshots in CI) | — |
 | 2.3 | Run summaries API: `GET /runs` (newest first, cursor pagination, filter by status/template/repo) and `GET /runs/{id}` (status, workflow, repo, input, timings, PR URL, failure reason, waiting gate, `rerun_of`) | The API lists past runs with status taken from the event log | — |
 | 2.4 | Runs page (new home): list of runs with status, workflow, repo, started, duration and PR link; table on desktop, cards on mobile; filters; live status; "Needs approval" first | User finds any past run and sees whether it succeeded, failed or is waiting | — |
