@@ -51,7 +51,7 @@ function RunEventStream({
   return (
     <section className="flex flex-col gap-4">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h1 className="text-xl font-semibold tracking-tight">
+        <h1 className="text-2xl font-semibold tracking-tight">
           Run <code className="font-mono text-base font-normal break-all">{runId}</code>
         </h1>
         <span aria-live="polite">
@@ -86,7 +86,7 @@ function RunEventStream({
       ) : null}
 
       {events.length > 0 ? (
-        <Table className="text-[13px]">
+        <Table className="text-[13px]" scrollLabel="Run events">
           <TableHeader>
             <TableRow>
               <TableHead>#</TableHead>

@@ -1,11 +1,13 @@
-import { ArrowLeftIcon } from "lucide-react";
-import Link from "next/link";
+import type { Metadata } from "next";
 import { Suspense } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { LoadingState } from "@/components/states";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClaudeConnection } from "@/settings/claude-connection";
 import { GithubConnection } from "@/settings/github-connection";
+
+export const metadata: Metadata = { title: "Settings" };
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -21,15 +23,11 @@ async function GithubForSearchParams({
 
 export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1.5 self-start rounded-sm text-muted-foreground hover:text-foreground hover:underline"
-      >
-        <ArrowLeftIcon aria-hidden="true" className="size-4" />
-        Back
-      </Link>
-      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <PageHeader
+        title="Settings"
+        description="Model access and the repositories this workspace can work on."
+      />
       <Card>
         <CardHeader>
           <CardTitle>
@@ -58,6 +56,6 @@ export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
           </Suspense>
         </CardContent>
       </Card>
-    </main>
+    </div>
   );
 }

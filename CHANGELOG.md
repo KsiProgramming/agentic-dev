@@ -9,6 +9,17 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 2.2 app shell:
+  - **Shell.** Every page renders in `AppShell` (`web/src/components/shell/`).
+    - The sidebar has the product name, the workspace name and the sections Runs, Templates and Settings, with the current one marked (`aria-current`).
+    - It is full from 1280 px, an icon rail with tooltips from 1024 px, and a drawer (shadcn `Sheet`) below that.
+    - The top bar has breadcrumbs built from the path and a Light/Dark/System theme menu.
+    - A "Skip to content" link comes first.
+  - **Components.** `PageHeader` (title, description, actions that stack on mobile); shadcn `Sheet`, `DropdownMenu` and `Tooltip`; an `--overlay` token behind sheets; a `scrollLabel` on `Table` that makes a wide table a keyboard-scrollable region.
+  - **Checks.**
+    - `web/e2e/layout.spec.ts` checks every page at 375, 768, 1024 and 1440 px: no horizontal page scroll and a reachable nav. It saves screenshots, which CI uploads as `layout-screenshots`.
+    - axe now runs at 375 and 1440 px and on the open drawer.
+    - New keyboard tests cover the skip link, the drawer's focus trap and the theme menu.
 - Phase 2.1 design system:
   - **Tokens.** `web/src/app/globals.css` defines Tailwind v4 semantic tokens for light and dark (zinc neutrals, indigo `--primary` and `--ring`, `--radius: 0.5rem`) and `--status-{queued,running,waiting,succeeded,failed,cancelled}` with a `-muted` background each. Palette values live only in this file.
   - **Fonts, icons, theme.** Inter for UI text and JetBrains Mono for ids, paths and code via `next/font`; `lucide-react` icons; `next-themes` follows the system theme (the toggle comes with the app shell in 2.2); `sonner` toasts.
@@ -89,6 +100,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- Phase 2.2 routes: today's home page (Generate docs card and sample run) moved to `/templates`. `/` redirects to `/runs`, which shows an empty state until run history arrives in 2.4. Page titles read `<Page> · Agentic Dev`.
 - Phase 2.1: home, run monitor and settings use only shared components and tokens. The run status is a `StatusBadge` (`data-status` holds the status), the event list uses the Table primitive, the gate panel is an amber card with a toast on decision, and failed loads (repos, GitHub, a lost event stream) can be retried.
 - Docker sandboxes run from `agentic-dev/sandbox:dev` instead of `alpine:3.20`. A missing local image is reported with the command that builds it.
 - A Docker sandbox is now removed even when its run is cancelled during teardown. Before, a stopping worker could skip the removal and leave the container until the next startup sweep.

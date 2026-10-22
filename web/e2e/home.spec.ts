@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("home page loads without console errors", async ({ page }) => {
+test("home redirects to runs without console errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") errors.push(msg.text());
@@ -8,6 +8,9 @@ test("home page loads without console errors", async ({ page }) => {
 
   await page.goto("/");
 
-  await expect(page.getByTestId("app-root")).toBeVisible();
+  await expect(page).toHaveURL(/\/runs$/);
+  await expect(page.getByTestId("app-shell")).toBeVisible();
+  await expect(page.getByTestId("workspace-name")).toBeVisible();
+  await expect(page).toHaveTitle("Runs · Agentic Dev");
   expect(errors).toEqual([]);
 });

@@ -30,6 +30,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
 
   --color-status-queued: var(--status-queued);
   --color-status-queued-muted: var(--status-queued-muted);
@@ -77,6 +78,8 @@
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.871 0.006 286.286);
   --ring: oklch(0.585 0.233 277.117);
+  /* Behind a sheet or dialog. */
+  --overlay: oklch(0 0 0 / 10%);
 
   /* Status: `--status-*` is the icon and label colour, `--status-*-muted` the badge background.
    * Each label is ≥ 4.5:1 on its muted background and on --background. */
@@ -114,6 +117,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.673 0.182 276.935);
+  --overlay: oklch(0 0 0 / 50%);
 
   --status-queued: oklch(0.871 0.006 286.286);
   --status-queued-muted: oklch(0.274 0.006 286.033);
