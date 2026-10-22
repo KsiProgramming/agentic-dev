@@ -13,7 +13,14 @@ DONE = AgentNodeResult(
 
 
 def test_initial_state_seeds_last_text_with_input() -> None:
-    assert initial_state("go") == {"input": "go", "last_text": "go", "results": {}, "order": []}
+    assert initial_state("go") == {
+        "input": "go",
+        "last_text": "go",
+        "results": {},
+        "order": [],
+        "iterations": {},
+        "usage": [],
+    }
 
 
 def test_merge_results_adds_by_node_id() -> None:

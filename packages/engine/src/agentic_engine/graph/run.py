@@ -25,7 +25,7 @@ from agentic_engine.events import (
 )
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph.checkpoint import Checkpointer, thread_config
-from agentic_engine.graph.compile import CompiledWorkflow, compile_workflow
+from agentic_engine.graph.compile import CompiledWorkflow, compile_workflow, recursion_limit
 from agentic_engine.graph.state import (
     RunState,
     WorkflowRunResult,
@@ -72,7 +72,7 @@ async def run_workflow(
         log,
         lambda: compile_workflow(spec, runtime, log, checkpointer, tools),
         initial_state(input),
-        thread_config(log.run_id),
+        _config(spec, log.run_id),
     )
 
 
@@ -102,11 +102,12 @@ async def resume_workflow(
     """
     log = RunEventLog(run_id, sink, next_seq=next_seq)
     graph = compile_workflow(spec, runtime, log, checkpointer, tools)
-    config = thread_config(run_id)
+    config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
     saved = snapshot.values
     results = saved.get("results", {})
-    completed = [n for n in saved.get("order", []) if results[n].status == "completed"]
+    ran = dict.fromkeys(saved.get("order", []))  # a node in a loop runs once per iteration
+    completed = [n for n in ran if results[n].status == "completed"]
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
     if not saved:
         return await _finish(log, lambda: graph, initial_state(input), config)
@@ -116,6 +117,10 @@ async def resume_workflow(
     resume = decision.model_dump(mode="json") if paused and decision else None
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
     return await _finish(log, lambda: graph, start, config)
+
+
+def _config(spec: WorkflowSpec, run_id: UUID) -> RunnableConfig:
+    return {**thread_config(run_id), "recursion_limit": recursion_limit(spec)}
 
 
 async def _finish(
@@ -188,7 +193,8 @@ def _result(
         text=state["last_text"],
         order=state["order"],
         results=results,
-        usage=sum_usage(r.usage for r in results.values()),
+        # Checkpoints saved before phase 1.9 have no `usage`.
+        usage=sum_usage(state.get("usage") or [r.usage for r in results.values()]),
         stopped_at=stopped_at,
         waiting_at=waiting_at,
     )

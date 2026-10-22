@@ -24,7 +24,7 @@
               "type": "agent",
               "id": "review",
               "role": "Reviewer",
-              "instructions": "Review the summary. Reply APPROVED if it is clear and accurate; otherwise list what to fix."
+              "instructions": "Review the summary. If it is clear and accurate, reply APPROVED on the first line followed by the summary unchanged; otherwise list what to fix."
             }
           ]
         },

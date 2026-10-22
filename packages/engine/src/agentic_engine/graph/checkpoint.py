@@ -11,7 +11,10 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 type Checkpointer = BaseCheckpointSaver[str]
 
-CHECKPOINT_TYPES: tuple[tuple[str, str], ...] = (("agentic_engine.agent", "AgentNodeResult"),)
+CHECKPOINT_TYPES: tuple[tuple[str, str], ...] = (
+    ("agentic_engine.agent", "AgentNodeResult"),
+    ("agentic_runtime.events", "Usage"),
+)
 """The classes `RunState` holds, which a checkpoint may deserialise. LangGraph blocks any other."""
 
 
