@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import docker
 import pytest
 from docker.errors import DockerException
+from docker.models.containers import Container
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import SecretStr
 from redis.asyncio import Redis
@@ -105,7 +106,9 @@ async def worker(
 async def wait_for_status(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID, status: str
 ) -> None:
-    async with asyncio.timeout(10):
+    # Generous: cloning this project into a container can take over 10 s on a loaded machine,
+    # and a run cut off by a timeout is left for the next test's worker to reclaim.
+    async with asyncio.timeout(30):
         while True:
             run = await get_run(sessions, run_id)
             if run is not None and run.status == status:
@@ -421,7 +424,7 @@ async def test_done_when_an_agent_lists_files_in_a_cloned_repo_inside_a_containe
     # The run ends before its sandbox is removed; give the removal a moment.
     async with asyncio.timeout(10):
         while True:
-            if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
+            if not containers_of(client, run_id):
                 break
             await asyncio.sleep(0.1)
 
@@ -457,9 +460,15 @@ async def test_done_when_an_agent_answers_a_question_about_the_repo(
     assert events[-1].type == "run_completed"
     async with asyncio.timeout(10):
         while True:
-            if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
+            if not containers_of(client, run_id):
                 break
             await asyncio.sleep(0.1)
+
+
+def containers_of(client: docker.DockerClient, run_id: UUID) -> list[Container]:
+    """The run's sandbox containers. Sparse: a full listing inspects each container, which fails
+    if one is removed in between, as these tests' polls race the sandbox's removal."""
+    return client.containers.list(all=True, sparse=True, filters={"label": f"{RUN_LABEL}={run_id}"})
 
 
 def assert_wrote_and_committed_notes(events: list[RunEvent], run_id: UUID) -> None:
@@ -532,7 +541,7 @@ async def test_done_when_an_agent_commits_a_file_to_its_branch(
     assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
     async with asyncio.timeout(10):
         while True:
-            if not client.containers.list(all=True, filters={"label": f"{RUN_LABEL}={run_id}"}):
+            if not containers_of(client, run_id):
                 break
             await asyncio.sleep(0.1)
 
