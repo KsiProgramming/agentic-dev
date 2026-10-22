@@ -115,7 +115,8 @@ jobs:
         # An agent lists the files of this repo, cloned into a sandbox container; none is left.
         run: |
           python3 scripts/sandbox_demo.py --api http://localhost:8000
-          test -z "$(docker ps -aq --filter label=agentic.run_id)"
+          # The run ends before its sandbox is removed, so wait for the removal (bounded).
+          timeout 30 sh -c 'while [ -n "$(docker ps -aq --filter label=agentic.run_id)" ]; do sleep 1; done'
       - name: Repo MCP demo (phase 1.2)
         # An agent lists, reads and searches this repo through the repo MCP server; none is left.
         run: |
@@ -124,7 +125,7 @@ jobs:
             --expect "packages/tools/" \
             --expect 'members = ["packages/*"]' \
             --expect "packages/tools/pyproject.toml:1: [project]"
-          test -z "$(docker ps -aq --filter label=agentic.run_id)"
+          timeout 30 sh -c 'while [ -n "$(docker ps -aq --filter label=agentic.run_id)" ]; do sleep 1; done'
       - name: Repo write demo (phase 1.6)
         # A writer agent commits NOTES.md on agent/<run>/writer in its worktree, then a tool node
         # lists the shared checkout; nothing is pushed and no sandbox is left.
@@ -133,7 +134,7 @@ jobs:
             --spec packages/engine/tests/fixtures/specs/valid/write-file.json \
             --expect "wrote NOTES.md (" \
             --expect "/writer: NOTES.md"
-          test -z "$(docker ps -aq --filter label=agentic.run_id)"
+          timeout 30 sh -c 'while [ -n "$(docker ps -aq --filter label=agentic.run_id)" ]; do sleep 1; done'
       - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
