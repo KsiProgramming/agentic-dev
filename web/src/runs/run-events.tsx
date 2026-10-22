@@ -1,95 +1,127 @@
 "use client";
 
+import { ExternalLinkIcon, RadioIcon } from "lucide-react";
+import { useState } from "react";
+
+import { EmptyState, ErrorState } from "@/components/states";
+import { StatusBadge } from "@/components/status-badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
 import { GatePanel } from "./gate-panel";
 import { pendingGate, pullRequestUrl } from "./gates";
+import { displayStatus } from "./status";
 import { summarizePayload } from "./summarize";
-import type { StreamStatus } from "./types";
 import { useRunEvents } from "./use-run-events";
 
-const STATUS_STYLE: Record<StreamStatus, string> = {
-  connecting: "bg-gray-100 text-gray-700",
-  live: "bg-blue-100 text-blue-800",
-  completed: "bg-green-100 text-green-800",
-  failed: "bg-red-100 text-red-800",
-  cancelled: "bg-yellow-100 text-yellow-800",
-  not_found: "bg-gray-100 text-gray-700",
-  error: "bg-red-100 text-red-800",
-};
-
-/** The live event list of one run. Payloads are rendered as text only: they are data. */
+/** The live event list of one run. Retry reconnects by mounting a fresh stream. */
 export function RunEvents({ runId, baseUrl }: { runId: string; baseUrl?: string }) {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <RunEventStream
+      key={attempt}
+      runId={runId}
+      baseUrl={baseUrl}
+      onRetry={() => setAttempt((n) => n + 1)}
+    />
+  );
+}
+
+/** Payloads are rendered as text only: they are data. */
+function RunEventStream({
+  runId,
+  baseUrl,
+  onRetry,
+}: {
+  runId: string;
+  baseUrl?: string;
+  onRetry: () => void;
+}) {
   const { events, status } = useRunEvents(runId, baseUrl);
   const gate = status === "live" ? pendingGate(events) : null;
   const pullRequest = pullRequestUrl(events);
+  const shown = displayStatus(status, gate !== null);
 
   return (
-    <section className="mt-4">
-      <header className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">
-          Run <code className="text-base">{runId}</code>
+    <section className="flex flex-col gap-4">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h1 className="text-xl font-semibold tracking-tight">
+          Run <code className="font-mono text-base font-normal break-all">{runId}</code>
         </h1>
-        <span
-          data-testid="run-status"
-          className={`rounded px-2 py-0.5 text-sm ${STATUS_STYLE[status]}`}
-        >
-          {status.replace("_", " ")}
+        <span aria-live="polite">
+          <StatusBadge data-testid="run-status" status={shown.status} label={shown.label} />
         </span>
       </header>
 
-      {status === "not_found" ? (
-        <p className="mt-4 text-gray-600">Run not found.</p>
-      ) : status === "error" ? (
-        <p className="mt-4 text-red-700">Lost the connection to the event stream.</p>
+      {status === "not_found" ? <ErrorState message="Run not found." /> : null}
+      {status === "error" ? (
+        <ErrorState message="Lost the connection to the event stream." onRetry={onRetry} />
       ) : null}
 
       {gate ? <GatePanel key={gate.nodeId} runId={runId} gate={gate} baseUrl={baseUrl} /> : null}
 
       {pullRequest ? (
-        <p data-testid="pull-request" className="mt-4 text-sm">
-          Pull request opened:{" "}
-          <a href={pullRequest} target="_blank" rel="noreferrer" className="underline">
+        <p data-testid="pull-request" className="flex flex-wrap items-center gap-1.5">
+          <span className="text-muted-foreground">Pull request opened:</span>
+          <a
+            href={pullRequest}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-mono break-all text-primary underline-offset-4 hover:underline"
+          >
             {pullRequest}
+            <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
           </a>
         </p>
       ) : null}
 
       {events.length === 0 && (status === "connecting" || status === "live") ? (
-        <p className="mt-4 text-gray-500">Waiting for events…</p>
+        <EmptyState icon={RadioIcon} message="Waiting for events…" />
       ) : null}
 
       {events.length > 0 ? (
-        <table className="mt-4 w-full border-collapse text-left text-sm">
-          <thead className="border-b text-gray-500">
-            <tr>
-              <th className="py-1 pr-3 font-medium">#</th>
-              <th className="py-1 pr-3 font-medium">Time</th>
-              <th className="py-1 pr-3 font-medium">Type</th>
-              <th className="py-1 pr-3 font-medium">Node</th>
-              <th className="py-1 font-medium">Details</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="text-[13px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>#</TableHead>
+              <TableHead>Time</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Node</TableHead>
+              <TableHead>Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {events.map((event) => (
-              <tr
+              <TableRow
                 key={event.seq}
                 data-testid="event-row"
                 data-seq={event.seq}
                 data-type={event.type}
                 data-created-at={event.created_at}
                 data-received-at={event.receivedAt}
-                className="border-b border-gray-100 align-top"
+                className="align-top"
               >
-                <td className="py-1 pr-3 text-gray-500 tabular-nums">{event.seq}</td>
-                <td className="py-1 pr-3 whitespace-nowrap text-gray-500 tabular-nums">
+                <TableCell className="text-muted-foreground tabular-nums">{event.seq}</TableCell>
+                <TableCell className="text-muted-foreground tabular-nums">
                   {new Date(event.created_at).toLocaleTimeString()}
-                </td>
-                <td className="py-1 pr-3 font-mono">{event.type}</td>
-                <td className="py-1 pr-3 font-mono text-gray-600">{event.node_id ?? ""}</td>
-                <td className="py-1 break-all whitespace-pre-wrap">{summarizePayload(event)}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="font-mono">{event.type}</TableCell>
+                <TableCell className="font-mono text-muted-foreground">
+                  {event.node_id ?? ""}
+                </TableCell>
+                <TableCell className="min-w-64 break-all whitespace-pre-wrap">
+                  {summarizePayload(event)}
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       ) : null}
     </section>
   );
