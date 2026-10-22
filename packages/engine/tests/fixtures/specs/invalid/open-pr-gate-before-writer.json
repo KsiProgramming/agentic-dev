@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "id": "open-pr-gate-before-writer",
+  "name": "Approves before anything is written",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      { "type": "gate", "id": "gate", "title": "Start?" },
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Add NOTES.md and commit it.",
+        "tools": ["repo.write_file", "repo.commit"]
+      },
+      {
+        "type": "tool",
+        "id": "publish",
+        "tool": "github.openPR",
+        "args": { "from_node": "writer", "title": "Add NOTES.md" }
+      }
+    ]
+  }
+}

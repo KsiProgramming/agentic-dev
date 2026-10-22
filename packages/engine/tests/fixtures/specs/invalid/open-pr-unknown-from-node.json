@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "id": "open-pr-unknown-from-node",
+  "name": "Publishes a node that does not exist",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Technical writer",
+        "instructions": "Add NOTES.md and commit it.",
+        "tools": ["repo.write_file", "repo.commit"]
+      },
+      { "type": "gate", "id": "gate", "title": "Publish?" },
+      {
+        "type": "tool",
+        "id": "publish",
+        "tool": "github.openPR",
+        "args": { "from_node": "editor", "title": "Add NOTES.md" }
+      }
+    ]
+  }
+}
