@@ -133,6 +133,10 @@ class FakeSandboxManager:
     def keep(self, run_id: UUID) -> None:
         self._kept.add(run_id)
 
+    async def discard(self, run_id: UUID) -> None:
+        self._kept.discard(run_id)
+        await asyncio.to_thread(_remove_dir, self._base_dir / f"agentic-sandbox-{run_id}")
+
     @asynccontextmanager
     async def open(
         self,

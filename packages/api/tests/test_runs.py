@@ -745,3 +745,97 @@ async def test_the_summaries_stream_of_an_unknown_workspace_is_404(
         response = await client.get("/runs/stream", params={"workspace_id": str(uuid4())})
 
     assert response.status_code == 404
+
+
+async def post_slow_run(client: httpx.AsyncClient) -> UUID:
+    response = await client.post(
+        "/runs",
+        json={"workflow": spec_json("valid/single-agent.json"), "input": "one two three four five"},
+    )
+    assert response.status_code == 202, response.text
+    return UUID(response.json()["run_id"])
+
+
+async def until_event(client: httpx.AsyncClient, run_id: UUID, event: str) -> list[Frame]:
+    """The run's frames up to its first `event`; the stream itself stays open."""
+    frames: list[Frame] = []
+    async with asyncio.timeout(15), contextlib.aclosing(stream(client, run_id)) as frames_in:
+        async for _, frame in frames_in:
+            frames.append(frame)
+            if frame.event == event:
+                return frames
+    raise AssertionError(f"no {event}: {[f.event for f in frames]}")
+
+
+async def test_a_running_run_is_cancelled_within_seconds(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with (
+        worker(postgres_url, redis_url, step_delay_s=0.5),
+        api(postgres_url, redis_url) as client,
+    ):
+        run_id = await post_slow_run(client)
+        started = await until_event(client, run_id, "text_delta")
+        response = await client.post(f"/runs/{run_id}/cancel")
+        again = await client.post(f"/runs/{run_id}/cancel")
+        rest = await collect(client, run_id, headers={"Last-Event-ID": str(started[-1].id)})
+
+    assert response.status_code == 202, response.text
+    assert response.json() == {"run_id": str(run_id), "status": "cancelling"}
+    assert again.status_code == 202
+    assert [f.event for f in rest][-2:] == ["node_cancelled", "run_cancelled"]
+    assert rest[-1].data["payload"] == {"reason": "cancelled by user"}
+    assert "message" not in {f.event for f in rest}
+    run = await get_run(sessions, run_id)
+    assert run is not None and run.status == "cancelled"
+
+
+async def test_a_run_waiting_at_a_gate_is_cancelled_and_its_gate_closed(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_gated_run(client)
+        paused = await until_waiting(client, run_id)
+        response = await client.post(f"/runs/{run_id}/cancel")
+        approve = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        rest = await collect(client, run_id, headers={"Last-Event-ID": str(paused[-1].id)})
+
+    assert response.status_code == 202, response.text
+    assert approve.status_code == 409
+    assert [(f.event, f.data["payload"]) for f in rest] == [
+        ("run_cancelled", {"reason": "cancelled by user"})
+    ]
+    run = await get_run(sessions, run_id)
+    assert run is not None and run.status == "cancelled"
+
+
+async def test_a_queued_run_is_cancelled_by_the_worker_that_claims_it(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        run_id = await post_slow_run(client)
+        response = await client.post(f"/runs/{run_id}/cancel")
+        async with worker(postgres_url, redis_url):
+            frames = await collect(client, run_id)
+
+    assert response.status_code == 202, response.text
+    assert [f.event for f in frames] == ["run_started", "run_cancelled"]
+    assert frames[-1].data["payload"] == {"reason": "cancelled by user"}
+    run = await get_run(sessions, run_id)
+    assert run is not None and run.status == "cancelled"
+
+
+async def test_cancelling_an_unknown_or_ended_run_is_refused(
+    postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        unknown = await client.post(f"/runs/{uuid4()}/cancel")
+        run_id = await post_slow_run(client)
+        await collect(client, run_id)
+        ended = await client.post(f"/runs/{run_id}/cancel")
+
+    assert unknown.status_code == 404
+    assert ended.status_code == 409
+    assert "has already ended (completed)" in ended.text

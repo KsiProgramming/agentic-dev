@@ -13,17 +13,21 @@ function watchConsole(page: Page): string[] {
 
 interface Row {
   seq: number;
+  /** The last `seq` of the row: chunks of one message are folded into one row. */
+  lastSeq: number;
   type: string;
   createdAt: number;
   receivedAt: number;
 }
 
 async function rows(page: Page): Promise<Row[]> {
+  await page.getByRole("tab", { name: "Raw events" }).click();
   return page.getByTestId("event-row").evaluateAll((els) =>
     els.map((el) => {
       const d = (el as HTMLElement).dataset;
       return {
         seq: Number(d.seq),
+        lastSeq: Number(d.lastSeq),
         type: d.type ?? "",
         createdAt: Date.parse(d.createdAt ?? ""),
         receivedAt: Number(d.receivedAt),
@@ -37,7 +41,11 @@ async function expectCompletedRun(page: Page): Promise<Row[]> {
     timeout: 30_000,
   });
   const listed = await rows(page);
-  expect(listed.map((r) => r.seq)).toEqual(listed.map((_, i) => i + 1));
+  // Every event is listed once, in order, with no gaps.
+  const seqs = listed.flatMap((r) =>
+    Array.from({ length: r.lastSeq - r.seq + 1 }, (_, i) => r.seq + i),
+  );
+  expect(seqs).toEqual(seqs.map((_, i) => i + 1));
   expect(listed[0]?.type).toBe("run_started");
   expect(listed.at(-1)?.type).toBe("run_completed");
   return listed;

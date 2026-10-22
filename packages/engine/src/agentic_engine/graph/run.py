@@ -136,8 +136,10 @@ async def _finish(
         graph = build()
         final = await graph.ainvoke(start, config)
         paused = await _paused_gate(graph, config)
-    except asyncio.CancelledError:
-        await log.emit(RUN_CANCELLED, payload={"reason": "caller cancelled"})
+    except asyncio.CancelledError as e:
+        # `task.cancel("cancelled by user")` names why; a bare cancel is the caller's.
+        reason = next((a for a in e.args if isinstance(a, str) and a), "caller cancelled")
+        await log.emit(RUN_CANCELLED, payload={"reason": reason})
         raise
     except Exception as exc:
         await log.emit(RUN_FAILED, payload={"error": f"{type(exc).__name__}: {exc}"})

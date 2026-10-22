@@ -43,6 +43,7 @@ from agentic_store import (
     put_connection,
     put_github_connection,
     record_approval,
+    request_cancel,
 )
 from agentic_tools.github import PUBLISH_TOOL_NAMES, GithubPublisher
 from agentic_tools.repo import COMMIT_AUTHOR, WRITE_TOOL_NAMES, open_repo_tools
@@ -312,6 +313,9 @@ class RecordingSandboxes:
 
     def keep(self, run_id: UUID) -> None:
         self._inner.keep(run_id)
+
+    async def discard(self, run_id: UUID) -> None:
+        await self._inner.discard(run_id)
 
     @asynccontextmanager
     async def open(
@@ -702,6 +706,36 @@ async def test_a_writer_s_commit_survives_the_gate(
     assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
 
 
+async def test_cancelling_a_run_at_a_gate_removes_the_sandbox_it_kept(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos, base_dir=boxes))
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        repo = RepoSource(url=str(repos / "hello"))
+        run_id = await submit(sessions, redis_url, load_spec("gate-approval.json"), repo)
+        await wait_for_status(sessions, run_id, "waiting")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+        assert [p.name for p in boxes.iterdir()] == [f"agentic-sandbox-{run_id}"]  # kept
+
+        assert await request_cancel(sessions, run_id) == "waiting"
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "cancelled")
+
+    assert list(boxes.iterdir()) == []
+    events = await list_run_events(sessions, run_id)
+    assert events[-1].type == "run_cancelled"
+    assert events[-1].payload == {"reason": "cancelled by user"}
+    assert "gate_decided" not in {e.type for e in events}
+
+
 GITHUB_URL = "https://github.com/acme/hello"
 GITHUB_TOKEN = "ghs_workertoken0005"
 
@@ -717,6 +751,9 @@ class MirroredSandboxes:
 
     def keep(self, run_id: UUID) -> None:
         self._inner.keep(run_id)
+
+    async def discard(self, run_id: UUID) -> None:
+        await self._inner.discard(run_id)
 
     @asynccontextmanager
     async def open(

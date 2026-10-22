@@ -9,6 +9,24 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 2.5 run console v2 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
+  - **Run console.** `/runs/{id}` (`web/src/runs/console/`) shows a header (live status, workflow, repo and branch, started, live duration, PR link, Copy run id, Cancel) and two tabs, Timeline and Raw events, kept in the URL (`?tab=raw`).
+  - **Timeline.**
+    - `buildTimeline` (`web/src/runs/timeline.ts`) turns a run's events into steps, map items, loop iterations and turns.
+    - Streamed `text_delta` chunks merge into one growing message per agent turn, rendered as Markdown (`react-markdown`, `remark-gfm`) with raw HTML and images dropped.
+    - Steps hang off a vertical rail by a status icon with a screen-reader label. Map items are named by their path and kind, and each step has a token-usage footer.
+  - **Tool calls.**
+    - Each call is one line with an icon, a verb and its target ("Read `src/app.ts`") that opens to its arguments and result (`JsonView`: collapsible, copyable).
+    - Consecutive reads, listings and searches collapse into one summary line ("Read 12 files, listed 3 folders · 16 tool calls").
+    - Writes, commits, pull requests and failed calls show their first lines inline.
+  - **Live behaviour.** A live line at the end of a running run says what it is doing ("writer · Reading `src/app.ts`…"). The page follows new content only once you are at the bottom, otherwise a "Jump to latest" pill appears.
+  - **Raw events.** The event table, with consecutive chunks of one message folded into one expandable row ("`text_delta` × 27") and filters by type and node.
+  - **Cancel a run.**
+    - `POST /runs/{id}/cancel` (`202`; `404` unknown; `409` already ended) sets `runs.cancel_requested_at` (Alembic `0011_run_cancel`).
+    - The worker running the run checks every second (`CANCEL_POLL_S`) and ends it `cancelled` with reason `cancelled by user`. A queued run, or one waiting at a gate, is ended by the worker that claims it.
+    - `agentic_store` gains `request_cancel`, `cancel_requested`, `run_ended` and `RunEndedError`.
+  - **Components.** shadcn `Tabs`, `Collapsible` and `AlertDialog`; `JsonView`, `TextView` and `OutputView` (`web/src/components/json-view.tsx`).
+  - **Tests.** `scripts/record_console_fixture.py` records a docs-like run from the engine (`web/src/runs/fixtures/docs-run.json`), and the timeline is tested on it.
 - Phase 2.2 app shell:
   - **Shell.** Every page renders in `AppShell` (`web/src/components/shell/`).
     - The sidebar has the product name, the workspace name and the sections Runs, Templates and Settings, with the current one marked (`aria-current`).
@@ -100,6 +118,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- Phase 2.5 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
+  - The engine writes at most one `text_delta` per node (and map item) every 250 ms (`agentic_engine.graph.deltas.DeltaBuffer`). The first chunk of a burst is written at once and the rest are joined. Any other event of the node, its end and cancellation write the pending text first, so order and the joined text are unchanged.
+  - `run_cancelled` takes its `reason` from the cancel message (`task.cancel("…")`); a bare cancel still says `caller cancelled`.
+  - `SandboxManager` gains `discard(run_id)`, which removes a sandbox a run kept at a gate.
+  - The run page no longer lists one table row per event (`RunEvents` removed); the event table moved to the Raw events tab.
 - Phase 2.2 routes: today's home page (Generate docs card and sample run) moved to `/templates`. `/` redirects to `/runs`, which shows an empty state until run history arrives in 2.4. Page titles read `<Page> · Agentic Dev`.
 - Phase 2.1: home, run monitor and settings use only shared components and tokens. The run status is a `StatusBadge` (`data-status` holds the status), the event list uses the Table primitive, the gate panel is an amber card with a toast on decision, and failed loads (repos, GitHub, a lost event stream) can be retried.
 - Docker sandboxes run from `agentic-dev/sandbox:dev` instead of `alpine:3.20`. A missing local image is reported with the command that builds it.

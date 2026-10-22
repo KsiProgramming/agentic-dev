@@ -128,6 +128,14 @@ class ApprovalResponse(BaseModel):
     status: Literal["queued"] = "queued"
 
 
+class CancelResponse(BaseModel):
+    run_id: UUID
+    status: Literal["cancelling"] = Field(
+        default="cancelling",
+        description="The worker ends the run `cancelled`; its event stream shows when.",
+    )
+
+
 type RunStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled"]
 
 

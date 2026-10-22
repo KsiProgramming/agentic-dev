@@ -91,14 +91,14 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 ### Run console
 
 - **Header:** status badge, workflow name, repo and branch, started time and duration, and the PR link once opened. Actions: Rerun, Cancel, Copy run id.
-- **Timeline (default tab):** one step per node in run order, with its status icon and duration. Map items are nested under their map node. Inside a step:
-  - Streamed `text_delta` events are **merged on the client** into one growing message per agent turn. The `message` event replaces the merged text when it arrives. A message is rendered as Markdown with HTML disabled, so payloads stay data.
-  - Tool calls appear as collapsible cards (`repo.list_modules`, arguments, result). JSON is pretty-printed, collapsed after 2 levels and copyable.
+- **Timeline (default tab):** the run reads top to bottom on a vertical rail. Each node hangs off it by a status icon (with a screen-reader label) and shows its duration; a finished node has no badge, and only states that need attention say so in words ("Needs approval", "Failed"). Map items (named by their path) and loop iterations are nested on their own rail. Inside a step:
+  - Streamed `text_delta` events are **merged on the client** into one growing message per agent turn. The `message` event replaces the merged text when it arrives. A message is rendered as Markdown with raw HTML and images dropped, so payloads stay data.
+  - Each tool call is one quiet line with an icon, a verb and its target ("Read `src/app.ts`"); opening it shows its arguments and result (JSON pretty-printed, collapsed after 2 levels, copyable). Consecutive reads, listings and searches collapse into one summary line ("Read 12 files, listed 3 folders"). Calls that change something (writes, commits, pull requests) and failed calls stand on their own line with a preview of their first lines. Only running and failed calls get a status icon.
   - Usage and cost appear as a quiet footer line.
-- **Raw events tab:** today's event table, with filters by type and node. It is kept for debugging and audit.
+- **Raw events tab:** the event table, with filters by type and node. Consecutive chunks of one message are folded into one row (expandable to the chunks). It is kept for debugging and audit.
 - **Graph tab:** added in 3.5.
 - **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with the gate title, a one-line summary, "Review details" (opens a side sheet with the full summary or diff) and Approve and Reject buttons. Reject asks for an optional comment. The bar never covers content: the page reserves padding for it. The browser tab title gets a "● Needs approval" prefix.
-- **Live updates:** auto-scroll follows new content only while the user is at the bottom. Otherwise a "Jump to latest" pill appears.
+- **Live updates:** while a run executes, a live line at the end of the timeline says where it is and what it is doing ("writer · Reading `src/app.ts`…"). The page opens at the top; auto-scroll follows new content only once the user is at the bottom. Otherwise a "Jump to latest" pill appears.
 
 ### Interaction and accessibility
 
@@ -111,6 +111,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - `GET /runs`: run summaries, newest first, with cursor pagination and filters `status`, `template`, `repo`. Status, timings, PR URL and the waiting gate come from the run's events. They are kept in the `runs` row when events are written, so listing does not scan the log.
 - `GET /runs/{id}`: one summary (the same shape as the list items, plus `input` and `failure_reason`).
 - `POST /runs/{id}/rerun`: creates a **new** run with the same workflow spec, input, repo and workspace. It sets `rerun_of` and returns `CreateRunResponse`. The original run is never changed (the log is append-only). Resuming a failed run from its last completed node, which the checkpointer would allow, is a later option and not part of rerun.
+- `POST /runs/{id}/cancel`: sets `runs.cancel_requested_at` and returns `202`. Only workers write events, so the worker running the run ends it (it checks every second); a queued run, or one waiting at a gate (queued again), is ended by the worker that claims it. The run ends `cancelled` with reason `cancelled by user`. An ended run answers `409`.
 - **Delta volume:** the Claude adapter keeps streaming `text_delta`. The engine buffers deltas per node and writes at most one merged `text_delta` event every 250 ms. This keeps the log small and the stream live, while the client still merges what it receives.
 
 ## Security & secrets

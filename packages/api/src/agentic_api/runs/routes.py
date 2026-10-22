@@ -14,6 +14,7 @@ from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.models import (
     ApprovalRequest,
     ApprovalResponse,
+    CancelResponse,
     CreateRunRequest,
     CreateRunResponse,
     RunDetail,
@@ -29,6 +30,7 @@ from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
     InvalidCursorError,
+    RunEndedError,
     RunNotFoundError,
     RunSummaryRow,
     create_run,
@@ -41,6 +43,7 @@ from agentic_store import (
     list_run_events,
     list_run_summaries,
     record_approval,
+    request_cancel,
 )
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -289,6 +292,31 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     await enqueue_run(request.app.state.redis, run_id)
     return ApprovalResponse(run_id=run_id, node_id=body.node_id, decision=body.decision)
+
+
+@router.post(
+    "/{run_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="cancelRun",
+    responses={
+        404: {"description": "No run with this id"},
+        409: {"description": "The run has already ended"},
+    },
+)
+async def cancel(run_id: UUID, request: Request) -> CancelResponse:
+    """Ask for the run to be cancelled. Its worker stops it within a few seconds and writes
+    `run_cancelled` (reason `cancelled by user`); a queued run, or one waiting at a gate, is ended
+    by the worker that picks it up. Asking again before it has ended is accepted."""
+    try:
+        before = await request_cancel(_sessions(request), run_id)
+    except RunNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except RunEndedError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    if before == "waiting":
+        # No worker holds a run paused at a gate: queue it, so one ends it.
+        await enqueue_run(request.app.state.redis, run_id)
+    return CancelResponse(run_id=run_id)
 
 
 @router.get(

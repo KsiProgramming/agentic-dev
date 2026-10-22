@@ -96,7 +96,8 @@ class Run(Base):
     The summary columns (`started_at`, `finished_at`, `pr_url`, `failure_reason`, `waiting_gate`)
     are a projection of the run's events, written by `PostgresEventSink` with each event, so
     listing runs never scans the log. `template_id` and `repo_url` are set at creation, and
-    `rerun_of` links a rerun to the run it repeats."""
+    `rerun_of` links a rerun to the run it repeats. `cancel_requested_at` is set when a user asks
+    to cancel the run; the worker then ends it `cancelled`."""
 
     __tablename__ = "runs"
     __table_args__ = (
@@ -131,6 +132,8 @@ class Run(Base):
     # `{node_id, title}` of the gate the run is paused at.
     waiting_gate: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     rerun_of: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
+    # When a user asked to cancel the run (`agentic_store.cancel`).
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

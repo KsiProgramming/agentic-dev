@@ -103,6 +103,10 @@ class SandboxManager(Protocol):
         gate), so a later `open(..., reuse=True)` gets it back."""
         ...
 
+    async def discard(self, run_id: UUID) -> None:
+        """Remove the sandbox the run kept, if any (a run cancelled while paused at a gate)."""
+        ...
+
 
 def decode_capped(data: bytes) -> tuple[str, bool]:
     """`data` as text, cut to `MAX_OUTPUT_BYTES`; the flag is true when it was cut."""

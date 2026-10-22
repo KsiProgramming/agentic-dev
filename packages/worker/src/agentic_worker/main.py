@@ -29,6 +29,10 @@ server: `github.openPR` bundles a writer's branch out of the sandbox, pushes it 
 and opens a pull request. The sandbox never holds a credential and has no network.
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
 this host (no isolation).
+
+A user can cancel a run (`POST /runs/{id}/cancel`): the worker running it checks every
+`CANCEL_POLL_S`, cancels its graph and writes `run_cancelled`; a cancelled run that is claimed
+(queued, or paused at a gate) is ended at once, and a sandbox it kept is removed.
 """
 
 import asyncio
@@ -52,7 +56,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from agentic_engine.events import RUN_FAILED, EventSink, RunEvent, RunEventLog
+from agentic_engine.events import RUN_CANCELLED, RUN_FAILED, EventSink, RunEvent, RunEventLog
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import (
     Checkpointer,
@@ -87,8 +91,10 @@ from agentic_secrets import (
     registered,
 )
 from agentic_store import (
+    USER_CANCEL_REASON,
     PostgresEventSink,
     StoredRun,
+    cancel_requested,
     claim_run,
     dequeue_run,
     get_github_installation,
@@ -100,6 +106,7 @@ from agentic_store import (
     reclaim_expired_run,
     release_run,
     renew_lease,
+    run_ended,
     waiting_run_ids,
 )
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
@@ -144,6 +151,8 @@ class WorkerSettings(BaseSettings):
     # A lease not renewed for this long is expired, and its run is reclaimed by another worker.
     lease_ttl_s: float = Field(default=30.0, gt=0)
     lease_heartbeat_s: float = Field(default=10.0, gt=0)
+    # How often a running run is checked for a user's cancel request.
+    cancel_poll_s: float = Field(default=1.0, gt=0)
     # Claims of one run before it fails instead of being resumed again (a run that kills workers).
     max_attempts: int = Field(default=3, ge=1)
     # The platform's GitHub App (the same settings as the API's). Unset, runs clone GitHub repos
@@ -330,10 +339,26 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
     event is already written. If the lease is lost, the run is left to the worker that has it."""
     lost = asyncio.Event()
     sink = AttemptSink(PostgresEventSink(worker.sessions), lambda: stop.is_set() or lost.is_set())
+    if await cancel_requested(worker.sessions, run.id):
+        try:
+            await _end_cancelled(worker, run, sink)
+            log.info("run %s cancelled before it ran", run.id)
+        finally:
+            await release_run(worker.sessions, run.id, worker.settings.worker_id)
+        return
     attempt = asyncio.create_task(_attempt(worker, run, sink))
     heartbeat = asyncio.create_task(_keep_lease(worker, run.id, lost))
+    cancel = asyncio.create_task(_watch_cancel(worker, run.id))
     try:
-        await asyncio.wait({attempt, heartbeat}, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait({attempt, heartbeat, cancel}, return_when=asyncio.FIRST_COMPLETED)
+        if cancel.done() and not attempt.done():
+            # The sink stays attached, so the graph writes `node_cancelled` and `run_cancelled`.
+            attempt.cancel(USER_CANCEL_REASON)
+            with contextlib.suppress(asyncio.CancelledError):
+                await attempt
+            await _end_cancelled(worker, run, sink)
+            log.info("run %s cancelled by its user", run.id)
+            return
         if not attempt.done():
             log.warning("run %s: lease lost to another worker; dropped", run.id)
             return
@@ -345,6 +370,7 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
         log.exception("run %s crashed", run.id)
     finally:
         heartbeat.cancel()
+        cancel.cancel()
         if not attempt.done():
             attempt.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -367,6 +393,40 @@ async def _keep_lease(worker: Worker, run_id: UUID, lost: asyncio.Event) -> None
         if not held:
             lost.set()
             return
+
+
+async def _watch_cancel(worker: Worker, run_id: UUID) -> None:
+    """Return once a user has asked to cancel the run, checking every `cancel_poll_s`."""
+    while True:
+        await asyncio.sleep(worker.settings.cancel_poll_s)
+        try:
+            if await cancel_requested(worker.sessions, run_id):
+                return
+        except Exception:
+            log.warning("run %s: could not check for a cancel request", run_id, exc_info=True)
+
+
+async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> None:
+    """End a run its user cancelled, unless its graph already wrote its end: `run_cancelled`
+    after its last event (a run that never started gets `run_started` first). A sandbox the run
+    kept at a gate is removed."""
+    if not await run_ended(worker.sessions, run.id):
+        last_seq = await max_event_seq(worker.sessions, run.id)
+        if last_seq == 0:
+            await record_unstarted_run(
+                run.spec,
+                run.input,
+                run_id=run.id,
+                sink=sink,
+                status="cancelled",
+                reason=USER_CANCEL_REASON,
+            )
+        else:
+            await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
+                RUN_CANCELLED, payload={"reason": USER_CANCEL_REASON}
+            )
+    if run.repo is not None:
+        await worker.sandboxes.discard(run.id)
 
 
 async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
