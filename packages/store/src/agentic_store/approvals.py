@@ -2,7 +2,8 @@
 
 A run paused at a gate is `waiting` and no worker holds it. Recording the decision sets it back
 to `queued` with no lease, so `claim_run` takes it like a new run once it is enqueued again; the
-worker then continues it with `pending_decision`. The gate a run waits at is the node of its last
+worker then continues it with `pending_decision`. Its `attempt` count starts again, so the time
+a run spends at gates never uses up its retries. The gate a run waits at is the node of its last
 `gate_waiting` event.
 """
 
@@ -71,7 +72,7 @@ async def record_approval(
             await session.execute(
                 update(Run)
                 .where(Run.id == run_id)
-                .values(status="queued", worker_id=None, lease_expires_at=None)
+                .values(status="queued", worker_id=None, lease_expires_at=None, attempt=0)
             )
     except IntegrityError as e:
         raise AlreadyDecidedError(f"gate {node_id!r} of run {run_id} was already decided") from e

@@ -30,6 +30,7 @@ from agentic_store.lease import (
     reclaim_expired_run,
     release_run,
     renew_lease,
+    waiting_run_ids,
 )
 from agentic_store.models import (
     CONNECTION_COLUMNS_CHECK,
@@ -98,4 +99,5 @@ __all__ = [
     "record_approval",
     "release_run",
     "renew_lease",
+    "waiting_run_ids",
 ]

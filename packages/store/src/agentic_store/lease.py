@@ -82,6 +82,12 @@ async def leased_run_ids(sessions: async_sessionmaker[AsyncSession]) -> set[UUID
         return set(rows)
 
 
+async def waiting_run_ids(sessions: async_sessionmaker[AsyncSession]) -> set[UUID]:
+    """Runs paused at a gate: no worker holds them, but their sandboxes are kept for them."""
+    async with sessions() as session:
+        return set(await session.scalars(select(Run.id).where(Run.status == "waiting")))
+
+
 def _claim(worker_id: str, ttl_s: float) -> Update:
     return update(Run).values(
         worker_id=worker_id,

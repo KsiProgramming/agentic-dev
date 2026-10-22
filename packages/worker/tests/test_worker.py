@@ -17,6 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import RunEvent
+from agentic_engine.gate import GateDecision
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.spec import WorkflowSpec, parse_spec
@@ -34,6 +35,7 @@ from agentic_store import (
     get_run,
     list_run_events,
     put_connection,
+    record_approval,
 )
 from agentic_tools.repo import COMMIT_AUTHOR, open_repo_tools
 from agentic_worker.main import RuntimeFactory, WorkerSettings, run
@@ -626,3 +628,49 @@ async def test_a_key_stored_under_another_master_key_fails_the_run_cleanly(
 
     [*_, failed] = await list_run_events(sessions, run_id)
     assert "cannot be decrypted" in str(failed.payload["error"])
+
+
+async def test_a_writer_s_commit_survives_the_gate(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """A run paused at a gate frees the worker but keeps its sandbox; after approval it carries
+    on in that sandbox, so the branch the writer committed before the gate is still there."""
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    branch_log = BranchLog()
+    sandboxes = RecordingSandboxes(
+        FakeSandboxManager(local_root=repos, base_dir=boxes), inspect=branch_log
+    )
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        repo = RepoSource(url=str(repos / "hello"))
+        run_id = await submit(sessions, redis_url, load_spec("gate-approval.json"), repo)
+        await wait_for_status(sessions, run_id, "waiting")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+        assert [p.name for p in boxes.iterdir()] == [f"agentic-sandbox-{run_id}"]  # kept
+        assert branch_log.branches == [f"agent/{run_id}/writer"]
+
+        await record_approval(sessions, run_id, "gate", GateDecision(decision="approve"))
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+        async with asyncio.timeout(10):
+            while list(boxes.iterdir()):  # noqa: ASYNC110 (the sandbox is removed after the run)
+                await asyncio.sleep(0.05)
+
+    events = await list_run_events(sessions, run_id)
+    assert [e.type for e in events if e.node_id == "gate"] == [
+        "node_started",
+        "gate_waiting",
+        "gate_decided",
+        "node_completed",
+    ]
+    resumed = next(e for e in events if e.type == "run_resumed")
+    assert resumed.payload == {"attempt": 1, "completed_nodes": ["writer"]}
+    name, email = COMMIT_AUTHOR
+    assert branch_log.branches == [f"agent/{run_id}/writer"]
+    assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
