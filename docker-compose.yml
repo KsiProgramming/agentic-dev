@@ -95,6 +95,9 @@ services:
       # fake events so a run streams visibly.
       AGENTIC_RUNTIME: ${AGENTIC_RUNTIME:-fake}
       CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-sonnet-5-5}
+      # Output tokens per API call and tool-use turns per agent node.
+      CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-32000}
+      CLAUDE_MAX_TURNS: ${CLAUDE_MAX_TURNS:-50}
       FAKE_STEP_DELAY_S: ${FAKE_STEP_DELAY_S:-0.5}
       # A run whose worker stops renewing its lease for LEASE_TTL_S is resumed by another worker.
       LEASE_TTL_S: ${LEASE_TTL_S:-30}

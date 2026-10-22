@@ -36,8 +36,11 @@ from agentic_runtime.request import AgentRequest
 from agentic_runtime.tools import ToolDefinition, ToolExecutor
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
-DEFAULT_MAX_TOKENS = 4096
-DEFAULT_MAX_TURNS = 10
+# Per API call. A writer sends whole files as tool input, so a turn can be long; streaming makes
+# a high cap safe.
+DEFAULT_MAX_TOKENS = 32000
+# Enough for the docs writer: up to 40 pages, an index and a commit, one tool call per turn.
+DEFAULT_MAX_TURNS = 50
 
 # Status codes worth retrying: timeout, conflict, rate limit, and server errors (529 = overloaded).
 _RETRYABLE_STATUS = frozenset({408, 409, 429})

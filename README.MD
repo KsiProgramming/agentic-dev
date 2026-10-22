@@ -508,7 +508,8 @@ The runtime and engine test suites block all non-loopback network access (`agent
 
 - `role` and `instructions` form the system prompt. `input` goes in the user turn inside an `<input>` block marked as data.
 - Each API call streams `text_delta` events, then emits one `usage` event (input tokens include cache tokens). A finished turn adds `message` (the final turn's text) and `completed`.
-- When Claude asks for tools, each one becomes a `tool_call`, runs through the `ToolExecutor` given to the runtime, and becomes a `tool_result` that is sent back. Then the loop calls the API again, up to `max_turns` (default 10). Platform tool names such as `repo.read_file` are sent to the API as `repo__read_file`. A request that names tools the executor cannot offer fails before any API call. No real tools exist until phase 1.2.
+- When Claude asks for tools, each one becomes a `tool_call`, runs through the `ToolExecutor` given to the runtime, and becomes a `tool_result` that is sent back. Then the loop calls the API again, up to `max_turns` (default 50, `CLAUDE_MAX_TURNS`). Platform tool names such as `repo.read_file` are sent to the API as `repo__read_file`. A request that names tools the executor cannot offer fails before any API call. No real tools exist until phase 1.2.
+- Each API call may write up to `max_tokens` (default 32,000, `CLAUDE_MAX_TOKENS`). Writers send whole files as tool input, so the cap must fit several pages.
 - API errors become `failed`. Rate limits, overloaded and 5xx responses, timeouts and connection errors are marked `retryable`. Hitting `max_tokens`, a refusal, or running out of turns fails without `retryable`.
 
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
