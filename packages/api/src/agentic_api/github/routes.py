@@ -12,12 +12,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_api.github.models import GithubErrorDetail, InstallUrlOut, RepoOut
+from agentic_api.github.models import GithubErrorDetail, InstallUrlOut, RepoOut, StartInstall
 from agentic_api.settings import Settings
-from agentic_github import GithubApiError, GithubApp, InstallationNotFoundError
+from agentic_github import GithubApiError, GithubPlatform, InstallationNotFoundError
 from agentic_store import (
     GITHUB,
     WorkspaceNotFoundError,
@@ -28,6 +29,14 @@ from agentic_store import (
 )
 
 router = APIRouter(tags=["github"])
+
+
+class _PendingInstall(BaseModel):
+    """What an install's `state` stands for, kept in Redis until GitHub sends the browser back."""
+
+    workspace_id: UUID
+    return_to: str | None = None
+
 
 STATE_TTL_S = 600
 _STATE_KEY = "github:install-state:{state}"
@@ -46,8 +55,8 @@ def _redis(request: Request) -> Redis:
     return request.app.state.redis
 
 
-def _github(request: Request) -> GithubApp:
-    github: GithubApp | None = request.app.state.github
+def _github(request: Request) -> GithubPlatform:
+    github: GithubPlatform | None = request.app.state.github
     if github is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -73,14 +82,19 @@ def _conflict(code: str, message: str) -> HTTPException:
     responses={**_NOT_FOUND, **_NOT_CONFIGURED},
 )
 async def start_install(
-    workspace_id: UUID, request: Request, github: Annotated[GithubApp, Depends(_github)]
+    workspace_id: UUID,
+    request: Request,
+    github: Annotated[GithubPlatform, Depends(_github)],
+    body: StartInstall | None = None,
 ) -> InstallUrlOut:
-    """An install URL for the GitHub App. Installing it links the installation to the workspace."""
+    """An install URL for the GitHub App. Installing it links the installation to the workspace,
+    then sends the browser to `return_to` (the settings page by default)."""
     if await get_workspace(_sessions(request), workspace_id) is None:
         raise _not_found(workspace_id)
     state = secrets.token_urlsafe(32)
+    pending = _PendingInstall(workspace_id=workspace_id, return_to=body.return_to if body else None)
     await _redis(request).set(
-        _STATE_KEY.format(state=state), str(workspace_id), ex=STATE_TTL_S, nx=True
+        _STATE_KEY.format(state=state), pending.model_dump_json(), ex=STATE_TTL_S, nx=True
     )
     return InstallUrlOut(install_url=github.install_url(state))
 
@@ -98,13 +112,10 @@ async def complete_install(
     state: str | None = None,
 ) -> RedirectResponse:
     """GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the
-    web app's settings page with `github=connected`, or `github=error` and a `reason`."""
+    page that started the install (the web app's settings page by default) with
+    `github=connected`, or `github=error` and a `reason`."""
     settings: Settings = request.app.state.settings
-    github: GithubApp | None = request.app.state.github
-
-    def back(**params: str) -> RedirectResponse:
-        url = f"{settings.web_base_url.rstrip('/')}/settings?{urlencode(params)}"
-        return RedirectResponse(url, status_code=status.HTTP_303_SEE_OTHER)
+    github: GithubPlatform | None = request.app.state.github
 
     # The state is consumed first, so it is single use whatever happens next.
     stored: Any = (
@@ -112,7 +123,15 @@ async def complete_install(
         if state
         else None
     )
-    workspace_id = None if stored is None else UUID(bytes(stored).decode())
+    pending = None if stored is None else _PendingInstall.model_validate_json(bytes(stored))
+    workspace_id = None if pending is None else pending.workspace_id
+    return_to = (pending.return_to if pending else None) or "/settings"
+
+    def back(**params: str) -> RedirectResponse:
+        separator = "&" if "?" in return_to else "?"
+        url = f"{settings.web_base_url.rstrip('/')}{return_to}{separator}{urlencode(params)}"
+        return RedirectResponse(url, status_code=status.HTTP_303_SEE_OTHER)
+
     if github is None:
         return back(github="error", reason="not_configured")
     if setup_action == "request":
@@ -129,6 +148,7 @@ async def complete_install(
             workspace_id,
             installation.id,
             installation.account_login,
+            installation.account_type,
         )
     except InstallationNotFoundError:
         return back(github="error", reason="installation")
@@ -154,7 +174,7 @@ async def complete_install(
     },
 )
 async def repos(
-    workspace_id: UUID, request: Request, github: Annotated[GithubApp, Depends(_github)]
+    workspace_id: UUID, request: Request, github: Annotated[GithubPlatform, Depends(_github)]
 ) -> list[RepoOut]:
     """The repos the workspace's GitHub App installation can reach, by full name."""
     try:

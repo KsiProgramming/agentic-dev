@@ -10,15 +10,20 @@ from agentic_github.errors import (
     PullRequestError,
     PushError,
 )
+from agentic_github.fake import FAKE_REPOS, FakeGithubApp, fixture_path
 from agentic_github.models import InstallationInfo, PullRequestInfo, RepoInfo
+from agentic_github.platform import GithubPlatform, installation_settings_url
 from agentic_github.push import auth_env, github_remote, push_bundle, repo_full_name
 
 __all__ = [
+    "FAKE_REPOS",
     "GITHUB_API_URL",
+    "FakeGithubApp",
     "GithubApiError",
     "GithubApp",
     "GithubAppConfig",
     "GithubConfigError",
+    "GithubPlatform",
     "InstallationInfo",
     "InstallationNotFoundError",
     "PullRequestError",
@@ -26,7 +31,9 @@ __all__ = [
     "PushError",
     "RepoInfo",
     "auth_env",
+    "fixture_path",
     "github_remote",
+    "installation_settings_url",
     "push_bundle",
     "repo_full_name",
 ]

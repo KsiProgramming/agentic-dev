@@ -101,6 +101,9 @@ jobs:
         run: |
           cp .env.example .env
           echo "DOCKER_GID=$(stat -c %g /var/run/docker.sock)" >> .env
+          # The e2e journey runs on the fake GitHub App and Claude key check (phase 2.6).
+          echo "AGENTIC_GITHUB=fake" >> .env
+          echo "CLAUDE_KEY_CHECK=fake" >> .env
       - name: Start stack
         run: docker compose up -d --build --wait --wait-timeout 180
       - name: Probe endpoints

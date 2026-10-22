@@ -299,3 +299,72 @@ def test_a_configured_app_without_its_key_fails_at_startup(
 
     with pytest.raises(RuntimeError, match="private key"):
         create_app(settings)
+
+
+async def test_a_connection_links_to_its_installation_settings(client: AsyncClient) -> None:
+    await install(client)
+
+    (github,) = (await client.get(f"{WORKSPACE}/connections")).json()
+
+    assert github["manage_url"] == "https://github.com/settings/installations/42"
+
+
+async def test_an_install_returns_to_the_page_that_started_it(client: AsyncClient) -> None:
+    started = await client.post(INSTALL, json={"return_to": "/templates?template=generate-docs"})
+    params = {"installation_id": "42", "setup_action": "install", "state": state_of(started)}
+
+    back = await client.get("/github/setup", params=params)
+
+    assert back.headers["location"] == (
+        "http://web.test/templates?template=generate-docs&github=connected"
+    )
+
+
+@pytest.mark.parametrize(
+    "return_to", ["https://evil.test/", "//evil.test/x", r"/\evil.test", "settings", "/a b"]
+)
+async def test_an_install_only_returns_to_a_page_of_the_web_app(
+    client: AsyncClient, return_to: str
+) -> None:
+    response = await client.post(INSTALL, json={"return_to": return_to})
+
+    assert response.status_code == 422
+
+
+async def test_the_fake_app_installs_without_github(migrated: str, redis_url: str) -> None:
+    settings = Settings(
+        database_url=migrated,
+        redis_url=redis_url,
+        github="fake",
+        api_base_url="http://api.test",
+        web_base_url="http://web.test",
+    )
+    app = create_app(settings)
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://api.test") as client,
+    ):
+        url = install_url(await client.post(INSTALL))
+        back = await client.get(url.path, params=parse_qs(url.query))
+        connections = (await client.get(f"{WORKSPACE}/connections")).json()
+        repos = (await client.get(REPOS)).json()
+        await client.delete(f"{WORKSPACE}/connections/github")
+
+    assert (url.scheme, url.netloc, url.path) == ("http", "api.test", "/github/setup")
+    assert back.headers["location"] == "http://web.test/settings?github=connected"
+    assert [(c["account_login"], c["manage_url"]) for c in connections] == [
+        ("e2e-org", "https://github.com/organizations/e2e-org/settings/installations/1")
+    ]
+    assert [r["full_name"] for r in repos] == ["e2e-org/docs-demo", "e2e-org/private-lib"]
+
+
+@pytest.mark.parametrize("fake", [{"github": "fake"}, {"claude_key_check": "fake"}])
+def test_fakes_are_refused_in_production(
+    postgres_url: str, redis_url: str, fake: dict[str, str]
+) -> None:
+    settings = Settings.model_validate(
+        {"database_url": postgres_url, "redis_url": redis_url, "env": "production", **fake}
+    )
+
+    with pytest.raises(RuntimeError, match="not allowed with AGENTIC_ENV=production"):
+        create_app(settings)

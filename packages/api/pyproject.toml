@@ -9,6 +9,7 @@ dependencies = [
     "agentic-secrets",
     "agentic-store",
     "alembic>=1.16",
+    "anthropic>=1.17",
     "asyncpg>=0.30",
     "fastapi>=0.118",
     "pydantic-settings>=2.10",

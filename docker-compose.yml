@@ -10,6 +10,14 @@ x-db-env: &db-env
 x-master-key: &master-key
   MASTER_KEY_FILE: /secrets/master.key
 
+# Fakes for local dev and the e2e tests (CI turns them on), refused with AGENTIC_ENV=production.
+# AGENTIC_GITHUB=fake stands in a GitHub App with repos e2e-org/docs-demo and e2e-org/private-lib,
+# kept as bare repos in the `fixtures` volume; CLAUDE_KEY_CHECK=fake accepts keys starting
+# `sk-ant-test-` without calling Anthropic.
+x-fakes: &fakes
+  AGENTIC_ENV: ${AGENTIC_ENV:-development}
+  AGENTIC_GITHUB: ${AGENTIC_GITHUB:-app}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -44,13 +52,32 @@ services:
     healthcheck:
       disable: true
 
+  # Seeds the fake GitHub App's bare repos (once; later runs keep what was pushed to them).
+  fixtures:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    image: agentic-dev/python:dev
+    command: ["sh", "/scripts/seed_fixture_repos.sh", "/samples"]
+    volumes:
+      - fixtures:/samples/e2e-org
+      - ./scripts/seed_fixture_repos.sh:/scripts/seed_fixture_repos.sh:ro
+    depends_on:
+      keygen:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+
   api:
     build:
       context: .
       dockerfile: packages/api/Dockerfile
     image: agentic-dev/python:dev
     environment:
-      <<: [*db-env, *master-key]
+      <<: [*db-env, *master-key, *fakes]
+      CLAUDE_KEY_CHECK: ${CLAUDE_KEY_CHECK:-anthropic}
+      # Where the browser reaches the API (the fake GitHub install flow redirects back to it).
+      API_BASE_URL: http://localhost:${API_PORT:-8000}
       # The browser calls the API directly, so the web app's origin must be allowed.
       CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
       # The platform's GitHub App (README, "GitHub App"). Left blank, the GitHub endpoints
@@ -88,7 +115,7 @@ services:
     image: agentic-dev/python:dev
     command: ["python", "-m", "agentic_worker"]
     environment:
-      <<: [*db-env, *master-key]
+      <<: [*db-env, *master-key, *fakes]
       READY_FILE: /tmp/worker-ready
       # Agents run on the fake runtime unless AGENTIC_RUNTIME=claude: then each run uses the
       # Claude key stored in its workspace (the web app's Settings page). FAKE_STEP_DELAY_S paces
@@ -120,6 +147,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./.git:/samples/agentic-dev.git:ro
+      - fixtures:/samples/e2e-org
       - secrets:/secrets:ro
       - ./.secrets:/github:ro
     healthcheck:
@@ -134,6 +162,8 @@ services:
         condition: service_healthy
       sandbox-image:
         condition: service_completed_successfully
+      fixtures:
+        condition: service_completed_successfully
 
   web:
     build:
@@ -147,3 +177,4 @@ services:
 volumes:
   pgdata:
   secrets:
+  fixtures:

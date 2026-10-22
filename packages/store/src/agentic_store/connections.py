@@ -52,6 +52,10 @@ class ConnectionInfo:
     key_hint: str | None
     # Set for GitHub: the account the App is installed on.
     account_login: str | None
+    # Set for GitHub connections made since it was recorded: `User` or `Organization`.
+    account_type: str | None
+    # Set for GitHub: the App installation.
+    installation_id: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -126,6 +130,7 @@ async def put_github_connection(
     workspace_id: UUID,
     installation_id: int,
     account_login: str,
+    account_type: str | None = None,
 ) -> ConnectionInfo:
     """Link the workspace to a GitHub App installation, replacing any earlier one."""
     now = datetime.now(UTC)
@@ -144,6 +149,7 @@ async def put_github_connection(
             session.add(connection)
         connection.external_id = installation_id
         connection.account_login = account_login
+        connection.account_type = account_type
         connection.updated_at = now
         return _connection_info(connection)
 
@@ -257,6 +263,8 @@ def _connection_info(connection: Connection) -> ConnectionInfo:
         provider=connection.provider,
         key_hint=connection.key_hint,
         account_login=connection.account_login,
+        account_type=connection.account_type,
+        installation_id=connection.external_id if connection.provider == GITHUB else None,
         created_at=connection.created_at,
         updated_at=connection.updated_at,
     )

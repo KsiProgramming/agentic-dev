@@ -61,7 +61,7 @@ class Connection(Base):
 
     `key_hint` (the last 4 characters) is the only part of the secret ever shown. A `github`
     connection holds no secret: `external_id` is its App installation and `account_login` the
-    user or organisation it is installed on."""
+    user or organisation it is installed on, `account_type` which of the two."""
 
     __tablename__ = "connections"
     __table_args__ = (
@@ -77,6 +77,8 @@ class Connection(Base):
     key_hint: Mapped[str | None] = mapped_column(String(8))
     external_id: Mapped[int | None] = mapped_column(BigInteger)
     account_login: Mapped[str | None] = mapped_column(String(255))
+    # `User` or `Organization` for GitHub; unset for connections made before it was recorded.
+    account_type: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
