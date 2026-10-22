@@ -1,9 +1,10 @@
 from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
 
 from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools
+from agentic_engine.templates import get_template
 from agentic_github import repo_full_name
 from agentic_sandbox import RepoSource
 
@@ -12,10 +13,41 @@ from agentic_sandbox import RepoSource
 _REPO_TOOL_PREFIXES = ("repo.", "github.")
 
 
+class TemplateRun(BaseModel):
+    """A run of a template (`GET /templates`) with its options."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="The template's id, e.g. `generate-docs`.")
+    parameters: dict[str, JsonValue] = Field(
+        default_factory=dict[str, JsonValue],
+        description="The template's options, as its `parameters` schema describes.",
+    )
+
+    def build_spec(self) -> WorkflowSpec:
+        template = get_template(self.id)
+        if template is None:
+            raise ValueError(f"unknown template {self.id!r}")
+        try:
+            return template.build_spec(self.parameters)
+        except ValidationError as e:
+            reasons = [
+                f"parameters.{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
+                for err in e.errors()
+            ]
+            raise ValueError("; ".join(reasons)) from None
+
+
 class CreateRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    workflow: WorkflowSpec
+    workflow: WorkflowSpec | None = Field(
+        default=None, description="The workflow to run. Give this or `template`, not both."
+    )
+    template: TemplateRun | None = Field(
+        default=None,
+        description="A template to build the workflow from. Give this or `workflow`, not both.",
+    )
     input: str = ""
     repo: RepoSource | None = Field(
         default=None,
@@ -29,8 +61,16 @@ class CreateRunRequest(BaseModel):
     )
 
     @model_validator(mode="after")
+    def _one_workflow(self) -> Self:
+        if (self.workflow is None) == (self.template is None):
+            raise ValueError("give either `workflow` or `template`")
+        if self.template is not None:
+            self.workflow = self.template.build_spec()
+        return self
+
+    @model_validator(mode="after")
     def _repo_for_repo_tools(self) -> Self:
-        for _, node in iter_nodes(self.workflow.root):
+        for _, node in iter_nodes(self.spec().root):
             tools = node_tools(node)
             repo_tools = [t for t in tools if t.startswith(_REPO_TOOL_PREFIXES)]
             if repo_tools and self.repo is None:
@@ -45,10 +85,15 @@ class CreateRunRequest(BaseModel):
                 )
         return self
 
+    def spec(self) -> WorkflowSpec:
+        """The workflow to run: `workflow`, or the one built from `template`."""
+        assert self.workflow is not None, "validated: built from the template if not given"
+        return self.workflow
+
     def uses_github(self) -> bool:
         return any(
             tool.startswith("github.")
-            for _, node in iter_nodes(self.workflow.root)
+            for _, node in iter_nodes(self.spec().root)
             for tool in node_tools(node)
         )
 

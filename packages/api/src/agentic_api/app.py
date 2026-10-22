@@ -20,6 +20,7 @@ from agentic_api.health import router as health_router
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.routes import router as runs_router
 from agentic_api.settings import Settings
+from agentic_api.templates.routes import router as templates_router
 from agentic_api.workspaces.routes import router as workspaces_router
 from agentic_engine.events import RunEvent
 from agentic_github import GithubApp, GithubAppConfig, GithubConfigError
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(runs_router)
     app.include_router(workspaces_router)
     app.include_router(github_router)
+    app.include_router(templates_router)
     app.add_exception_handler(RequestValidationError, _validation_error)
     _add_schema_components(app, RunEvent)
     return app

@@ -83,9 +83,10 @@ async def existing_run(run_id: UUID, request: Request) -> UUID:
     },
 )
 async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
-    """Queue a run of `workflow` with `input` for its first node, working on `repo` if given.
-    Stream it from `events_url`. A workflow that publishes (`github.openPR`) must have a gate
-    between the writer and the publishing node, or it is refused with `422`."""
+    """Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first
+    node, working on `repo` if given. Stream it from `events_url`. A workflow that publishes
+    (`github.openPR`) must have a gate between the writer and the publishing node, or it is
+    refused with `422`."""
     redis: Redis = request.app.state.redis
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
@@ -97,7 +98,7 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
             "the workflow uses github.* tools, but the workspace has no GitHub connection; "
             "install the GitHub App first",
         )
-    run_id = await create_run(sessions, body.workflow, body.input, body.repo, workspace_id)
+    run_id = await create_run(sessions, body.spec(), body.input, body.repo, workspace_id)
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))

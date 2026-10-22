@@ -65,7 +65,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow` with `input` for its first node, working on `repo` if given.\nStream it from `events_url`. A workflow that publishes (`github.openPR`) must have a gate\nbetween the writer and the publishing node, or it is refused with `422`.",
+        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`.",
         "operationId": "createRun",
         "requestBody": {
           "content": {
@@ -676,6 +676,32 @@
           }
         }
       }
+    },
+    "/templates": {
+      "get": {
+        "tags": [
+          "templates"
+        ],
+        "summary": "List Templates",
+        "description": "The workflow templates a run can start from (`POST /runs` with `template`).",
+        "operationId": "listTemplates",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateOut"
+                  },
+                  "type": "array",
+                  "title": "Response Listtemplates"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -876,7 +902,26 @@
       "CreateRunRequest": {
         "properties": {
           "workflow": {
-            "$ref": "#/components/schemas/WorkflowSpec"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workflow to run. Give this or `template`, not both."
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemplateRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A template to build the workflow from. Give this or `workflow`, not both."
           },
           "input": {
             "type": "string",
@@ -910,9 +955,6 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "workflow"
-        ],
         "title": "CreateRunRequest"
       },
       "CreateRunResponse": {
@@ -1496,6 +1538,60 @@
         ],
         "title": "SequenceNode",
         "description": "Runs its steps in order."
+      },
+      "TemplateOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters",
+            "description": "JSON Schema of the template's options."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "parameters"
+        ],
+        "title": "TemplateOut"
+      },
+      "TemplateRun": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The template's id, e.g. `generate-docs`."
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Parameters",
+            "description": "The template's options, as its `parameters` schema describes."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "TemplateRun",
+        "description": "A run of a template (`GET /templates`) with its options."
       },
       "ToolNode": {
         "properties": {

@@ -529,3 +529,61 @@ async def test_publishing_needs_a_github_connection(
     assert response.status_code == 409
     assert "no GitHub connection" in response.text
     assert await count_runs(sessions) == runs_before
+
+
+DOCS_RUN: dict[str, Any] = {
+    "template": {"id": "generate-docs", "parameters": {"output_dir": "documentation"}},
+    "repo": GITHUB_REPO,
+}
+
+
+async def test_a_template_run_stores_the_spec_it_builds(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with github_connected(sessions), api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json=DOCS_RUN)
+
+    assert response.status_code == 202, response.text
+    run_id = response.json()["run_id"]
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await redis.lrem(RUN_QUEUE, 0, run_id)  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        await redis.aclose()
+    run = await get_run(sessions, UUID(run_id))
+    assert run is not None
+    assert run.spec.id == "generate-docs"
+    assert "`documentation/README.md`" in run.spec.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ({**DOCS_RUN, "workflow": spec_json("valid/open-pr.json")}, "either `workflow` or"),
+        ({"repo": GITHUB_REPO}, "either `workflow` or `template`"),
+        ({**DOCS_RUN, "template": {"id": "nope"}}, "unknown template 'nope'"),
+        (
+            {**DOCS_RUN, "template": {"id": "generate-docs", "parameters": {"output_dir": "../x"}}},
+            "parameters.output_dir:",
+        ),
+        (
+            {**DOCS_RUN, "template": {"id": "generate-docs", "parameters": {"colour": "red"}}},
+            "parameters.colour: Extra inputs are not permitted",
+        ),
+        ({"template": DOCS_RUN["template"]}, "uses repo.list_modules, which need a `repo`"),
+    ],
+)
+async def test_bad_template_runs_are_refused(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    body: dict[str, Any],
+    message: str,
+) -> None:
+    runs_before = await count_runs(sessions)
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json=body)
+
+    assert response.status_code == 422
+    assert message in response.text
+    assert await count_runs(sessions) == runs_before
