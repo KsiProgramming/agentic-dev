@@ -150,6 +150,14 @@ jobs:
       - name: Compose logs
         if: always()
         run: docker compose logs --no-color
+      - name: Upload layout screenshots (phase 2.2)
+        # Every page at 375, 768, 1024 and 1440 px, for review; overflow is asserted in the tests.
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: layout-screenshots
+          path: web/test-results/screenshots
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

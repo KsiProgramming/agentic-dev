@@ -727,7 +727,7 @@ A `map` node runs its `body` once per item of a list, several items at a time, a
 ## Generate docs
 The "Generate docs" template documents each module of a repo and opens a pull request after you approve (phase 1.11, AC-1). A template is a named builder of an ordinary workflow spec (`agentic_engine.templates`): the API builds the spec from the template's options and runs it like any other.
 
-- **Starting it.** In the browser, open `http://localhost:3000`, pick a repo in the **Generate docs** card and click **Generate docs**. Over HTTP, `GET /templates` lists the templates with a JSON Schema of their options, and `POST /runs` takes `"template": {"id": "generate-docs", "parameters": {...}}` instead of `"workflow"` (give one of the two). Unknown templates and bad options get `422` with the option's path (`parameters.output_dir: ...`).
+- **Starting it.** In the browser, open `http://localhost:3000/templates`, pick a repo in the **Generate docs** card and click **Generate docs**. Over HTTP, `GET /templates` lists the templates with a JSON Schema of their options, and `POST /runs` takes `"template": {"id": "generate-docs", "parameters": {...}}` instead of `"workflow"` (give one of the two). Unknown templates and bad options get `422` with the option's path (`parameters.output_dir: ...`).
 - **Options.**
   - `output_dir`: where the docs go, relative to the repo root. Default `docs`. No `.`, `..`, absolute paths or `.git`.
   - `include`: glob patterns over module paths (`packages/*`); only matching modules are documented. Default: all.
@@ -747,7 +747,7 @@ Demo (the phase 1.11 "Done when", AC-1). It needs a dev GitHub App installed on 
 ```bash
 docker compose up -d --build     # with GITHUB_APP_ID, GITHUB_APP_SLUG, .secrets/github-app.pem and AGENTIC_RUNTIME=claude
 # http://localhost:3000/settings: save the Claude key, install the GitHub App
-# http://localhost:3000: pick the test repo, Generate docs, wait for the gate, Approve
+# http://localhost:3000/templates: pick the test repo, Generate docs, wait for the gate, Approve
 # the run page links to the pull request with docs/README.md and one page per module
 ```
 
@@ -816,8 +816,20 @@ For `write-file.json` the writer node `writer` reads `pyproject.toml`, then `rep
 
 While a run is going, `docker ps --filter label=agentic.run_id` shows its container; afterwards it shows none. With `AGENTIC_RUNTIME=claude`, Claude decides which tools to call and answers from what it finds. On `ask-repo.json` it reads each package's `pyproject.toml` and returns a table of the packages and what each is for.
 
+## UI shell
+Every page renders inside one app shell (phase 2.2, `web/src/components/shell/`), set up in the root layout:
+
+- **Sidebar:** the product name, the workspace name (from `GET /workspaces`) and the main sections: **Runs** (`/runs`, the home page, which `/` redirects to), **Templates** (`/templates`) and **Settings** (`/settings`). It is full from 1280 px, an icon rail with tooltips from 1024 to 1279 px, and a drawer opened from the top bar's menu button below 1024 px.
+- **Top bar:** breadcrumbs built from the path (`Runs › 1a2b3c4d` on a run, from `breadcrumbsFor` in `nav.ts`) and the theme menu (Light, Dark, System).
+- **A new page:**
+  - Add `web/src/app/<section>/.../page.tsx` under one of the sections. A new section is a new entry in `NAV_ITEMS`.
+  - Start the page with `PageHeader` (`title`, `description`, `actions`). It is the page's only `h1`, and its actions stack under the title below 768 px.
+  - Set `metadata.title` and the layout adds ` · Agentic Dev`.
+  - Content wider than the screen scrolls in its own box (for example `Table` with `scrollLabel`), never the page.
+- **Checks:** `web/e2e/layout.spec.ts` opens every page at 375, 768, 1024 and 1440 px (Playwright projects `mobile-375` … `desktop-1440`). It fails on horizontal page scroll, checks the nav is reachable, and saves a full-page screenshot to `web/test-results/screenshots/<project>/`. CI uploads these as the `layout-screenshots` artifact. `a11y.spec.ts` runs axe at 375 and 1440 px and checks the skip link, the drawer's focus trap and the theme menu from the keyboard. `pnpm test:e2e --project=mobile-375` runs one width.
+
 ## Monitor
-Open `http://localhost:3000` to start the "Generate docs" template (see above), or type an input and click **Start sample run**. The page starts a one-agent workflow (`web/src/runs/sample-spec.ts`) and opens `/runs/<id>`, which lists the run's events as they arrive: `seq`, time, type, node and a one-line summary of the payload, shown as plain text. The status badge goes from `connecting` to `live`, then to `completed`, `failed` or `cancelled`. A run started with `curl` (see above) can be opened the same way at `http://localhost:3000/runs/<id>`, and reloading a finished run shows its full list. While the run waits at a gate, the page shows the gate's title, prompt and input with **Approve** and **Reject** buttons (`POST /runs/{id}/approvals`). Once a `pr_opened` event arrives, it links to the pull request (only `https://github.com/<owner>/<repo>/pull/<n>` URLs are linked).
+Open `http://localhost:3000/templates` to start the "Generate docs" template (see above), or type an input and click **Start sample run**. The page starts a one-agent workflow (`web/src/runs/sample-spec.ts`) and opens `/runs/<id>`, which lists the run's events as they arrive: `seq`, time, type, node and a one-line summary of the payload, shown as plain text. The status badge goes from `connecting` to `live`, then to `completed`, `failed` or `cancelled`. A run started with `curl` (see above) can be opened the same way at `http://localhost:3000/runs/<id>`, and reloading a finished run shows its full list. While the run waits at a gate, the page shows the gate's title, prompt and input with **Approve** and **Reject** buttons (`POST /runs/{id}/approvals`). Once a `pr_opened` event arrives, it links to the pull request (only `https://github.com/<owner>/<repo>/pull/<n>` URLs are linked).
 
 The browser calls the API directly (`NEXT_PUBLIC_API_URL`, default `http://localhost:8000`) and reads `GET /runs/{id}/events` with `EventSource`, so the API must allow the web app's origin: `CORS_ORIGINS` is a JSON list, and compose sets it to `["http://localhost:${WEB_PORT}"]`. The `RunEvent` type the page uses is generated from the OpenAPI spec like the rest of the client. The Playwright test `web/e2e/monitor.spec.ts` checks the roadmap target: every live event shows up in the browser less than 1 s after it was stored.
 

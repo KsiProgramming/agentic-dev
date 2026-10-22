@@ -61,6 +61,11 @@ Principles and choices that apply:
 | Theme control | Dropdown with Light, Dark and System | The tech stack says "light, dark and system". A two-state toggle cannot select System. |
 | Order of work | Primitives, then shell, then pages, then tests in CI | User choice. The app keeps working after each group. |
 | Screenshot checks | Upload as a CI artifact; assert no overflow in code | User choice. Pixel baselines are flaky across fonts and OS. The overflow assertion is the real "Done when" check. |
+| Breadcrumbs source | Built from the path (`breadcrumbsFor`), not set by each page | Changed during implementation (was a context filled by `PageHeader`). A context is set after hydration, so the crumbs would flash in. The path gives the same crumbs today. A page that needs a custom label (a run name in 2.5) can add a context then. |
+| Path hooks under Cache Components | `usePathname` only in small leaves (nav links, breadcrumbs) inside `Suspense` | Found during implementation. With `cacheComponents`, `/runs/[id]` cannot resolve its path while prerendering, and the build fails otherwise (Next.js docs: "blocking-prerender-client-hook"). The fallback renders the links without the active mark. |
+| Run page header | `RunEvents` keeps its own `h1` (run id and live status) | The status is client state inside `RunEvents`. 2.5 redesigns this header, so `PageHeader` is not forced onto it now. |
+| Wide tables | `Table scrollLabel` makes the scroll container a focusable, named region | Found by the new 375 px axe run (`scrollable-region-focusable`). The event table scrolls inside its box on phones, so it must be reachable by keyboard. |
+| Overlay colour | New `--overlay` token | The shadcn `Sheet` ships `bg-black/10`, a raw palette class (2.1 rule). |
 
 ## Open questions
 - **Shell layout for e2e in CI:** the smoke job runs Playwright against compose. Adding three viewport projects roughly triples the e2e time. If the job gets too slow, run only the layout and axe specs at every viewport and the rest at desktop only.

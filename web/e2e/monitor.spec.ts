@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// The API the browser talks to (compose publishes it on the host).
-const apiURL = process.env.E2E_API_URL ?? "http://localhost:8000";
+import { apiURL } from "./runs";
 
 /** Fail the test on any console error, CORS errors included. */
 function watchConsole(page: Page): string[] {
@@ -44,9 +43,9 @@ async function expectCompletedRun(page: Page): Promise<Row[]> {
   return listed;
 }
 
-test("a run started from the home page shows its events within 1 s", async ({ page }) => {
+test("a run started from the templates page shows its events within 1 s", async ({ page }) => {
   const errors = watchConsole(page);
-  await page.goto("/");
+  await page.goto("/templates");
 
   await page.getByLabel("Input").fill("hello from e2e");
   await page.getByRole("button", { name: "Start sample run" }).click();

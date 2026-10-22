@@ -3,9 +3,19 @@
 import * as React from "react";
 import { cn } from "cn";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+/** `scrollLabel` names the container as a focusable region, so a table wider than the screen
+ * can be scrolled from the keyboard (axe `scrollable-region-focusable`). */
+function Table({
+  className,
+  scrollLabel,
+  ...props
+}: React.ComponentProps<"table"> & { scrollLabel?: string }) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto"
+      {...(scrollLabel ? { role: "region", "aria-label": scrollLabel, tabIndex: 0 } : {})}
+    >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}
