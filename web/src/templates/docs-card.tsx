@@ -1,11 +1,20 @@
 "use client";
 
+import { FolderGit2Icon, PlugIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 
 import { createApiClient } from "@/api/client";
 import type { components } from "@/api/schema";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_WORKSPACE_ID } from "@/settings/claude-connection";
 
 type Repo = components["schemas"]["RepoOut"];
@@ -55,6 +64,8 @@ export function DocsCard({
   workspaceId?: string;
 }) {
   const router = useRouter();
+  const id = useId();
+  const [attempt, setAttempt] = useState(0);
   const [repos, setRepos] = useState<Repos>({ state: "loading" });
   const [repo, setRepo] = useState("");
   const [outputDir, setOutputDir] = useState("docs");
@@ -99,7 +110,12 @@ export function DocsCard({
     return () => {
       live = false;
     };
-  }, [baseUrl, workspaceId]);
+  }, [baseUrl, workspaceId, attempt]);
+
+  function retry() {
+    setRepos({ state: "loading" });
+    setAttempt((n) => n + 1);
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -132,92 +148,93 @@ export function DocsCard({
   }
 
   return (
-    <section
-      aria-labelledby="docs-card-title"
-      className="flex w-full max-w-md flex-col gap-3 rounded border p-4"
-    >
-      <h2 id="docs-card-title" className="font-semibold">
-        Generate docs
-      </h2>
-      <p className="text-sm text-gray-600">
-        Documents each module of a repo in Markdown. You approve before a pull request is opened.
-      </p>
-      {repos.state === "loading" ? <p className="text-sm text-gray-500">Loading repos…</p> : null}
-      {repos.state === "failed" ? (
-        <p role="alert" className="text-sm text-red-700">
-          {repos.message}
-        </p>
-      ) : null}
-      {repos.state === "not-connected" ? (
-        <p className="text-sm">
-          Connect GitHub first:{" "}
-          <Link href="/settings" className="underline">
-            install the GitHub App in Settings
-          </Link>
-          .
-        </p>
-      ) : null}
-      {repos.state === "connected" && repos.repos.length === 0 ? (
-        <p className="text-sm">The GitHub App can reach no repos. Add some on GitHub.</p>
-      ) : null}
-      {repos.state === "connected" && repos.repos.length > 0 ? (
-        <form onSubmit={onSubmit} className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-sm">
-            Repository
-            <select
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              className="rounded border px-2 py-1"
-            >
-              {repos.repos.map((r) => (
-                <option key={r.id} value={r.html_url}>
-                  {r.full_name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Output folder
-            <input
-              value={outputDir}
-              onChange={(e) => setOutputDir(e.target.value)}
-              className="rounded border px-2 py-1 font-mono"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Only these modules (optional)
-            <input
-              value={include}
-              onChange={(e) => setInclude(e.target.value)}
-              placeholder="packages/*, web"
-              className="rounded border px-2 py-1 font-mono"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Extra instructions (optional)
-            <textarea
-              value={extra}
-              onChange={(e) => setExtra(e.target.value)}
-              maxLength={2000}
-              rows={3}
-              placeholder="e.g. Write for new contributors."
-              className="rounded border px-2 py-1"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={pending || !repo}
-            className="self-start rounded bg-black px-3 py-1.5 text-white disabled:opacity-50"
-          >
-            {pending ? "Starting…" : "Generate docs"}
-          </button>
-        </form>
-      ) : null}
-      {error ? (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
-    </section>
+    <Card role="region" aria-labelledby="docs-card-title">
+      <CardHeader>
+        <CardTitle>
+          <h2 id="docs-card-title">Generate docs</h2>
+        </CardTitle>
+        <CardDescription>
+          Documents each module of a repo in Markdown. You approve before a pull request is opened.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {repos.state === "loading" ? <LoadingState rows={2} label="Loading repos…" /> : null}
+        {repos.state === "failed" ? <ErrorState message={repos.message} onRetry={retry} /> : null}
+        {repos.state === "not-connected" ? (
+          <EmptyState
+            icon={PlugIcon}
+            message="Connect GitHub to pick a repository."
+            action={
+              <Button asChild variant="outline">
+                <Link href="/settings">Open Settings to install the GitHub App</Link>
+              </Button>
+            }
+          />
+        ) : null}
+        {repos.state === "connected" && repos.repos.length === 0 ? (
+          <EmptyState
+            icon={FolderGit2Icon}
+            message="The GitHub App can reach no repos. Add some on GitHub."
+          />
+        ) : null}
+        {repos.state === "connected" && repos.repos.length > 0 ? (
+          <form onSubmit={onSubmit} className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`${id}-repo`}>Repository</Label>
+              <NativeSelect
+                id={`${id}-repo`}
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                className="w-full"
+              >
+                {repos.repos.map((r) => (
+                  <NativeSelectOption key={r.id} value={r.html_url}>
+                    {r.full_name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`${id}-output`}>Output folder</Label>
+              <Input
+                id={`${id}-output`}
+                value={outputDir}
+                onChange={(e) => setOutputDir(e.target.value)}
+                className="font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`${id}-include`}>Only these modules (optional)</Label>
+              <Input
+                id={`${id}-include`}
+                value={include}
+                onChange={(e) => setInclude(e.target.value)}
+                placeholder="packages/*, web"
+                className="font-mono"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={`${id}-extra`}>Extra instructions (optional)</Label>
+              <Textarea
+                id={`${id}-extra`}
+                value={extra}
+                onChange={(e) => setExtra(e.target.value)}
+                maxLength={2000}
+                rows={3}
+                placeholder="e.g. Write for new contributors."
+              />
+            </div>
+            <Button type="submit" disabled={pending || !repo} className="self-start">
+              {pending ? "Starting…" : "Generate docs"}
+            </Button>
+          </form>
+        ) : null}
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

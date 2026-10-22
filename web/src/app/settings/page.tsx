@@ -1,6 +1,9 @@
+import { ArrowLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { LoadingState } from "@/components/states";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClaudeConnection } from "@/settings/claude-connection";
 import { GithubConnection } from "@/settings/github-connection";
 
@@ -18,27 +21,43 @@ async function GithubForSearchParams({
 
 export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
-      <Link href="/" className="text-sm text-gray-500 hover:underline">
-        ← Back
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1.5 self-start rounded-sm text-muted-foreground hover:text-foreground hover:underline"
+      >
+        <ArrowLeftIcon aria-hidden="true" className="size-4" />
+        Back
       </Link>
-      <h1 className="text-2xl font-semibold">Settings</h1>
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Claude</h2>
-        <p className="text-sm text-gray-600">
-          Runs on Claude use this key. It is stored encrypted and never shown again.
-        </p>
-        <ClaudeConnection />
-      </section>
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">GitHub</h2>
-        <p className="text-sm text-gray-600">
-          Runs work on the repos the platform&apos;s GitHub App is installed on.
-        </p>
-        <Suspense fallback={<p className="text-sm text-gray-500">Loading…</p>}>
-          <GithubForSearchParams searchParams={searchParams} />
-        </Suspense>
-      </section>
+      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2>Claude</h2>
+          </CardTitle>
+          <CardDescription>
+            Runs on Claude use this key. It is stored encrypted and never shown again.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ClaudeConnection />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2>GitHub</h2>
+          </CardTitle>
+          <CardDescription>
+            Runs work on the repos the platform&apos;s GitHub App is installed on.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<LoadingState rows={2} />}>
+            <GithubForSearchParams searchParams={searchParams} />
+          </Suspense>
+        </CardContent>
+      </Card>
     </main>
   );
 }

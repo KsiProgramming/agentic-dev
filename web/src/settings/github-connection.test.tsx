@@ -174,3 +174,18 @@ test("an unreachable API shows an error", async () => {
 
   expect((await screen.findByRole("alert")).textContent).toBe("Could not reach the API.");
 });
+
+test("a failed load can be retried", async () => {
+  let calls = 0;
+  api({
+    "GET /connections": () => json(200, [GITHUB_CONNECTION]),
+    "GET /repos": () => (++calls === 1 ? json(500, {}) : json(200, REPOS)),
+  });
+  render(<GithubConnection baseUrl="http://api.test" />);
+
+  expect((await screen.findByRole("alert")).textContent).toContain("HTTP 500");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  expect((await screen.findByTestId("github-status")).textContent).toContain("2 repos available");
+  expect(screen.queryByRole("alert")).toBeNull();
+});

@@ -1,9 +1,15 @@
 "use client";
 
+import { CircleAlertIcon, CircleCheckIcon, FolderGit2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 import { createApiClient } from "@/api/client";
 import type { components } from "@/api/schema";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { DEFAULT_WORKSPACE_ID } from "@/settings/claude-connection";
 
 type Repo = components["schemas"]["RepoOut"];
@@ -67,6 +73,7 @@ export function GithubConnection({
   reason?: string;
   navigate?: (url: string) => void;
 }) {
+  const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [pending, setPending] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -105,7 +112,12 @@ export function GithubConnection({
     return () => {
       live = false;
     };
-  }, [baseUrl, workspaceId]);
+  }, [baseUrl, workspaceId, attempt]);
+
+  function retry() {
+    setLoaded({ state: "loading" });
+    setAttempt((n) => n + 1);
+  }
 
   async function onInstall() {
     setPending(true);
@@ -136,6 +148,7 @@ export function GithubConnection({
       }
       setLoaded({ state: "not-connected" });
       setConfirming(false);
+      toast.success("GitHub disconnected.");
     } catch (err) {
       setError(failure(err));
     } finally {
@@ -144,41 +157,39 @@ export function GithubConnection({
   }
 
   const installButton = (label: string) => (
-    <button
-      type="button"
-      onClick={onInstall}
-      disabled={pending}
-      className="self-start rounded bg-black px-3 py-1.5 text-white disabled:opacity-50"
-    >
+    <Button type="button" onClick={onInstall} disabled={pending} className="self-start">
       {label}
-    </button>
+    </Button>
   );
 
   return (
-    <div className="flex w-full max-w-2xl flex-col gap-3">
+    <div className="flex w-full flex-col gap-3">
       {banner ? (
-        <p
+        <Alert
           role="status"
-          className={`text-sm ${banner.ok ? "text-green-700" : "text-red-700"}`}
+          variant={banner.ok ? "default" : "destructive"}
           data-testid="github-result"
         >
-          {banner.text}
-        </p>
+          {banner.ok ? (
+            <CircleCheckIcon aria-hidden="true" className="text-status-succeeded" />
+          ) : (
+            <CircleAlertIcon aria-hidden="true" />
+          )}
+          <AlertDescription className={banner.ok ? "text-foreground" : undefined}>
+            {banner.text}
+          </AlertDescription>
+        </Alert>
       ) : null}
-      {loaded.state === "loading" ? <p className="text-sm text-gray-500">Loading…</p> : null}
+      {loaded.state === "loading" ? <LoadingState rows={2} label="Loading GitHub…" /> : null}
       {loaded.state === "not-configured" ? (
-        <p data-testid="github-status" className="text-sm">
+        <p data-testid="github-status" className="text-muted-foreground">
           The GitHub App is not configured on the API. {loaded.detail}
         </p>
       ) : null}
-      {loaded.state === "failed" ? (
-        <p role="alert" className="text-sm text-red-700">
-          {loaded.message}
-        </p>
-      ) : null}
+      {loaded.state === "failed" ? <ErrorState message={loaded.message} onRetry={retry} /> : null}
       {loaded.state === "not-connected" ? (
         <>
-          <p data-testid="github-status" className="text-sm">
+          <p data-testid="github-status">
             Not connected. Install the GitHub App on your account or organisation to pick repos.
           </p>
           {installButton("Install GitHub App")}
@@ -186,7 +197,7 @@ export function GithubConnection({
       ) : null}
       {loaded.state === "gone" ? (
         <>
-          <p data-testid="github-status" className="text-sm">
+          <p data-testid="github-status">
             The GitHub App was uninstalled{loaded.login ? ` from ${loaded.login}` : ""} or lost
             access. Install it again.
           </p>
@@ -195,68 +206,75 @@ export function GithubConnection({
       ) : null}
       {loaded.state === "connected" ? (
         <>
-          <p data-testid="github-status" className="text-sm">
-            Installed on <span className="font-medium">{loaded.login ?? "GitHub"}</span>.{" "}
-            {loaded.repos.length === 1 ? "1 repo" : `${loaded.repos.length} repos`} available.
+          <p data-testid="github-status" className="flex items-start gap-2">
+            <CircleCheckIcon
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-status-succeeded"
+            />
+            <span>
+              Installed on <span className="font-medium">{loaded.login ?? "GitHub"}</span>.{" "}
+              {loaded.repos.length === 1 ? "1 repo" : `${loaded.repos.length} repos`} available.
+            </span>
           </p>
-          <ul className="flex flex-col divide-y rounded border text-sm" aria-label="Repos">
-            {loaded.repos.map((repo) => (
-              <li key={repo.id} className="flex items-center gap-2 px-3 py-2">
-                <a
-                  href={repo.html_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono hover:underline"
-                >
-                  {repo.full_name}
-                </a>
-                {repo.private ? (
-                  <span className="rounded border px-1.5 text-xs text-gray-600">private</span>
-                ) : null}
-                <span className="ml-auto text-xs text-gray-500">{repo.default_branch}</span>
-              </li>
-            ))}
-            {loaded.repos.length === 0 ? (
-              <li className="px-3 py-2 text-gray-500">
-                The installation has no repos. Add some in its settings on GitHub.
-              </li>
-            ) : null}
-          </ul>
+          {loaded.repos.length === 0 ? (
+            <EmptyState
+              icon={FolderGit2Icon}
+              message="The installation has no repos. Add some in its settings on GitHub."
+            />
+          ) : (
+            <ul className="flex flex-col divide-y rounded-lg border" aria-label="Repos">
+              {loaded.repos.map((repo) => (
+                <li key={repo.id} className="flex min-w-0 items-center gap-2 px-3 py-2">
+                  <a
+                    href={repo.html_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="truncate font-mono underline-offset-4 hover:underline"
+                  >
+                    {repo.full_name}
+                  </a>
+                  {repo.private ? <Badge variant="outline">private</Badge> : null}
+                  <span className="ml-auto font-mono text-xs text-muted-foreground">
+                    {repo.default_branch}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           {confirming ? (
-            <div className="flex items-center gap-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
               <span>Disconnect GitHub? The App stays installed on GitHub.</span>
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="sm"
                 onClick={onDisconnect}
                 disabled={pending}
-                className="rounded bg-red-700 px-2 py-1 text-white disabled:opacity-50"
               >
                 Confirm disconnect
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                className="hover:underline"
-              >
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           ) : (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setConfirming(true)}
               disabled={pending}
-              className="self-start text-sm text-red-700 hover:underline"
+              className="self-start text-destructive hover:text-destructive"
             >
               Disconnect
-            </button>
+            </Button>
           )}
         </>
       ) : null}
       {error ? (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       ) : null}
     </div>
   );

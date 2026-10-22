@@ -34,7 +34,9 @@ async function rows(page: Page): Promise<Row[]> {
 }
 
 async function expectCompletedRun(page: Page): Promise<Row[]> {
-  await expect(page.getByTestId("run-status")).toHaveText("completed", { timeout: 30_000 });
+  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
+    timeout: 30_000,
+  });
   const listed = await rows(page);
   expect(listed.map((r) => r.seq)).toEqual(listed.map((_, i) => i + 1));
   expect(listed[0]?.type).toBe("run_started");

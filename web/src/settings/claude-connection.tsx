@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { CircleCheckIcon, CircleDashedIcon } from "lucide-react";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 
 import { createApiClient } from "@/api/client";
 import type { components } from "@/api/schema";
+import { LoadingState } from "@/components/states";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Connection = components["schemas"]["ConnectionOut"];
 
@@ -33,6 +40,7 @@ export function ClaudeConnection({
   baseUrl?: string;
   workspaceId?: string;
 }) {
+  const keyId = useId();
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const [apiKey, setApiKey] = useState("");
   const [pending, setPending] = useState(false);
@@ -88,6 +96,7 @@ export function ClaudeConnection({
       }
       setLoaded({ state: "ready", connection: data });
       setApiKey("");
+      toast.success("Claude key saved.");
     } catch (err) {
       setError(failure(err));
     } finally {
@@ -108,6 +117,7 @@ export function ClaudeConnection({
       }
       setLoaded({ state: "ready", connection: null });
       setConfirming(false);
+      toast.success("Claude key removed.");
     } catch (err) {
       setError(failure(err));
     } finally {
@@ -116,72 +126,84 @@ export function ClaudeConnection({
   }
 
   if (loaded.state === "loading") {
-    return <p className="text-sm text-gray-500">Loading…</p>;
+    return <LoadingState rows={2} label="Loading the Claude connection…" />;
   }
   const { connection } = loaded;
 
   return (
     <div className="flex w-full max-w-md flex-col gap-3">
-      <p data-testid="claude-status" className="text-sm">
+      <p data-testid="claude-status" className="flex items-start gap-2">
         {connection ? (
           <>
-            Claude key ending in <span className="font-mono">…{connection.key_hint}</span>, updated{" "}
-            {new Date(connection.updated_at).toLocaleString()}.
+            <CircleCheckIcon
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-status-succeeded"
+            />
+            <span>
+              Claude key ending in <span className="font-mono">…{connection.key_hint}</span>,
+              updated {new Date(connection.updated_at).toLocaleString()}.
+            </span>
           </>
         ) : (
-          "No Claude key stored. Runs on Claude fail until one is."
+          <>
+            <CircleDashedIcon
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+            />
+            <span>No Claude key stored. Runs on Claude fail until one is.</span>
+          </>
         )}
       </p>
-      <form onSubmit={onSave} className="flex flex-col gap-2">
-        <label className="flex flex-col gap-1 text-sm">
-          Claude API key
-          <input
+      <form onSubmit={onSave} className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={keyId}>Claude API key</Label>
+          <Input
+            id={keyId}
             type="password"
             autoComplete="off"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="sk-ant-…"
-            className="rounded border px-2 py-1 font-mono"
+            className="font-mono"
           />
-        </label>
-        <button
-          type="submit"
-          disabled={pending || apiKey.trim() === ""}
-          className="rounded bg-black px-3 py-1.5 text-white disabled:opacity-50"
-        >
+        </div>
+        <Button type="submit" disabled={pending || apiKey.trim() === ""} className="self-start">
           {connection ? "Replace key" : "Save key"}
-        </button>
+        </Button>
       </form>
       {connection && !confirming ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => setConfirming(true)}
           disabled={pending}
-          className="self-start text-sm text-red-700 hover:underline"
+          className="self-start text-destructive hover:text-destructive"
         >
           Remove key
-        </button>
+        </Button>
       ) : null}
       {connection && confirming ? (
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
           <span>Remove the stored key?</span>
-          <button
+          <Button
             type="button"
+            variant="destructive"
+            size="sm"
             onClick={onRemove}
             disabled={pending}
-            className="rounded bg-red-700 px-2 py-1 text-white disabled:opacity-50"
           >
             Confirm remove
-          </button>
-          <button type="button" onClick={() => setConfirming(false)} className="hover:underline">
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)}>
             Cancel
-          </button>
+          </Button>
         </div>
       ) : null}
       {error ? (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       ) : null}
     </div>
   );
