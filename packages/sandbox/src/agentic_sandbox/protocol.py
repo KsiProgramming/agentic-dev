@@ -2,7 +2,8 @@
 
 A sandbox holds a clone of the run's repo at `workdir`, which the sandbox user can read but not
 change. Writer nodes get their own git worktree under `worktrees_dir` (`agentic_sandbox.worktree`),
-and file contents reach the sandbox through `put_file`. Commands run with `workdir`, or a worktree,
+and file contents reach the sandbox through `put_file` (and leave it through `take_file`, e.g. a
+writer's branch as a git bundle). Commands run with `workdir`, or a worktree,
 as their current directory. The manager owns the lifecycle: `open()` creates the sandbox and
 clones the repo, and leaving the context destroys it, whether the run succeeded, failed or was
 cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and the attempt that
@@ -22,6 +23,8 @@ MAX_OUTPUT_BYTES = 1024 * 1024
 DEFAULT_EXEC_TIMEOUT_S = 30.0
 # The largest file `put_file` takes.
 MAX_PUT_FILE_BYTES = 1024 * 1024
+# The largest file `take_file` hands out (a writer's branch, bundled).
+MAX_TAKE_FILE_BYTES = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,18 @@ class Sandbox(Protocol):
         """Store `data` as a new file owned by the sandbox user, outside the clone and its
         worktrees, and return its path in the sandbox; a tool then moves it into place. Raises
         `SandboxError` if `data` is over `MAX_PUT_FILE_BYTES`."""
+        ...
+
+    @property
+    def staging_dir(self) -> str:
+        """Where staged files live: writable by the sandbox user, outside the clone and its
+        worktrees. Commands may write a file here for `take_file` to hand out."""
+        ...
+
+    async def take_file(self, path: str) -> bytes:
+        """The bytes of the file `path`, directly in `staging_dir`, which is then removed.
+        Raises `ValueError` for any other path, and `SandboxError` if the file is missing or over
+        `MAX_TAKE_FILE_BYTES`."""
         ...
 
 
