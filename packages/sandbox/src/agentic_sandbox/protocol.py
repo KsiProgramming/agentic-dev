@@ -10,7 +10,7 @@ cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and the att
 continues it opens it again (`open(..., reuse=True)`).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Protocol
@@ -79,14 +79,21 @@ class Sandbox(Protocol):
 
 class SandboxManager(Protocol):
     def open(
-        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
     ) -> AbstractAsyncContextManager[Sandbox]:
         """Create a sandbox for `run_id` holding a shallow clone of `repo`; destroy it on exit,
         unless `keep(run_id)` was called meanwhile.
 
         Without `reuse`, a sandbox the run already has (left by an attempt that died) is replaced
         by a fresh one. With `reuse`, the one it kept is opened again as it was, with its writers'
-        worktrees and commits; if there is none, a fresh one is created.
+        worktrees and commits; if there is none, a fresh one is created. `git_env` goes to the
+        clone (`clone_shallow`), e.g. to authenticate to a private repo; the sandbox never sees
+        it.
 
         Raises `SandboxError` if the sandbox cannot be created or the repo cannot be cloned."""
         ...

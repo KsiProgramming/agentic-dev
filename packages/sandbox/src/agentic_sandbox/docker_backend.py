@@ -23,7 +23,7 @@ import shutil
 import tarfile
 import tempfile
 import time
-from collections.abc import AsyncGenerator, Collection, Sequence
+from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -181,7 +181,12 @@ class DockerSandboxManager:
 
     @asynccontextmanager
     async def open(
-        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
     ) -> AsyncGenerator[DockerSandbox]:
         name = f"agentic-sandbox-{run_id}"
         started = time.monotonic()
@@ -193,7 +198,7 @@ class DockerSandboxManager:
                 container, volume = kept
                 log.info("sandbox %s reopened in %.2f s", name, time.monotonic() - started)
             else:
-                container, volume = await self._create_fresh(name, run_id, repo)
+                container, volume = await self._create_fresh(name, run_id, repo, git_env)
                 log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
             yield DockerSandbox(container)
         finally:
@@ -206,9 +211,9 @@ class DockerSandboxManager:
                 log.info("sandbox %s removed after %.2f s", name, time.monotonic() - started)
 
     async def _create_fresh(
-        self, name: str, run_id: UUID, repo: RepoSource
+        self, name: str, run_id: UUID, repo: RepoSource, git_env: Mapping[str, str] | None
     ) -> tuple[Container, Volume]:
-        archive = await self._clone(repo)
+        archive = await self._clone(repo, git_env)
         volume: Volume | None = None
         container: Container | None = None
         try:
@@ -243,12 +248,14 @@ class DockerSandboxManager:
             return None
         return container, volume
 
-    async def _clone(self, repo: RepoSource) -> bytes:
+    async def _clone(self, repo: RepoSource, git_env: Mapping[str, str] | None) -> bytes:
         """A tar of the sandbox's `/workspace`: a shallow clone of `repo` at `repo/`, and the
         empty `worktrees/` and `.incoming/`."""
         staging = Path(tempfile.mkdtemp(prefix="agentic-clone-"))
         try:
-            await clone_shallow(repo, staging / "repo", local_root=self._local_root)
+            await clone_shallow(
+                repo, staging / "repo", local_root=self._local_root, git_env=git_env
+            )
             return await asyncio.to_thread(_workspace_tar, staging / "repo")
         finally:
             await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)

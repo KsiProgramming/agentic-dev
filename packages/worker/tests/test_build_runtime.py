@@ -8,6 +8,8 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.spec import parse_spec
+from agentic_github import GithubApp
+from agentic_github.testing import private_key_pem
 from agentic_runtime import ClaudeRuntime
 from agentic_runtime.fake import FakeRuntime
 from agentic_runtime.testing import MockClaude
@@ -18,6 +20,7 @@ from agentic_worker.main import (
     ConfigError,
     RunSetupError,
     WorkerSettings,
+    build_github,
     build_keys,
     build_sandboxes,
     run_runtimes,
@@ -136,3 +139,37 @@ def test_the_docker_backend_without_docker_fails_fast(monkeypatch: pytest.Monkey
 
     with pytest.raises(ConfigError, match="Docker is not reachable"):
         build_sandboxes(WorkerSettings.model_validate({"sandbox_backend": "docker"}))
+
+
+def test_no_github_app_without_an_id_and_slug() -> None:
+    assert build_github(WorkerSettings(github_app_id=None, github_app_slug=None)) is None
+
+
+def test_the_github_app_needs_its_private_key(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="GITHUB_APP_PRIVATE_KEY_FILE"):
+        build_github(WorkerSettings(github_app_id=1, github_app_slug="s"))
+    with pytest.raises(ConfigError, match="cannot read"):
+        build_github(
+            WorkerSettings(
+                github_app_id=1, github_app_slug="s", github_app_private_key_file=tmp_path / "x"
+            )
+        )
+
+
+def test_the_github_app_is_built_from_settings(tmp_path: Path) -> None:
+    pem = tmp_path / "app.pem"
+    pem.write_text(private_key_pem(), encoding="ascii")
+
+    app = build_github(
+        WorkerSettings(github_app_id=1, github_app_slug="s", github_app_private_key_file=pem)
+    )
+
+    assert isinstance(app, GithubApp)
+    app.close()
+
+
+def test_empty_github_settings_mean_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "")
+    monkeypatch.setenv("GITHUB_APP_SLUG", "")
+
+    assert WorkerSettings().github_app_id is None

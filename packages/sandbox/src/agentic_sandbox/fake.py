@@ -12,7 +12,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -135,7 +135,12 @@ class FakeSandboxManager:
 
     @asynccontextmanager
     async def open(
-        self, run_id: UUID, repo: RepoSource, *, reuse: bool = False
+        self,
+        run_id: UUID,
+        repo: RepoSource,
+        *,
+        reuse: bool = False,
+        git_env: Mapping[str, str] | None = None,
     ) -> AsyncGenerator[FakeSandbox]:
         root = self._base_dir / f"agentic-sandbox-{run_id}"
         self._kept.discard(run_id)
@@ -143,7 +148,9 @@ class FakeSandboxManager:
             if not (reuse and await asyncio.to_thread((root / "repo").is_dir)):
                 await asyncio.to_thread(_remove_dir, root)
                 await asyncio.to_thread(root.mkdir, parents=True)
-                await clone_shallow(repo, root / "repo", local_root=self._local_root)
+                await clone_shallow(
+                    repo, root / "repo", local_root=self._local_root, git_env=git_env
+                )
                 (root / "worktrees").mkdir()
                 (root / ".incoming").mkdir()
             yield FakeSandbox(root)

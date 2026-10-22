@@ -104,6 +104,12 @@ services:
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-agentic-dev/sandbox:dev}
       SANDBOX_LOCAL_ROOT: /samples
+      # The same GitHub App as the API: runs on GitHub repos clone with an installation token,
+      # and `github.openPR` pushes a writer's branch and opens a pull request (after a gate).
+      # Left blank, GitHub repos are cloned anonymously and runs that use github.* tools fail.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_APP_PRIVATE_KEY_FILE: /github/github-app.pem
     # The Docker socket gives the worker control of the host's Docker (dev only; phase 9.2
     # replaces it). DOCKER_GID is the socket's group: 0 on Docker Desktop, `docker` on Linux.
     group_add:
@@ -112,6 +118,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./.git:/samples/agentic-dev.git:ro
       - secrets:/secrets:ro
+      - ./.secrets:/github:ro
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/worker-ready"]
       interval: 2s

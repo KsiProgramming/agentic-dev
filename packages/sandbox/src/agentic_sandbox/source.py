@@ -10,6 +10,7 @@ import contextlib
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Self
 
@@ -75,11 +76,14 @@ async def clone_shallow(
     *,
     local_root: Path | None = None,
     timeout_s: float = CLONE_TIMEOUT_S,
+    git_env: Mapping[str, str] | None = None,
 ) -> None:
     """Clone `source` into `dest` (which must not exist) with depth 1.
 
     Only the https and file transports are enabled, prompts are off, and the user's and system's
-    git config are ignored. Raises `SandboxError` with a message free of host paths if the clone
+    git config are ignored. `git_env` (e.g. a GitHub token as an HTTP header, through
+    `GIT_CONFIG_*`) is added to git's environment for an https source only; it never reaches the
+    clone's own config. Raises `SandboxError` with a message free of host paths if the clone
     fails.
     """
     url = _local_repo(source, local_root) if source.is_local else source.url
@@ -104,6 +108,7 @@ async def clone_shallow(
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": str(config),
+            **({} if source.is_local else dict(git_env or {})),
         }
         await _git(argv, env, timeout_s, url, dest)
 
