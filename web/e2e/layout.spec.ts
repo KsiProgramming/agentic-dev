@@ -128,7 +128,22 @@ test("a finished run", async ({ page, request }) => {
   await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
     timeout: 30_000,
   });
+  await expect(page.getByRole("button", { name: "Rerun" })).toBeVisible();
   await checkPage(page, "run-finished");
+});
+
+test("runs, with a run's menu open", async ({ page, request }) => {
+  const runId = await startRun(request, [WRITER]);
+  await page.goto(`/runs/${runId}`);
+  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
+    timeout: 30_000,
+  });
+  await page.goto("/runs");
+  const row = page.locator(`[data-run-id="${runId}"]`).filter({ visible: true });
+  await row.getByRole("button", { name: /^Actions for/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Rerun" })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await screenshot(page, "runs-row-menu");
 });
 
 test("a run waiting at a gate", async ({ page, request }) => {

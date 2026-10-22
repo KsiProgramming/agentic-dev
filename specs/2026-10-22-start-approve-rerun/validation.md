@@ -41,11 +41,11 @@
 - [ ] Rerun: the button shows only on failed, cancelled and succeeded; success navigates with a toast; errors show a toast; the "Rerun of" link is rendered.
 - [ ] ESLint, Prettier and `tsc --noEmit` are green. The generated API client is up to date (the CI diff check).
 
-### End to end (Playwright on docker compose, `AGENTIC_RUNTIME=fake`, `AGENTIC_GITHUB=fake`)
+### End to end (Playwright on docker compose, `AGENTIC_RUNTIME=fake`, `AGENTIC_GITHUB=fake`, `CLAUDE_KEY_CHECK=fake`)
 - [ ] `journey.spec.ts` runs the full Done-when story:
   1. Connect Claude and GitHub from Settings.
   2. Start "Generate docs" on the fixture repo from the gallery sheet.
-  3. Reject at the dock with a comment, and the run fails.
+  3. Reject at the dock with a comment, and the run ends cancelled with the comment on its gate.
   4. Rerun from the console, approve, and the PR link appears.
   5. Rerun from the runs list.
   6. Both reruns link back.

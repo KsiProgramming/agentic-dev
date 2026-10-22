@@ -37,7 +37,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0012_connection_account_type"
+    assert version == "0013_run_template_parameters"
     assert {
         "runs",
         "run_events",

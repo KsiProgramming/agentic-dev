@@ -12,10 +12,10 @@ import { RunConsole } from "./run-console";
 
 const RUN_ID = "00000000-0000-0000-0000-000000000001";
 
-const nav = vi.hoisted(() => ({ search: "", replace: vi.fn() }));
+const nav = vi.hoisted(() => ({ search: "", replace: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({
   usePathname: () => `/runs/00000000-0000-0000-0000-000000000001`,
-  useRouter: () => ({ replace: nav.replace }),
+  useRouter: () => ({ replace: nav.replace, push: nav.push }),
   useSearchParams: () => new URLSearchParams(nav.search),
 }));
 
@@ -74,6 +74,7 @@ function expectStatus(status: string, label: string) {
 beforeEach(() => {
   nav.search = "";
   nav.replace.mockReset();
+  nav.push.mockReset();
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal("scrollTo", vi.fn());
@@ -393,4 +394,48 @@ test("an ended run offers no Cancel", async () => {
   });
   await screen.findByRole("heading", { name: "Generate docs" });
   expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
+});
+
+test("an ended run can be rerun from the header, which opens the new run", async () => {
+  const NEW_ID = "00000000-0000-0000-0000-0000000000b2";
+  const fetch = api(detail({ status: "failed", failure_reason: "boom" }), async (request) =>
+    request.url.endsWith(`/runs/${RUN_ID}/rerun`)
+      ? json({ run_id: NEW_ID, status: "queued", events_url: "" }, 202)
+      : json({ detail: "unexpected" }, 500),
+  );
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit(runEvent(2, "run_failed", { error: "boom" }));
+  });
+
+  const rerun = await screen.findByRole("button", { name: "Rerun" });
+  expect(screen.queryByRole("button", { name: /Cancel run/ })).toBeNull();
+  fireEvent.click(rerun);
+
+  await waitFor(() => expect(nav.push).toHaveBeenCalledWith(`/runs/${NEW_ID}`));
+  expect(
+    fetch.mock.calls.some(
+      ([r]) => typeof r !== "string" && r.method === "POST" && r.url.endsWith("/rerun"),
+    ),
+  ).toBe(true);
+});
+
+test("a live run offers Cancel, not Rerun", async () => {
+  api(detail({ status: "running" }));
+  const source = show();
+  act(() => source.emit(runEvent(1, "run_started")));
+
+  expect(await screen.findByRole("button", { name: /Cancel run/ })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Rerun" })).toBeNull();
+});
+
+test("a rerun links back to the run it repeats", async () => {
+  const ORIGINAL = "00000000-0000-0000-0000-0000000000c3";
+  api(detail({ status: "running", rerun_of: ORIGINAL }));
+  show();
+
+  const link = await screen.findByRole("link", { name: ORIGINAL.slice(0, 8) });
+  expect(link.getAttribute("href")).toBe(`/runs/${ORIGINAL}`);
+  expect(link.parentElement?.textContent).toBe(`Rerun of ${ORIGINAL.slice(0, 8)}`);
 });

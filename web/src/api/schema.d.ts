@@ -116,6 +116,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun
+         * @description Queue a new run with the same workflow spec, input, repo and workspace as the ended run
+         *     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
+         *     not changed. The spec is the one the original ran, even if its template has changed since.
+         */
+        post: operations["rerunRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/approvals": {
         parameters: {
             query?: never;
@@ -1249,6 +1271,51 @@ export interface operations {
             };
             /** @description No run with this id */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerunRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateRunResponse"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

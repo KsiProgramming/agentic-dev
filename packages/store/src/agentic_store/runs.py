@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
+from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.spec import WorkflowSpec, parse_spec
@@ -29,9 +30,11 @@ async def create_run(
     repo: RepoSource | None = None,
     workspace_id: UUID = DEFAULT_WORKSPACE_ID,
     template_id: str | None = None,
+    template_parameters: dict[str, JsonValue] | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
-    template `spec` was built from if any; returns its id. The workspace must exist."""
+    template `spec` was built from (with its options) if any; returns its id. The workspace must
+    exist."""
     run_id = uuid4()
     async with sessions.begin() as session:
         session.add(
@@ -44,6 +47,7 @@ async def create_run(
                 repo=repo.model_dump(mode="json") if repo else None,
                 repo_url=repo.url if repo else None,
                 template_id=template_id,
+                template_parameters=template_parameters,
             )
         )
     return run_id

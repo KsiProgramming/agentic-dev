@@ -839,3 +839,156 @@ async def test_cancelling_an_unknown_or_ended_run_is_refused(
     assert unknown.status_code == 404
     assert ended.status_code == 409
     assert "has already ended (completed)" in ended.text
+
+
+# `POST /runs/{id}/rerun`: a new run linked to the one it repeats.
+
+
+async def unqueue(redis_url: str, *run_ids: str) -> None:
+    """Take runs off the queue: these tests have no worker, and the next test's worker must not
+    pick them up."""
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        for run_id in run_ids:
+            await redis.lrem(RUN_QUEUE, 0, run_id)  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        await redis.aclose()
+
+
+async def ended_run(
+    sessions: async_sessionmaker[AsyncSession],
+    client: httpx.AsyncClient,
+    redis_url: str,
+    body: dict[str, Any],
+    status: str,
+) -> str:
+    """A run started with `body`, then set to `status` as a worker would have left it."""
+    response = await client.post("/runs", json=body)
+    assert response.status_code == 202, response.text
+    run_id = response.json()["run_id"]
+    await unqueue(redis_url, run_id)
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.id == UUID(run_id))
+            .values(status=status, failure_reason="boom" if status == "failed" else None)
+        )
+    return run_id
+
+
+async def stored_row(sessions: async_sessionmaker[AsyncSession], run_id: str) -> Run:
+    async with sessions() as session:
+        row = await session.get(Run, UUID(run_id))
+    assert row is not None
+    return row
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled", "completed"])
+async def test_an_ended_run_is_rerun_as_a_new_linked_run(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, status: str
+) -> None:
+    async with github_connected(sessions), api(postgres_url, redis_url) as client:
+        original_id = await ended_run(sessions, client, redis_url, DOCS_RUN, status)
+        before = await stored_row(sessions, original_id)
+        response = await client.post(f"/runs/{original_id}/rerun")
+        assert response.status_code == 202, response.text
+        new_id = response.json()["run_id"]
+        # Other tests leave runs of their own in this database: list the docs runs only.
+        listed = (await client.get("/runs", params={"template": "generate-docs"})).json()["items"]
+        detail = (await client.get(f"/runs/{new_id}")).json()
+    await unqueue(redis_url, new_id)
+
+    original, rerun = await stored_row(sessions, original_id), await stored_row(sessions, new_id)
+    assert new_id != original_id
+    assert response.json()["events_url"].endswith(f"/runs/{new_id}/events")
+    copied = ("spec", "input", "repo", "repo_url", "workspace_id", "template_id")
+    assert {k: getattr(rerun, k) for k in copied} == {k: getattr(original, k) for k in copied}
+    assert rerun.template_parameters == {"output_dir": "documentation"}
+    assert (rerun.status, rerun.rerun_of, rerun.failure_reason) == ("queued", before.id, None)
+    # The original is not changed.
+    assert (original.status, original.updated_at, original.rerun_of) == (
+        status,
+        before.updated_at,
+        None,
+    )
+    assert listed[0]["id"] == new_id and listed[0]["rerun_of"] == original_id
+    assert detail["rerun_of"] == original_id
+
+
+async def test_a_rerun_of_a_rerun_links_to_its_parent(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        first = await ended_run(
+            sessions,
+            client,
+            redis_url,
+            {"workflow": spec_json("valid/two-step-sequence.json")},
+            "failed",
+        )
+        second = (await client.post(f"/runs/{first}/rerun")).json()["run_id"]
+        await unqueue(redis_url, second)
+        async with sessions.begin() as session:
+            await session.execute(update(Run).where(Run.id == UUID(second)).values(status="failed"))
+        third = (await client.post(f"/runs/{second}/rerun")).json()["run_id"]
+    await unqueue(redis_url, third)
+
+    assert (await stored_row(sessions, third)).rerun_of == UUID(second)
+    assert (await stored_row(sessions, second)).rerun_of == UUID(first)
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "waiting"])
+async def test_a_run_that_has_not_ended_is_not_rerun(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, status: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        run_id = await ended_run(
+            sessions,
+            client,
+            redis_url,
+            {"workflow": spec_json("valid/two-step-sequence.json")},
+            status,
+        )
+        runs_before = await count_runs(sessions)
+        response = await client.post(f"/runs/{run_id}/rerun")
+
+    assert response.status_code == 409
+    assert f"has not ended ({status})" in response.text
+    assert await count_runs(sessions) == runs_before
+
+
+async def test_rerunning_an_unknown_run_is_404(postgres_url: str, redis_url: str) -> None:
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post(f"/runs/{uuid4()}/rerun")
+
+    assert response.status_code == 404
+
+
+async def test_a_publishing_run_is_not_rerun_once_github_is_disconnected(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        async with github_connected(sessions):
+            run_id = await ended_run(sessions, client, redis_url, DOCS_RUN, "failed")
+        runs_before = await count_runs(sessions)
+        response = await client.post(f"/runs/{run_id}/rerun")
+
+    assert response.status_code == 409
+    assert "no GitHub connection" in response.text
+    assert await count_runs(sessions) == runs_before
+
+
+async def test_a_workflow_run_has_no_template_parameters(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        run_id = await ended_run(
+            sessions,
+            client,
+            redis_url,
+            {"workflow": spec_json("valid/two-step-sequence.json")},
+            "completed",
+        )
+
+    row = await stored_row(sessions, run_id)
+    assert (row.template_id, row.template_parameters) == (None, None)

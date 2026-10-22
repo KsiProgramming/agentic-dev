@@ -366,6 +366,56 @@
         }
       }
     },
+    "/runs/{run_id}/rerun": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Rerun",
+        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since.",
+        "operationId": "rerunRun",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRunResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "409": {
+            "description": "The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/approvals": {
       "post": {
         "tags": [

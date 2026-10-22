@@ -24,6 +24,7 @@ import { useRunEvents } from "../use-run-events";
 import { currentActivity } from "./activity";
 import { ActivityLine } from "./activity-line";
 import { ApprovalDock, DOCK_ID } from "./approval-dock";
+import { canRerun, RerunButton } from "../rerun";
 import { CancelRunButton } from "./cancel-run-button";
 import { RawEvents } from "./raw-events";
 import { RunHeader, type HeaderFacts } from "./run-header";
@@ -166,6 +167,8 @@ function Console({
         actions={
           canCancel(facts.status.status) ? (
             <CancelRunButton runId={runId} baseUrl={baseUrl} />
+          ) : canRerun(facts.status.status) && !live ? (
+            <RerunButton runId={runId} status={facts.status.status} baseUrl={baseUrl} />
           ) : null
         }
       />

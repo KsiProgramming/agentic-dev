@@ -118,6 +118,21 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Escape");
     });
 
+    test("a finished run's Rerun and the runs list menu have no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(request, [WRITER]);
+      await open(page, `/runs/${runId}`);
+      await expect(page.getByRole("button", { name: "Rerun" })).toBeVisible({ timeout: 30_000 });
+      await expectNoSeriousIssues(page);
+      await open(page, "/runs");
+      const row = page.locator(`[data-run-id="${runId}"]`).filter({ visible: true });
+      await row.getByRole("button", { name: /^Actions for/ }).click();
+      await expect(page.getByRole("menuitem", { name: "Rerun" })).toBeVisible();
+      await expectNoSeriousIssues(page);
+    });
+
     test("an unknown run has no serious a11y issues", async ({ page }) => {
       await open(page, "/runs/00000000-0000-0000-0000-000000000000");
       await expect(page.getByText("Run not found.")).toBeVisible();

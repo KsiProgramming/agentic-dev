@@ -126,6 +126,8 @@ class Run(Base):
     attempt: Mapped[int] = mapped_column(Integer, server_default="0")
     # The template the spec was built from, if any (e.g. `generate-docs`).
     template_id: Mapped[str | None] = mapped_column(String(128))
+    # The template's options the run was started with (for "Edit and rerun" later).
+    template_parameters: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     repo_url: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -128,7 +128,7 @@ It depends on 2.3, 2.4 and 2.5 (all done). It unblocks:
 
 **Fake mode for dev and e2e**
 - Only allowed outside production. The API refuses to start with a fake mode when `AGENTIC_ENV=production`.
-- **Fake key verifier:** when `AGENTIC_RUNTIME=fake`, keys starting `sk-ant-test-` pass and others are rejected.
+- **Fake key verifier:** when `CLAUDE_KEY_CHECK=fake`, keys starting `sk-ant-test-` pass and others are rejected. It is its own setting rather than following `AGENTIC_RUNTIME=fake`, so a developer on the fake runtime can still save a real key.
 - **`AGENTIC_GITHUB=fake`:** fake install, connection and repos. It maps `https://github.com/e2e-org/<name>` to a bare fixture repo seeded in compose, and a fake `openPR` returns a PR URL. It reuses `agentic_github/testing.py` where possible.
 
 **tech-stack.md → UI design system**

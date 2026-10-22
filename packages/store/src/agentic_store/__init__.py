@@ -52,6 +52,7 @@ from agentic_store.models import (
 )
 from agentic_store.notify import listen
 from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run
+from agentic_store.rerun import RunNotEndedError, create_rerun
 from agentic_store.runs import StoredRun, create_run, get_run
 from agentic_store.sink import (
     RUN_EVENTS_CHANNEL,
@@ -85,6 +86,7 @@ __all__ = [
     "Run",
     "RunEndedError",
     "RunEventRow",
+    "RunNotEndedError",
     "RunNotFoundError",
     "RunNotWaitingError",
     "RunSummaryRow",
@@ -95,6 +97,7 @@ __all__ = [
     "WrongGateError",
     "cancel_requested",
     "claim_run",
+    "create_rerun",
     "create_run",
     "delete_connection",
     "dequeue_run",

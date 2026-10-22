@@ -23,6 +23,7 @@ from agentic_api.runs.models import (
     RunSummaryPage,
     WaitingGate,
     WorkflowRef,
+    uses_github,
 )
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
@@ -31,8 +32,10 @@ from agentic_store import (
     ApprovalError,
     InvalidCursorError,
     RunEndedError,
+    RunNotEndedError,
     RunNotFoundError,
     RunSummaryRow,
+    create_rerun,
     create_run,
     enqueue_run,
     get_github_installation,
@@ -252,11 +255,7 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     if await get_workspace(sessions, workspace_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
     if body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "the workflow uses github.* tools, but the workspace has no GitHub connection; "
-            "install the GitHub App first",
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
     run_id = await create_run(
         sessions,
         body.spec(),
@@ -264,10 +263,53 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
         body.repo,
         workspace_id,
         template_id=body.template.id if body.template else None,
+        template_parameters=dict(body.template.parameters) if body.template else None,
     )
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
+    )
+
+
+_NO_GITHUB = (
+    "the workflow uses github.* tools, but the workspace has no GitHub connection; "
+    "install the GitHub App first"
+)
+
+
+@router.post(
+    "/{run_id}/rerun",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="rerunRun",
+    responses={
+        404: {"description": "No run with this id"},
+        409: {
+            "description": "The run has not ended yet, or its workflow uses `github.*` tools and "
+            "the workspace no longer has a GitHub connection"
+        },
+    },
+)
+async def rerun(run_id: UUID, request: Request) -> CreateRunResponse:
+    """Queue a new run with the same workflow spec, input, repo and workspace as the ended run
+    `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
+    not changed. The spec is the one the original ran, even if its template has changed since."""
+    sessions = _sessions(request)
+    original = await get_run(sessions, run_id)
+    if original is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+    if uses_github(original.spec) and (
+        await get_github_installation(sessions, original.workspace_id) is None
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
+    try:
+        new_id = await create_rerun(sessions, run_id)
+    except RunNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except RunNotEndedError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    await enqueue_run(request.app.state.redis, new_id)
+    return CreateRunResponse(
+        run_id=new_id, events_url=str(request.url_for("stream_run_events", run_id=new_id))
     )
 
 
