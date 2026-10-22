@@ -137,6 +137,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel
+         * @description Ask for the run to be cancelled. Its worker stops it within a few seconds and writes
+         *     `run_cancelled` (reason `cancelled by user`); a queued run, or one waiting at a gate, is ended
+         *     by the worker that picks it up. Asking again before it has ended is accepted.
+         */
+        post: operations["cancelRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/events": {
         parameters: {
             query?: never;
@@ -384,6 +406,21 @@ export interface components {
              * @constant
              */
             status: "queued";
+        };
+        /** CancelResponse */
+        CancelResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Status
+             * @description The worker ends the run `cancelled`; its event stream shows when.
+             * @default cancelling
+             * @constant
+             */
+            status: "cancelling";
         };
         /**
          * ConnectionOut
@@ -1224,6 +1261,51 @@ export interface operations {
                 content?: never;
             };
             /** @description The run is not waiting at this gate, or it was already decided */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelResponse"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run has already ended */
             409: {
                 headers: {
                     [name: string]: unknown;

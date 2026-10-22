@@ -1,4 +1,5 @@
-"""Streamed text is merged so the log gets at most one `text_delta` per interval (phase 2.5)."""
+"""Streamed text is merged so the log gets at most one `text_delta` per interval, and a cancelled
+run says why (phase 2.5)."""
 
 import asyncio
 from uuid import uuid4
@@ -177,3 +178,33 @@ async def test_a_cancelled_node_writes_its_pending_text_before_node_cancelled() 
     assert "".join(str(e.payload["text"]) for e in _deltas(sink.events)) == "ab"
     assert types.index("node_cancelled") > max(i for i, t in enumerate(types) if t == "text_delta")
     assert types[-1] == "run_cancelled"
+
+
+@pytest.mark.parametrize(
+    ("message", "reason"),
+    [(None, "caller cancelled"), ("cancelled by user", "cancelled by user")],
+)
+async def test_run_cancelled_says_why_the_caller_cancelled(
+    message: str | None, reason: str
+) -> None:
+    spec = parse_spec(
+        {
+            "spec_version": "0",
+            "id": "cancel",
+            "name": "Cancel",
+            "root": {"type": "agent", "id": "writer", "role": "Writer", "instructions": "Go."},
+        }
+    )
+    runtime = FakeRuntime(
+        {"writer": [TextDelta(text="a"), Delay(10), Message(text="a"), ECHO_USAGE]}
+    )
+    sink = DeltaSignal()
+    task = asyncio.create_task(run_workflow(spec, runtime, run_id=uuid4(), sink=sink))
+    await sink.first_delta.wait()
+
+    task.cancel(message)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert sink.events[-1].type == "run_cancelled"
+    assert sink.events[-1].payload == {"reason": reason}

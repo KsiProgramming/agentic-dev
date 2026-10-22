@@ -179,6 +179,11 @@ class DockerSandboxManager:
     def keep(self, run_id: UUID) -> None:
         self._kept.add(run_id)
 
+    async def discard(self, run_id: UUID) -> None:
+        self._kept.discard(run_id)
+        if removed := await asyncio.to_thread(_sweep, self._client, f"{RUN_LABEL}={run_id}"):
+            log.info("sandbox agentic-sandbox-%s discarded (%d container)", run_id, removed)
+
     @asynccontextmanager
     async def open(
         self,

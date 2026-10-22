@@ -9,6 +9,13 @@ from agentic_store.approvals import (
     pending_decision,
     record_approval,
 )
+from agentic_store.cancel import (
+    USER_CANCEL_REASON,
+    RunEndedError,
+    cancel_requested,
+    request_cancel,
+    run_ended,
+)
 from agentic_store.checkpoint import open_checkpointer
 from agentic_store.connections import (
     GITHUB,
@@ -66,6 +73,7 @@ __all__ = [
     "GITHUB",
     "RUN_EVENTS_CHANNEL",
     "RUN_QUEUE",
+    "USER_CANCEL_REASON",
     "AlreadyDecidedError",
     "Approval",
     "ApprovalError",
@@ -75,6 +83,7 @@ __all__ = [
     "InvalidCursorError",
     "PostgresEventSink",
     "Run",
+    "RunEndedError",
     "RunEventRow",
     "RunNotFoundError",
     "RunNotWaitingError",
@@ -84,6 +93,7 @@ __all__ = [
     "WorkspaceInfo",
     "WorkspaceNotFoundError",
     "WrongGateError",
+    "cancel_requested",
     "claim_run",
     "create_run",
     "delete_connection",
@@ -111,5 +121,7 @@ __all__ = [
     "record_approval",
     "release_run",
     "renew_lease",
+    "request_cancel",
+    "run_ended",
     "waiting_run_ids",
 ]

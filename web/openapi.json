@@ -426,6 +426,56 @@
         }
       }
     },
+    "/runs/{run_id}/cancel": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Cancel",
+        "description": "Ask for the run to be cancelled. Its worker stops it within a few seconds and writes\n`run_cancelled` (reason `cancelled by user`); a queued run, or one waiting at a gate, is ended\nby the worker that picks it up. Asking again before it has ended is accepted.",
+        "operationId": "cancelRun",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "409": {
+            "description": "The run has already ended"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/events": {
       "get": {
         "tags": [
@@ -1099,6 +1149,27 @@
           "decision"
         ],
         "title": "ApprovalResponse"
+      },
+      "CancelResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "const": "cancelling",
+            "title": "Status",
+            "description": "The worker ends the run `cancelled`; its event stream shows when.",
+            "default": "cancelling"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "CancelResponse"
       },
       "ConnectionOut": {
         "properties": {

@@ -268,3 +268,38 @@ test("a lost stream can be retried", async () => {
   act(() => second.emit(runEvent(1, "run_started")));
   await waitFor(() => expectStatus("running", "Running"));
 });
+
+test("a live run can be cancelled after confirming", async () => {
+  const fetch = api(detail(), async () => json({ run_id: RUN_ID, status: "cancelling" }, 202));
+  const source = show();
+  act(() => source.emit(runEvent(1, "run_started")));
+
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Cancel this run?" });
+  expect(fetch.mock.calls.some(([r]) => typeof r !== "string" && r.url.endsWith("/cancel"))).toBe(
+    false,
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
+
+  await screen.findByRole("button", { name: "Cancelling…" });
+  const request = fetch.mock.calls
+    .map((c) => c[0])
+    .find((r): r is Request => typeof r !== "string" && r.url.endsWith("/cancel"))!;
+  expect(request.method).toBe("POST");
+  expect(request.url).toBe(`http://api.test/runs/${RUN_ID}/cancel`);
+
+  act(() => source.emit(runEvent(2, "run_cancelled", { reason: "cancelled by user" })));
+  expectStatus("cancelled", "Cancelled");
+  expect(screen.queryByRole("button", { name: /Cancel/ })).toBeNull();
+});
+
+test("an ended run offers no Cancel", async () => {
+  api(detail({ status: "completed" }));
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit(runEvent(2, "run_completed"));
+  });
+  await screen.findByRole("heading", { name: "Generate docs" });
+  expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
+});

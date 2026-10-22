@@ -111,6 +111,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - `GET /runs`: run summaries, newest first, with cursor pagination and filters `status`, `template`, `repo`. Status, timings, PR URL and the waiting gate come from the run's events. They are kept in the `runs` row when events are written, so listing does not scan the log.
 - `GET /runs/{id}`: one summary (the same shape as the list items, plus `input` and `failure_reason`).
 - `POST /runs/{id}/rerun`: creates a **new** run with the same workflow spec, input, repo and workspace. It sets `rerun_of` and returns `CreateRunResponse`. The original run is never changed (the log is append-only). Resuming a failed run from its last completed node, which the checkpointer would allow, is a later option and not part of rerun.
+- `POST /runs/{id}/cancel`: sets `runs.cancel_requested_at` and returns `202`. Only workers write events, so the worker running the run ends it (it checks every second); a queued run, or one waiting at a gate (queued again), is ended by the worker that claims it. The run ends `cancelled` with reason `cancelled by user`. An ended run answers `409`.
 - **Delta volume:** the Claude adapter keeps streaming `text_delta`. The engine buffers deltas per node and writes at most one merged `text_delta` event every 250 ms. This keeps the log small and the stream live, while the client still merges what it receives.
 
 ## Security & secrets

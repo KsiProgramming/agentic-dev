@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { EmptyState, ErrorState } from "@/components/states";
+import type { RunStatus } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,6 +21,7 @@ import { useFollowScroll } from "../use-follow-scroll";
 import { useNow } from "../use-now";
 import { runDetailKey, useRunDetail, type RunDetail } from "../use-run-detail";
 import { useRunEvents } from "../use-run-events";
+import { CancelRunButton } from "./cancel-run-button";
 import { RawEvents } from "./raw-events";
 import { RunHeader, type HeaderFacts } from "./run-header";
 import { StepList } from "./step-view";
@@ -66,6 +68,11 @@ export function headerFacts(
     durationMs,
     prUrl: prUrl ?? run?.pr_url ?? null,
   };
+}
+
+/** A run can be cancelled until it has ended. */
+function canCancel(status: RunStatus): boolean {
+  return status === "queued" || status === "running" || status === "waiting";
 }
 
 function lastPullRequest(steps: Step[]): string | null {
@@ -127,7 +134,17 @@ function Console({
 
   return (
     <section className="flex flex-col gap-6">
-      <RunHeader runId={runId} run={run} facts={facts} now={now} />
+      <RunHeader
+        runId={runId}
+        run={run}
+        facts={facts}
+        now={now}
+        actions={
+          canCancel(facts.status.status) ? (
+            <CancelRunButton runId={runId} baseUrl={baseUrl} />
+          ) : null
+        }
+      />
 
       {status === "error" ? (
         <ErrorState message="Lost the connection to the event stream." onRetry={onRetry} />
