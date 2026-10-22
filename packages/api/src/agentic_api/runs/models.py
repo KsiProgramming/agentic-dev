@@ -39,3 +39,18 @@ class CreateRunResponse(BaseModel):
     run_id: UUID
     status: Literal["queued"] = "queued"
     events_url: str
+
+
+class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str = Field(description="The gate the run is waiting at.")
+    decision: Literal["approve", "reject"]
+    comment: str | None = None
+
+
+class ApprovalResponse(BaseModel):
+    run_id: UUID
+    node_id: str
+    decision: Literal["approve", "reject"]
+    status: Literal["queued"] = "queued"

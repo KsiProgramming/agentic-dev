@@ -65,6 +65,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve
+         * @description Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
+         *     `cancelled`. The run is queued again; its stream carries on with `gate_decided`.
+         */
+        post: operations["approveRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/events": {
         parameters: {
             query?: never;
@@ -256,6 +277,42 @@ export interface components {
             model?: string | null;
             /** Tools */
             tools?: string[];
+        };
+        /** ApprovalRequest */
+        ApprovalRequest: {
+            /**
+             * Node Id
+             * @description The gate the run is waiting at.
+             */
+            node_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            /** Comment */
+            comment?: string | null;
+        };
+        /** ApprovalResponse */
+        ApprovalResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approve" | "reject";
+            /**
+             * Status
+             * @default queued
+             * @constant
+             */
+            status: "queued";
         };
         /**
          * ConnectionOut
@@ -636,6 +693,55 @@ export interface operations {
             };
             /** @description No workspace with this id */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approveRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalResponse"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run is not waiting at this gate, or it was already decided */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
