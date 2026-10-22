@@ -58,7 +58,8 @@ test("/ redirects to runs", async ({ page }) => {
 
 test("runs", async ({ page }) => {
   await page.goto("/runs");
-  await expect(page.getByRole("link", { name: "Browse templates" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All runs" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveCount(0); // the list has loaded
   await checkPage(page, "runs");
 });
 

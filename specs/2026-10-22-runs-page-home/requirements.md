@@ -19,13 +19,14 @@ Principles and choices that apply:
 ## Scope
 ### In scope
 - **Backend: `GET /runs/stream?workspace_id`** (SSE). It sends one `run_summary` frame (a `RunSummary`) each time a run in the workspace changes.
-  - `RunEventListener` gets a workspace-wide subscription. Today it only has a per-run one. On a wake-up, the stream re-reads the summaries of the runs that were notified, using `get_run_summary`.
-  - A frame is sent only when the summary has changed since the last frame for that run, for example status, `finished_at`, `pr_url` or `waiting_gate`. 250 ms delta notifications that change nothing are dropped.
-  - Each frame's `id` is the run's `updated_at`. There is no replay: after a reconnect the client refetches the list. A keep-alive comment is sent every 15 s.
+  - `RunEventListener` gets a workspace-wide subscription (`subscribe_all`). Today it only has a per-run one.
+  - On a wake-up (or every 15 s without one), the stream reads the workspace's runs whose `updated_at` passed a watermark, with a 5 s lookback (`list_changed_run_summaries`). The sink only moves `updated_at` on events that change the summary, so text deltas never list a run. Reading by watermark rather than by notified run id means a lost notification or a listener reconnect delays a change but never drops it. The lookback covers two workers committing out of order.
+  - A frame is sent only when the summary differs from the last one sent for that run. A burst of events is read once (200 ms coalescing).
+  - Each frame's `id` is the run's `updated_at`. There is no replay: after a reconnect the client refetches the list. FastAPI's SSE response sends the keep-alive pings itself.
   - The route is declared before `/{run_id}`. OpenAPI and `web/src/api/schema.d.ts` are regenerated.
 - **Frontend data layer:** add `@tanstack/react-query` with a `QueryClientProvider` in the root layout.
-  - `useRunSummaries(filters)` is an infinite query over the cursor.
-  - `useRunsStream(workspaceId)` opens one `EventSource`. It patches matching items in the query cache. It invalidates the list queries when a run it doesn't know about appears, or when a run moves into or out of `waiting`.
+  - `useRunList(filters)` is an infinite query over the cursor.
+  - `useRunsStream(workspaceId)` opens one `EventSource`. For each cached list, a run it shows is patched in place. A list the run joins (a new run, or one that now matches its filters) or leaves (for example an approved run leaving "Needs approval") is refetched. On a reconnect (not the first connection) every list is refetched.
 - **Runs page `/runs`:**
   - **Needs approval** section on top (`?status=waiting`, every waiting run), shown only when there are any. Below it is **All runs**, newest first, with "Load more" pagination.
   - Columns: status badge, workflow name, repo (`owner/name`, mono), started (relative time with the absolute time as a tooltip), duration (ticks live while the run is running), PR link (external icon). The whole row links to `/runs/{id}`.
@@ -48,7 +49,9 @@ Principles and choices that apply:
 |---|---|---|
 | Live updates | New workspace SSE `GET /runs/stream` (user choice), not polling | Status changes show within about 1 s. It reuses the existing `LISTEN/NOTIFY` listener. |
 | Frame content | The full `RunSummary`, deduplicated per run | The client needs no extra fetch per change, and noisy delta events don't flood the stream. |
-| Reconnect | No replay. Invalidate list queries on `open` | Summaries are state, not a log. A refetch is simpler and always correct. |
+| Change detection | Watermark on `runs.updated_at` (5 s lookback), not the notified run ids | It survives lost notifications and listener reconnects with no extra bookkeeping, and the sink already keeps `updated_at` to summary changes only. |
+| Reconnect | No replay. Refetch the lists on every `open` after the first | Summaries are state, not a log. A refetch is simpler and always correct. The first connection is covered by the stream's lookback. |
+| Cache update rule | Per list: patch if shown and still matching; refetch if the run joins or leaves it | The API stays the source of order and paging; no client-side re-sorting. |
 | Data fetching | TanStack Query (user choice), added now | It is the tech-stack choice. Infinite queries, cache patching and retry come with it, and 2.5 to 2.8 reuse it. |
 | "Needs approval first" | A separate query `status=waiting`, shown above the main list | Waiting runs are never paged away (mission 8). It was noted as a 2.4 concern in 2.3. |
 | Waiting runs in "All runs" | Still listed in their date position | The main list stays the complete, truthful history. The top section only highlights them. |
