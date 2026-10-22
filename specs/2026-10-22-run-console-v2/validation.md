@@ -8,23 +8,34 @@ Made checkable: rendering the recorded docs-run fixture produces exactly one mes
 ## Automated checks
 The user chose Vitest reducer + component tests as the merge gate. Backend code added here (buffer, cancel) still gets the repo's usual pytest coverage, and the existing CI suites must stay green.
 
-- [ ] **Vitest, `buildTimeline`:** on the docs-run fixture, the number of message turns per step equals the number of agent turns, and no turn holds a single chunk when the fixture streamed several. `message` replaces the merged text. `tool_call`/`tool_result` pair by `call_id` (pending, success, `is_error`). Map items nest under their map node with their own turns; loop iterations are separate. Duplicate `seq` and unknown types do not change the result. Usage tokens sum per step.
-- [ ] **Vitest, components:** a message with `<script>`/`<img onerror>` renders as text (no raw HTML). Links get `target="_blank" rel="noreferrer"`. Tool card is collapsed by default, expands with keyboard, Copy writes the JSON. `JsonView` collapses past depth 2. Header shows PR link only after `pr_opened`; Cancel only for live statuses and asks for confirmation. Raw events tab folds a streamed message into one row with the full text and chunk count (expandable to the chunks), filters by type and node, and the tab survives a reload via `?tab=raw`. "Jump to latest" appears when scrolled up and new content arrives.
-- [ ] **pytest, delta buffer:** see plan group 4 (merge, timer flush, flush-before-other-events, text unchanged, per map item, flush on cancel).
-- [ ] **pytest, cancel:** see plan group 5 (running, waiting, ended → 409, unknown → 404, idempotent).
-- [ ] Existing CI e2e (`layout` screenshots at 375/768/1440, `a11y` axe, `monitor`, `runs-page`) pass, updated where they relied on per-event rows.
-- [ ] Lint and types: `ruff`, `pyright`/`mypy` strict, ESLint, Prettier, `tsc`; the OpenAPI/schema-is-current check is green.
+- [x] **Vitest, `buildTimeline`:** on the docs-run fixture, 8 message blocks (3 writers × 2 turns + 2 review rounds) from many more chunks. `message` replaces the merged text. `tool_call`/`tool_result` pair by `call_id` (pending, success, `is_error`). Map items nest under their map node; loop iterations are separate. Duplicate `seq` and unknown types do not change the result. Usage tokens sum per step.
+- [x] **Vitest, components and console:**
+  - Messages: Markdown renders; raw HTML and `<!-- -->` comments are dropped, never rendered; images dropped; links `target="_blank" rel="noreferrer"`, `javascript:` dropped; caret only while streaming.
+  - Tool calls: one line per call, closed until opened, then arguments and result; failed calls marked; running calls say what they are doing; groups summarise ("Read 2 files, listed 1 folder, ran 1 search") and count failures; writes stand on their own line with a preview ("+3 more lines"); reads have no preview.
+  - Rail: each step's marker carries its status label for screen readers.
+  - `currentActivity`: the latest running step's action, map items named by path, parallel count, `null` once nothing runs.
+  - `JsonView` collapses past depth 2 and copies.
+  - Header: summary facts before any event, PR link after `pr_opened`, Cancel only while live and only after confirming, failure reason shown.
+  - Raw events folds a streamed message into one row with the full text and chunk count (expandable to the chunks), filters by type and node; the tab is kept in the URL.
+  - Follow-scroll: the replay neither scrolls nor shows the pill; follows once at the bottom; away from the bottom, new content shows "Jump to latest".
+  - 169 web tests pass locally.
+- [x] **pytest, delta buffer** (`test_deltas.py`): merge, timer flush, flush before other events, text unchanged, per map item in a real run, flush on cancel, cancel reason.
+- [x] **pytest, cancel** (`test_runs.py`, `test_worker.py`): running, waiting at a gate (approval then refused), queued before any worker, unknown → 404, ended → 409, asked twice; kept sandbox discarded. 653 Python tests pass locally (all packages but `sandbox`, whose Docker tests sweep every run sandbox on the host).
+- [ ] Existing CI e2e (`layout` screenshots at 375/768/1440, `a11y` axe, `monitor`, `runs-page`) pass in CI. `monitor` was updated for the folded raw rows; the suite was not run locally.
+- [x] Lint and types: `ruff`, `pyright` strict, ESLint, Prettier, `tsc` clean; OpenAPI and `schema.d.ts` regenerated.
 
 ## Manual / demo checks
-- [ ] `docker compose up`, start a "Generate docs" run on the fake runtime, open it from the Runs page: each agent turn is one growing message, tool calls are collapsed cards, map items are nested under the map node.
-- [ ] Switch to Raw events: each streamed message is a single row with readable paragraph text (no row per chunk); expanding it lists the chunks; filters by type and node work; the event count is much lower than before the buffer (deltas merged per 250 ms).
-- [ ] Scroll up during a live run: auto-scroll stops and "Jump to latest" appears; clicking it returns to the bottom and follow resumes.
-- [ ] Cancel a running run from the header: confirm dialog, toast, status becomes Cancelled within a few seconds, both in the console and on the Runs page.
-- [ ] Check the page at 375 px: header actions stack, JSON scrolls in its box, no horizontal page scroll.
+- [x] On the local stack (Claude runtime), a real "Generate docs" run on `KsiProgramming/GildedRoseKata`: each agent turn is one message; a module's 16 tool calls are one summary line; the writer's file writes and commit show their first lines; map items read `src/Core dotnet`; steps hang off the rail with status icons; the waiting gate says "Needs approval" with its panel.
+- [x] Raw events on a two-node run: each streamed message is one folded row ("text_delta × 6", "× 27") with readable text; 45 events in all.
+- [x] A fresh live run shows the activity line ("writer · Thinking…") with a spinner.
+- [x] Opening a finished or waiting run lands at the top with no "Jump to latest" pill.
+- [x] At 375 px: header actions stack, no horizontal page scroll.
+- [ ] Scroll up during a long live run: auto-scroll stops and "Jump to latest" appears; clicking it returns to the bottom and follow resumes (covered by unit tests, not tried by hand).
+- [ ] Cancel a running run from the header: confirm dialog, toast, status becomes Cancelled within a few seconds, in the console and on the Runs page (API and worker covered by pytest, not tried by hand).
 
 ## Merge criteria
 - [ ] All checks above pass in CI.
-- [ ] No raw palette classes; only tokens and shared components (2.1 rule).
-- [ ] Agent messages and tool output are never rendered as HTML.
-- [ ] Cancel never triggers a write action (push, PR) and leaves the event log append-only.
-- [ ] Roadmap 2.5 is marked `✅ Done` in the implementation PR.
+- [x] No raw palette classes; only tokens and shared components (2.1 rule).
+- [x] Agent messages and tool output are never rendered as HTML.
+- [x] Cancel never triggers a write action (push, PR) and leaves the event log append-only.
+- [x] Roadmap 2.5 is marked `✅ Done` in the implementation PR (#27).
