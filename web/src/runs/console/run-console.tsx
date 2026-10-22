@@ -1,17 +1,17 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDownIcon, ListTreeIcon, RadioIcon, TableIcon } from "lucide-react";
+import { ArrowDownIcon, CirclePauseIcon, ListTreeIcon, RadioIcon, TableIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { useConsoleWaiting } from "@/components/shell/attention";
 import { EmptyState, ErrorState } from "@/components/states";
 import type { RunStatus } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { GatePanel } from "../gate-panel";
 import { pendingGate, type PendingGate } from "../gates";
 import { displayStatus } from "../status";
 import { badgeStatus, statusLabel } from "../summaries";
@@ -23,6 +23,7 @@ import { runDetailKey, useRunDetail, type RunDetail } from "../use-run-detail";
 import { useRunEvents } from "../use-run-events";
 import { currentActivity } from "./activity";
 import { ActivityLine } from "./activity-line";
+import { ApprovalDock, DOCK_ID } from "./approval-dock";
 import { CancelRunButton } from "./cancel-run-button";
 import { RawEvents } from "./raw-events";
 import { RunHeader, type HeaderFacts } from "./run-header";
@@ -90,6 +91,25 @@ function lastPullRequest(steps: Step[]): string | null {
   return url;
 }
 
+/** In the waiting step: the decision is made in the dock at the bottom of the page. */
+function WaitingMarker() {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[13px]" data-testid="waiting-marker">
+      <CirclePauseIcon aria-hidden="true" className="size-4 text-status-waiting" />
+      <span className="font-medium">Waiting for approval</span>
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="h-auto px-0"
+        onClick={() => document.getElementById(DOCK_ID)?.focus()}
+      >
+        Go to the decision
+      </Button>
+    </div>
+  );
+}
+
 function Console({
   runId,
   baseUrl,
@@ -108,6 +128,7 @@ function Console({
   const live = status === "connecting" || status === "live";
   const now = useNow(1000, live);
   const follow = useFollowScroll(events.length, status === "live");
+  useConsoleWaiting(gate !== null);
 
   // The summary (repo, PR, failure reason) moves on with the run: fetch it again when it does.
   useEffect(() => {
@@ -184,7 +205,7 @@ function Console({
                 now,
                 extra: (step) =>
                   gate && step.id === gate.nodeId && step.status === "waiting" ? (
-                    <GatePanel key={gate.nodeId} runId={runId} gate={gate} baseUrl={baseUrl} />
+                    <WaitingMarker />
                   ) : null,
               }}
             />
@@ -201,8 +222,14 @@ function Console({
         </TabsContent>
       </Tabs>
 
+      {/* Announced once when a gate starts waiting; the dock itself never takes focus. */}
+      <div aria-live="polite" className="sr-only">
+        {gate ? `Approval needed: ${gate.title}` : ""}
+      </div>
+      {gate ? <ApprovalDock key={gate.nodeId} runId={runId} gate={gate} baseUrl={baseUrl} /> : null}
+
       {follow.behind ? (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center">
+        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--dock-height,0px)+1.5rem)] z-40 flex justify-center">
           <Button
             type="button"
             size="sm"

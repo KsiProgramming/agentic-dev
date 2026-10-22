@@ -4,6 +4,7 @@ import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 
 import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -43,6 +44,19 @@ function PrLink({ url }: { url: string }) {
       {label}
       <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
     </a>
+  );
+}
+
+/** A waiting run's way to its decision: the console, where the gate is reviewed. */
+function ReviewLink({ run }: { run: RunSummary }) {
+  if (run.status !== "waiting") return null;
+  return (
+    <Button asChild size="xs" variant="outline" className="relative z-10">
+      <Link href={`/runs/${run.id}`}>
+        Review
+        <span className="sr-only"> {run.workflow.name}</span>
+      </Link>
+    </Button>
   );
 }
 
@@ -95,7 +109,10 @@ export function RunsTable({
         {runs.map((run) => (
           <TableRow key={run.id} data-run-id={run.id} className="relative">
             <TableCell>
-              <StatusBadge status={badgeStatus(run.status)} />
+              <div className="flex items-center gap-2">
+                <StatusBadge status={badgeStatus(run.status)} />
+                <ReviewLink run={run} />
+              </div>
             </TableCell>
             <TableCell className="max-w-72 truncate">
               <Link href={`/runs/${run.id}`} className={STRETCHED}>
@@ -143,6 +160,9 @@ export function RunCard({ run, now }: { run: RunSummary; now: number }) {
           <Duration run={run} now={now} />
         </span>
         {run.pr_url ? <PrLink url={run.pr_url} /> : null}
+        <span className="ml-auto">
+          <ReviewLink run={run} />
+        </span>
       </div>
     </Card>
   );

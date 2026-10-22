@@ -134,8 +134,28 @@ test("a finished run", async ({ page, request }) => {
 test("a run waiting at a gate", async ({ page, request }) => {
   const runId = await startRun(request, [WRITER, GATE]);
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("gate-panel")).toBeVisible({ timeout: 30_000 });
+  const dock = page.getByTestId("approval-dock");
+  await expect(dock).toBeVisible({ timeout: 30_000 });
   await checkPage(page, "run-waiting");
+
+  // The gate is visible without scrolling (roadmap 2.6): the whole dock is in the viewport,
+  // its buttons included, and fits its width.
+  const viewport = page.viewportSize()!;
+  const box = (await dock.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  for (const name of [/Approve/, /Reject/, "Review details"]) {
+    await expect(dock.getByRole("button", { name })).toBeInViewport({ ratio: 1 });
+  }
+
+  // Scrolled to the end, the last of the timeline is above the dock, not under it.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const last = page.getByTestId("step").last();
+  const lastBox = (await last.boundingBox())!;
+  const dockTop = (await dock.boundingBox())!.y;
+  expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(dockTop + 1);
+  await screenshot(page, "run-waiting-end");
 });
 
 test("an unknown run", async ({ page }) => {

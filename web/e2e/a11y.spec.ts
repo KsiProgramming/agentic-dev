@@ -103,8 +103,19 @@ for (const colorScheme of ["light", "dark"] as const) {
     test("a run waiting at a gate has no serious a11y issues", async ({ page, request }) => {
       const runId = await startRun(request, [WRITER, GATE]);
       await open(page, `/runs/${runId}`);
-      await expect(page.getByTestId("gate-panel")).toBeVisible({ timeout: 30_000 });
+      const dock = page.getByTestId("approval-dock");
+      await expect(dock).toBeVisible({ timeout: 30_000 });
       await expectNoSeriousIssues(page);
+
+      await dock.getByRole("button", { name: "Review details" }).click();
+      await expect(page.getByTestId("gate-details")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+
+      await dock.getByRole("button", { name: /Reject/ }).click();
+      await expect(page.getByRole("dialog", { name: /Reject/ })).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
     });
 
     test("an unknown run has no serious a11y issues", async ({ page }) => {
@@ -154,6 +165,31 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Escape");
     await expect(drawer).toBeHidden();
     await expect(button).toBeFocused();
+  });
+
+  test("a gate is decided from the keyboard: R opens Reject, Escape closes it, A approves", async ({
+    page,
+    request,
+  }) => {
+    const runId = await startRun(request, [WRITER, GATE]);
+    await page.goto(`/runs/${runId}`);
+    const dock = page.getByTestId("approval-dock");
+    await expect(dock).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveTitle(/^● Needs approval · Run /);
+
+    await page.keyboard.press("r");
+    const dialog = page.getByRole("dialog", { name: /Reject/ });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Comment (optional)")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+
+    await page.keyboard.press("a");
+    await expect(dock).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
+      timeout: 30_000,
+    });
+    await expect(page).not.toHaveTitle(/Needs approval · Run /);
   });
 
   test("the theme menu works from the keyboard", async ({ page }) => {

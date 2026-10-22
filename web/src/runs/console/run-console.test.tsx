@@ -189,37 +189,128 @@ test("an unknown run says so", async () => {
   await screen.findByText("Run not found.");
 });
 
-test("a waiting gate can be approved from its step", async () => {
-  const fetch = api(detail({ status: "waiting" }), async () =>
-    json({ run_id: RUN_ID, node_id: "gate", decision: "approve", status: "queued" }, 202),
-  );
-  const source = show();
+function approvals(fetch: ReturnType<typeof api>): Request[] {
+  return fetch.mock.calls
+    .map((c) => c[0])
+    .filter((r): r is Request => typeof r !== "string" && r.url.endsWith("/approvals"));
+}
 
+/** A run waiting at gate `gate`, with an artifact holding HTML (data, never markup). */
+function waitAtGate(source: FakeEventSource, prompt?: string) {
   act(() => {
     source.emit(runEvent(1, "run_started"));
     source.emit({ ...runEvent(2, "node_started"), node_id: "gate" });
     source.emit({
-      ...runEvent(3, "gate_waiting", { title: "Open a PR?", artifact: "<b>x</b>" }),
+      ...runEvent(3, "gate_waiting", {
+        title: "Open a PR?",
+        ...(prompt ? { prompt } : {}),
+        artifact: "# Docs written\n\n<b>x</b> under `docs/`.",
+      }),
       node_id: "gate",
     });
   });
+}
+
+const APPROVED = json(
+  { run_id: RUN_ID, node_id: "gate", decision: "approve", status: "queued" },
+  202,
+);
+
+test("a waiting gate is decided in the dock; its step points there", async () => {
+  const fetch = api(detail({ status: "waiting" }), async () => APPROVED.clone());
+  const source = show();
+  waitAtGate(source);
 
   expectStatus("waiting", "Needs approval");
   const step = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "gate")!;
-  const panel = within(step).getByTestId("gate-panel");
-  expect(panel.querySelector("b")).toBeNull();
-  fireEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+  expect(within(step).getByTestId("waiting-marker").textContent).toContain("Waiting for approval");
+  const dock = screen.getByRole("region", { name: "Approval needed" });
+  expect(within(dock).getByRole("heading", { name: "Open a PR?" })).toBeDefined();
+  // No prompt: the summary is the artifact's first line of text.
+  expect(within(dock).getByText("Docs written")).toBeDefined();
+  expect(dock.querySelector("b")).toBeNull();
+  expect(screen.getByTestId("dock-spacer")).toBeDefined();
 
-  await screen.findByText(/Approved\. The run carries on/);
-  const request = fetch.mock.calls
-    .map((c) => c[0])
-    .find((r): r is Request => typeof r !== "string" && r.url.endsWith("/approvals"))!;
-  expect(await request.json()).toEqual({ node_id: "gate", decision: "approve" });
+  fireEvent.click(within(step).getByRole("button", { name: "Go to the decision" }));
+  expect(document.activeElement).toBe(dock);
+
+  fireEvent.click(within(dock).getByRole("button", { name: /Approve/ }));
+  await within(dock).findByText(/Approved\. The run carries on/);
+  expect(await approvals(fetch)[0]!.json()).toEqual({ node_id: "gate", decision: "approve" });
 
   act(() =>
     source.emit({ ...runEvent(4, "gate_decided", { decision: "approve" }), node_id: "gate" }),
   );
-  expect(screen.queryByTestId("gate-panel")).toBeNull();
+  expect(screen.queryByTestId("approval-dock")).toBeNull();
+  expect(screen.queryByTestId("dock-spacer")).toBeNull();
+});
+
+test("rejecting asks first, with an optional comment sent with the decision", async () => {
+  const fetch = api(detail({ status: "waiting" }), async () =>
+    json({ run_id: RUN_ID, node_id: "gate", decision: "reject", status: "queued" }, 202),
+  );
+  const source = show();
+  waitAtGate(source, "Approving pushes the branch.");
+  const dock = screen.getByRole("region", { name: "Approval needed" });
+  expect(within(dock).getByText("Approving pushes the branch.")).toBeDefined();
+
+  fireEvent.click(within(dock).getByRole("button", { name: /Reject/ }));
+  const dialog = await screen.findByRole("dialog", { name: /Reject/ });
+  expect(approvals(fetch)).toEqual([]);
+  fireEvent.change(within(dialog).getByLabelText("Comment (optional)"), {
+    target: { value: "  Wrong folder.  " },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Reject" }));
+
+  await within(dock).findByText(/Rejected\. The run carries on/);
+  expect(await approvals(fetch)[0]!.json()).toEqual({
+    node_id: "gate",
+    decision: "reject",
+    comment: "Wrong folder.",
+  });
+});
+
+test("Review details shows the gate's artifact as Markdown, without its HTML", async () => {
+  api(detail({ status: "waiting" }));
+  const source = show();
+  waitAtGate(source);
+
+  fireEvent.click(screen.getByRole("button", { name: "Review details" }));
+
+  const details = await screen.findByTestId("gate-details");
+  expect(within(details).getByRole("heading", { name: "Docs written" })).toBeDefined();
+  expect(details.querySelector("b")).toBeNull();
+});
+
+test("A approves and R opens Reject, but not while typing or in a dialog", async () => {
+  const fetch = api(detail({ status: "waiting" }), async () => APPROVED.clone());
+  const source = show();
+  waitAtGate(source);
+
+  fireEvent.keyDown(window, { key: "r" });
+  const dialog = await screen.findByRole("dialog", { name: /Reject/ });
+  const comment = within(dialog).getByLabelText("Comment (optional)");
+  fireEvent.keyDown(comment, { key: "a" });
+  fireEvent.keyDown(window, { key: "a" });
+  expect(approvals(fetch)).toEqual([]);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+  fireEvent.keyDown(window, { key: "a" });
+  await waitFor(() => expect(approvals(fetch)).toHaveLength(1));
+});
+
+test("a refused decision is shown in the dock and can be tried again", async () => {
+  api(detail({ status: "waiting" }), async () =>
+    json({ detail: "the run is not waiting at gate" }, 409),
+  );
+  const source = show();
+  waitAtGate(source);
+
+  fireEvent.click(screen.getByRole("button", { name: /Approve/ }));
+
+  expect((await screen.findByRole("alert")).textContent).toBe("the run is not waiting at gate");
+  expect(screen.getByRole("button", { name: /Approve/ })).toHaveProperty("disabled", false);
 });
 
 test("an opened pull request is linked in the header and its step", async () => {

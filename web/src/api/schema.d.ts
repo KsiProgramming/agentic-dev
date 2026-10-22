@@ -385,7 +385,10 @@ export interface components {
              * @enum {string}
              */
             decision: "approve" | "reject";
-            /** Comment */
+            /**
+             * Comment
+             * @description Why, recorded with the decision; a rejection's becomes the run's reason.
+             */
             comment?: string | null;
         };
         /** ApprovalResponse */

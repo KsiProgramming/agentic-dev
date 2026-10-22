@@ -72,6 +72,42 @@ test("a docs run is started from the template gallery", async ({ page, request }
   await request.post(`${apiURL}/runs/${runId}/cancel`);
 });
 
+test("a docs run waits at its gate, is approved from the dock and opens a pull request", async ({
+  page,
+  request,
+}) => {
+  const response = await request.post(`${apiURL}/runs`, {
+    data: {
+      template: { id: "generate-docs", parameters: {} },
+      repo: { url: `https://github.com/${DOCS_DEMO}` },
+    },
+  });
+  expect(response.status()).toBe(202);
+  const { run_id } = (await response.json()) as { run_id: string };
+
+  // Waiting runs are counted on Runs in the sidebar and in the title of every page.
+  await page.goto("/runs");
+  await expect(page.getByRole("link", { name: /Review/ }).first()).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page).toHaveTitle(/^\(\d+\+?\) ● Needs approval · Runs/);
+
+  await page.goto(`/runs/${run_id}`);
+  const dock = page.getByTestId("approval-dock");
+  await expect(dock).toBeVisible({ timeout: 60_000 });
+  await expect(dock.getByRole("heading")).toHaveText(
+    "Open a pull request with the generated docs?",
+  );
+  await dock.getByRole("button", { name: /Approve/ }).click();
+
+  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
+    timeout: 60_000,
+  });
+  await expect(
+    page.getByRole("link", { name: new RegExp(`${DOCS_DEMO}/pull/\\d+`) }).first(),
+  ).toBeVisible();
+});
+
 test("a run started with POST /runs shows its events within 1 s", async ({ page, request }) => {
   const errors = watchConsole(page);
   const response = await request.post(`${apiURL}/runs`, {

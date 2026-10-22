@@ -1126,13 +1126,15 @@
           "comment": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 2000
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Comment"
+            "title": "Comment",
+            "description": "Why, recorded with the decision; a rejection's becomes the run's reason."
           }
         },
         "additionalProperties": false,

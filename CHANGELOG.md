@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 2.6 (part B) approval dock and waiting signals:
+  - **Approval dock.** While a gate waits, the run console shows a bar fixed to the bottom of the viewport (`web/src/runs/console/approval-dock.tsx`) with the gate's title, a one-line summary (its prompt, else the first line of its artifact), "Review details" (a sheet with the artifact as Markdown, HTML dropped), Reject (a dialog with an optional comment, sent with the decision) and Approve. The page reserves the dock's height so it never covers content; under 768 px its buttons stack. `A` approves and `R` opens Reject, except while typing or in a dialog.
+  - **In the timeline**, the waiting step shows "Waiting for approval" with a link to the decision instead of the old inline gate panel (removed).
+  - **Waiting signals.** "Runs" in the sidebar (a dot on the icon rail) and the mobile menu button show how many runs wait. The tab title is "● Needs approval · Run <id>" on a waiting run and "(N) ● Needs approval · …" on every other page. Waiting rows in the runs list have a "Review" link to the console.
+  - **API.** An approval's `comment` is limited to 2000 characters.
 - Phase 2.6 (part A) start screen and settings:
   - **Start screen.** `/templates` is a gallery of template cards from `GET /templates`, each with a "Requires" line showing which connections are there. A card (or `?template=<id>`, or "New run" on the Runs page) opens the "New run" sheet (`web/src/runs/new-run/`):
     - a "Before you start" checklist of the connections the template needs, with the Claude key entered in place and GitHub connected through an install that comes back to the sheet;

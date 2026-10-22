@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { pendingGate, pullRequestUrl } from "./gates";
+import { gateSummary, pendingGate, pullRequestUrl, SUMMARY_MAX, type PendingGate } from "./gates";
 import { runEvent } from "./testing";
 
 const WAITING = runEvent(2, "gate_waiting", {
@@ -29,4 +29,27 @@ test("only GitHub pull request URLs are offered as links", () => {
   expect(pullRequestUrl(opened("javascript:alert(1)"))).toBeNull();
   expect(pullRequestUrl(opened("https://evil.test/acme/api/pull/1"))).toBeNull();
   expect(pullRequestUrl([])).toBeNull();
+});
+
+function gate(overrides: Partial<PendingGate>): PendingGate {
+  return { nodeId: "g", title: "Approve?", prompt: null, artifact: "", ...overrides };
+}
+
+test("the dock summary is the prompt, else the artifact's first line of text", () => {
+  expect(gateSummary(gate({ prompt: "  Approving pushes.  ", artifact: "x" }))).toBe(
+    "Approving pushes.",
+  );
+  expect(
+    gateSummary(gate({ artifact: "\n<!-- module: api -->\n\n## The api   module\nmore" })),
+  ).toBe("The api module");
+  expect(gateSummary(gate({ artifact: "- first item" }))).toBe("first item");
+  expect(gateSummary(gate({ artifact: "<b></b>\n<i>bold</i> text" }))).toBe("bold text");
+  expect(gateSummary(gate({}))).toBe("");
+});
+
+test("a long summary is cut at a word, within the limit", () => {
+  const summary = gateSummary(gate({ prompt: "word ".repeat(60) }));
+
+  expect(summary.length).toBeLessThanOrEqual(SUMMARY_MAX);
+  expect(summary.endsWith("word…")).toBe(true);
 });

@@ -1,5 +1,16 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  render as renderUi,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+import { FakeEventSource, runSummary } from "@/runs/testing";
 
 import { AppShell } from "./app-shell";
 
@@ -8,13 +19,27 @@ const nav = vi.hoisted(() => ({ pathname: "/runs" }));
 vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
 vi.mock("next-themes", () => ({ useTheme: () => ({ theme: "system", setTheme: vi.fn() }) }));
 
+const api = vi.hoisted(() => ({ waiting: [] as unknown[] }));
+
 beforeEach(() => {
   nav.pathname = "/runs";
+  api.waiting = [];
+  FakeEventSource.instances = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(Response.json([{ id: "w1", name: "Default", created_at: "" }])),
+    vi.fn(async (request: Request) =>
+      new URL(request.url).pathname === "/runs"
+        ? Response.json({ items: api.waiting, next_cursor: null })
+        : Response.json([{ id: "w1", name: "Default", created_at: "" }]),
+    ),
   );
 });
+
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderUi(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -70,4 +95,37 @@ test("following a link closes the drawer", async () => {
   fireEvent.click(within(drawer).getByRole("link", { name: "Settings" }));
 
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("runs waiting at a gate are counted on Runs, the menu button and the page title", async () => {
+  api.waiting = [
+    runSummary({ id: "r1", status: "waiting" }),
+    runSummary({ id: "r2", status: "waiting" }),
+  ];
+  document.title = "Settings · Agentic Dev";
+  render(<AppShell>page</AppShell>);
+
+  const runs = sidebar().getByRole("link", { name: /Runs/ });
+  await waitFor(() => expect(runs.textContent).toContain("2 need approval"));
+  expect(
+    screen.getByRole("button", { name: "Open navigation (2 runs need approval)" }),
+  ).toBeDefined();
+  await waitFor(() => expect(document.title).toBe("(2) ● Needs approval · Settings · Agentic Dev"));
+
+  // Next.js sets the title of the next page: the count is put back in front.
+  act(() => {
+    document.title = "Templates · Agentic Dev";
+  });
+  await waitFor(() =>
+    expect(document.title).toBe("(2) ● Needs approval · Templates · Agentic Dev"),
+  );
+});
+
+test("with nothing waiting, Runs has no badge and the title is left alone", async () => {
+  document.title = "Runs · Agentic Dev";
+  render(<AppShell>page</AppShell>);
+
+  await sidebar().findByTestId("workspace-name");
+  expect(sidebar().queryByTestId("runs-waiting-badge")).toBeNull();
+  expect(document.title).toBe("Runs · Agentic Dev");
 });
