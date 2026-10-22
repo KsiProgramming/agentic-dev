@@ -118,6 +118,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
+- `github.openPR` no longer fails with "git fetch failed: transport 'file' not allowed" after an approved gate. git checks the file transport when fetching the writer's bundle, and `push_bundle` only allowed it for `file://` test remotes. It is now allowed for the bundle fetch only, and fetch and push to GitHub stay https only.
 - The "Generate docs" writer no longer fails with "Claude stopped without finishing: max_tokens": the Claude runtime's defaults are now 32,000 output tokens per call (was 4,096) and 50 tool-use turns (was 10), and compose passes `CLAUDE_MAX_TOKENS` and `CLAUDE_MAX_TURNS` to the worker.
 - A run's `usage` now adds up every node run (the new `RunState.usage`, with `Usage` allowed in checkpoints). Before, it counted only each node's latest result, which undercounted loops. `run_resumed`'s `completed_nodes` lists each node once.
 
