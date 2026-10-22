@@ -6,10 +6,10 @@
 ## Automated checks
 - [ ] `packages/tools/tests/test_list_modules.py`: manifest detection, fallback dirs, `include` filter, 40 cap with `truncated`, structured output shape.
 - [ ] `packages/engine/tests/test_templates.py`: `build_docs_spec` output validates for default and custom params; `output_dir` with `..` or an absolute path, and over-long `extra_instructions`, are rejected; `approve` gate always sits before `publish`.
-- [ ] `packages/engine/tests/test_docs_template.py` (fakes only, no network): a 3-module repo maps 3 items, the writer commits `docs/README.md` + 3 module pages on `agent/<run>/writer`, the run pauses at `approve`, approval opens a PR on the fake GitHub; rejection pushes nothing.
+- [ ] `packages/worker/tests/test_worker.py::test_done_when_a_docs_run_opens_a_pr[approve|reject]` (fakes only, no network): a 3-module repo maps 3 items, the writer gets the 3 pages and commits `docs/README.md` + 3 module pages on `agent/<run>/writer`, the run pauses at `approve` with nothing pushed, approval opens a PR on the fake GitHub; rejection pushes nothing.
 - [ ] `packages/api/tests/test_templates.py`: `GET /templates` lists `docs` with its parameters schema.
 - [ ] `packages/api/tests/test_runs.py`: `POST /runs` with `template` stores the built spec; both or neither of `workflow`/`template` → 422; unknown template → 422; bad params → 422 with the field path; template without `repo` → 422.
-- [ ] Vitest: docs card (repo list, request body, errors, not-connected), approval buttons, PR link.
+- [ ] Vitest: docs card (request body, defaults, API errors, not-connected without asking for repos, uninstalled app), gate panel (approve, refused decision, input shown as text), PR link (only GitHub PR URLs), home page.
 - [ ] OpenAPI and web client re-exported with no diff in CI.
 - [ ] CI green: `ruff`, `pyright`/`mypy` strict, `pytest`, ESLint, Prettier, `tsc`, Vitest, roadmap check.
 

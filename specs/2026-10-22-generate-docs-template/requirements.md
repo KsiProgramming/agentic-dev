@@ -32,18 +32,19 @@ Tech-stack choices that apply: FastAPI + Pydantic v2 (template parameters export
   - `build_docs_spec(params) -> WorkflowSpec` builds this flow:
     1. `list_modules`: tool node `repo.list_modules` with `include`.
     2. `document`: `map` over `results.list_modules.data.modules`, `max_concurrency: 4`. The body is a read-only agent (`repo.list_files`, `repo.read_file`, `repo.search`) that writes one Markdown page for its module.
-    3. `combine`: `reduce` with strategy `agent`. It writes an overview and an index linking the module pages, and passes every page through.
-    4. `writer`: an agent with `repo.write_file` and `repo.commit` that writes `<output_dir>/README.md` and `<output_dir>/<module>.md` and commits once.
+    3. `combine`: `reduce` with strategy `concat`, joining the pages with a separator line.
+    4. `writer`: an agent with `repo.list_files`, `repo.write_file` and `repo.commit` that writes `<output_dir>/<module>.md` and `<output_dir>/README.md` (overview and index) and commits once.
     5. `approve`: gate "Open a pull request with the generated docs?".
-    6. `publish`: `github.openPR` from `writer`, with a fixed title and a body listing the modules.
+    6. `publish`: `github.openPR` from `writer`, with a fixed title and a body naming the output folder and the module filter.
   - A template registry: `id`, `name`, `description`, parameters JSON Schema, and the builder.
 - **API:**
   - `GET /templates` lists templates (id, name, description, `parameters` JSON Schema).
   - `POST /runs` accepts either `workflow` or `template: {id, parameters}` (exactly one). The API builds and validates the spec, then stores it on the run as today. Unknown template or bad parameters return 422 with the field path.
   - The OpenAPI spec and the web client are re-exported.
 - **Web:**
-  - Home page: a repo picker from `GET /workspaces/{id}/repos` and a "Generate docs" card with the three options (output folder, module filter, extra instructions). Starting it opens `/runs/{id}`. If GitHub is not connected, the card links to `/settings`.
+  - Home page: a repo picker from `GET /workspaces/{id}/repos` (asked only once `GET …/connections` shows GitHub, so an unconnected page logs no error response) and a "Generate docs" card with the three options (output folder, module filter, extra instructions). Starting it opens `/runs/{id}`. If GitHub is not connected, the card links to `/settings`.
   - Monitor page: when the latest event is a gate waiting for approval, show **Approve** and **Reject** buttons that call `POST /runs/{id}/approvals`. When `openPR` completes, show the PR link from its event.
+  - The monitor's `EventSource` listens for the gate, loop, map and `pr_opened` events too. Before this phase it dropped them, because `EventSource` only delivers event names it has listeners for.
   - The sample-run form stays, below the templates.
 - **Docs:** README "Generate docs" section (how to run AC-1 locally) and a CHANGELOG entry.
 
@@ -64,7 +65,8 @@ Tech-stack choices that apply: FastAPI + Pydantic v2 (template parameters export
 | Module discovery | Deterministic `repo.list_modules` tool with structured output | User choice. It resolves the 1.10 open question with no model cost, and the result is testable. |
 | Who writes files | One writer agent after the reduce | `map` bodies cannot write (1.10). One writer means one branch and one PR. |
 | Map concurrency | 4 | Half the alive-agents cap (8), leaving room for the reduce and writer agents. |
-| Reduce strategy | `agent` | The overview and index need judgement. `concat` would give no index. |
+| Reduce strategy | `concat`; the writer writes the overview and index | Changed during implementation (was `agent`). An agent only sees the previous node's text, so an `agent` reduce would have to re-emit every page for the writer: double the output tokens and a risk of truncation. The writer already needs judgement to write the files, so it writes the index too. |
+| PR body | Fixed at build time: output folder and module filter | Changed during implementation. Tool node args are fixed when the spec is built, and the module list is only known at runtime. |
 | Gate | Always present and not a parameter | Mission principle 3: a PR is an irreversible action. |
 | Run request shape | `POST /runs` takes `workflow` or `template` (exactly one) | Keeps one endpoint and one stored spec per run. The monitor and worker do not change. |
 | Approval in the UI | Minimal approve/reject buttons on the monitor | User choice. AC-1 must work in the browser, and 2.6 later replaces the buttons with cards. |

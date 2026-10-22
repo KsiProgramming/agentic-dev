@@ -723,6 +723,40 @@ A `map` node runs its `body` once per item of a list, several items at a time, a
 - **Events.** `node_started` for the map (`items`), then per item `map_item_started` (`index`, `item`), the body's usual events, each with `item` (the index) in its payload, and `map_item_completed` (`index`, `status`, `error`), and finally `node_completed` (`items`) or the map's failure (`error`). Items that run at once interleave their events; `seq` still orders them all. A reduce writes the events of an agent node.
 - **Durability.** LangGraph checkpoints each finished item, so a run cut off mid-map runs again only the items that had not finished. The map adds three LangGraph steps whatever its item count.
 
+## Generate docs
+The "Generate docs" template documents each module of a repo and opens a pull request after you approve (phase 1.11, AC-1). A template is a named builder of an ordinary workflow spec (`agentic_engine.templates`): the API builds the spec from the template's options and runs it like any other.
+
+- **Starting it.** In the browser, open `http://localhost:3000`, pick a repo in the **Generate docs** card and click **Generate docs**. Over HTTP, `GET /templates` lists the templates with a JSON Schema of their options, and `POST /runs` takes `"template": {"id": "generate-docs", "parameters": {...}}` instead of `"workflow"` (give one of the two). Unknown templates and bad options get `422` with the option's path (`parameters.output_dir: ...`).
+- **Options.**
+  - `output_dir`: where the docs go, relative to the repo root. Default `docs`. No `.`, `..`, absolute paths or `.git`.
+  - `include`: glob patterns over module paths (`packages/*`); only matching modules are documented. Default: all.
+  - `extra_instructions`: preferences for every agent of the run, up to 2,000 characters. They are added to the agents' instructions in a marked `<user-preferences>` block.
+- **The flow** (`build_docs_spec`):
+  1. `list_modules`: the `repo.list_modules` tool (no model) finds the modules: each directory down to three levels with a manifest (`pyproject.toml`, `package.json`, `go.mod`, `Cargo.toml`, `pom.xml`, `*.csproj`), else the top-level directories, else the whole repo. Dependencies, build output, `docs` and hidden directories are skipped, and at most 40 are listed.
+  2. `document`: a map over them, 4 at a time. Each item is a read-only agent that explores its module and returns one Markdown page starting with `<!-- module: PATH -->`.
+  3. `combine`: a `concat` reduce that joins the pages with a separator line.
+  4. `writer`: one agent that writes each page to `<output_dir>/<path with / as ->.md`, writes `<output_dir>/README.md` (overview and index) and commits once on `agent/<run>/writer`. A map body cannot write, so a single writer gives one branch and one PR.
+  5. `approve`: a gate. It is always there and no option removes it.
+  6. `publish`: `github.openPR` from the writer's branch.
+- **What it needs.** A repo on GitHub, a workspace linked to the GitHub App (see "GitHub App") and, for real docs, a Claude key (see "Run on Claude"). On the fake runtime the module agents echo their item, which is enough to see the flow.
+- **Approving.** The run page shows the gate with **Approve** and **Reject** buttons and the writer's commit summary. Approving opens the PR, and the page links to it. Rejecting ends the run `cancelled` with nothing pushed.
+
+Demo (the phase 1.11 "Done when", AC-1). It needs a dev GitHub App installed on a test repo (see "Pull requests") and a Claude key:
+
+```bash
+docker compose up -d --build     # with GITHUB_APP_ID, GITHUB_APP_SLUG, .secrets/github-app.pem and AGENTIC_RUNTIME=claude
+# http://localhost:3000/settings: save the Claude key, install the GitHub App
+# http://localhost:3000: pick the test repo, Generate docs, wait for the gate, Approve
+# the run page links to the pull request with docs/README.md and one page per module
+```
+
+Or with `curl`:
+
+```bash
+curl -s localhost:8000/templates
+curl -s -X POST localhost:8000/runs -H 'content-type: application/json'   -d '{"template": {"id": "generate-docs", "parameters": {"include": ["packages/*"]}}, "repo": {"url": "https://github.com/<owner>/<test-repo>"}}'
+```
+
 ## Sandbox
 A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref": ...}`. The worker then gives the run a sandbox that holds a shallow clone of that repo for its whole duration, and its agents and tool nodes get the repo tools, which run in there. A spec whose nodes (agent or tool) use `repo.*` tools is rejected with `422` if the run has no `repo`.
 
@@ -731,6 +765,7 @@ A run can name a repo: `POST /runs` takes an optional `"repo": {"url": ..., "ref
 | `repo.list_files(path=".", max_depth=3)` | Files and directories under `path`, relative to the repo root; directories end with `/`. | 1,000 entries |
 | `repo.read_file(path, start_line=1, end_line=None)` | A text file's lines, each prefixed with its number and a tab. Directories and binary files (a NUL byte in the first 8 KiB) are refused. | 2,000 lines or 256 KiB; the note says where to continue |
 | `repo.search(pattern, path=".", regex=False, case_sensitive=True, max_results=100)` | `path:line: text` for each matching line in text files. The pattern is a fixed string unless `regex` (extended regex). | 500 matches at most; lines cut at 300 characters |
+| `repo.list_modules(include=None)` | The repo's modules as structured content, `{"modules": [{"path", "kind"}], "truncated"}`, so a map can go over `results.<node>.data.modules`. A module is a directory (down to three levels) with a manifest; without any, the top-level directories (see "Generate docs"). `include` filters by glob. | 40 modules |
 | `repo.write_file(path, content)` | Writers only. Creates or overwrites a UTF-8 text file on the node's branch, creating parent directories. Refuses anything under `.git`, directories, and writing through a symlink. | 1 MiB per file |
 | `repo.commit(message)` | Writers only. Commits every change on the node's branch; returns `<short-sha> on agent/<run>/<node>: <files>`. Nothing to commit is an error. | 5,000-character message; 50 files listed |
 
@@ -781,7 +816,7 @@ For `write-file.json` the writer node `writer` reads `pyproject.toml`, then `rep
 While a run is going, `docker ps --filter label=agentic.run_id` shows its container; afterwards it shows none. With `AGENTIC_RUNTIME=claude`, Claude decides which tools to call and answers from what it finds. On `ask-repo.json` it reads each package's `pyproject.toml` and returns a table of the packages and what each is for.
 
 ## Monitor
-Open `http://localhost:3000`, type an input and click **Start sample run**. The page starts a one-agent workflow (`web/src/runs/sample-spec.ts`) and opens `/runs/<id>`, which lists the run's events as they arrive: `seq`, time, type, node and a one-line summary of the payload, shown as plain text. The status badge goes from `connecting` to `live`, then to `completed`, `failed` or `cancelled`. A run started with `curl` (see above) can be opened the same way at `http://localhost:3000/runs/<id>`, and reloading a finished run shows its full list.
+Open `http://localhost:3000` to start the "Generate docs" template (see above), or type an input and click **Start sample run**. The page starts a one-agent workflow (`web/src/runs/sample-spec.ts`) and opens `/runs/<id>`, which lists the run's events as they arrive: `seq`, time, type, node and a one-line summary of the payload, shown as plain text. The status badge goes from `connecting` to `live`, then to `completed`, `failed` or `cancelled`. A run started with `curl` (see above) can be opened the same way at `http://localhost:3000/runs/<id>`, and reloading a finished run shows its full list. While the run waits at a gate, the page shows the gate's title, prompt and input with **Approve** and **Reject** buttons (`POST /runs/{id}/approvals`). Once a `pr_opened` event arrives, it links to the pull request (only `https://github.com/<owner>/<repo>/pull/<n>` URLs are linked).
 
 The browser calls the API directly (`NEXT_PUBLIC_API_URL`, default `http://localhost:8000`) and reads `GET /runs/{id}/events` with `EventSource`, so the API must allow the web app's origin: `CORS_ORIGINS` is a JSON list, and compose sets it to `["http://localhost:${WEB_PORT}"]`. The `RunEvent` type the page uses is generated from the OpenAPI spec like the rest of the client. The Playwright test `web/e2e/monitor.spec.ts` checks the roadmap target: every live event shows up in the browser less than 1 s after it was stored.
 
