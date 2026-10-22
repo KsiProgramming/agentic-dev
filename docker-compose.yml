@@ -113,7 +113,7 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_APP_PRIVATE_KEY_FILE: /github/github-app.pem
-    # The Docker socket gives the worker control of the host's Docker (dev only; phase 9.2
+    # The Docker socket gives the worker control of the host's Docker (dev only; phase 10.2
     # replaces it). DOCKER_GID is the socket's group: 0 on Docker Desktop, `docker` on Linux.
     group_add:
       - "${DOCKER_GID:-0}"

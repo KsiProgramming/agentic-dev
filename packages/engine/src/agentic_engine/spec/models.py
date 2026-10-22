@@ -67,7 +67,7 @@ class SequenceNode(_Base):
 
 
 MAX_LOOP_ITERATIONS = 5
-"""The policy default for loop iterations (tech stack). Phase 2.2 makes it configurable."""
+"""The policy default for loop iterations (tech stack). Phase 3.2 makes it configurable."""
 
 
 class LoopNode(_Base):
@@ -96,7 +96,7 @@ MAX_AGENTS_ALIVE = 8
 
 MAX_AGENTS_SPAWNED = 40
 """The policy default for agents a run may spawn (tech stack); caps a map's item count, which is
-only known at runtime. Phase 2.2 makes it configurable."""
+only known at runtime. Phase 3.2 makes it configurable."""
 
 
 class MapNode(_Base):
