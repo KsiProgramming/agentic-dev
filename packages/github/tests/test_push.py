@@ -8,6 +8,7 @@ import pytest
 from pydantic import SecretStr
 
 from agentic_github import PushError, auth_env, github_remote, push_bundle, repo_full_name
+from agentic_github.push import _Git  # pyright: ignore[reportPrivateUsage]
 
 BRANCH = "agent/run-1/writer"
 TOKEN = SecretStr("ghs_pushtoken0003")
@@ -147,6 +148,21 @@ async def test_push_errors_name_no_token_or_temp_path(remote: Remote) -> None:
     assert message.startswith("git fetch failed")
     assert TOKEN.get_secret_value() not in message
     assert "agentic-push-" not in message
+
+
+async def test_bundle_fetch_works_with_an_https_remote(remote: Remote, tmp_path: Path) -> None:
+    # The other tests use a `file://` remote, which enables the file transport for every
+    # command. A real remote is https, and git checks the file transport for a bundle path too.
+    bundle = tmp_path / "branch.bundle"
+    bundle.write_bytes(remote.bundle())
+    repo = tmp_path / "work"
+    git(tmp_path, "init", "-q", str(repo))
+    git(repo, "fetch", "-q", "--depth", "1", remote.url, remote.base)
+    ref = f"refs/heads/{BRANCH}"
+
+    await _Git(repo, "https://github.com/acme/api.git", None, 30.0).fetch_bundle(bundle, ref)
+
+    assert git(repo, "show", f"{ref}:NOTES.md") == "notes"
 
 
 def test_auth_env_sends_the_token_as_a_header_only() -> None:

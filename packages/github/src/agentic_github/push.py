@@ -85,7 +85,7 @@ async def push_bundle(
         await git.run("init", "-q", str(work / "repo"), cwd=work)
         await git.run("fetch", "-q", "--no-tags", "--depth", "1", remote_url, base_sha)
         await git.run("bundle", "verify", "-q", str(work / "branch.bundle"))
-        await git.run("fetch", "-q", "--no-tags", str(work / "branch.bundle"), f"{ref}:{ref}")
+        await git.fetch_bundle(work / "branch.bundle", ref)
         head = (await git.run("rev-parse", "--verify", f"{ref}^{{commit}}")).strip()
         try:
             await git.run("merge-base", "--is-ancestor", base_sha, ref)
@@ -125,8 +125,16 @@ class _Git:
             **(auth_env(token) if token is not None else {}),
         }
 
-    async def run(self, *args: str, cwd: Path | None = None) -> str:
-        argv = ["git", *self._options, *args]
+    async def fetch_bundle(self, bundle: Path, ref: str) -> None:
+        """Fetch `ref` from the local `bundle`. git checks the file transport for a bundle
+        path, so it is allowed for this command only; the remote stays https."""
+        await self.run(
+            "fetch", "-q", "--no-tags", str(bundle), f"{ref}:{ref}",
+            allow=("-c", "protocol.file.allow=always"),
+        )  # fmt: skip
+
+    async def run(self, *args: str, cwd: Path | None = None, allow: tuple[str, ...] = ()) -> str:
+        argv = ["git", *self._options, *allow, *args]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
