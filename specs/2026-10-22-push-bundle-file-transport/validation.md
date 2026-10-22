@@ -9,9 +9,9 @@
 - [x] CI is green (tests, ruff, pyright).
 
 ## Manual / demo checks
-- [ ] Rerun "Generate docs" on a GitHub repo and approve the `approve` gate. The `publish` node logs `pr_opened` with a PR URL, and the PR exists on GitHub with the `docs/` changes.
+- [x] Rerun "Generate docs" on a GitHub repo and approve the `approve` gate. The `publish` node logs `pr_opened` with a PR URL, and the PR exists on GitHub with the `docs/` changes.
 
 ## Merge criteria
-- [ ] All checks above pass
-- [ ] CHANGELOG "Fixed" entry added
-- [ ] No token or host temp path in any new error message
+- [x] All checks above pass
+- [x] CHANGELOG "Fixed" entry added
+- [x] No token or host temp path in any new error message
