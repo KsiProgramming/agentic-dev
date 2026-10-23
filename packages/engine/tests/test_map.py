@@ -11,6 +11,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import JsonValue
 
+from agentic_engine.agent import sum_usage
 from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.graph import (
     WorkflowRunResult,
@@ -343,10 +344,17 @@ async def test_reduce_agent_gets_items_and_outputs_as_json() -> None:
 async def test_usage_adds_up_every_item_and_the_reduce_agent() -> None:
     reduce = {"strategy": "agent", "agent": {"role": "Architect", "instructions": "Overview."}}
 
-    result = await run(mapping(agent("writer"), reduce=reduce), CountingRuntime())
+    sink = InMemoryEventSink()
+
+    result = await run(mapping(agent("writer"), reduce=reduce), CountingRuntime(), sink)
 
     # 3 items, the reduce agent and `after`, each with ECHO_USAGE.
-    assert result.usage == Usage(input_tokens=50, output_tokens=50)
+    expected = Usage(model="fake", input_tokens=50, output_tokens=50, estimated_usd=0.0005)
+    assert result.usage == expected
+    # The logged usage events, which the console and the runs row add up, give the same total.
+    logged = [e.agent_event() for e in sink.events if e.type == "usage"]
+    assert len(logged) == 5
+    assert sum_usage(u for u in logged if isinstance(u, Usage)) == expected
 
 
 async def test_the_fixtures_run_end_to_end() -> None:

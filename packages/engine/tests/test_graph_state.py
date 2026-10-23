@@ -41,11 +41,31 @@ def test_sum_usage_adds_optional_fields_when_set() -> None:
     total = sum_usage(
         [
             Usage(input_tokens=1, output_tokens=1, estimated_usd=0.5),
-            Usage(input_tokens=1, output_tokens=1, premium_requests=1),
+            Usage(input_tokens=1, output_tokens=1, premium_requests=1, estimated_usd=0.25),
         ]
     )
     assert total is not None
-    assert (total.estimated_usd, total.premium_requests) == (0.5, 1)
+    assert (total.estimated_usd, total.premium_requests) == (0.75, 1)
+
+
+def test_sum_usage_adds_cache_tokens_and_keeps_a_shared_model() -> None:
+    a = Usage(model="m", input_tokens=1, output_tokens=1, cache_read_tokens=5, cache_write_tokens=2)
+    total = sum_usage([a, a])
+    assert total == Usage(
+        model="m", input_tokens=2, output_tokens=2, cache_read_tokens=10, cache_write_tokens=4
+    )
+    mixed = sum_usage([a, a.model_copy(update={"model": "other"})])
+    assert mixed is not None and mixed.model is None
+
+
+def test_sum_usage_has_no_cost_when_one_record_is_unpriced() -> None:
+    total = sum_usage(
+        [
+            Usage(input_tokens=1, output_tokens=1, estimated_usd=0.5),
+            Usage(input_tokens=1, output_tokens=1),
+        ]
+    )
+    assert total is not None and total.estimated_usd is None
 
 
 def test_workflow_run_result_round_trips_through_json() -> None:

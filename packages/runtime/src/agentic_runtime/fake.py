@@ -45,7 +45,8 @@ class CallTool:
 type Step = AgentEvent | Delay | CallTool
 type Script = Sequence[Step]
 
-ECHO_USAGE = Usage(input_tokens=10, output_tokens=10)
+# Scripted, so it carries its own price: engine tests see costs without a price table.
+ECHO_USAGE = Usage(model="fake", input_tokens=10, output_tokens=10, estimated_usd=0.0001)
 
 
 def echo_script(text: str) -> list[Step]:

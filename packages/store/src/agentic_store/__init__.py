@@ -48,9 +48,15 @@ from agentic_store.models import (
     Run,
     RunEventRow,
     Workspace,
+    WorkspaceModelPrice,
     metadata,
 )
 from agentic_store.notify import listen
+from agentic_store.pricing import (
+    list_price_overrides,
+    replace_price_overrides,
+    workspace_price_table,
+)
 from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run
 from agentic_store.rerun import RunNotEndedError, create_rerun
 from agentic_store.runs import StoredRun, create_run, get_run
@@ -63,6 +69,7 @@ from agentic_store.sink import (
 from agentic_store.summaries import (
     InvalidCursorError,
     RunSummaryRow,
+    RunUsageRow,
     get_run_summary,
     list_changed_run_summaries,
     list_run_summaries,
@@ -90,9 +97,11 @@ __all__ = [
     "RunNotFoundError",
     "RunNotWaitingError",
     "RunSummaryRow",
+    "RunUsageRow",
     "StoredRun",
     "Workspace",
     "WorkspaceInfo",
+    "WorkspaceModelPrice",
     "WorkspaceNotFoundError",
     "WrongGateError",
     "cancel_requested",
@@ -109,6 +118,7 @@ __all__ = [
     "leased_run_ids",
     "list_changed_run_summaries",
     "list_connections",
+    "list_price_overrides",
     "list_run_events",
     "list_run_summaries",
     "list_workspaces",
@@ -124,7 +134,9 @@ __all__ = [
     "record_approval",
     "release_run",
     "renew_lease",
+    "replace_price_overrides",
     "request_cancel",
     "run_ended",
     "waiting_run_ids",
+    "workspace_price_table",
 ]

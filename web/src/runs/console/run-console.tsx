@@ -15,7 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { pendingGate, type PendingGate } from "../gates";
 import { displayStatus } from "../status";
 import { badgeStatus, statusLabel } from "../summaries";
-import { buildTimeline, type Step } from "../timeline";
+import { usageOfRun } from "../cost";
+import { buildTimeline, stepsUsage, type Step } from "../timeline";
 import type { ReceivedRunEvent, StreamStatus } from "../types";
 import { useFollowScroll } from "../use-follow-scroll";
 import { useNow } from "../use-now";
@@ -51,7 +52,12 @@ export function headerFacts(
   events: ReceivedRunEvent[],
   gate: PendingGate | null,
   run: RunDetail | null | undefined,
-  timeline: { workflowName: string | null; startedAt: string | null; endedAt: string | null },
+  timeline: {
+    steps: Step[];
+    workflowName: string | null;
+    startedAt: string | null;
+    endedAt: string | null;
+  },
   prUrl: string | null,
   now: number,
 ): HeaderFacts {
@@ -71,6 +77,8 @@ export function headerFacts(
     startedAt,
     durationMs,
     prUrl: prUrl ?? run?.pr_url ?? null,
+    // Added up live from the events; the summary's totals until they arrive.
+    usage: stepsUsage(timeline.steps) ?? (run?.usage.input_tokens ? usageOfRun(run.usage) : null),
   };
 }
 

@@ -7,6 +7,7 @@ import re
 import subprocess
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -27,7 +28,15 @@ from agentic_engine.logging import JsonFormatter
 from agentic_engine.spec import PUBLISH_TOOLS, WRITE_TOOLS, WorkflowSpec, parse_spec
 from agentic_engine.templates import DocsParams, build_docs_spec
 from agentic_engine.templates.docs import PAGE_SEPARATOR
-from agentic_runtime import AgentRuntime, ClaudeRuntime, Completed, Failed, Message, ToolExecutor
+from agentic_runtime import (
+    AgentRuntime,
+    ClaudeRuntime,
+    Completed,
+    Failed,
+    Message,
+    ModelPrice,
+    ToolExecutor,
+)
 from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script
 from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
 from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
@@ -39,10 +48,12 @@ from agentic_store import (
     create_run,
     enqueue_run,
     get_run,
+    get_run_summary,
     list_run_events,
     put_connection,
     put_github_connection,
     record_approval,
+    replace_price_overrides,
     request_cancel,
 )
 from agentic_tools.github import PUBLISH_TOOL_NAMES, GithubPublisher
@@ -616,6 +627,27 @@ async def test_each_run_uses_its_workspace_s_stored_claude_key(
     # One client per run (after the mock's own), each closed when its run ended.
     assert len(mock.clients) == 3
     assert all(c.is_closed() for c in mock.clients[1:])
+
+
+async def test_usage_is_priced_with_the_workspace_s_prices(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, master_key: Path
+) -> None:
+    keys = LocalKeyProvider.from_file(master_key)
+    workspace = await new_workspace(sessions)
+    await put_connection(sessions, keys, workspace, "claude", SecretStr("sk-ant-priced-workspace"))
+    price = ModelPrice.model_validate(dict.fromkeys(ModelPrice.model_fields, "1000"))
+    await replace_price_overrides(sessions, workspace, {"claude-test": price})
+    mock = MockClaude([text_reply("one", input_tokens=30, output_tokens=7)])
+
+    async with worker(postgres_url, redis_url, claude=mock, master_key_file=master_key):
+        run_id = await submit_to(sessions, redis_url, workspace)
+        await wait_for_status(sessions, run_id, "completed")
+
+    [usage] = [e.payload for e in await list_run_events(sessions, run_id) if e.type == "usage"]
+    assert (usage["model"], usage["estimated_usd"]) == ("claude-test", 0.037)
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None
+    assert (summary.usage.estimated_usd, summary.usage.cost_complete) == (Decimal("0.037"), True)
 
 
 async def test_a_workspace_without_a_claude_key_fails_its_run(

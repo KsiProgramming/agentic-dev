@@ -10,6 +10,7 @@ import json
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -42,6 +43,20 @@ class RunSummaryRow:
     rerun_of: UUID | None
     input: str
     failure_reason: str | None
+    usage: "RunUsageRow"
+
+
+@dataclass(frozen=True)
+class RunUsageRow:
+    """Totals of the run's `usage` events. `cost_complete` is false once one had no price, and
+    `estimated_usd` is then a lower bound."""
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    estimated_usd: Decimal
+    cost_complete: bool
 
 
 def encode_cursor(created_at: datetime, run_id: UUID) -> str:
@@ -75,6 +90,12 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.rerun_of,
         Run.input,
         Run.failure_reason,
+        Run.input_tokens,
+        Run.output_tokens,
+        Run.cache_read_tokens,
+        Run.cache_write_tokens,
+        Run.estimated_usd,
+        Run.cost_complete,
     )
 
 
@@ -95,6 +116,14 @@ def _summary(row: Any) -> RunSummaryRow:
         rerun_of=row.rerun_of,
         input=row.input,
         failure_reason=row.failure_reason,
+        usage=RunUsageRow(
+            input_tokens=row.input_tokens,
+            output_tokens=row.output_tokens,
+            cache_read_tokens=row.cache_read_tokens,
+            cache_write_tokens=row.cache_write_tokens,
+            estimated_usd=row.estimated_usd,
+            cost_complete=row.cost_complete,
+        ),
     )
 
 

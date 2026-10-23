@@ -116,6 +116,7 @@ from agentic_store import (
     renew_lease,
     run_ended,
     waiting_run_ids,
+    workspace_price_table,
 )
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
@@ -263,6 +264,8 @@ def run_runtimes(
         run: StoredRun, tools: ToolExecutor | None
     ) -> AsyncGenerator[AgentRuntime]:
         key = await claude_key(run)
+        # Fixed for the attempt; a resumed attempt reads the workspace's prices again.
+        prices = await workspace_price_table(sessions, run.workspace_id)
         with registered(key):
             client = make_client(key)
             try:
@@ -272,6 +275,7 @@ def run_runtimes(
                     max_tokens=settings.claude_max_tokens,
                     max_turns=settings.claude_max_turns,
                     tools=tools,
+                    prices=prices,
                 )
             finally:
                 await client.close()

@@ -24,6 +24,14 @@ EXAMPLES: list[AgentEvent] = [
     ToolCall(call_id="c1", name="repo.read_file", arguments={"path": "README.md", "n": [1, 2]}),
     ToolResult(call_id="c1", output="# Title", is_error=False),
     Usage(input_tokens=12, output_tokens=3, premium_requests=1, estimated_usd=0.0004),
+    Usage(
+        model="claude-opus-5-5",
+        input_tokens=12,
+        output_tokens=3,
+        cache_read_tokens=400,
+        cache_write_tokens=50,
+        estimated_usd=0.00021,
+    ),
     Completed(),
     Failed(error="rate limited", retryable=True),
     Cancelled(),
@@ -51,6 +59,13 @@ def test_extra_keys_are_rejected() -> None:
 def test_negative_token_counts_are_rejected() -> None:
     with pytest.raises(ValidationError):
         Usage(input_tokens=-1, output_tokens=0)
+
+
+def test_usage_logged_before_cache_fields_still_parses() -> None:
+    event = agent_event_adapter.validate_python(
+        {"type": "usage", "input_tokens": 12, "output_tokens": 3, "estimated_usd": None}
+    )
+    assert event == Usage(model=None, input_tokens=12, output_tokens=3, cache_read_tokens=0)
 
 
 def test_terminal_events() -> None:

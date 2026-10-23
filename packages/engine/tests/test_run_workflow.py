@@ -61,7 +61,9 @@ async def test_nested_sequence_passes_output_down_the_chain() -> None:
     assert result.order == ["planner", "implementer", "tester"]
     assert [r.input for r in runtime.requests] == ["task", "plan", "code"]
     assert result.text == "code"  # the tester echoes its input
-    assert result.usage == Usage(input_tokens=30, output_tokens=30)
+    assert result.usage == Usage(
+        model="fake", input_tokens=30, output_tokens=30, estimated_usd=0.0003
+    )
 
 
 async def test_single_agent_root_runs_one_node() -> None:

@@ -32,6 +32,7 @@ from agentic_runtime.events import (
     ToolResult,
     Usage,
 )
+from agentic_runtime.pricing import DEFAULT_PRICES, CallTokens, PriceTable
 from agentic_runtime.request import AgentRequest
 from agentic_runtime.tools import ToolDefinition, ToolExecutor
 
@@ -96,10 +97,36 @@ def _api_message(error: anthropic.APIStatusError) -> str:
     return error.message
 
 
-def usage_of(message: ClaudeMessage) -> Usage:
+def call_tokens(message: ClaudeMessage) -> CallTokens:
+    """The call's tokens as billed. Without a TTL breakdown, cache writes are 5 minute ones (the
+    API's default TTL)."""
     u = message.usage
-    cached = (u.cache_creation_input_tokens or 0) + (u.cache_read_input_tokens or 0)
-    return Usage(input_tokens=u.input_tokens + cached, output_tokens=u.output_tokens)
+    cache_write = u.cache_creation_input_tokens or 0
+    if u.cache_creation is not None:
+        write_5m = u.cache_creation.ephemeral_5m_input_tokens
+        write_1h = u.cache_creation.ephemeral_1h_input_tokens
+    else:
+        write_5m, write_1h = cache_write, 0
+    return CallTokens(
+        input=u.input_tokens,
+        output=u.output_tokens,
+        cache_read=u.cache_read_input_tokens or 0,
+        cache_write_5m=write_5m,
+        cache_write_1h=write_1h,
+    )
+
+
+def usage_of(message: ClaudeMessage, prices: PriceTable = DEFAULT_PRICES) -> Usage:
+    tokens = call_tokens(message)
+    usd = prices.estimate_usd(message.model, tokens)
+    return Usage(
+        model=message.model,
+        input_tokens=tokens.input,
+        output_tokens=tokens.output,
+        cache_read_tokens=tokens.cache_read,
+        cache_write_tokens=tokens.cache_write_5m + tokens.cache_write_1h,
+        estimated_usd=float(usd) if usd is not None else None,
+    )
 
 
 class ClaudeRun:
@@ -114,6 +141,7 @@ class ClaudeRun:
         max_tokens: int,
         max_turns: int,
         tools: ToolExecutor | None,
+        prices: PriceTable,
     ) -> None:
         self._client = client
         self._request = request
@@ -121,6 +149,7 @@ class ClaudeRun:
         self._max_tokens = max_tokens
         self._max_turns = max_turns
         self._tools = tools
+        self._prices = prices
         self._cancel = asyncio.Event()
         self._started = False
 
@@ -184,7 +213,7 @@ class ClaudeRun:
                 yield failure(e)
                 return
 
-            yield usage_of(final)
+            yield usage_of(final, self._prices)
             match final.stop_reason:
                 case "end_turn" | "stop_sequence":
                     text = "".join(b.text for b in final.content if b.type == "text")
@@ -272,6 +301,7 @@ class ClaudeRuntime:
 
     `client` carries the API key and HTTP settings (tests pass one on a mock transport).
     `tools` runs the tools a request names; without it, a request that names tools fails.
+    `prices` prices each call's `usage` event (the workspace's effective table).
     """
 
     def __init__(
@@ -282,6 +312,7 @@ class ClaudeRuntime:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         max_turns: int = DEFAULT_MAX_TURNS,
         tools: ToolExecutor | None = None,
+        prices: PriceTable = DEFAULT_PRICES,
     ) -> None:
         if max_turns < 1:
             raise ValueError("max_turns must be at least 1")
@@ -290,6 +321,7 @@ class ClaudeRuntime:
         self._max_tokens = max_tokens
         self._max_turns = max_turns
         self._tools = tools
+        self._prices = prices
 
     def start(self, request: AgentRequest) -> ClaudeRun:
         return ClaudeRun(
@@ -299,4 +331,5 @@ class ClaudeRuntime:
             max_tokens=self._max_tokens,
             max_turns=self._max_turns,
             tools=self._tools,
+            prices=self._prices,
         )

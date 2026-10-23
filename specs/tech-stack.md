@@ -109,7 +109,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - **Timeline (default tab):** the run reads top to bottom on a vertical rail. Each node hangs off it by a status icon (with a screen-reader label) and shows its duration; a finished node has no badge, and only states that need attention say so in words ("Needs approval", "Failed"). Map items (named by their path) and loop iterations are nested on their own rail. Inside a step:
   - Streamed `text_delta` events are **merged on the client** into one growing message per agent turn. The `message` event replaces the merged text when it arrives. A message is rendered as Markdown with raw HTML and images dropped, so payloads stay data.
   - Each tool call is one quiet line with an icon, a verb and its target ("Read `src/app.ts`"); opening it shows its arguments and result (JSON pretty-printed, collapsed after 2 levels, copyable). Consecutive reads, listings and searches collapse into one summary line ("Read 12 files, listed 3 folders"). Calls that change something (writes, commits, pull requests) and failed calls stand on their own line with a preview of their first lines. Only running and failed calls get a status icon.
-  - Usage and cost appear as a quiet footer line.
+  - Usage and cost appear as a quiet footer line ("12.3K in · 2.1K out · $0.042"); a map or loop node shows the total of its items. The header shows the run's total. A cost with unpriced usage shows "—" (or "≥ $x") and says why in a tooltip.
 - **Raw events tab:** the event table, with filters by type and node. Consecutive chunks of one message are folded into one row (expandable to the chunks). It is kept for debugging and audit.
 - **Graph tab:** added in 3.5.
 - **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with:
@@ -147,6 +147,11 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 
 - OpenTelemetry traces across API, engine nodes and tool calls.
 - Cost and token metrics per node, run, user and workspace, derived from usage events.
+- **Pricing:**
+  - The adapter prices each provider call when it emits its `usage` event, from the workspace's price table: list prices in `agentic_runtime.pricing` (dated by `PRICES_AS_OF`, checked by hand against the provider's pricing page) with the workspace's overrides on top (`GET`/`PUT /workspaces/{id}/pricing`).
+  - Cache reads and writes are counted and priced apart from input.
+  - The logged `estimated_usd` never changes, and the `runs` row keeps the run's totals.
+  - A model with no price logs its tokens with no cost, and the run's cost is then marked incomplete.
 - Structured JSON logs with secrets redacted.
 
 ## Testing & quality
@@ -173,3 +178,4 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | UI kit | shadcn/ui + Tailwind tokens (not MUI, Chakra or Ant) | We own the component code, it is accessible through Radix, it gives a modern, neutral enterprise look, and it themes through CSS variables. |
 | Event display | Merge deltas on the client, buffer writes on the server (250 ms) | The append-only log and SSE replay stay unchanged. The UI shows messages, not chunks. |
 | Rerun | A new run linked by `rerun_of` | The log stays immutable and the history stays truthful. Resuming from a checkpoint is a separate, later feature. |
+| Cost | Priced by the adapter when usage is logged, never recomputed | The append-only log stays truthful, a budget stop (3.3) can always be explained, and changing a price never rewrites past runs. |

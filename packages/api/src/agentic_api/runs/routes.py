@@ -21,6 +21,7 @@ from agentic_api.runs.models import (
     RunStatus,
     RunSummary,
     RunSummaryPage,
+    RunUsage,
     WaitingGate,
     WorkflowRef,
     uses_github,
@@ -126,6 +127,7 @@ def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
         "pr_url": row.pr_url,
         "waiting_gate": WaitingGate.model_validate(row.waiting_gate) if row.waiting_gate else None,
         "rerun_of": row.rerun_of,
+        "usage": RunUsage.model_validate(row.usage, from_attributes=True),
     }
 
 
@@ -186,7 +188,7 @@ async def stream_summaries(
     request: Request, workspace_id: Annotated[UUID, Depends(existing_workspace)]
 ) -> AsyncIterable[ServerSentEvent]:
     """Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with
-    the run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,
+    the run's `RunSummary` whenever its status, timings, PR URL, waiting gate or usage change,
     including new runs. Each frame's `id` is when the run last changed. Only changes after
     connecting are sent; after a reconnect, list the runs again. The stream stays open."""
     sessions = _sessions(request)

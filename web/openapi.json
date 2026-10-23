@@ -247,7 +247,7 @@
           "runs"
         ],
         "summary": "Stream Summaries",
-        "description": "Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with\nthe run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,\nincluding new runs. Each frame's `id` is when the run last changed. Only changes after\nconnecting are sent; after a reconnect, list the runs again. The stream stays open.",
+        "description": "Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with\nthe run's `RunSummary` whenever its status, timings, PR URL, waiting gate or usage change,\nincluding new runs. Each frame's `id` is when the run last changed. Only changes after\nconnecting are sent; after a reconnect, list the runs again. The stream stays open.",
         "operationId": "streamRunSummaries",
         "parameters": [
           {
@@ -810,6 +810,101 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/pricing": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Get Pricing",
+        "description": "The model prices the workspace's runs are priced with.",
+        "operationId": "getPricing",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePricing"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Put Pricing",
+        "description": "Replace the workspace's price overrides. New usage is priced with them; runs already\nlogged keep their cost.",
+        "operationId": "putPricing",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutPricing"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePricing"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "A negative price, a bad model id or a model given twice"
           }
         }
       }
@@ -1522,6 +1617,24 @@
         "description": "Where to send the browser to install the GitHub App. The URL is valid for 10 minutes."
       },
       "JsonValue": {},
+      "LongContextPrice": {
+        "properties": {
+          "above_tokens": {
+            "type": "integer",
+            "title": "Above Tokens",
+            "description": "Applies to a call whose prompt is over this size."
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "above_tokens",
+          "price"
+        ],
+        "title": "LongContextPrice"
+      },
       "LoopNode": {
         "properties": {
           "type": {
@@ -1678,6 +1791,122 @@
         "title": "MapNode",
         "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. A map has at most\n`MAX_AGENTS_SPAWNED` items; one that does not complete fails the map."
       },
+      "ModelPricingOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Price"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The list price; unset for a model with none."
+          },
+          "long_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LongContextPrice"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The list price for long prompts, if the model has one."
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Price"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace's price. It replaces the list price, long prompts included."
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "default",
+          "long_context",
+          "override"
+        ],
+        "title": "ModelPricingOut"
+      },
+      "Price": {
+        "properties": {
+          "input": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Input"
+          },
+          "output": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Output"
+          },
+          "cache_write_5m": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Cache Write 5M",
+            "description": "Writing to the 5 minute prompt cache."
+          },
+          "cache_write_1h": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Cache Write 1H",
+            "description": "Writing to the 1 hour prompt cache."
+          },
+          "cache_read": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Cache Read",
+            "description": "Reading from the prompt cache."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "input",
+          "output",
+          "cache_write_5m",
+          "cache_write_1h",
+          "cache_read"
+        ],
+        "title": "Price",
+        "description": "USD per million tokens."
+      },
+      "PriceOverride": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "title": "Model"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "model",
+          "price"
+        ],
+        "title": "PriceOverride"
+      },
       "PutClaudeConnection": {
         "properties": {
           "api_key": {
@@ -1696,6 +1925,25 @@
           "api_key"
         ],
         "title": "PutClaudeConnection"
+      },
+      "PutPricing": {
+        "properties": {
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/PriceOverride"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Overrides",
+            "description": "The workspace's overrides, replacing all stored ones; `[]` resets every model to its list price."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "overrides"
+        ],
+        "title": "PutPricing"
       },
       "Readiness": {
         "properties": {
@@ -2026,6 +2274,9 @@
             "title": "Rerun Of",
             "description": "The run this one repeats."
           },
+          "usage": {
+            "$ref": "#/components/schemas/RunUsage"
+          },
           "input": {
             "type": "string",
             "title": "Input"
@@ -2070,6 +2321,7 @@
           "pr_url",
           "waiting_gate",
           "rerun_of",
+          "usage",
           "input",
           "failure_reason",
           "duration_ms"
@@ -2192,6 +2444,9 @@
             "title": "Rerun Of",
             "description": "The run this one repeats."
           },
+          "usage": {
+            "$ref": "#/components/schemas/RunUsage"
+          },
           "duration_ms": {
             "anyOf": [
               {
@@ -2220,6 +2475,7 @@
           "pr_url",
           "waiting_gate",
           "rerun_of",
+          "usage",
           "duration_ms"
         ],
         "title": "RunSummary",
@@ -2253,6 +2509,48 @@
           "next_cursor"
         ],
         "title": "RunSummaryPage"
+      },
+      "RunUsage": {
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "description": "Uncached input tokens."
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "estimated_usd": {
+            "type": "number",
+            "title": "Estimated Usd",
+            "description": "Estimated cost in USD of the priced usage."
+          },
+          "cost_complete": {
+            "type": "boolean",
+            "title": "Cost Complete",
+            "description": "False if some usage had no price (an unknown model): `estimated_usd` is then a lower bound."
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "estimated_usd",
+          "cost_complete"
+        ],
+        "title": "RunUsage",
+        "description": "Totals of the run's usage events, priced when each was logged."
       },
       "SequenceNode": {
         "properties": {
@@ -2625,6 +2923,30 @@
           "created_at"
         ],
         "title": "WorkspaceOut"
+      },
+      "WorkspacePricing": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of",
+            "description": "When the list prices were last checked."
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPricingOut"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "models"
+        ],
+        "title": "WorkspacePricing",
+        "description": "The prices the workspace's runs are priced with: each model's `override`, else its\n`default`. A run keeps the cost it was priced with when its usage was logged."
       },
       "RunEvent": {
         "additionalProperties": false,
