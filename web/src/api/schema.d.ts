@@ -66,7 +66,9 @@ export interface paths {
          *     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
          *     refused with `422`. So is one above the workspace's run limits (`GET
          *     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
-         *     created with.
+         *     created with. Its budget is `budget_usd`, else the workspace's default; with a budget, every
+         *     agent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the
+         *     same way.
          */
         post: operations["createRun"];
         delete?: never;
@@ -133,7 +135,8 @@ export interface paths {
          *     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
          *     not changed. The spec is the one the original ran, even if its template has changed since;
          *     the limits are the workspace's as they are now, and a spec above them is refused with
-         *     `422`.
+         *     `422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the
+         *     original run's spend does not count.
          */
         post: operations["rerunRun"];
         delete?: never;
@@ -306,7 +309,8 @@ export interface paths {
         /**
          * Put Policy
          * @description Replace the workspace's own run limits; leave one unset to keep the platform's, and all of
-         *     them to reset. New runs get them; a run keeps the limits it was created with.
+         *     them to reset. `budget_usd` is the default budget of new runs (unset: no budget), which a run
+         *     may replace. New runs get them; a run keeps the limits it was created with.
          */
         put: operations["putPolicy"];
         post?: never;
@@ -569,6 +573,11 @@ export interface components {
              * @description The workspace the run belongs to; its connections are used. Default: the default workspace.
              */
             workspace_id?: string | null;
+            /**
+             * Budget Usd
+             * @description USD the run may spend, a hard stop once reached. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
         };
         /** CreateRunResponse */
         CreateRunResponse: {
@@ -872,6 +881,14 @@ export interface components {
         };
         /** @enum {string} */
         Requirement: "claude" | "github";
+        /** RerunRequest */
+        RerunRequest: {
+            /**
+             * Budget Usd
+             * @description USD the new run may spend. Unset: the workspace's default budget as it is now. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
+        };
         /** RunDetail */
         RunDetail: {
             /**
@@ -957,6 +974,11 @@ export interface components {
              * @description Seconds a run may spend executing, gates aside. At most 7200, the platform's limit; unset keeps it.
              */
             wall_time_s?: number | null;
+            /**
+             * Budget Usd
+             * @description The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
         };
         /**
          * RunLimits
@@ -988,6 +1010,11 @@ export interface components {
              * @description Seconds a run may spend executing; time waiting at a gate does not count.
              */
             wall_time_s: number;
+            /**
+             * Budget Usd
+             * @description USD a run may spend, a hard stop once reached; unset is no cost cap.
+             */
+            budget_usd?: number | null;
         };
         /** @enum {string} */
         RunStatus: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -1079,6 +1106,11 @@ export interface components {
              * @description False if some usage had no price (an unknown model): `estimated_usd` is then a lower bound.
              */
             cost_complete: boolean;
+            /**
+             * Budget Usd
+             * @description The run's budget: it stops once `estimated_usd` reaches it. Unset: no cap.
+             */
+            budget_usd?: number | null;
         };
         /**
          * SequenceNode
@@ -1524,7 +1556,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RerunRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -1994,7 +2030,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A limit below 1 or above the platform's */
+            /** @description A limit below 1 or above the platform's, or a budget out of range */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -24,11 +24,11 @@ Unblocks: 3.4 (validation endpoint reuses the "budget is enforceable" check), 5.
   - a "Budget (USD)" field in the Settings "Run limits" card, where empty means "No budget".
 - **Per-run budget:**
   - an optional `budget_usd` on `POST /runs`, which replaces the workspace default for that run;
-  - a "Budget (USD)" field in the "New run" sheet, prefilled with the workspace default and empty when there is none.
+  - a "Budget (USD)" field in the "New run" sheet. Its placeholder shows the workspace default ("No budget" when there is none), and leaving it empty uses that default.
 - **Frozen per run:** the run's budget is stored in `runs.policy` (`budget_usd`, null = no cap) when the run is created, and kept across resumes.
 - **Rerun:** `POST /runs/{id}/rerun` takes an optional `budget_usd`. When it is omitted, the rerun gets the current workspace default, the same as its other limits (3.2). The original run's spend is not carried over.
 - **Checked before the run** (on `POST /runs` and rerun, 422 with a `PolicyErrorDetail`):
-  - `budget_usd` must be > 0;
+  - `budget_usd` must be from $0.01 to $1,000,000;
   - when a budget is set, every agent node's model (its own `model`, else the worker's default) must have a price in the workspace's effective price table. A cap that cannot be measured is rejected, e.g. `agent 'writer' at steps[1]: model 'x' has no price, so a budget cannot be enforced`.
 - **Enforced while it runs (engine meter):**
   - The worker seeds a run-wide budget meter with `runs.estimated_usd` when an attempt starts, so spend from earlier attempts and before a gate counts.

@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { RunLimitOverrides, WorkspacePolicy } from "@/api/queries";
+import type { RunLimitOverrides, RunLimits, WorkspacePolicy } from "@/api/queries";
 import { json, renderWithQueries, stubApi } from "@/testing/api";
 import { DEFAULT_WORKSPACE_ID } from "@/workspace";
 
@@ -9,12 +9,13 @@ import { duration, RunLimitsCard } from "./run-limits";
 
 const POLICY_PATH = `/workspaces/${DEFAULT_WORKSPACE_ID}/policy`;
 
-const DEFAULTS = {
+const DEFAULTS: RunLimits = {
   agents_alive: 8,
   agents_spawned: 40,
   max_depth: 2,
   loop_iterations: 5,
   wall_time_s: 7200,
+  budget_usd: null,
 };
 const UNSET: RunLimitOverrides = {
   agents_alive: null,
@@ -22,6 +23,7 @@ const UNSET: RunLimitOverrides = {
   max_depth: null,
   loop_iterations: null,
   wall_time_s: null,
+  budget_usd: null,
 };
 
 afterEach(() => {
@@ -134,4 +136,31 @@ test("durations read in hours, minutes and seconds", () => {
     "1 min",
     "5 s",
   ]);
+});
+
+test("a budget is saved in dollars, and an empty one is no budget", async () => {
+  const fetch = storingApi();
+  show();
+  const budget = await card().findByLabelText("Budget (USD)");
+  expect(budget.getAttribute("placeholder")).toBe("No budget");
+
+  type("Budget (USD)", "2.50");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await putBody(fetch)).toEqual({ ...UNSET, budget_usd: 2.5 });
+});
+
+test("a budget out of range is caught before calling the API", async () => {
+  const fetch = storingApi();
+  show();
+  await card().findByLabelText("Budget (USD)");
+
+  type("Budget (USD)", "0");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await card().findByText("From $0.01 to $1,000,000.")).toBeDefined();
+  type("Budget (USD)", "five");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+  expect(await card().findByText("An amount in dollars, like 5 or 2.50.")).toBeDefined();
+  expect(fetch.mock.calls.some(([r]) => r.method === "PUT")).toBe(false);
 });

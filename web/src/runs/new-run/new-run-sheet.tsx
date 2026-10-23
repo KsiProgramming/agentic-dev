@@ -9,12 +9,13 @@ import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { createApiClient } from "@/api/client";
-import { ApiError, failure, messageOf } from "@/api/errors";
-import { useTemplates, type Template } from "@/api/queries";
+import { ApiError, codeOf, detailOf, failure, messageOf, validationIssues } from "@/api/errors";
+import { usePolicy, useTemplates, type Template } from "@/api/queries";
 import { ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
   Sheet,
@@ -35,6 +36,8 @@ import {
   type FormValues,
 } from "@/forms/schema-form/schema";
 import { FieldMessage, SchemaFields } from "@/forms/schema-form/schema-fields";
+import { budgetSchema, isBudgetError, parseBudget } from "@/runs/budget";
+import { formatUsd } from "@/runs/cost";
 import { runsKey } from "@/runs/use-run-summaries";
 
 import { ConnectionChecklist } from "./connection-checklist";
@@ -45,6 +48,16 @@ import { RepoCombobox } from "./repo-combobox";
 interface Values {
   repo: string;
   params: FormValues;
+  /** "" runs with the workspace's default budget. */
+  budget: string;
+}
+
+/** The problems of a `policy_limits` refusal, or null for any other body. */
+function policyErrors(error: unknown): string[] | null {
+  const detail = detailOf(error);
+  if (codeOf(error) !== "policy_limits" || !detail || typeof detail !== "object") return null;
+  const errors = "errors" in detail ? detail.errors : null;
+  return Array.isArray(errors) ? errors.filter((e): e is string => typeof e === "string") : null;
 }
 
 /** Where GitHub's install sends the browser back to: this template's sheet. */
@@ -74,18 +87,22 @@ function NewRunForm({
   const router = useRouter();
   const queries = useQueryClient();
   const repoId = useId();
+  const budgetId = useId();
+  const policy = usePolicy({ workspaceId, baseUrl });
+  const defaultBudget = policy.data?.effective.budget_usd ?? null;
   const needsRepo = template.requires.includes("github");
   const schema = useMemo(
     () =>
       z.object({
         repo: needsRepo ? z.string().min(1, "Pick a repository.") : z.string(),
         params: toZod(fields),
+        budget: budgetSchema(),
       }),
     [fields, needsRepo],
   );
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { repo: "", params: defaultValues(fields) },
+    defaultValues: { repo: "", params: defaultValues(fields), budget: "" },
   });
   const { isSubmitting } = form.formState;
   const rootError = form.formState.errors.root?.message;
@@ -109,6 +126,7 @@ function NewRunForm({
           input: "",
           repo: needsRepo ? { url: values.repo } : null,
           workspace_id: workspaceId,
+          budget_usd: parseBudget(values.budget),
         },
       });
     } catch (err) {
@@ -118,6 +136,12 @@ function NewRunForm({
     const { data, error, response } = result;
     if (!data) {
       const message = messageOf(error);
+      const budgetIssue = validationIssues(error).find((i) => i.loc.at(-1) === "budget_usd");
+      const budgetProblems = policyErrors(error)?.filter(isBudgetError) ?? [];
+      if (response.status === 422 && (budgetIssue || budgetProblems.length > 0)) {
+        form.setError("budget", { message: budgetIssue?.msg ?? budgetProblems.join(" ") });
+        return;
+      }
       if (response.status === 422 && message) {
         const { byField, rest } = parameterErrors(message);
         for (const [name, why] of Object.entries(byField)) {
@@ -179,6 +203,35 @@ function NewRunForm({
         control={form.control}
         prefix="params"
         disabled={isSubmitting}
+      />
+      <Controller
+        name="budget"
+        control={form.control}
+        render={({ field, fieldState }) => (
+          <Field data-invalid={fieldState.error ? true : undefined}>
+            <FieldLabel htmlFor={budgetId}>Budget (USD)</FieldLabel>
+            <Input
+              id={budgetId}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={defaultBudget === null ? "No budget" : formatUsd(defaultBudget)}
+              className="tabular-nums"
+              aria-invalid={fieldState.error ? true : undefined}
+              aria-describedby={fieldState.error ? `${budgetId}-error` : `${budgetId}-help`}
+              disabled={isSubmitting}
+              {...field}
+            />
+            {fieldState.error?.message ? (
+              <FieldMessage id={`${budgetId}-error`}>{fieldState.error.message}</FieldMessage>
+            ) : (
+              <FieldDescription id={`${budgetId}-help`}>
+                {defaultBudget === null
+                  ? "Optional. The run stops once its cost reaches this; empty runs without a cap."
+                  : `Optional. The run stops once its cost reaches this; empty uses the workspace's ${formatUsd(defaultBudget)}.`}
+              </FieldDescription>
+            )}
+          </Field>
+        )}
       />
       {rootError ? (
         <Alert variant="destructive">
