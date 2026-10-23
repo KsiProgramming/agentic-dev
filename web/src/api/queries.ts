@@ -14,6 +14,9 @@ export type WorkspacePricing = components["schemas"]["WorkspacePricing"];
 export type ModelPricing = WorkspacePricing["models"][number];
 export type Price = components["schemas"]["Price"];
 export type PriceOverride = components["schemas"]["PriceOverride"];
+export type WorkspacePolicy = components["schemas"]["WorkspacePolicyOut"];
+export type RunLimits = components["schemas"]["RunLimits"];
+export type RunLimitOverrides = components["schemas"]["RunLimitOverrides"];
 
 /** What the API says about the workspace's GitHub repos. */
 export type GithubRepos =
@@ -31,6 +34,10 @@ export function connectionsKey(workspaceId: string) {
 
 export function pricingKey(workspaceId: string) {
   return ["workspace", workspaceId, "pricing"] as const;
+}
+
+export function policyKey(workspaceId: string) {
+  return ["workspace", workspaceId, "policy"] as const;
 }
 
 export function reposKey(workspaceId: string) {
@@ -252,5 +259,51 @@ export function useSavePricing({
       return data;
     },
     onSuccess: (pricing) => queries.setQueryData(pricingKey(workspaceId), pricing),
+  });
+}
+
+/** The run limits the workspace's new runs get. */
+export function usePolicy({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  return useQuery({
+    queryKey: policyKey(workspaceId),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/policy", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the run limits");
+      return data;
+    },
+  });
+}
+
+/** Replaces the workspace's own run limits; `{}` resets them to the platform's. */
+export function useSavePolicy({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async (overrides: RunLimitOverrides) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).PUT("/workspaces/{workspace_id}/policy", {
+          params: { path: { workspace_id: workspaceId } },
+          body: overrides,
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not save the run limits");
+      return data;
+    },
+    onSuccess: (policy) => queries.setQueryData(policyKey(workspaceId), policy),
   });
 }

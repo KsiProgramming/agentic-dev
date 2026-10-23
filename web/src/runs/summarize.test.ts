@@ -16,6 +16,16 @@ test.each([
   ["tool_call", { name: "list_files", arguments: { path: "." } }, 'list_files({"path":"."})'],
   ["tool_result", { output: "README.md" }, "README.md"],
   ["node_completed", {}, ""],
+  [
+    "policy_limit_exceeded",
+    { limit: "agents_spawned", value: 40, observed: 41 },
+    "agents spawned: 41, limit 40",
+  ],
+  [
+    "policy_limit_exceeded",
+    { limit: "wall_time_s", value: 7200, observed: 7201 },
+    "wall time: limit 2h 0m",
+  ],
   ["something_new", { a: 1 }, '{"a":1}'],
 ])("%s → one line of text", (type, payload, expected) => {
   expect(summarizePayload(runEvent(1, type, payload))).toBe(expected);

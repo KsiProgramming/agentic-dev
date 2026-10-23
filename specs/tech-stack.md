@@ -142,6 +142,10 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - Policy limits are enforced in the engine at validation time and at runtime:
   - **Budget (USD): optional.** No default cap. If set, it is a hard stop at 100%. If unset, the run continues and cost is still tracked.
   - Agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h, gates before push/PR/repo creation/Jira status change.
+  - These defaults (`agentic_engine.policy.PLATFORM_POLICY`) are also the ceilings. A workspace may lower each one (`GET`/`PUT /workspaces/{id}/policy`, the "Run limits" card in Settings), never raise it.
+  - A run gets the workspace's effective limits when it is created (`runs.policy`) and keeps them, resumes included. A rerun gets the limits as they are then.
+  - Checked before the run (`POST /runs` and rerun answer `422`): loop `max_iterations`, map `max_concurrency` against agents alive, and nesting depth. Checked while it runs: agents spawned (every agent start, a map's items all at once when it starts) and agents alive (extra agents wait for a slot). The worker checks wall time, which counts only time spent executing, not time waiting at a gate.
+  - A run over a limit ends `failed`: a `policy_limit_exceeded` event (`limit`, `value`, `observed`), then the failure with a readable reason.
 
 ## Observability
 
@@ -179,3 +183,4 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | Event display | Merge deltas on the client, buffer writes on the server (250 ms) | The append-only log and SSE replay stay unchanged. The UI shows messages, not chunks. |
 | Rerun | A new run linked by `rerun_of` | The log stays immutable and the history stays truthful. Resuming from a checkpoint is a separate, later feature. |
 | Cost | Priced by the adapter when usage is logged, never recomputed | The append-only log stays truthful, a budget stop (3.3) can always be explained, and changing a price never rewrites past runs. |
+| Policy limits | Platform ceilings a workspace may only lower, frozen on each run when it is created | Safe by construction (mission principle 2), and a stop can always be explained by the limits the run was given. |

@@ -25,6 +25,7 @@ from agentic_engine.events import RunEvent
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
+from agentic_engine.policy import PolicyOverrides
 from agentic_engine.spec import PUBLISH_TOOLS, WRITE_TOOLS, WorkflowSpec, parse_spec
 from agentic_engine.templates import DocsParams, build_docs_spec
 from agentic_engine.templates.docs import PAGE_SEPARATOR
@@ -45,6 +46,7 @@ from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_secrets import LocalKeyProvider, generate_key_file, install_redaction
 from agentic_store import (
     Workspace,
+    active_seconds,
     create_run,
     enqueue_run,
     get_run,
@@ -53,6 +55,7 @@ from agentic_store import (
     put_connection,
     put_github_connection,
     record_approval,
+    replace_policy_overrides,
     replace_price_overrides,
     request_cancel,
 )
@@ -1120,3 +1123,110 @@ def test_the_fake_github_app_is_refused_in_production(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="AGENTIC_ENV=production"):
         build_github(settings)
+
+
+async def submit_limited(
+    sessions: async_sessionmaker[AsyncSession],
+    redis_url: str,
+    spec: WorkflowSpec,
+    **limits: int,
+) -> UUID:
+    """Run `spec` in a new workspace with its own run limits."""
+    workspace_id = await new_workspace(sessions)
+    await replace_policy_overrides(sessions, workspace_id, PolicyOverrides(**limits))
+    run_id = await create_run(sessions, spec, "go", workspace_id=workspace_id)
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await enqueue_run(redis, run_id)
+    finally:
+        await redis.aclose()
+    return run_id
+
+
+async def test_a_run_past_its_wall_time_stops_cleanly_with_the_reason(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Done when (3.2): exceeding a limit stops the run cleanly with a reason."""
+    runtime = FakeRuntime({"reviewer": [Delay(30), ECHO_USAGE]})
+
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        run_id = await submit_limited(sessions, redis_url, two_step_spec(), wall_time_s=1)
+        await wait_for_status(sessions, run_id, "failed")
+
+    events = await list_run_events(sessions, run_id)
+    assert [(e.type, e.node_id) for e in events][-3:] == [
+        ("node_cancelled", "reviewer"),
+        ("policy_limit_exceeded", None),
+        ("run_failed", None),
+    ]
+    over = events[-2].payload
+    assert (over["limit"], over["value"]) == ("wall_time_s", 1)
+    assert isinstance(over["observed"], int) and over["observed"] >= 1
+    assert events[-1].payload == {"error": "policy limit: wall time of 1s exceeded"}
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None
+    assert summary.failure_reason == "policy limit: wall time of 1s exceeded"
+
+
+def gated_spec() -> WorkflowSpec:
+    """`writer`, a gate, then `after`; no tools, so no sandbox."""
+    return parse_spec(
+        {
+            "spec_version": "0",
+            "id": "gated",
+            "name": "Gated",
+            "root": {
+                "type": "sequence",
+                "id": "main",
+                "steps": [
+                    {"type": "agent", "id": "writer", "role": "W", "instructions": "Go."},
+                    {"type": "gate", "id": "approve", "title": "Go on?"},
+                    {"type": "agent", "id": "after", "role": "A", "instructions": "Go."},
+                ],
+            },
+        }
+    )
+
+
+async def test_time_waiting_at_a_gate_does_not_count_toward_wall_time(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url):
+        run_id = await submit_limited(sessions, redis_url, gated_spec(), wall_time_s=2)
+        await wait_for_status(sessions, run_id, "waiting")
+        await asyncio.sleep(2.5)  # longer than the run's wall time
+        await record_approval(sessions, run_id, "approve", GateDecision(decision="approve"))
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+
+    assert await active_seconds(sessions, run_id) < 2
+
+
+async def test_wall_time_carries_over_a_worker_restart(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """The time a run spent on an earlier attempt counts, up to that attempt's last event: the
+    next worker stops it sooner."""
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
+    first = FakeRuntime({"writer": [Delay(2), ECHO_USAGE], "reviewer": [Delay(30), ECHO_USAGE]})
+    async with worker(postgres_url, redis_url, runtime=first, checkpointer=checkpointer):
+        run_id = await submit_limited(sessions, redis_url, two_step_spec(), wall_time_s=3)
+        await wait_for_event(sessions, run_id, "node_started", "reviewer")
+    spent = await active_seconds(sessions, run_id)
+
+    again = FakeRuntime({"reviewer": [Delay(30), ECHO_USAGE]})
+    loop = asyncio.get_running_loop()
+    async with worker(postgres_url, redis_url, runtime=again, checkpointer=checkpointer):
+        resumed_at = loop.time()
+        await wait_for_status(sessions, run_id, "failed")
+        took = loop.time() - resumed_at
+
+    assert spent >= 1.9
+    assert took < 2.5  # what was left (about 1 s) and the worker's start, not 3 s
+    events = await list_run_events(sessions, run_id)
+    assert [e.type for e in events][-2:] == ["policy_limit_exceeded", "run_failed"]
+    assert events[-2].payload["observed"] == 3

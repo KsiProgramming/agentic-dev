@@ -102,6 +102,21 @@ class WorkspaceModelPrice(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkspacePolicy(Base):
+    """A workspace's own run limits, each lower than the platform's; `NULL` keeps the platform's
+    (`agentic_engine.policy.PLATFORM_POLICY`)."""
+
+    __tablename__ = "workspace_policies"
+
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    agents_alive: Mapped[int | None] = mapped_column(Integer)
+    agents_spawned: Mapped[int | None] = mapped_column(Integer)
+    max_depth: Mapped[int | None] = mapped_column(Integer)
+    loop_iterations: Mapped[int | None] = mapped_column(Integer)
+    wall_time_s: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Run(Base):
     """A run's mutable summary and what it was started with. Its history lives in `run_events`.
 
@@ -118,7 +133,8 @@ class Run(Base):
     are a projection of the run's events, written by `PostgresEventSink` with each event, so
     listing runs never scans the log. `template_id` and `repo_url` are set at creation, and
     `rerun_of` links a rerun to the run it repeats. `cancel_requested_at` is set when a user asks
-    to cancel the run; the worker then ends it `cancelled`."""
+    to cancel the run; the worker then ends it `cancelled`. `policy` holds the limits the run got
+    when it was created (`agentic_engine.policy.Policy`); they never change, resumes included."""
 
     __tablename__ = "runs"
     __table_args__ = (
@@ -137,6 +153,7 @@ class Run(Base):
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
     status: Mapped[str] = mapped_column(String(32))
     spec: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    policy: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     input: Mapped[str] = mapped_column(Text, server_default="")
     # The `RepoSource` the run works on, if any.
     repo: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)

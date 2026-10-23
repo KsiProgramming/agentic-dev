@@ -6,9 +6,11 @@ from uuid import UUID, uuid4
 from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.policy import PLATFORM_POLICY, Policy
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_sandbox import RepoSource
 from agentic_store.models import DEFAULT_WORKSPACE_ID, Run
+from agentic_store.policy import run_policy
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,8 @@ class StoredRun:
     # How many times a worker has claimed the run; above 1 it is being resumed.
     attempt: int = 0
     workspace_id: UUID = DEFAULT_WORKSPACE_ID
+    # The limits the run got when it was created.
+    policy: Policy = PLATFORM_POLICY
 
 
 async def create_run(
@@ -34,15 +38,18 @@ async def create_run(
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) if any; returns its id. The workspace must
-    exist."""
+    exist. The run gets the workspace's policy (`run_policy`), which raises
+    `PolicyViolationError` if the spec is above it."""
     run_id = uuid4()
     async with sessions.begin() as session:
+        policy = await run_policy(session, workspace_id, spec)
         session.add(
             Run(
                 id=run_id,
                 workspace_id=workspace_id,
                 status="queued",
                 spec=spec.model_dump(mode="json"),
+                policy=policy.model_dump(mode="json"),
                 input=input,
                 repo=repo.model_dump(mode="json") if repo else None,
                 repo_url=repo.url if repo else None,
@@ -68,4 +75,5 @@ def stored_run(run: Run) -> StoredRun:
         repo=RepoSource.model_validate(run.repo) if run.repo is not None else None,
         attempt=run.attempt,
         workspace_id=run.workspace_id,
+        policy=Policy.model_validate(run.policy),
     )

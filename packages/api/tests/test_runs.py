@@ -30,6 +30,7 @@ from agentic_api.runs import routes
 from agentic_api.settings import Settings
 from agentic_engine.events import RunEventLog
 from agentic_engine.graph import checkpoint_serde
+from agentic_engine.policy import PolicyOverrides, effective_policy
 from agentic_engine.spec import parse_spec
 from agentic_runtime import AgentRuntime, Failed
 from agentic_runtime.fake import FakeRuntime
@@ -44,6 +45,7 @@ from agentic_store import (
     get_run,
     get_run_summary,
     put_github_connection,
+    replace_policy_overrides,
 )
 from agentic_worker.main import WorkerSettings
 from agentic_worker.main import run as run_worker
@@ -992,3 +994,67 @@ async def test_a_workflow_run_has_no_template_parameters(
 
     row = await stored_row(sessions, run_id)
     assert (row.template_id, row.template_parameters) == (None, None)
+
+
+async def policy_workspace(sessions: async_sessionmaker[AsyncSession], **limits: int) -> UUID:
+    """A new workspace with its own run limits."""
+    workspace_id = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=workspace_id, name="limits"))
+    await replace_policy_overrides(sessions, workspace_id, PolicyOverrides(**limits))
+    return workspace_id
+
+
+async def test_a_workflow_above_the_workspace_limits_is_refused(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workspace_id = await policy_workspace(sessions, loop_iterations=2)
+    body = {"workflow": spec_json("valid/review-loop.json"), "workspace_id": str(workspace_id)}
+
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json=body)
+        listed = (await client.get("/runs", params={"workspace_id": str(workspace_id)})).json()
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "policy_limits"
+    assert detail["errors"] == [
+        "loop 'revise' at root.steps[0]: max_iterations 3 is above the workspace limit of 2"
+    ]
+    assert detail["message"].startswith("The workflow is above the workspace's run limits: ")
+    assert listed["items"] == []
+
+
+async def test_a_run_keeps_the_limits_it_was_created_with(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workspace_id = await policy_workspace(sessions, agents_spawned=10, wall_time_s=600)
+    body = {"workflow": spec_json("valid/review-loop.json"), "workspace_id": str(workspace_id)}
+
+    async with api(postgres_url, redis_url) as client:
+        run_id = await ended_run(sessions, client, redis_url, body, "failed")
+        await replace_policy_overrides(sessions, workspace_id, PolicyOverrides(wall_time_s=60))
+        stored = await get_run(sessions, UUID(run_id))
+        response = await client.post(f"/runs/{run_id}/rerun")
+    await unqueue(redis_url, response.json()["run_id"])
+
+    assert stored is not None
+    assert stored.policy == effective_policy(PolicyOverrides(agents_spawned=10, wall_time_s=600))
+    # A rerun gets the workspace's limits as they are now.
+    rerun = await get_run(sessions, UUID(response.json()["run_id"]))
+    assert rerun is not None and rerun.policy == effective_policy(PolicyOverrides(wall_time_s=60))
+
+
+async def test_a_rerun_above_the_current_limits_is_refused(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workspace_id = await policy_workspace(sessions)
+    body = {"workflow": spec_json("valid/review-loop.json"), "workspace_id": str(workspace_id)}
+
+    async with api(postgres_url, redis_url) as client:
+        run_id = await ended_run(sessions, client, redis_url, body, "completed")
+        await replace_policy_overrides(sessions, workspace_id, PolicyOverrides(loop_iterations=1))
+        response = await client.post(f"/runs/{run_id}/rerun")
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "policy_limits"
