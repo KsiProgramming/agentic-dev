@@ -23,6 +23,8 @@ interface Row {
 
 async function rows(page: Page): Promise<Row[]> {
   await page.getByRole("tab", { name: "Raw events" }).click();
+  // The panel renders after the click: read the rows once they are there.
+  await expect(page.getByTestId("event-row").first()).toBeVisible();
   return page.getByTestId("event-row").evaluateAll((els) =>
     els.map((el) => {
       const d = (el as HTMLElement).dataset;
