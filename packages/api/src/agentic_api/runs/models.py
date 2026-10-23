@@ -156,6 +156,20 @@ class WaitingGate(BaseModel):
     title: str | None = None
 
 
+class RunUsage(BaseModel):
+    """Totals of the run's usage events, priced when each was logged."""
+
+    input_tokens: int = Field(description="Uncached input tokens.")
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    estimated_usd: float = Field(description="Estimated cost in USD of the priced usage.")
+    cost_complete: bool = Field(
+        description="False if some usage had no price (an unknown model): `estimated_usd` is "
+        "then a lower bound."
+    )
+
+
 class RunSummary(BaseModel):
     """A run as the runs list shows it. Status, timings, PR URL and the waiting gate come from
     the run's events."""
@@ -172,6 +186,7 @@ class RunSummary(BaseModel):
     pr_url: str | None = Field(description="The last pull request the run opened.")
     waiting_gate: WaitingGate | None = Field(description="Set while the run waits at a gate.")
     rerun_of: UUID | None = Field(description="The run this one repeats.")
+    usage: RunUsage
 
     @computed_field  # type: ignore[prop-decorator]
     @property

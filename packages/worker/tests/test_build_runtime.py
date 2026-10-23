@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_engine.spec import parse_spec
 from agentic_github import GithubApp
 from agentic_github.testing import private_key_pem
-from agentic_runtime import ClaudeRuntime
+from agentic_runtime import DEFAULT_PRICES, ClaudeRuntime, PriceTable
 from agentic_runtime.fake import FakeRuntime
 from agentic_runtime.testing import MockClaude
 from agentic_sandbox import FakeSandboxManager
@@ -54,12 +54,17 @@ def keys() -> LocalKeyProvider:
 
 
 def stored(monkeypatch: pytest.MonkeyPatch, secret: SecretStr | None) -> None:
-    """Every workspace's stored Claude key reads as `secret`."""
+    """Every workspace's stored Claude key reads as `secret`, and its prices as the list
+    prices."""
 
     async def load(*_args: object) -> SecretStr | None:
         return secret
 
+    async def prices(*_args: object) -> PriceTable:
+        return DEFAULT_PRICES
+
     monkeypatch.setattr("agentic_worker.main.load_secret", load)
+    monkeypatch.setattr("agentic_worker.main.workspace_price_table", prices)
 
 
 async def test_agentic_runtime_claude_runs_on_the_stored_key(

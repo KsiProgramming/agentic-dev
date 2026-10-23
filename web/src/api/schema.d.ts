@@ -83,7 +83,7 @@ export interface paths {
         /**
          * Stream Summaries
          * @description Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with
-         *     the run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,
+         *     the run's `RunSummary` whenever its status, timings, PR URL, waiting gate or usage change,
          *     including new runs. Each frame's `id` is when the run last changed. Only changes after
          *     connecting are sent; after a reconnect, list the runs again. The stream stays open.
          */
@@ -257,6 +257,31 @@ export interface paths {
         post?: never;
         /** Delete Claude */
         delete: operations["deleteClaudeConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pricing
+         * @description The model prices the workspace's runs are priced with.
+         */
+        get: operations["getPricing"];
+        /**
+         * Put Pricing
+         * @description Replace the workspace's price overrides. New usage is priced with them; runs already
+         *     logged keep their cost.
+         */
+        put: operations["putPricing"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -589,6 +614,15 @@ export interface components {
             install_url: string;
         };
         JsonValue: unknown;
+        /** LongContextPrice */
+        LongContextPrice: {
+            /**
+             * Above Tokens
+             * @description Applies to a call whose prompt is over this size.
+             */
+            above_tokens: number;
+            price: components["schemas"]["Price"];
+        };
         /**
          * LoopNode
          * @description Runs its body again and again until `until` is true, at most `max_iterations` times.
@@ -649,6 +683,48 @@ export interface components {
             /** Max Concurrency */
             max_concurrency: number;
         };
+        /** ModelPricingOut */
+        ModelPricingOut: {
+            /** Model */
+            model: string;
+            /** @description The list price; unset for a model with none. */
+            default: components["schemas"]["Price"] | null;
+            /** @description The list price for long prompts, if the model has one. */
+            long_context: components["schemas"]["LongContextPrice"] | null;
+            /** @description The workspace's price. It replaces the list price, long prompts included. */
+            override: components["schemas"]["Price"] | null;
+        };
+        /**
+         * Price
+         * @description USD per million tokens.
+         */
+        Price: {
+            /** Input */
+            input: number;
+            /** Output */
+            output: number;
+            /**
+             * Cache Write 5M
+             * @description Writing to the 5 minute prompt cache.
+             */
+            cache_write_5m: number;
+            /**
+             * Cache Write 1H
+             * @description Writing to the 1 hour prompt cache.
+             */
+            cache_write_1h: number;
+            /**
+             * Cache Read
+             * @description Reading from the prompt cache.
+             */
+            cache_read: number;
+        };
+        /** PriceOverride */
+        PriceOverride: {
+            /** Model */
+            model: string;
+            price: components["schemas"]["Price"];
+        };
         /** PutClaudeConnection */
         PutClaudeConnection: {
             /**
@@ -657,6 +733,14 @@ export interface components {
              * @description The Anthropic API key. Stored encrypted; it is never returned.
              */
             api_key: string;
+        };
+        /** PutPricing */
+        PutPricing: {
+            /**
+             * Overrides
+             * @description The workspace's overrides, replacing all stored ones; `[]` resets every model to its list price.
+             */
+            overrides: components["schemas"]["PriceOverride"][];
         };
         /** Readiness */
         Readiness: {
@@ -800,6 +884,7 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            usage: components["schemas"]["RunUsage"];
             /** Input */
             input: string;
             /**
@@ -860,6 +945,7 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            usage: components["schemas"]["RunUsage"];
             /**
              * Duration Ms
              * @description From start to end; `null` until the run has ended.
@@ -875,6 +961,33 @@ export interface components {
              * @description Pass as `cursor` for the next page.
              */
             next_cursor: string | null;
+        };
+        /**
+         * RunUsage
+         * @description Totals of the run's usage events, priced when each was logged.
+         */
+        RunUsage: {
+            /**
+             * Input Tokens
+             * @description Uncached input tokens.
+             */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /**
+             * Estimated Usd
+             * @description Estimated cost in USD of the priced usage.
+             */
+            estimated_usd: number;
+            /**
+             * Cost Complete
+             * @description False if some usage had no price (an unknown model): `estimated_usd` is then a lower bound.
+             */
+            cost_complete: boolean;
         };
         /**
          * SequenceNode
@@ -1027,6 +1140,21 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * WorkspacePricing
+         * @description The prices the workspace's runs are priced with: each model's `override`, else its
+         *     `default`. A run keeps the cost it was priced with when its usage was logged.
+         */
+        WorkspacePricing: {
+            /**
+             * As Of
+             * Format: date
+             * @description When the list prices were last checked.
+             */
+            as_of: string;
+            /** Models */
+            models: components["schemas"]["ModelPricingOut"][];
         };
         /**
          * RunEvent
@@ -1618,6 +1746,84 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    getPricing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePricing"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    putPricing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutPricing"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePricing"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A negative price, a bad model id or a model given twice */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

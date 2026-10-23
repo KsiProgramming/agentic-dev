@@ -1,6 +1,9 @@
 """The run summary columns `PostgresEventSink` projects from each run's events."""
 
+import asyncio
 import json
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
@@ -8,17 +11,19 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.agent import sum_usage
 from agentic_engine.events import RunEvent, RunEventLog
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.spec import WorkflowSpec, parse_spec
-from agentic_runtime import Failed, Message
+from agentic_runtime import Failed, Message, Usage, agent_event_adapter
 from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
 from agentic_sandbox import RepoSource
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     PostgresEventSink,
     RunSummaryRow,
+    RunUsageRow,
     create_run,
     get_run_summary,
     list_run_events,
@@ -212,6 +217,95 @@ async def test_a_second_run_started_keeps_the_first_start(
 
     assert started_at is not None
     assert (await summary(sessions, run_id)).started_at == started_at
+
+
+async def test_usage_totals_equal_the_sum_of_the_logged_usage_events(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    priced = Usage(
+        model="claude-opus-5-5",
+        input_tokens=1200,
+        output_tokens=300,
+        cache_read_tokens=5000,
+        cache_write_tokens=700,
+        estimated_usd=0.01234567,
+    )
+    runtime = FakeRuntime(
+        {
+            "writer": [Message(text="draft"), priced, priced],
+            "reviewer": [Message(text="LGTM"), ECHO_USAGE],
+        }
+    )
+    await run_workflow(
+        spec("two-step-sequence.json"),
+        runtime,
+        "go",
+        run_id=run_id,
+        sink=PostgresEventSink(sessions),
+    )
+
+    logged = [e.agent_event() for e in await list_run_events(sessions, run_id) if e.type == "usage"]
+    total = sum_usage(u for u in logged if isinstance(u, Usage))
+    assert total is not None and total.estimated_usd is not None
+    usage = (await summary(sessions, run_id)).usage
+    assert usage == RunUsageRow(
+        input_tokens=total.input_tokens,
+        output_tokens=total.output_tokens,
+        cache_read_tokens=total.cache_read_tokens,
+        cache_write_tokens=total.cache_write_tokens,
+        estimated_usd=Decimal("0.02479134"),
+        cost_complete=True,
+    )
+    assert float(usage.estimated_usd) == total.estimated_usd
+
+
+async def test_unpriced_usage_marks_the_cost_incomplete(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    runtime = FakeRuntime(
+        {
+            "writer": [Message(text="draft"), ECHO_USAGE],
+            "reviewer": [Message(text="LGTM"), Usage(input_tokens=7, output_tokens=1)],
+        }
+    )
+    await run_workflow(
+        spec("two-step-sequence.json"),
+        runtime,
+        "go",
+        run_id=run_id,
+        sink=PostgresEventSink(sessions),
+    )
+
+    usage = (await summary(sessions, run_id)).usage
+    assert (usage.input_tokens, usage.output_tokens) == (17, 11)
+    assert (usage.estimated_usd, usage.cost_complete) == (Decimal("0.0001"), False)
+
+
+async def test_concurrent_usage_events_all_count(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Map items write usage at the same time; increments in SQL lose none of them."""
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    sink = PostgresEventSink(sessions)
+    payload = agent_event_adapter.dump_python(ECHO_USAGE, mode="json")
+    events = [
+        RunEvent(
+            run_id=run_id,
+            seq=seq,
+            type="usage",
+            node_id="describe",
+            payload={**payload, "item": seq},
+            created_at=datetime.now(UTC),
+        )
+        for seq in range(1, 21)
+    ]
+
+    await asyncio.gather(*(sink.emit(e) for e in events))
+
+    usage = (await summary(sessions, run_id)).usage
+    assert (usage.input_tokens, usage.estimated_usd) == (200, Decimal("0.002"))
 
 
 async def test_an_unknown_run_has_no_summary(
