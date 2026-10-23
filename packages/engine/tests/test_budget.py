@@ -199,7 +199,7 @@ async def test_spend_exactly_at_the_budget_stops_the_run() -> None:
 
     assert result.status == "failed"
     assert [r.node_id for r in runtime.requests] == ["a", "b"]
-    assert stop_of(sink.events).payload["observed"] == "1.0"
+    assert stop_of(sink.events).payload["observed"] == "1"
 
 
 async def test_a_map_item_over_the_budget_cancels_its_running_siblings() -> None:

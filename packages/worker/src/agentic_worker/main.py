@@ -639,7 +639,8 @@ async def _workflow(
     decision: GateDecision | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
-    run paused at a gate continues with `decision`."""
+    run paused at a gate continues with `decision`. A run with a budget counts what its earlier
+    attempts spent (`runs.estimated_usd` when it was claimed)."""
     if last_seq == 0:
         log.info("run %s started", run.id)
         return await run_workflow(
@@ -651,6 +652,7 @@ async def _workflow(
             checkpointer=worker.checkpointer,
             tools=tools,
             policy=run.policy,
+            spent=run.spent,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -665,6 +667,7 @@ async def _workflow(
         tools=tools,
         decision=decision,
         policy=run.policy,
+        spent=run.spent,
     )
 
 

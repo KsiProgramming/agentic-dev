@@ -18,6 +18,7 @@ from agentic_api.runs.models import (
     CreateRunRequest,
     CreateRunResponse,
     PolicyErrorDetail,
+    RerunRequest,
     RunDetail,
     RunStatus,
     RunSummary,
@@ -27,6 +28,7 @@ from agentic_api.runs.models import (
     WorkflowRef,
     uses_github,
 )
+from agentic_api.workspaces.models import to_usd
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
 from agentic_store import (
@@ -255,7 +257,9 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
     refused with `422`. So is one above the workspace's run limits (`GET
     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
-    created with."""
+    created with. Its budget is `budget_usd`, else the workspace's default; with a budget, every
+    agent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the
+    same way."""
     redis: Redis = request.app.state.redis
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
@@ -272,6 +276,7 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
             workspace_id,
             template_id=body.template.id if body.template else None,
             template_parameters=dict(body.template.parameters) if body.template else None,
+            budget_usd=to_usd(body.budget_usd),
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e
@@ -307,12 +312,15 @@ _NO_GITHUB = (
         422: {"description": "The workflow is above the workspace's limits as they are now"},
     },
 )
-async def rerun(run_id: UUID, request: Request) -> CreateRunResponse:
+async def rerun(
+    run_id: UUID, request: Request, body: RerunRequest | None = None
+) -> CreateRunResponse:
     """Queue a new run with the same workflow spec, input, repo and workspace as the ended run
     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
     not changed. The spec is the one the original ran, even if its template has changed since;
     the limits are the workspace's as they are now, and a spec above them is refused with
-    `422`."""
+    `422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the
+    original run's spend does not count."""
     sessions = _sessions(request)
     original = await get_run(sessions, run_id)
     if original is None:
@@ -322,7 +330,7 @@ async def rerun(run_id: UUID, request: Request) -> CreateRunResponse:
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
     try:
-        new_id = await create_rerun(sessions, run_id)
+        new_id = await create_rerun(sessions, run_id, to_usd(body.budget_usd) if body else None)
     except RunNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except RunNotEndedError as e:

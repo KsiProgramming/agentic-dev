@@ -1,6 +1,7 @@
 """Creating and loading runs."""
 
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from pydantic import JsonValue
@@ -25,6 +26,8 @@ class StoredRun:
     workspace_id: UUID = DEFAULT_WORKSPACE_ID
     # The limits the run got when it was created.
     policy: Policy = PLATFORM_POLICY
+    # USD the run's usage has cost so far, for its budget.
+    spent: Decimal = Decimal(0)
 
 
 async def create_run(
@@ -35,14 +38,15 @@ async def create_run(
     workspace_id: UUID = DEFAULT_WORKSPACE_ID,
     template_id: str | None = None,
     template_parameters: dict[str, JsonValue] | None = None,
+    budget_usd: Decimal | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) if any; returns its id. The workspace must
-    exist. The run gets the workspace's policy (`run_policy`), which raises
-    `PolicyViolationError` if the spec is above it."""
+    exist. The run gets the workspace's policy with `budget_usd` in place of its budget, if given
+    (`run_policy`), which raises `PolicyViolationError` if the spec is above it."""
     run_id = uuid4()
     async with sessions.begin() as session:
-        policy = await run_policy(session, workspace_id, spec)
+        policy = await run_policy(session, workspace_id, spec, budget_usd)
         session.add(
             Run(
                 id=run_id,
@@ -76,4 +80,5 @@ def stored_run(run: Run) -> StoredRun:
         attempt=run.attempt,
         workspace_id=run.workspace_id,
         policy=Policy.model_validate(run.policy),
+        spent=run.estimated_usd,
     )

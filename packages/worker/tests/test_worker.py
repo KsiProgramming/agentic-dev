@@ -37,6 +37,7 @@ from agentic_runtime import (
     Message,
     ModelPrice,
     ToolExecutor,
+    Usage,
 )
 from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script
 from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
@@ -1129,11 +1130,11 @@ async def submit_limited(
     sessions: async_sessionmaker[AsyncSession],
     redis_url: str,
     spec: WorkflowSpec,
-    **limits: int,
+    **limits: int | Decimal,
 ) -> UUID:
     """Run `spec` in a new workspace with its own run limits."""
     workspace_id = await new_workspace(sessions)
-    await replace_policy_overrides(sessions, workspace_id, PolicyOverrides(**limits))
+    await replace_policy_overrides(sessions, workspace_id, PolicyOverrides.model_validate(limits))
     run_id = await create_run(sessions, spec, "go", workspace_id=workspace_id)
     redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
     try:
@@ -1230,3 +1231,103 @@ async def test_wall_time_carries_over_a_worker_restart(
     events = await list_run_events(sessions, run_id)
     assert [e.type for e in events][-2:] == ["policy_limit_exceeded", "run_failed"]
     assert events[-2].payload["observed"] == 3
+
+
+def costing(usd: float, then: float = 0.0) -> Script:
+    """An agent turn whose usage costs `usd`, ending `then` seconds later."""
+    return [
+        Usage(model="m", input_tokens=1, output_tokens=1, estimated_usd=usd),
+        Delay(then),
+        Message(text="done"),
+    ]
+
+
+async def test_a_run_over_its_budget_stops_cleanly_with_the_reason(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Done when (3.3): AC-7 for a budgeted run."""
+    runtime = FakeRuntime({"writer": costing(0.6), "reviewer": costing(0.6)})
+
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        run_id = await submit_limited(sessions, redis_url, two_step_spec(), budget_usd=Decimal("1"))
+        await wait_for_status(sessions, run_id, "failed")
+
+    events = await list_run_events(sessions, run_id)
+    assert [(e.type, e.node_id) for e in events][-3:] == [
+        ("node_cancelled", "reviewer"),
+        ("policy_limit_exceeded", "reviewer"),
+        ("run_failed", None),
+    ]
+    assert events[-2].payload == {"limit": "budget_usd", "value": "1", "observed": "1.2"}
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None
+    assert summary.failure_reason == "policy limit: budget of $1.00 reached ($1.20 spent)"
+    assert summary.usage.estimated_usd == Decimal("1.2")
+    assert summary.usage.budget_usd == Decimal("1")
+
+
+async def test_an_unbudgeted_run_continues_and_still_reports_its_cost(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Done when (3.3): without a budget there is no cap."""
+    runtime = FakeRuntime({"writer": costing(60), "reviewer": costing(60)})
+
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        run_id = await submit_limited(sessions, redis_url, two_step_spec())
+        await wait_for_status(sessions, run_id, "completed")
+
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None
+    assert summary.usage.estimated_usd == Decimal("120")
+    assert summary.usage.budget_usd is None
+
+
+async def test_spend_carries_over_a_worker_restart(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """The next worker counts what the cut-off attempt spent: alone, the reviewer's $0.50 is
+    under the budget."""
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
+    first = FakeRuntime({"writer": costing(0.6), "reviewer": [Delay(30), ECHO_USAGE]})
+    async with worker(postgres_url, redis_url, runtime=first, checkpointer=checkpointer):
+        run_id = await submit_limited(sessions, redis_url, two_step_spec(), budget_usd=Decimal("1"))
+        await wait_for_event(sessions, run_id, "node_started", "reviewer")
+
+    again = FakeRuntime({"reviewer": costing(0.5)})
+    async with worker(postgres_url, redis_url, runtime=again, checkpointer=checkpointer):
+        await wait_for_status(sessions, run_id, "failed")
+
+    events = await list_run_events(sessions, run_id)
+    assert [e.type for e in events][-2:] == ["policy_limit_exceeded", "run_failed"]
+    assert events[-2].payload["observed"] == "1.1"
+
+
+async def test_spend_before_a_gate_counts_and_the_budget_stays_frozen(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runtime = FakeRuntime({"writer": costing(0.6), "after": costing(0.6)})
+
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        run_id = await submit_limited(sessions, redis_url, gated_spec(), budget_usd=Decimal("1"))
+        await wait_for_status(sessions, run_id, "waiting")
+        stored = await get_run(sessions, run_id)
+        assert stored is not None
+        # Raising the workspace's default does not change a run that already exists.
+        await replace_policy_overrides(
+            sessions, stored.workspace_id, PolicyOverrides(budget_usd=Decimal("100"))
+        )
+        await record_approval(sessions, run_id, "approve", GateDecision(decision="approve"))
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "failed")
+
+    events = await list_run_events(sessions, run_id)
+    assert [(e.type, e.node_id) for e in events][-3:] == [
+        ("node_cancelled", "after"),
+        ("policy_limit_exceeded", "after"),
+        ("run_failed", None),
+    ]
+    assert events[-2].payload["observed"] == "1.2"

@@ -104,7 +104,8 @@ class WorkspaceModelPrice(Base):
 
 class WorkspacePolicy(Base):
     """A workspace's own run limits, each lower than the platform's; `NULL` keeps the platform's
-    (`agentic_engine.policy.PLATFORM_POLICY`)."""
+    (`agentic_engine.policy.PLATFORM_POLICY`). `budget_usd` is the default budget of its runs;
+    `NULL` is no budget."""
 
     __tablename__ = "workspace_policies"
 
@@ -114,6 +115,7 @@ class WorkspacePolicy(Base):
     max_depth: Mapped[int | None] = mapped_column(Integer)
     loop_iterations: Mapped[int | None] = mapped_column(Integer)
     wall_time_s: Mapped[int | None] = mapped_column(Integer)
+    budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(16, 8))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

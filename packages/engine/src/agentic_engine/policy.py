@@ -163,4 +163,5 @@ class PolicyLimitExceeded(Exception):
 
 
 def _json_number(value: int | Decimal) -> JsonValue:
-    return f"{value:f}" if isinstance(value, Decimal) else value
+    """An amount as JSON: a `Decimal` as its shortest decimal string (`1.20000000` → `1.2`)."""
+    return f"{value.normalize():f}" if isinstance(value, Decimal) else value

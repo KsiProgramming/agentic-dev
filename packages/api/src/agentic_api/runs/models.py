@@ -12,6 +12,7 @@ from pydantic import (
     model_validator,
 )
 
+from agentic_api.workspaces.models import budget_field
 from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools
 from agentic_engine.templates import get_template
 from agentic_github import repo_full_name
@@ -48,8 +49,9 @@ class TemplateRun(BaseModel):
 
 
 class PolicyErrorDetail(BaseModel):
-    """The `detail` of a run refused because its workflow is above the workspace's run limits:
-    `errors` names each problem (node, limit and value), `message` says it for people."""
+    """The `detail` of a run refused because its workflow is above the workspace's run limits, or
+    has a budget that cannot be enforced (an agent's model has no price): `errors` names each
+    problem (node, limit and value), `message` says it for people."""
 
     code: Literal["policy_limits"] = "policy_limits"
     message: str
@@ -76,6 +78,9 @@ class CreateRunRequest(BaseModel):
         default=None,
         description="The workspace the run belongs to; its connections are used. Default: the "
         "default workspace.",
+    )
+    budget_usd: float | None = budget_field(
+        "USD the run may spend, a hard stop once reached. Unset: the workspace's default budget."
     )
 
     @model_validator(mode="after")
@@ -116,6 +121,14 @@ def uses_github(spec: WorkflowSpec) -> bool:
     """Whether a node of `spec` names a `github.*` tool."""
     return any(
         tool.startswith("github.") for _, node in iter_nodes(spec.root) for tool in node_tools(node)
+    )
+
+
+class RerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    budget_usd: float | None = budget_field(
+        "USD the new run may spend. Unset: the workspace's default budget as it is now."
     )
 
 
@@ -176,6 +189,10 @@ class RunUsage(BaseModel):
     cost_complete: bool = Field(
         description="False if some usage had no price (an unknown model): `estimated_usd` is "
         "then a lower bound."
+    )
+    budget_usd: float | None = Field(
+        default=None,
+        description="The run's budget: it stops once `estimated_usd` reaches it. Unset: no cap.",
     )
 
 

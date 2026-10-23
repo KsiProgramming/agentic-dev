@@ -3,16 +3,19 @@ the workspace's own, lower limits on top. A run gets the effective policy when i
 keeps it, so changing the workspace's limits never changes a run that already exists."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import GATE_WAITING, RUN_RESUMED, RUN_STARTED
-from agentic_engine.policy import Policy, PolicyOverrides, effective_policy
-from agentic_engine.spec import WorkflowSpec, policy_errors
+from agentic_engine.policy import Policy, PolicyOverrides, effective_policy, with_budget
+from agentic_engine.spec import WorkflowSpec, budget_errors, policy_errors
+from agentic_runtime.claude import DEFAULT_MODEL
 from agentic_store.connections import WorkspaceNotFoundError
 from agentic_store.models import RunEventRow, Workspace, WorkspacePolicy
+from agentic_store.pricing import price_table
 
 
 class PolicyViolationError(Exception):
@@ -52,11 +55,22 @@ async def replace_policy_overrides(
         row.updated_at = datetime.now(UTC)
 
 
-async def run_policy(session: AsyncSession, workspace_id: UUID, spec: WorkflowSpec) -> Policy:
-    """The policy a new run of `spec` in the workspace gets. Raises `PolicyViolationError` if the
-    spec is above it."""
-    policy = effective_policy(await _overrides(session, workspace_id))
-    if errors := policy_errors(spec.root, policy):
+async def run_policy(
+    session: AsyncSession,
+    workspace_id: UUID,
+    spec: WorkflowSpec,
+    budget_usd: Decimal | None = None,
+) -> Policy:
+    """The policy a new run of `spec` in the workspace gets, with the run's own `budget_usd` in
+    place of the workspace's if it set one. Raises `PolicyViolationError` if the spec is above
+    it, or if it has a budget and an agent's model has no price in the workspace (an agent with
+    no `model` runs on the platform's default)."""
+    policy = with_budget(effective_policy(await _overrides(session, workspace_id)), budget_usd)
+    errors = policy_errors(spec.root, policy)
+    if policy.budget_usd is not None:
+        prices = await price_table(session, workspace_id)
+        errors += budget_errors(spec.root, policy, prices.__contains__, DEFAULT_MODEL)
+    if errors:
         raise PolicyViolationError(errors)
     return policy
 
@@ -114,4 +128,5 @@ async def _overrides(session: AsyncSession, workspace_id: UUID) -> PolicyOverrid
         max_depth=row.max_depth,
         loop_iterations=row.loop_iterations,
         wall_time_s=row.wall_time_s,
+        budget_usd=row.budget_usd,
     )
