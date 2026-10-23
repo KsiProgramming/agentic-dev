@@ -191,7 +191,7 @@
     },
     "MapNode": {
       "additionalProperties": false,
-      "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. A map has at most\n`MAX_AGENTS_SPAWNED` items; one that does not complete fails the map.",
+      "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. Its items' agents count toward the\nrun's `agents_spawned` limit; one item that does not complete fails the map.",
       "properties": {
         "body": {
           "discriminator": {
