@@ -9,6 +9,7 @@ import { StatusBadge, type RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+import { costCaveat, formatCost, formatTokens, usageDetails, type TokenUsage } from "../cost";
 import { RerunOf } from "../rerun";
 import { formatAbsolute, formatDuration, formatRelative, repoLabel } from "../summaries";
 import type { RunDetail } from "../use-run-detail";
@@ -19,6 +20,7 @@ export interface HeaderFacts {
   startedAt: string | null;
   durationMs: number | null;
   prUrl: string | null;
+  usage: TokenUsage | null;
 }
 
 function Meta({ children }: { children: ReactNode }) {
@@ -86,6 +88,29 @@ export function RunHeader({
               <span data-testid="run-duration" className="tabular-nums">
                 {formatDuration(facts.durationMs)}
               </span>
+            </Meta>
+          ) : null}
+          {facts.usage ? (
+            <Meta>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    data-testid="run-cost"
+                    tabIndex={0}
+                    className="rounded-sm tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
+                    {formatCost(facts.usage)}
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {formatTokens(facts.usage.inputTokens + facts.usage.outputTokens)} tokens
+                    </span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {usageDetails(facts.usage)}
+                  {costCaveat(facts.usage) ? <p>{costCaveat(facts.usage)}</p> : null}
+                </TooltipContent>
+              </Tooltip>
             </Meta>
           ) : null}
           {run?.rerun_of ? (

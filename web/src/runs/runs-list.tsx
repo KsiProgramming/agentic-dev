@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { costCaveat, formatCost, usageDetails, usageOfRun } from "./cost";
 import { canRerun, RerunOf, useRerun } from "./rerun";
 import {
   badgeStatus,
@@ -109,6 +110,23 @@ function Duration({ run, now }: { run: RunSummary; now: number }) {
   return <span className="tabular-nums">{ms === null ? "—" : formatDuration(ms)}</span>;
 }
 
+/** What the run cost so far; "—" before any usage is logged. */
+function Cost({ run }: { run: RunSummary }) {
+  const usage = usageOfRun(run.usage);
+  if (usage.inputTokens + usage.outputTokens === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <span
+      data-testid="run-cost"
+      title={costCaveat(usage) ?? usageDetails(usage)}
+      className="tabular-nums"
+    >
+      {formatCost(usage)}
+    </span>
+  );
+}
+
 function Repo({ run }: { run: RunSummary }) {
   if (!run.repo) return <span className="text-muted-foreground">—</span>;
   return (
@@ -139,6 +157,7 @@ export function RunsTable({
           <TableHead>Repo</TableHead>
           <TableHead>Started</TableHead>
           <TableHead>Duration</TableHead>
+          <TableHead className="text-right">Cost</TableHead>
           <TableHead>Pull request</TableHead>
           <TableHead className="w-10">
             <span className="sr-only">Actions</span>
@@ -170,6 +189,9 @@ export function RunsTable({
             </TableCell>
             <TableCell>
               <Duration run={run} now={now} />
+            </TableCell>
+            <TableCell className="text-right">
+              <Cost run={run} />
             </TableCell>
             <TableCell>
               {run.pr_url ? (
@@ -210,6 +232,10 @@ export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; b
         <span>
           <span className="sr-only">Duration </span>
           <Duration run={run} now={now} />
+        </span>
+        <span>
+          <span className="sr-only">Cost </span>
+          <Cost run={run} />
         </span>
         {run.pr_url ? <PrLink url={run.pr_url} /> : null}
         <span className="ml-auto">

@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 3.1 usage and cost per node and run:
+  - **Priced usage events.** A `usage` event now has its `model` and its cache reads and writes apart from uncached input (`cache_read_tokens`, `cache_write_tokens`). The Claude adapter prices every API call when it emits the event, from `agentic_runtime.pricing` (Anthropic list prices as of 2026-10-23, with 5 minute and 1 hour cache writes and Haiku 5.5's long-prompt prices). A model with no price logs its tokens with no cost. A logged cost never changes.
+  - **Run totals.** `runs` keeps the tokens and estimated USD of its usage events, added in SQL as each one is written (Alembic `0014_run_usage`, which also adds up runs logged before it). `GET /runs`, `GET /runs/{id}` and the summary stream have a `usage` object, and `cost_complete` is false once some usage had no price.
+  - **Workspace prices.** `GET`/`PUT /workspaces/{id}/pricing` lists the list prices with the workspace's overrides, and replaces the overrides (Alembic `0015_workspace_model_prices`). The worker prices a run with its workspace's prices.
+  - **UI.** The run console header shows the run's cost and tokens. Each step's footer shows its tokens and cost, and a map or loop node shows the total of its items. The runs list has a Cost column (a cost line on mobile). Settings has a "Model pricing" card to edit a model's price, add a model, and reset to list prices. A cost with unpriced usage shows "—" (or "≥ $x") and says why.
 - Merge rules and roadmap board ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)):
   - **Merging to main.** `scripts/setup_repo_rules.py` sets the repository to squash merges only (PR title and body as the commit, branch deleted after merge) and adds a ruleset on `main` with no bypass: changes go through a PR, every `ci.yml` and `pr-checks.yml` job must pass on a branch up to date with `main`, conversations resolved, no force push or deletion. `scripts/test_setup_repo_rules.py` keeps the required checks in step with the workflows.
   - **`open-pr` skill.** Opens a PR the way the rules want (changelog entry, labels, phase issue, watched checks) and leaves the merge to a person.

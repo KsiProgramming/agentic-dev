@@ -226,7 +226,9 @@ describe("StepList on the recorded docs run", () => {
     expect(
       screen.getAllByTestId("iteration").map((i) => i.querySelector("p")?.textContent),
     ).toEqual(["Iteration 1· condition not met", "Iteration 2· condition met"]);
-    expect(screen.getAllByTestId("usage")[0]?.textContent).toBe("1,200 in · 180 out tokens");
+    expect(screen.getAllByTestId("usage")[0]?.textContent).toBe(
+      "1.2K in · 180 out · — (Some usage was logged before costs were tracked.)",
+    );
     expect(screen.getByText("Open the docs PR?").parentElement?.textContent).toContain("Approved");
   });
 

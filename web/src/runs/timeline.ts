@@ -1,4 +1,7 @@
+import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
 import type { RunEvent } from "./types";
+
+export type { TokenUsage } from "./cost";
 
 /**
  * The run as a story: one step per node in run order, map items and loop iterations nested
@@ -36,11 +39,6 @@ export interface ToolTurn {
 
 export type Turn = MessageTurn | ToolTurn;
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-}
-
 export interface GateInfo {
   title: string;
   decision: string | null;
@@ -55,6 +53,7 @@ export interface Step {
   endedAt: string | null;
   error: string | null;
   turns: Turn[];
+  /** The node's own usage; `stepUsage` adds its map items and iterations. */
   usage: TokenUsage | null;
   gate: GateInfo | null;
   prUrl: string | null;
@@ -314,10 +313,7 @@ class Builder {
         return;
       }
       case "usage":
-        step.usage = {
-          inputTokens: (step.usage?.inputTokens ?? 0) + (num(payload.input_tokens) ?? 0),
-          outputTokens: (step.usage?.outputTokens ?? 0) + (num(payload.output_tokens) ?? 0),
-        };
+        step.usage = addUsage(step.usage, usageOfEvent(payload));
         return;
       case "failed":
         step.error = str(payload.error) ?? step.error;
@@ -426,4 +422,19 @@ export function foldDeltas<E extends RunEvent>(events: readonly E[]): RawRow<E>[
     }
   }
   return rows;
+}
+
+/** A step's usage with that of its map items and loop iterations: what the node cost. */
+export function stepUsage(step: Step): TokenUsage | null {
+  let total = step.usage;
+  for (const item of step.items ?? []) total = addUsage(total, stepsUsage(item.steps));
+  for (const iteration of step.iterations ?? []) {
+    total = addUsage(total, stepsUsage(iteration.steps));
+  }
+  return total;
+}
+
+/** The usage of `steps` and everything nested in them; for the run, its timeline's steps. */
+export function stepsUsage(steps: Step[]): TokenUsage | null {
+  return steps.reduce<TokenUsage | null>((total, step) => addUsage(total, stepUsage(step)), null);
 }

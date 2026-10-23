@@ -52,12 +52,15 @@ Unblocks: 3.3 (budget), 6.4 (cost of dynamic children), 9.6 (Architect cost esti
 | Past runs | Frozen at write time, never recomputed | The append-only log stays truthful, and a budget stop can be explained later. |
 | Default prices | Python constant in `agentic_runtime.pricing`, with a `PRICES_AS_OF` date | Reviewable in PRs, needs no DB seed, and is easy to update. |
 | Overrides storage | `workspace_model_prices(workspace_id, model, input, output, cache_write, cache_read, updated_at)`, PK `(workspace_id, model)` | A full override per model keeps the merge logic trivial. |
-| Price precision | `Decimal` in Python, `NUMERIC(12,6)` for USD totals, USD per MTok as `NUMERIC(12,4)` | Avoids float drift across many small events. The JSON shows a float for display. |
-| Unknown model | Tokens logged, `estimated_usd = null`, run `cost_complete = false` | Never shows a wrong number. The UI says what is missing. |
+| Price precision | `Decimal` in Python. Each call's cost is kept to 1e-8 USD. Run totals use `NUMERIC(16,8)`, and USD per MTok uses `NUMERIC(12,4)` | Avoids float drift across many small events: a Haiku cache read of a few tokens is still non-zero. The JSON shows a float for display. |
+| Cache writes | Priced per TTL (5 minute or 1 hour) from the API's `cache_creation` breakdown, as 5 minute writes when there is none. The event keeps one `cache_write_tokens` total | The two TTLs cost different amounts, and the breakdown is only needed at pricing time. |
+| Long prompts | `ModelPricing.long_context` applies above `long_context_above` prompt tokens (Haiku 5.5 over 100K). A workspace override is one flat price | It matches the list price. Overrides stay simple. |
+| Unknown model | Tokens logged, `estimated_usd = null`, run `cost_complete = false`. The run's `estimated_usd` stays the sum of its priced usage, shown as "≥ $x", or "—" when nothing was priced | Never shows a wrong number. The UI says what is missing. |
 | Run totals | Incremented columns on `runs`, not a view over `run_events` | Same pattern as `pr_url` and `status` (2.3). Listing stays O(page). |
-| Old events | Events written before 3.1 have cache tokens folded into `input_tokens` and no price. They are read as they are: totals sum them and cost shows "—" | No backfill. The log is immutable. |
+| Old events | Events written before 3.1 have cache tokens folded into `input_tokens` and no price. They are read as they are: totals sum them and cost shows "—". Migration `0014` adds up the run totals once from the log | The log is immutable, and old runs still show their tokens in the list. |
 | UI money format | `$0.042`: three significant digits below $1, two decimals above, and "<$0.001" for tiny amounts; `tabular-nums` | Agent turns cost fractions of a cent. |
 
 ## Open questions
-- Current list prices for the Claude 5 family (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1), including cache write and cache read. Check them against Anthropic's pricing page at implementation time and record the date in `PRICES_AS_OF`.
-- Should the cache-write price follow the 5 minute or the 1 hour TTL? Default to the TTL the adapter actually uses. Confirm in task group 1.
+None. Settled during implementation:
+- **List prices:** checked against https://platform.claude.com/docs/en/about-claude/pricing on 2026-10-23 (`PRICES_AS_OF`).
+- **Cache-write TTL:** both TTLs are priced (see Decisions).

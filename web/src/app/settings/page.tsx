@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { LoadingState } from "@/components/states";
 import { ClaudeConnection } from "@/settings/claude-connection";
 import { GithubConnection } from "@/settings/github-connection";
+import { ModelPricingCard } from "@/settings/model-pricing";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -25,12 +26,13 @@ export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <PageHeader
         title="Settings"
-        description="Model access and the repositories this workspace can work on."
+        description="Model access, the repositories this workspace can work on, and what its runs cost."
       />
       <ClaudeConnection />
       <Suspense fallback={<LoadingState rows={2} />}>
         <GithubForSearchParams searchParams={searchParams} />
       </Suspense>
+      <ModelPricingCard />
     </div>
   );
 }
