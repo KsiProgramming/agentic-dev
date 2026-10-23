@@ -105,16 +105,22 @@ def _total_usage(events: Sequence[AgentEvent]) -> Usage | None:
 def sum_usage(usages: Iterable[Usage | None]) -> Usage | None:
     """Add up usage records; `None` entries are skipped, and no records gives `None`.
 
-    Optional fields stay `None` unless at least one record sets them.
+    `premium_requests` stays `None` unless at least one record sets it. `estimated_usd` is `None`
+    if any record has no price, so a partial sum is never shown as the cost. `model` is kept
+    only when every record has the same one.
     """
     present = [u for u in usages if u is not None]
     if not present:
         return None
     premium = [u.premium_requests for u in present if u.premium_requests is not None]
-    usd = [u.estimated_usd for u in present if u.estimated_usd is not None]
+    usd = [u.estimated_usd for u in present]
+    models = {u.model for u in present}
     return Usage(
+        model=models.pop() if len(models) == 1 else None,
         input_tokens=sum(u.input_tokens for u in present),
         output_tokens=sum(u.output_tokens for u in present),
+        cache_read_tokens=sum(u.cache_read_tokens for u in present),
+        cache_write_tokens=sum(u.cache_write_tokens for u in present),
         premium_requests=sum(premium) if premium else None,
-        estimated_usd=sum(usd) if usd else None,
+        estimated_usd=None if None in usd else round(sum(u for u in usd if u is not None), 8),
     )

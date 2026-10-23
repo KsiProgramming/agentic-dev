@@ -50,11 +50,20 @@ class ToolResult(_Event):
 
 
 class Usage(_Event):
-    """Normalised usage for (part of) the run; a run may emit several, which add up."""
+    """Normalised usage for (part of) the run; a run may emit several, which add up.
+
+    `input_tokens` is uncached input; cache reads and writes are counted apart because they are
+    priced apart. `estimated_usd` is priced by the adapter when it emits the event and is `None`
+    when the model has no price. Events logged before phase 3.1 have no `model`, count cache
+    tokens in `input_tokens` and have no price.
+    """
 
     type: Literal["usage"] = "usage"
+    model: str | None = None
     input_tokens: Count
     output_tokens: Count
+    cache_read_tokens: Count = 0
+    cache_write_tokens: Count = 0
     premium_requests: Count | None = None
     estimated_usd: Annotated[float, Field(ge=0)] | None = None
 

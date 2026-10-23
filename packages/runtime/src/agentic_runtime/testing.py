@@ -145,18 +145,19 @@ class MockReply:
     hang: bool = False
 
 
-def _message_start(input_tokens: int) -> dict[str, Any]:
+def _message_start(input_tokens: int, model: str = "claude-test", **cache: Any) -> dict[str, Any]:
+    """`cache` sets usage fields such as `cache_read_input_tokens`."""
     return {
         "type": "message_start",
         "message": {
             "id": "msg_test",
             "type": "message",
             "role": "assistant",
-            "model": "claude-test",
+            "model": model,
             "content": [],
             "stop_reason": None,
             "stop_sequence": None,
-            "usage": {"input_tokens": input_tokens, "output_tokens": 1},
+            "usage": {"input_tokens": input_tokens, "output_tokens": 1, **cache},
         },
     }
 
@@ -191,10 +192,13 @@ def text_reply(
     input_tokens: int = 12,
     output_tokens: int = 5,
     hang: bool = False,
+    model: str = "claude-test",
+    **cache: Any,
 ) -> MockReply:
-    """A streamed text answer, one delta per chunk."""
+    """A streamed text answer, one delta per chunk. `model` and `cache` (e.g.
+    `cache_read_input_tokens=100`) set what the reply's usage reports."""
     events = [
-        _message_start(input_tokens),
+        _message_start(input_tokens, model, **cache),
         *_text_block(0, chunks),
         *_end(stop_reason, output_tokens),
     ]
