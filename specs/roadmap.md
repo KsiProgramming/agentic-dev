@@ -55,7 +55,7 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 
 | # | Phase | Done when | Status |
 |---|---|---|---|
-| 3.1 | Usage normalisation → cost per node/run | Run console shows tokens and estimated USD per node and per run; the runs list shows cost per run | — |
+| 3.1 | Usage normalisation → cost per node/run | Run console shows tokens and estimated USD per node and per run; the runs list shows cost per run | ✅ Done ([#111](https://github.com/KsiProgramming/agentic-dev/pull/111)) |
 | 3.2 | Policy limits: agents alive/spawned, depth, iterations, wall time | Exceeding a limit stops the run cleanly with a reason | — |
 | 3.3 | **Optional budget**: if set, hard stop at 100%; if unset, no cap | AC-7 for budgeted runs; an unbudgeted run continues and still reports cost | — |
 | 3.4 | Validation endpoint `POST /workflows/{id}/validate` (schema, ports, cycles, policy) | Invalid specs return actionable errors | — |
