@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 3.3 optional budget:
+- Phase 3.3 optional budget ([#113](https://github.com/KsiProgramming/agentic-dev/pull/113)):
   - **Where it is set.** A workspace may set a default USD budget for its runs (`budget_usd` on `GET`/`PUT /workspaces/{id}/policy`, Alembic `0017_optional_budget`), and a run may set its own (`budget_usd` on `POST /runs` and `POST /runs/{id}/rerun`), which replaces it. From $0.01 to $1,000,000; no budget is no cost cap. A run keeps its budget in `runs.policy`, and `GET /runs`/`GET /runs/{id}` show it as `usage.budget_usd`.
   - **Before a run.** With a budget, every agent's model must have a price in the workspace, or the run is refused with `422` (`code: policy_limits`): a cost that cannot be measured cannot be capped.
   - **While it runs.** The engine meters the run's priced usage, starting from what it had already spent (earlier attempts, time before a gate). Once the spend reaches the budget, or a usage has no price, the running nodes end `node_cancelled` and the run ends `failed` with `policy_limit_exceeded` (`limit: "budget_usd"`, USD amounts as decimal strings) and a reason such as "policy limit: budget of $1.00 reached ($1.20 spent)". A run with no budget runs on and still reports its cost.
