@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 3.3 optional budget:
+  - **Where it is set.** A workspace may set a default USD budget for its runs (`budget_usd` on `GET`/`PUT /workspaces/{id}/policy`, Alembic `0017_optional_budget`), and a run may set its own (`budget_usd` on `POST /runs` and `POST /runs/{id}/rerun`), which replaces it. From $0.01 to $1,000,000; no budget is no cost cap. A run keeps its budget in `runs.policy`, and `GET /runs`/`GET /runs/{id}` show it as `usage.budget_usd`.
+  - **Before a run.** With a budget, every agent's model must have a price in the workspace, or the run is refused with `422` (`code: policy_limits`): a cost that cannot be measured cannot be capped.
+  - **While it runs.** The engine meters the run's priced usage, starting from what it had already spent (earlier attempts, time before a gate). Once the spend reaches the budget, or a usage has no price, the running nodes end `node_cancelled` and the run ends `failed` with `policy_limit_exceeded` (`limit: "budget_usd"`, USD amounts as decimal strings) and a reason such as "policy limit: budget of $1.00 reached ($1.20 spent)". A run with no budget runs on and still reports its cost.
+  - **UI.** The Run limits card has a Budget field, the New run sheet a per-run Budget field (its placeholder shows the workspace default, and a refusal is shown on it), and the run console header shows "$x of $y". The Raw events tab summarises budget stops.
 - Phase 3.2 policy limits ([#112](https://github.com/KsiProgramming/agentic-dev/pull/112)):
   - **Limits.** `agentic_engine.policy` holds the platform's run limits (agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h), which are also the ceilings. A workspace may lower each one with `GET`/`PUT /workspaces/{id}/policy` (Alembic `0016_policy_limits`). A run keeps the limits it was created with (`runs.policy`); a rerun gets the workspace's limits as they are then.
   - **Before a run.** `POST /runs` and rerun answer `422` (`code: policy_limits`, one error per problem) when a loop's `max_iterations`, a map's `max_concurrency` or the nesting depth is above the workspace's limits.
