@@ -60,7 +60,8 @@ class RepoLimits:
     max_write_bytes: int = MAX_PUT_FILE_BYTES
     max_commit_paths: int = 50
     max_modules: int = 40
-    """The `map` item cap (40 agents spawned), so a map can always go over the whole list."""
+    """The platform's `agents_spawned`, so a map can always go over the whole list; a caller
+    leaves room for its other agents with `limit`."""
 
 
 # Lists the directory to depth `$2`: directories, a marker line, then the rest.
@@ -400,6 +401,10 @@ class _RepoTools:
                 "matching one are listed. Omit to list them all.",
             ),
         ] = None,
+        limit: Annotated[
+            int | None,
+            Field(ge=1, description="List at most this many modules. Omit for the default cap."),
+        ] = None,
     ) -> ModulesOut:
         """List the repository's modules: each directory (down to three levels) with a project
         manifest such as pyproject.toml, package.json, go.mod, Cargo.toml, pom.xml or *.csproj.
@@ -411,7 +416,7 @@ class _RepoTools:
         modules = _find_modules(result.stdout)
         if include:
             modules = [m for m in modules if any(fnmatchcase(m.path, g) for g in include)]
-        cap = self._limits.max_modules
+        cap = self._limits.max_modules if limit is None else min(limit, self._limits.max_modules)
         return ModulesOut(modules=modules[:cap], truncated=len(modules) > cap)
 
     async def _binary_files(self, files: list[str]) -> set[str]:

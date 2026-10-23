@@ -43,6 +43,10 @@ class RunState(TypedDict):
     loop appears once per iteration. `iterations` counts each loop's started iterations, and
     `usage` collects the usage of every node run, which `results` alone would undercount.
 
+    `spawned` counts the agents the run has started, for its `agents_spawned` limit: one per
+    agent node run (a loop's once per iteration), and a map's items' agents all at once when the
+    map starts. Checkpoints saved before phase 3.2 have none, which counts as 0.
+
     `map_results` holds, per map, the result of its body for each item, keyed by the item's index
     as a string (checkpoints keep string keys). The nodes inside a map body are not in `results`
     or `order`: their ids repeat for every item.
@@ -55,6 +59,7 @@ class RunState(TypedDict):
     iterations: Annotated[dict[str, int], merge_counts]
     usage: Annotated[list[Usage], operator.add]
     map_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
+    spawned: Annotated[int, operator.add]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -66,6 +71,7 @@ class RunUpdate(TypedDict, total=False):
     iterations: dict[str, int]
     usage: list[Usage]
     map_results: dict[str, dict[str, AgentNodeResult]]
+    spawned: int
 
 
 class MapItem(TypedDict):
@@ -85,6 +91,7 @@ def initial_state(input: str) -> RunState:
         iterations={},
         usage=[],
         map_results={},
+        spawned=0,
     )
 
 

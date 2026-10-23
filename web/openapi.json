@@ -199,7 +199,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`.",
+        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with.",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -229,14 +229,7 @@
             "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection"
           },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "Invalid request, or the workflow is above the workspace's limits"
           }
         }
       }
@@ -372,7 +365,7 @@
           "runs"
         ],
         "summary": "Rerun",
-        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since.",
+        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`.",
         "operationId": "rerunRun",
         "parameters": [
           {
@@ -404,14 +397,7 @@
             "description": "The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection"
           },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "The workflow is above the workspace's limits as they are now"
           }
         }
       }
@@ -905,6 +891,101 @@
           },
           "422": {
             "description": "A negative price, a bad model id or a model given twice"
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/policy": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Get Policy",
+        "description": "The run limits the workspace's new runs get.",
+        "operationId": "getPolicy",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePolicyOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Put Policy",
+        "description": "Replace the workspace's own run limits; leave one unset to keep the platform's, and all of\nthem to reset. New runs get them; a run keeps the limits it was created with.",
+        "operationId": "putPolicy",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunLimitOverrides"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePolicyOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "A limit below 1 or above the platform's"
           }
         }
       }
@@ -1789,7 +1870,7 @@
           "max_concurrency"
         ],
         "title": "MapNode",
-        "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. A map has at most\n`MAX_AGENTS_SPAWNED` items; one that does not complete fails the map."
+        "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. Its items' agents count toward the\nrun's `agents_spawned` limit; one item that does not complete fails the map."
       },
       "ModelPricingOut": {
         "properties": {
@@ -2327,6 +2408,123 @@
           "duration_ms"
         ],
         "title": "RunDetail"
+      },
+      "RunLimitOverrides": {
+        "properties": {
+          "agents_alive": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agents Alive",
+            "description": "Agents running at once. At most 8, the platform's limit; unset keeps it."
+          },
+          "agents_spawned": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 40.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agents Spawned",
+            "description": "Agents a run may start in all. At most 40, the platform's limit; unset keeps it."
+          },
+          "max_depth": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Depth",
+            "description": "How deep loops and maps may nest. At most 2, the platform's limit; unset keeps it."
+          },
+          "loop_iterations": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loop Iterations",
+            "description": "The highest `max_iterations` a loop may have. At most 5, the platform's limit; unset keeps it."
+          },
+          "wall_time_s": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 7200.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Time S",
+            "description": "Seconds a run may spend executing, gates aside. At most 7200, the platform's limit; unset keeps it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RunLimitOverrides",
+        "description": "The workspace's own limits, each at or below the platform's; unset keeps the platform's."
+      },
+      "RunLimits": {
+        "properties": {
+          "agents_alive": {
+            "type": "integer",
+            "title": "Agents Alive",
+            "description": "Agents running at once."
+          },
+          "agents_spawned": {
+            "type": "integer",
+            "title": "Agents Spawned",
+            "description": "Agents a run may start in all."
+          },
+          "max_depth": {
+            "type": "integer",
+            "title": "Max Depth",
+            "description": "How deep loops and maps may nest."
+          },
+          "loop_iterations": {
+            "type": "integer",
+            "title": "Loop Iterations",
+            "description": "The highest `max_iterations` a loop may have."
+          },
+          "wall_time_s": {
+            "type": "integer",
+            "title": "Wall Time S",
+            "description": "Seconds a run may spend executing; time waiting at a gate does not count."
+          }
+        },
+        "type": "object",
+        "required": [
+          "agents_alive",
+          "agents_spawned",
+          "max_depth",
+          "loop_iterations",
+          "wall_time_s"
+        ],
+        "title": "RunLimits",
+        "description": "The limits a run executes under."
       },
       "RunStatus": {
         "type": "string",
@@ -2923,6 +3121,28 @@
           "created_at"
         ],
         "title": "WorkspaceOut"
+      },
+      "WorkspacePolicyOut": {
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/RunLimits",
+            "description": "The platform's limits, which are also the ceilings."
+          },
+          "overrides": {
+            "$ref": "#/components/schemas/RunLimitOverrides"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/RunLimits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "defaults",
+          "overrides",
+          "effective"
+        ],
+        "title": "WorkspacePolicyOut",
+        "description": "The limits the workspace's new runs get: each of its `overrides`, else the platform's\n`defaults`. A run keeps the limits it was created with."
       },
       "WorkspacePricing": {
         "properties": {

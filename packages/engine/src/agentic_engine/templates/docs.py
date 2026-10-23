@@ -2,7 +2,8 @@
 
 The flow, as one sequence:
 
-1. `list_modules`: the `repo.list_modules` tool finds the modules (structured, no model).
+1. `list_modules`: the `repo.list_modules` tool finds the modules (structured, no model), at
+   most `MAX_MODULES`.
 2. `document`: a map over them, `DOCS_CONCURRENCY` at a time. Each item is one read-only agent
    that writes a Markdown page for its module and returns it.
 3. `combine`: a `concat` reduce that joins the pages with `PAGE_SEPARATOR`.
@@ -20,10 +21,16 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agentic_engine.policy import PLATFORM_POLICY
 from agentic_engine.spec import WorkflowSpec
 
 DOCS_CONCURRENCY = 4
 """Module agents at once: half of `MAX_AGENTS_ALIVE`, leaving room for the other agents."""
+
+MAX_MODULES = PLATFORM_POLICY.agents_spawned - 1
+"""Modules documented at most: one agent each, and one left for the writer, so a large repo
+stays within the platform's `agents_spawned`. A workspace with a lower limit stops the run at the
+map with the reason."""
 
 PAGE_SEPARATOR = "\n\n---8<--- next page ---8<---\n\n"
 """What `combine` puts between pages; the writer splits on it."""
@@ -87,7 +94,9 @@ def _with_preferences(instructions: str, params: DocsParams) -> str:
 def build_docs_spec(params: DocsParams) -> WorkflowSpec:
     """The docs workflow for `params`. It always validates: tests check every option."""
     out = params.output_dir
-    list_args: dict[str, object] = {} if params.include is None else {"include": params.include}
+    list_args: dict[str, object] = {"limit": MAX_MODULES}
+    if params.include is not None:
+        list_args["include"] = params.include
     document = _with_preferences(
         "Your input is one module of the repository: its `path` (relative to the repository "
         "root, `.` for the whole repository) and its `kind`. Explore that module with the tools "

@@ -103,6 +103,16 @@ async def test_long_lists_are_truncated(manager: SandboxManager, repos: Path) ->
     assert result["truncated"] is True
 
 
+async def test_limit_lists_fewer_but_never_more_than_the_cap(
+    manager: SandboxManager, repos: Path
+) -> None:
+    fewer = await _modules(manager, repos, MONOREPO, limit=1)
+    capped = await _modules(manager, repos, MONOREPO, RepoLimits(max_modules=2), limit=4)
+
+    assert ([m["path"] for m in fewer["modules"]], fewer["truncated"]) == (["packages/api"], True)
+    assert len(capped["modules"]) == 2
+
+
 async def test_bad_arguments_are_reported(manager: SandboxManager, repos: Path) -> None:
     repo = make_repo(repos / "bad", {"README.md": "x"})
     async with (

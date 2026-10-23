@@ -47,6 +47,15 @@ class TemplateRun(BaseModel):
             raise ValueError("; ".join(reasons)) from None
 
 
+class PolicyErrorDetail(BaseModel):
+    """The `detail` of a run refused because its workflow is above the workspace's run limits:
+    `errors` names each problem (node, limit and value), `message` says it for people."""
+
+    code: Literal["policy_limits"] = "policy_limits"
+    message: str
+    errors: list[str]
+
+
 class CreateRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

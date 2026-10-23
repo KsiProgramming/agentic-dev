@@ -17,6 +17,7 @@ from agentic_api.runs.models import (
     CancelResponse,
     CreateRunRequest,
     CreateRunResponse,
+    PolicyErrorDetail,
     RunDetail,
     RunStatus,
     RunSummary,
@@ -32,6 +33,7 @@ from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
     InvalidCursorError,
+    PolicyViolationError,
     RunEndedError,
     RunNotEndedError,
     RunNotFoundError,
@@ -244,13 +246,16 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
             "description": "The workflow uses `github.*` tools, but the workspace has no "
             "GitHub connection"
         },
+        422: {"description": "Invalid request, or the workflow is above the workspace's limits"},
     },
 )
 async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     """Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first
     node, working on `repo` if given. Stream it from `events_url`. A workflow that publishes
     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
-    refused with `422`."""
+    refused with `422`. So is one above the workspace's run limits (`GET
+    /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
+    created with."""
     redis: Redis = request.app.state.redis
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
@@ -258,19 +263,29 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
     if body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
         raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
-    run_id = await create_run(
-        sessions,
-        body.spec(),
-        body.input,
-        body.repo,
-        workspace_id,
-        template_id=body.template.id if body.template else None,
-        template_parameters=dict(body.template.parameters) if body.template else None,
-    )
+    try:
+        run_id = await create_run(
+            sessions,
+            body.spec(),
+            body.input,
+            body.repo,
+            workspace_id,
+            template_id=body.template.id if body.template else None,
+            template_parameters=dict(body.template.parameters) if body.template else None,
+        )
+    except PolicyViolationError as e:
+        raise _over_policy(e) from e
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
     )
+
+
+def _over_policy(error: PolicyViolationError) -> HTTPException:
+    detail = PolicyErrorDetail(
+        message=f"The workflow is above the workspace's run limits: {error}", errors=error.errors
+    )
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump())
 
 
 _NO_GITHUB = (
@@ -289,12 +304,15 @@ _NO_GITHUB = (
             "description": "The run has not ended yet, or its workflow uses `github.*` tools and "
             "the workspace no longer has a GitHub connection"
         },
+        422: {"description": "The workflow is above the workspace's limits as they are now"},
     },
 )
 async def rerun(run_id: UUID, request: Request) -> CreateRunResponse:
     """Queue a new run with the same workflow spec, input, repo and workspace as the ended run
     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
-    not changed. The spec is the one the original ran, even if its template has changed since."""
+    not changed. The spec is the one the original ran, even if its template has changed since;
+    the limits are the workspace's as they are now, and a spec above them is refused with
+    `422`."""
     sessions = _sessions(request)
     original = await get_run(sessions, run_id)
     if original is None:
@@ -309,6 +327,8 @@ async def rerun(run_id: UUID, request: Request) -> CreateRunResponse:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except RunNotEndedError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    except PolicyViolationError as e:
+        raise _over_policy(e) from e
     await enqueue_run(request.app.state.redis, new_id)
     return CreateRunResponse(
         run_id=new_id, events_url=str(request.url_for("stream_run_events", run_id=new_id))

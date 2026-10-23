@@ -64,7 +64,9 @@ export interface paths {
          * @description Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first
          *     node, working on `repo` if given. Stream it from `events_url`. A workflow that publishes
          *     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
-         *     refused with `422`.
+         *     refused with `422`. So is one above the workspace's run limits (`GET
+         *     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
+         *     created with.
          */
         post: operations["createRun"];
         delete?: never;
@@ -129,7 +131,9 @@ export interface paths {
          * Rerun
          * @description Queue a new run with the same workflow spec, input, repo and workspace as the ended run
          *     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
-         *     not changed. The spec is the one the original ran, even if its template has changed since.
+         *     not changed. The spec is the one the original ran, even if its template has changed since;
+         *     the limits are the workspace's as they are now, and a spec above them is refused with
+         *     `422`.
          */
         post: operations["rerunRun"];
         delete?: never;
@@ -280,6 +284,31 @@ export interface paths {
          *     logged keep their cost.
          */
         put: operations["putPricing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Policy
+         * @description The run limits the workspace's new runs get.
+         */
+        get: operations["getPolicy"];
+        /**
+         * Put Policy
+         * @description Replace the workspace's own run limits; leave one unset to keep the platform's, and all of
+         *     them to reset. New runs get them; a run keeps the limits it was created with.
+         */
+        put: operations["putPolicy"];
         post?: never;
         delete?: never;
         options?: never;
@@ -661,8 +690,8 @@ export interface components {
          *     `over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's
          *     `until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string
          *     as is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the
-         *     others are keyed by node id, which repeats for every item. A map has at most
-         *     `MAX_AGENTS_SPAWNED` items; one that does not complete fails the map.
+         *     others are keyed by node id, which repeats for every item. Its items' agents count toward the
+         *     run's `agents_spawned` limit; one item that does not complete fails the map.
          */
         MapNode: {
             /**
@@ -897,6 +926,68 @@ export interface components {
              * @description From start to end; `null` until the run has ended.
              */
             readonly duration_ms: number | null;
+        };
+        /**
+         * RunLimitOverrides
+         * @description The workspace's own limits, each at or below the platform's; unset keeps the platform's.
+         */
+        RunLimitOverrides: {
+            /**
+             * Agents Alive
+             * @description Agents running at once. At most 8, the platform's limit; unset keeps it.
+             */
+            agents_alive?: number | null;
+            /**
+             * Agents Spawned
+             * @description Agents a run may start in all. At most 40, the platform's limit; unset keeps it.
+             */
+            agents_spawned?: number | null;
+            /**
+             * Max Depth
+             * @description How deep loops and maps may nest. At most 2, the platform's limit; unset keeps it.
+             */
+            max_depth?: number | null;
+            /**
+             * Loop Iterations
+             * @description The highest `max_iterations` a loop may have. At most 5, the platform's limit; unset keeps it.
+             */
+            loop_iterations?: number | null;
+            /**
+             * Wall Time S
+             * @description Seconds a run may spend executing, gates aside. At most 7200, the platform's limit; unset keeps it.
+             */
+            wall_time_s?: number | null;
+        };
+        /**
+         * RunLimits
+         * @description The limits a run executes under.
+         */
+        RunLimits: {
+            /**
+             * Agents Alive
+             * @description Agents running at once.
+             */
+            agents_alive: number;
+            /**
+             * Agents Spawned
+             * @description Agents a run may start in all.
+             */
+            agents_spawned: number;
+            /**
+             * Max Depth
+             * @description How deep loops and maps may nest.
+             */
+            max_depth: number;
+            /**
+             * Loop Iterations
+             * @description The highest `max_iterations` a loop may have.
+             */
+            loop_iterations: number;
+            /**
+             * Wall Time S
+             * @description Seconds a run may spend executing; time waiting at a gate does not count.
+             */
+            wall_time_s: number;
         };
         /** @enum {string} */
         RunStatus: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -1142,6 +1233,17 @@ export interface components {
             created_at: string;
         };
         /**
+         * WorkspacePolicyOut
+         * @description The limits the workspace's new runs get: each of its `overrides`, else the platform's
+         *     `defaults`. A run keeps the limits it was created with.
+         */
+        WorkspacePolicyOut: {
+            /** @description The platform's limits, which are also the ceilings. */
+            defaults: components["schemas"]["RunLimits"];
+            overrides: components["schemas"]["RunLimitOverrides"];
+            effective: components["schemas"]["RunLimits"];
+        };
+        /**
          * WorkspacePricing
          * @description The prices the workspace's runs are priced with: each model's `override`, else its
          *     `default`. A run keeps the cost it was priced with when its usage was logged.
@@ -1327,14 +1429,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description Invalid request, or the workflow is above the workspace's limits */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };
@@ -1449,14 +1549,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description The workflow is above the workspace's limits as they are now */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };
@@ -1819,6 +1917,84 @@ export interface operations {
                 content?: never;
             };
             /** @description A negative price, a bad model id or a model given twice */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePolicyOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    putPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunLimitOverrides"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePolicyOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A limit below 1 or above the platform's */
             422: {
                 headers: {
                     [name: string]: unknown;

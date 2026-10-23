@@ -35,6 +35,9 @@ MAP_ITEM_STARTED: Final = "map_item_started"
 """A map starts running its body for one item: `index` (from 0), `item`."""
 MAP_ITEM_COMPLETED: Final = "map_item_completed"
 """A map's body ended for one item: `index`, `status`, and `error` if it did not complete."""
+POLICY_LIMIT_EXCEEDED: Final = "policy_limit_exceeded"
+"""The run went over a policy limit: `limit`, `value` (the limit) and `observed`; the node that
+hit it, if one did. A `node_failed` or `run_failed` naming the reason follows."""
 PR_OPENED: Final = "pr_opened"
 """A publishing tool node opened a pull request: `url`, `number`, `head`, `base`, `commit`."""
 

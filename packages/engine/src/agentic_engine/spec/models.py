@@ -9,6 +9,7 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agentic_engine.expr import ExpressionError, compile_condition, compile_list
+from agentic_engine.policy import PLATFORM_POLICY, Policy
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
 """Slug used in branch names (`agent/<run>/<node>`), so it must be path- and ref-safe."""
@@ -66,8 +67,8 @@ class SequenceNode(_Base):
     steps: list["Node"] = Field(min_length=1)
 
 
-MAX_LOOP_ITERATIONS = 5
-"""The policy default for loop iterations (tech stack). Phase 3.2 makes it configurable."""
+MAX_LOOP_ITERATIONS = PLATFORM_POLICY.loop_iterations
+"""The platform's ceiling for loop iterations; a workspace policy may lower it (`policy_errors`)."""
 
 
 class LoopNode(_Base):
@@ -90,13 +91,13 @@ class LoopNode(_Base):
     max_iterations: int = Field(ge=1, le=MAX_LOOP_ITERATIONS)
 
 
-MAX_AGENTS_ALIVE = 8
-"""The policy default for agents running at once (tech stack); caps `map.max_concurrency`. Phase
-2.2 makes it configurable."""
+MAX_AGENTS_ALIVE = PLATFORM_POLICY.agents_alive
+"""The platform's ceiling for agents running at once; caps `map.max_concurrency`. A workspace
+policy may lower it (`policy_errors`)."""
 
-MAX_AGENTS_SPAWNED = 40
-"""The policy default for agents a run may spawn (tech stack); caps a map's item count, which is
-only known at runtime. Phase 3.2 makes it configurable."""
+MAX_AGENTS_SPAWNED = PLATFORM_POLICY.agents_spawned
+"""The platform's ceiling for agents a run may start. A map's item count is only known at
+runtime, so the engine checks it there against the run's policy."""
 
 
 class MapNode(_Base):
@@ -106,8 +107,8 @@ class MapNode(_Base):
     `over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's
     `until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string
     as is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the
-    others are keyed by node id, which repeats for every item. A map has at most
-    `MAX_AGENTS_SPAWNED` items; one that does not complete fails the map."""
+    others are keyed by node id, which repeats for every item. Its items' agents count toward the
+    run's `agents_spawned` limit; one item that does not complete fails the map."""
 
     type: Literal["map"]
     id: NodeId
@@ -313,6 +314,46 @@ def _not_in_map(node: Node) -> str | None:
             return _not_in_loop(node)
         case _:
             return node.type
+
+
+def policy_errors(root: Node, policy: Policy) -> list[str]:
+    """Why the spec under `root` cannot run under `policy`, in run order (depth first); empty if
+    it can. A loop's `max_iterations` must be within `loop_iterations`, a map's
+    `max_concurrency` within `agents_alive`, and loops and maps must not nest deeper than
+    `max_depth`. Agents spawned and wall time are only known at runtime, where the engine checks
+    them."""
+    errors: list[str] = []
+
+    def visit(node: Node, path: str, depth: int) -> None:
+        match node:
+            case LoopNode() if node.max_iterations > policy.loop_iterations:
+                errors.append(
+                    f"loop {node.id!r} at {path}: max_iterations {node.max_iterations} is above "
+                    f"the workspace limit of {policy.loop_iterations}"
+                )
+            case MapNode() if node.max_concurrency > policy.agents_alive:
+                errors.append(
+                    f"map {node.id!r} at {path}: max_concurrency {node.max_concurrency} is above "
+                    f"the workspace limit of {policy.agents_alive} agents alive"
+                )
+            case _:
+                pass
+        match node:
+            case LoopNode() | MapNode():
+                if depth + 1 > policy.max_depth:
+                    errors.append(
+                        f"{node.type} {node.id!r} at {path}: nesting depth {depth + 1} is above "
+                        f"the workspace limit of {policy.max_depth}"
+                    )
+                visit(node.body, f"{path}.body", depth + 1)
+            case SequenceNode():
+                for i, step in enumerate(node.steps):
+                    visit(step, f"{path}.steps[{i}]", depth)
+            case _:
+                pass
+
+    visit(root, "root", 0)
+    return errors
 
 
 def writer_node_ids(root: Node, write_tools: Collection[str] = WRITE_TOOLS) -> set[str]:

@@ -21,6 +21,7 @@ from agentic_engine.spec.models import (
     loop_errors,
     map_errors,
     node_tools,
+    policy_errors,
     publish_gate_errors,
     writer_node_ids,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "map_errors",
     "node_tools",
     "parse_spec",
+    "policy_errors",
     "publish_gate_errors",
     "writer_node_ids",
 ]

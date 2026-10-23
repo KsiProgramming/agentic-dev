@@ -1,0 +1,117 @@
+"""A workspace's run limits: the platform policy (`agentic_engine.policy.PLATFORM_POLICY`) with
+the workspace's own, lower limits on top. A run gets the effective policy when it is created and
+keeps it, so changing the workspace's limits never changes a run that already exists."""
+
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from agentic_engine.events import GATE_WAITING, RUN_RESUMED, RUN_STARTED
+from agentic_engine.policy import Policy, PolicyOverrides, effective_policy
+from agentic_engine.spec import WorkflowSpec, policy_errors
+from agentic_store.connections import WorkspaceNotFoundError
+from agentic_store.models import RunEventRow, Workspace, WorkspacePolicy
+
+
+class PolicyViolationError(Exception):
+    """The workflow cannot run under the workspace's policy; `errors` says why, one per
+    problem."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("; ".join(errors))
+
+
+async def get_policy_overrides(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
+) -> PolicyOverrides:
+    """The workspace's own limits. Raises `WorkspaceNotFoundError`."""
+    async with sessions() as session:
+        if await session.get(Workspace, workspace_id) is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        return await _overrides(session, workspace_id)
+
+
+async def replace_policy_overrides(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, overrides: PolicyOverrides
+) -> None:
+    """Make `overrides` the workspace's own limits; all `None` resets it to the platform policy.
+    Raises `WorkspaceNotFoundError`."""
+    async with sessions.begin() as session:
+        workspace = await session.get(Workspace, workspace_id, with_for_update=True)
+        if workspace is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        row = await session.get(WorkspacePolicy, workspace_id)
+        if row is None:
+            row = WorkspacePolicy(workspace_id=workspace_id)
+            session.add(row)
+        for name, value in overrides.model_dump().items():
+            setattr(row, name, value)
+        row.updated_at = datetime.now(UTC)
+
+
+async def run_policy(session: AsyncSession, workspace_id: UUID, spec: WorkflowSpec) -> Policy:
+    """The policy a new run of `spec` in the workspace gets. Raises `PolicyViolationError` if the
+    spec is above it."""
+    policy = effective_policy(await _overrides(session, workspace_id))
+    if errors := policy_errors(spec.root, policy):
+        raise PolicyViolationError(errors)
+    return policy
+
+
+async def active_seconds(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> float:
+    """How long the run has spent executing so far, for its `wall_time_s` limit, from its event
+    log: each stretch from `run_started` or `run_resumed` to `gate_waiting` or the attempt's last
+    event. Time paused at a gate, and the gap between a crashed attempt's last event and the next
+    attempt, do not count."""
+    events = (
+        select(
+            RunEventRow.type,
+            RunEventRow.created_at,
+            func.lag(RunEventRow.created_at).over(order_by=RunEventRow.seq).label("before"),
+        )
+        .where(RunEventRow.run_id == run_id)
+        .subquery()
+    )
+    async with sessions() as session:
+        boundaries = (
+            await session.execute(
+                select(events.c.type, events.c.created_at, events.c.before).where(
+                    events.c.type.in_((RUN_STARTED, RUN_RESUMED, GATE_WAITING))
+                )
+            )
+        ).all()
+        last = await session.scalar(
+            select(func.max(RunEventRow.created_at)).where(RunEventRow.run_id == run_id)
+        )
+    total, start = 0.0, None
+    for type, at, before in boundaries:
+        if type == GATE_WAITING:
+            if start is not None:
+                total += (at - start).total_seconds()
+            start = None
+        else:
+            if start is not None and before is not None:
+                # The earlier attempt was cut off: it ran until its last event.
+                total += (before - start).total_seconds()
+            start = at
+    if start is not None and last is not None:
+        total += (last - start).total_seconds()
+    return total
+
+
+async def _overrides(session: AsyncSession, workspace_id: UUID) -> PolicyOverrides:
+    row = await session.scalar(
+        select(WorkspacePolicy).where(WorkspacePolicy.workspace_id == workspace_id)
+    )
+    if row is None:
+        return PolicyOverrides()
+    return PolicyOverrides(
+        agents_alive=row.agents_alive,
+        agents_spawned=row.agents_spawned,
+        max_depth=row.max_depth,
+        loop_iterations=row.loop_iterations,
+        wall_time_s=row.wall_time_s,
+    )

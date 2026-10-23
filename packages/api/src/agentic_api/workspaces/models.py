@@ -1,10 +1,11 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyOverrides
 from agentic_github import installation_settings_url
 from agentic_runtime import ModelPrice
 from agentic_store import ConnectionInfo, WorkspaceInfo
@@ -154,3 +155,64 @@ class PutPricing(BaseModel):
         if dupes := sorted({m for m in models if models.count(m) > 1}):
             raise ValueError(f"one override per model: {', '.join(dupes)} given twice")
         return overrides
+
+
+class RunLimits(BaseModel):
+    """The limits a run executes under."""
+
+    agents_alive: int = Field(description="Agents running at once.")
+    agents_spawned: int = Field(description="Agents a run may start in all.")
+    max_depth: int = Field(description="How deep loops and maps may nest.")
+    loop_iterations: int = Field(description="The highest `max_iterations` a loop may have.")
+    wall_time_s: int = Field(
+        description="Seconds a run may spend executing; time waiting at a gate does not count."
+    )
+
+    @classmethod
+    def of(cls, policy: Policy) -> "RunLimits":
+        return cls.model_validate(policy.model_dump())
+
+
+def _lower_limit(ceiling: int, what: str) -> Any:
+    return Field(
+        default=None,
+        ge=1,
+        le=ceiling,
+        description=f"{what} At most {ceiling}, the platform's limit; unset keeps it.",
+    )
+
+
+class RunLimitOverrides(BaseModel):
+    """The workspace's own limits, each at or below the platform's; unset keeps the platform's."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agents_alive: int | None = _lower_limit(PLATFORM_POLICY.agents_alive, "Agents running at once.")
+    agents_spawned: int | None = _lower_limit(
+        PLATFORM_POLICY.agents_spawned, "Agents a run may start in all."
+    )
+    max_depth: int | None = _lower_limit(
+        PLATFORM_POLICY.max_depth, "How deep loops and maps may nest."
+    )
+    loop_iterations: int | None = _lower_limit(
+        PLATFORM_POLICY.loop_iterations, "The highest `max_iterations` a loop may have."
+    )
+    wall_time_s: int | None = _lower_limit(
+        PLATFORM_POLICY.wall_time_s, "Seconds a run may spend executing, gates aside."
+    )
+
+    @classmethod
+    def of(cls, overrides: PolicyOverrides) -> "RunLimitOverrides":
+        return cls.model_validate(overrides.model_dump())
+
+    def to_overrides(self) -> PolicyOverrides:
+        return PolicyOverrides.model_validate(self.model_dump())
+
+
+class WorkspacePolicyOut(BaseModel):
+    """The limits the workspace's new runs get: each of its `overrides`, else the platform's
+    `defaults`. A run keeps the limits it was created with."""
+
+    defaults: RunLimits = Field(description="The platform's limits, which are also the ceilings.")
+    overrides: RunLimitOverrides
+    effective: RunLimits

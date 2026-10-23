@@ -14,19 +14,25 @@ from agentic_api.workspaces.models import (
     Price,
     PutClaudeConnection,
     PutPricing,
+    RunLimitOverrides,
+    RunLimits,
     WorkspaceOut,
+    WorkspacePolicyOut,
     WorkspacePricing,
 )
+from agentic_engine.policy import PLATFORM_POLICY, effective_policy
 from agentic_runtime import DEFAULT_PRICES, PRICES_AS_OF
 from agentic_secrets import KeyProvider
 from agentic_store import (
     WorkspaceNotFoundError,
     delete_connection,
+    get_policy_overrides,
     get_workspace,
     list_connections,
     list_price_overrides,
     list_workspaces,
     put_connection,
+    replace_policy_overrides,
     replace_price_overrides,
 )
 
@@ -201,3 +207,41 @@ async def put_pricing(workspace_id: UUID, body: PutPricing, request: Request) ->
     except WorkspaceNotFoundError:
         raise _not_found(workspace_id) from None
     return await _pricing(sessions, workspace_id)
+
+
+async def _policy(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
+) -> WorkspacePolicyOut:
+    try:
+        overrides = await get_policy_overrides(sessions, workspace_id)
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    return WorkspacePolicyOut(
+        defaults=RunLimits.of(PLATFORM_POLICY),
+        overrides=RunLimitOverrides.of(overrides),
+        effective=RunLimits.of(effective_policy(overrides)),
+    )
+
+
+@router.get("/{workspace_id}/policy", operation_id="getPolicy", responses=_NOT_FOUND)
+async def get_policy(workspace_id: UUID, request: Request) -> WorkspacePolicyOut:
+    """The run limits the workspace's new runs get."""
+    return await _policy(_sessions(request), workspace_id)
+
+
+@router.put(
+    "/{workspace_id}/policy",
+    operation_id="putPolicy",
+    responses={**_NOT_FOUND, 422: {"description": "A limit below 1 or above the platform's"}},
+)
+async def put_policy(
+    workspace_id: UUID, body: RunLimitOverrides, request: Request
+) -> WorkspacePolicyOut:
+    """Replace the workspace's own run limits; leave one unset to keep the platform's, and all of
+    them to reset. New runs get them; a run keeps the limits it was created with."""
+    sessions = _sessions(request)
+    try:
+        await replace_policy_overrides(sessions, workspace_id, body.to_overrides())
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    return await _policy(sessions, workspace_id)

@@ -49,9 +49,16 @@ from agentic_store.models import (
     RunEventRow,
     Workspace,
     WorkspaceModelPrice,
+    WorkspacePolicy,
     metadata,
 )
 from agentic_store.notify import listen
+from agentic_store.policy import (
+    PolicyViolationError,
+    active_seconds,
+    get_policy_overrides,
+    replace_policy_overrides,
+)
 from agentic_store.pricing import (
     list_price_overrides,
     replace_price_overrides,
@@ -89,6 +96,7 @@ __all__ = [
     "Connection",
     "ConnectionInfo",
     "InvalidCursorError",
+    "PolicyViolationError",
     "PostgresEventSink",
     "Run",
     "RunEndedError",
@@ -103,7 +111,9 @@ __all__ = [
     "WorkspaceInfo",
     "WorkspaceModelPrice",
     "WorkspaceNotFoundError",
+    "WorkspacePolicy",
     "WrongGateError",
+    "active_seconds",
     "cancel_requested",
     "claim_run",
     "create_rerun",
@@ -112,6 +122,7 @@ __all__ = [
     "dequeue_run",
     "enqueue_run",
     "get_github_installation",
+    "get_policy_overrides",
     "get_run",
     "get_run_summary",
     "get_workspace",
@@ -134,6 +145,7 @@ __all__ = [
     "record_approval",
     "release_run",
     "renew_lease",
+    "replace_policy_overrides",
     "replace_price_overrides",
     "request_cancel",
     "run_ended",

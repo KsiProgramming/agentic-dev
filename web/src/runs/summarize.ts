@@ -11,6 +11,25 @@ function str(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+const LIMIT_LABELS: Record<string, string> = {
+  agents_alive: "agents alive",
+  agents_spawned: "agents spawned",
+  max_depth: "nesting depth",
+  loop_iterations: "loop iterations",
+  wall_time_s: "wall time",
+};
+
+/** "agents spawned: 41, limit 40" or "wall time: limit 2h 0m". */
+function policyLimit(payload: Record<string, unknown>): string {
+  const limit = str(payload.limit);
+  const label = LIMIT_LABELS[limit] ?? limit;
+  const { value, observed } = payload;
+  if (limit === "wall_time_s" && typeof value === "number") {
+    return `${label}: limit ${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
+  }
+  return `${label}: ${str(observed)}, limit ${str(value)}`;
+}
+
 /** A one-line, plain-text summary of an event's payload. Payloads are data: never render as HTML. */
 export function summarizePayload(event: RunEvent): string {
   const payload = event.payload ?? {};
@@ -39,6 +58,8 @@ export function summarizePayload(event: RunEvent): string {
       );
     case "pr_opened":
       return truncate(str(payload.url));
+    case "policy_limit_exceeded":
+      return policyLimit(payload);
     default:
       return Object.keys(payload).length === 0 ? "" : truncate(JSON.stringify(payload));
   }
