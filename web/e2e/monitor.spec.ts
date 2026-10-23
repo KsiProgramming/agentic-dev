@@ -40,9 +40,13 @@ async function rows(page: Page): Promise<Row[]> {
 }
 
 async function expectCompletedRun(page: Page): Promise<Row[]> {
-  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
-    timeout: 30_000,
-  });
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    "succeeded",
+    {
+      timeout: 30_000,
+    },
+  );
   const listed = await rows(page);
   // Every event is listed once, in order, with no gaps.
   const seqs = listed.flatMap((r) =>
@@ -65,9 +69,13 @@ test("a docs run is started from the template gallery", async ({ page, request }
   await sheet.getByRole("button", { name: "Start run" }).click();
 
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]{36}$/);
-  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", /running|waiting/, {
-    timeout: 30_000,
-  });
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    /running|waiting/,
+    {
+      timeout: 30_000,
+    },
+  );
   expect(errors).toEqual([]);
   // Leave nothing waiting on the runs pages of the other tests.
   const runId = page.url().split("/").at(-1)!;
@@ -95,16 +103,20 @@ test("a docs run waits at its gate, is approved from the dock and opens a pull r
   await expect(page).toHaveTitle(/^\(\d+\+?\) ● Needs approval · Runs/);
 
   await page.goto(`/runs/${run_id}`);
-  const dock = page.getByTestId("approval-dock");
+  const dock = page.getByTestId("approval-dock").filter({ visible: true });
   await expect(dock).toBeVisible({ timeout: 60_000 });
   await expect(dock.getByRole("heading")).toHaveText(
     "Open a pull request with the generated docs?",
   );
   await dock.getByRole("button", { name: /Approve/ }).click();
 
-  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
-    timeout: 60_000,
-  });
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    "succeeded",
+    {
+      timeout: 60_000,
+    },
+  );
   await expect(
     page.getByRole("link", { name: new RegExp(`${DOCS_DEMO}/pull/\\d+`) }).first(),
   ).toBeVisible();

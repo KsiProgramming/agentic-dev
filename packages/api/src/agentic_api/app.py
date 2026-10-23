@@ -21,6 +21,7 @@ from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.routes import router as runs_router
 from agentic_api.settings import Settings
 from agentic_api.templates.routes import router as templates_router
+from agentic_api.workflows.routes import router as workflows_router
 from agentic_api.workspaces.claude_keys import (
     AnthropicKeyVerifier,
     ClaudeKeyVerifier,
@@ -100,6 +101,7 @@ def create_app(
     app.include_router(workspaces_router)
     app.include_router(github_router)
     app.include_router(templates_router)
+    app.include_router(workflows_router)
     app.add_exception_handler(RequestValidationError, _validation_error)
     _add_schema_components(app, RunEvent)
     return app

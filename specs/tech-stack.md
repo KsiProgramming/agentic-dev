@@ -136,6 +136,19 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - `POST /runs/{id}/cancel`: sets `runs.cancel_requested_at` and returns `202`. Only workers write events, so the worker running the run ends it (it checks every second); a queued run, or one waiting at a gate (queued again), is ended by the worker that claims it. The run ends `cancelled` with reason `cancelled by user`. An ended run answers `409`.
 - **Delta volume:** the Claude adapter keeps streaming `text_delta`. The engine buffers deltas per node and writes at most one merged `text_delta` event every 250 ms. This keeps the log small and the stream live, while the client still merges what it receives.
 
+## Workflow validation (API contract)
+
+- `POST /workflows/{id}/validate` checks a spec without running it.
+  - Body: `workflow` (raw JSON), optional `workspace_id` and `budget_usd`.
+  - Answer: `200 {valid, issues, policy}`. An invalid spec is a normal answer, not an error. `404` means an unknown workspace, and `422` a malformed request.
+  - It stores nothing and needs no connection. Until 5.1 stores workflows, `{id}` must equal the spec's `id` (`id_mismatch` otherwise).
+- One validator, `agentic_engine.spec.validate_workflow`, serves the endpoint, the spec model and `POST /runs`.
+  - Each issue has a stable `code`, the spec `path` (`root.steps[1].body`), the `node_id` to fix and a `message`. Policy issues also have `limit`, `value` and `observed`.
+  - Codes: `schema`, `id_mismatch`, `duplicate_node_id`, `invalid_expression`, `not_allowed_in_loop`, `not_allowed_in_map`, `reference`, `publish_not_tool_node`, `publish_without_gate`, `unknown_tool`, `policy_limit`, `budget_unpriced_model`.
+  - A spec off the schema gets only `schema` issues. Otherwise every issue is listed, in run order.
+- Tool names must be platform tools (`PLATFORM_TOOLS`); the tool servers register exactly these, and a test keeps them in sync. `POST /runs` refuses an unknown one with `422`.
+- `POST /runs` and rerun put the same issues in their `policy_limits` detail (`issues`), next to `errors`.
+
 ## Security & secrets
 
 - Secrets are encrypted with a KMS key per workspace (cloud KMS in production; a local key file in dev). They never appear in logs or agent context.
@@ -188,3 +201,4 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | Cost | Priced by the adapter when usage is logged, never recomputed | The append-only log stays truthful, a budget stop (3.3) can always be explained, and changing a price never rewrites past runs. |
 | Policy limits | Platform ceilings a workspace may only lower, frozen on each run when it is created | Safe by construction (mission principle 2), and a stop can always be explained by the limits the run was given. |
 | Budget | A workspace default a run may replace, metered in the engine on every priced usage | Stops right after the call that crosses it, across parallel agents, and survives restarts because the meter starts from the stored spend. |
+| Validation | `200` with structured issues from one engine validator | The canvas and the Architect read issues as data, not as failures. One validator means they never disagree with what a run accepts. |

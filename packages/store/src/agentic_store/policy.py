@@ -11,7 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import GATE_WAITING, RUN_RESUMED, RUN_STARTED
 from agentic_engine.policy import Policy, PolicyOverrides, effective_policy, with_budget
-from agentic_engine.spec import WorkflowSpec, budget_errors, policy_errors
+from agentic_engine.spec import (
+    ValidationIssue,
+    WorkflowSpec,
+    budget_issues,
+    messages,
+    policy_issues,
+    validate_workflow,
+)
 from agentic_runtime.claude import DEFAULT_MODEL
 from agentic_store.connections import WorkspaceNotFoundError
 from agentic_store.models import RunEventRow, Workspace, WorkspacePolicy
@@ -19,12 +26,13 @@ from agentic_store.pricing import price_table
 
 
 class PolicyViolationError(Exception):
-    """The workflow cannot run under the workspace's policy; `errors` says why, one per
-    problem."""
+    """The workflow cannot run under the workspace's policy; `issues` says why, one per problem,
+    and `errors` says it for people."""
 
-    def __init__(self, errors: list[str]) -> None:
-        self.errors = errors
-        super().__init__("; ".join(errors))
+    def __init__(self, issues: list[ValidationIssue]) -> None:
+        self.issues = issues
+        self.errors = messages(issues)
+        super().__init__("; ".join(self.errors))
 
 
 async def get_policy_overrides(
@@ -66,13 +74,35 @@ async def run_policy(
     it, or if it has a budget and an agent's model has no price in the workspace (an agent with
     no `model` runs on the platform's default)."""
     policy = with_budget(effective_policy(await _overrides(session, workspace_id)), budget_usd)
-    errors = policy_errors(spec.root, policy)
+    issues = policy_issues(spec.root, policy)
     if policy.budget_usd is not None:
         prices = await price_table(session, workspace_id)
-        errors += budget_errors(spec.root, policy, prices.__contains__, DEFAULT_MODEL)
-    if errors:
-        raise PolicyViolationError(errors)
+        issues += budget_issues(spec.root, policy, prices.__contains__, DEFAULT_MODEL)
+    if issues:
+        raise PolicyViolationError(issues)
     return policy
+
+
+async def check_workflow(
+    sessions: async_sessionmaker[AsyncSession],
+    workspace_id: UUID,
+    raw: object,
+    budget_usd: Decimal | None = None,
+) -> tuple[Policy, list[ValidationIssue]]:
+    """Why the decoded workflow document `raw` could not run in the workspace now
+    (`validate_workflow`), with the policy a run of it would get: the workspace's, with
+    `budget_usd` in place of its budget if given. Writes nothing. Raises
+    `WorkspaceNotFoundError`."""
+    async with sessions() as session:
+        if await session.get(Workspace, workspace_id) is None:
+            raise WorkspaceNotFoundError(workspace_id)
+        overrides = await _overrides(session, workspace_id)
+        prices = await price_table(session, workspace_id)
+    policy = with_budget(effective_policy(overrides), budget_usd)
+    issues = validate_workflow(
+        raw, policy=policy, priced=prices.__contains__, default_model=DEFAULT_MODEL
+    )
+    return policy, issues
 
 
 async def active_seconds(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> float:

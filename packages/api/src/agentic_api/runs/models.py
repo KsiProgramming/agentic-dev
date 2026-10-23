@@ -13,7 +13,14 @@ from pydantic import (
 )
 
 from agentic_api.workspaces.models import budget_field
-from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools
+from agentic_engine.spec import (
+    ValidationIssue,
+    WorkflowSpec,
+    iter_nodes,
+    messages,
+    node_tools,
+    tool_issues,
+)
 from agentic_engine.templates import get_template
 from agentic_github import repo_full_name
 from agentic_sandbox import RepoSource
@@ -51,11 +58,13 @@ class TemplateRun(BaseModel):
 class PolicyErrorDetail(BaseModel):
     """The `detail` of a run refused because its workflow is above the workspace's run limits, or
     has a budget that cannot be enforced (an agent's model has no price): `errors` names each
-    problem (node, limit and value), `message` says it for people."""
+    problem (node, limit and value), `message` says it for people. `issues` are the same
+    problems with their code, path and node, as `POST /workflows/{id}/validate` gives them."""
 
     code: Literal["policy_limits"] = "policy_limits"
     message: str
     errors: list[str]
+    issues: list[ValidationIssue]
 
 
 class CreateRunRequest(BaseModel):
@@ -89,6 +98,12 @@ class CreateRunRequest(BaseModel):
             raise ValueError("give either `workflow` or `template`")
         if self.template is not None:
             self.workflow = self.template.build_spec()
+        return self
+
+    @model_validator(mode="after")
+    def _known_tools(self) -> Self:
+        if issues := tool_issues(self.spec().root):
+            raise ValueError("; ".join(messages(issues)))
         return self
 
     @model_validator(mode="after")

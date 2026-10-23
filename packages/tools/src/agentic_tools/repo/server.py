@@ -37,6 +37,8 @@ from agentic_tools.strict import strict_tool
 
 SERVER_NAME = "repo"
 MAX_SEARCH_RESULTS = 500
+READ_TOOLS = frozenset({"list_files", "read_file", "search", "list_modules"})
+"""Tools every server has."""
 WRITE_TOOLS = frozenset({"write_file", "commit"})
 """Tools only a writable server has."""
 COMMIT_AUTHOR = AGENT_IDENTITY

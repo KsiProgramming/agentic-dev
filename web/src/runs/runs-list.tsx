@@ -72,8 +72,11 @@ function ReviewLink({ run }: { run: RunSummary }) {
 function RunMenu({ run, baseUrl }: { run: RunSummary; baseUrl?: string }) {
   const rerun = useRerun({ workspaceId: run.workspace_id, baseUrl });
   if (!canRerun(badgeStatus(run.status))) return null;
+  // Not modal: a modal menu hides the rest of the page with `aria-hidden` while its links and
+  // buttons stay focusable (axe: aria-hidden-focus). Focus still moves into the menu, and Escape
+  // or a click outside closes it.
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"

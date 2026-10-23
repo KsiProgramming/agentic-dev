@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 3.4 workflow validation endpoint ([#114](https://github.com/KsiProgramming/agentic-dev/pull/114)):
+  - **Endpoint.** `POST /workflows/{id}/validate` checks a workflow spec (raw JSON) against a workspace without running it: schema, node ids, loop and map rules, references between nodes (`reduce.from`, a publisher's `from_node`), a gate before every publisher, tool names, the workspace's run limits and, with a budget (`budget_usd` or the workspace default), model prices. It answers `200 {valid, issues, policy}`; an invalid spec is a normal answer. Nothing is stored and no connection is needed. `{id}` must be the spec's `id` until 5.1 stores workflows.
+  - **Actionable issues.** Each issue has a stable `code` (`schema`, `id_mismatch`, `duplicate_node_id`, `invalid_expression`, `not_allowed_in_loop`, `not_allowed_in_map`, `reference`, `publish_not_tool_node`, `publish_without_gate`, `unknown_tool`, `policy_limit`, `budget_unpriced_model`), the spec `path` (e.g. `root.steps[1].title`, without Pydantic's union tags), the `node_id` to fix and a `message`; policy issues add `limit`, `value` and `observed`. Every problem is listed in run order; a spec off the schema gets only its schema issues.
+  - **One validator.** `agentic_engine.spec.validate_workflow` serves the endpoint, the spec model's own checks and `POST /runs`. `PLATFORM_TOOLS` lists the tools a node may name, and a test keeps it equal to what the tool servers register.
+  - **Runs.** `POST /runs` refuses a workflow naming an unknown tool with `422` before it starts (it used to fail at runtime). The `policy_limits` refusal of `POST /runs` and rerun adds `issues` next to `errors`.
 - Phase 3.3 optional budget ([#113](https://github.com/KsiProgramming/agentic-dev/pull/113)):
   - **Where it is set.** A workspace may set a default USD budget for its runs (`budget_usd` on `GET`/`PUT /workspaces/{id}/policy`, Alembic `0017_optional_budget`), and a run may set its own (`budget_usd` on `POST /runs` and `POST /runs/{id}/rerun`), which replaces it. From $0.01 to $1,000,000; no budget is no cost cap. A run keeps its budget in `runs.policy`, and `GET /runs`/`GET /runs/{id}` show it as `usage.budget_usd`.
   - **Before a run.** With a budget, every agent's model must have a price in the workspace, or the run is refused with `422` (`code: policy_limits`): a cost that cannot be measured cannot be capped.
@@ -182,6 +187,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ### Fixed
 - `github.openPR` no longer fails with "git fetch failed: transport 'file' not allowed" after an approved gate. git checks the file transport when fetching the writer's bundle, and `push_bundle` only allowed it for `file://` test remotes. It is now allowed for the bundle fetch only, and fetch and push to GitHub stay https only.
 - The "Generate docs" writer no longer fails with "Claude stopped without finishing: max_tokens": the Claude runtime's defaults are now 32,000 output tokens per call (was 4,096) and 50 tool-use turns (was 10), and compose passes `CLAUDE_MAX_TOKENS` and `CLAUDE_MAX_TURNS` to the worker.
+- The compose e2e job passes again (it had failed on `main` since 2.5) ([#114](https://github.com/KsiProgramming/agentic-dev/pull/114)):
+  - **Mobile menu button.** The waiting-count badge sits beside the button, not inside it, so the button's visible text no longer differs from its name (axe `label-content-name-mismatch`, WCAG 2.5.3).
+  - **Primary buttons.** Hover is `bg-primary/90` (was `/80`, 4.2:1 on white), so text keeps 4.5:1 contrast in both themes. The badge link hover matches.
+  - **Runs list menu.** The row "⋯" menu is not modal, so it no longer hides the page with `aria-hidden` around focusable elements (axe `aria-hidden-focus`).
+  - **Unknown run.** The console's "Run not found." page has its page heading, like every other page.
+  - **Tests.** The a11y spec scopes a settings alert to the page content (Next's route announcer is an alert too), and the keyboard gate test allows the "(N) ● Needs approval" prefix that other waiting runs add. The specs read a run's status and approval dock only where visible: Next keeps a previous run's console, and React a streamed copy of the page, hidden in the DOM. The sheet's layout check waits for its slide-in to finish.
 - A run's `usage` now adds up every node run (the new `RunState.usage`, with `Usage` allowed in checkpoints). Before, it counted only each node's latest result, which undercounted loops. `run_resumed`'s `completed_nodes` lists each node once.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main
