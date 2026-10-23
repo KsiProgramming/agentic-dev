@@ -141,6 +141,9 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - Secrets are encrypted with a KMS key per workspace (cloud KMS in production; a local key file in dev). They never appear in logs or agent context.
 - Policy limits are enforced in the engine at validation time and at runtime:
   - **Budget (USD): optional.** No default cap. If set, it is a hard stop at 100%. If unset, the run continues and cost is still tracked.
+    - A workspace may set a default budget (the "Budget" field of the "Run limits" card), and a run may set its own when it starts (`budget_usd` on `POST /runs` and rerun), which replaces it. It has no platform ceiling. From $0.01 to $1,000,000.
+    - The run's budget is frozen in `runs.policy` with its other limits. With a budget, every agent's model must have a price in the workspace, or the run is refused with `422`: a cap that cannot be measured is not a cap.
+    - The engine meters it: the worker seeds a meter with the run's spend so far (`runs.estimated_usd`, so earlier attempts and the time before a gate count), and each `usage` event adds its `estimated_usd`. Once the spend reaches the budget, or a usage has no price, the running nodes end `node_cancelled` and the run ends like any other limit (`policy_limit_exceeded` with `limit: "budget_usd"` and USD amounts as decimal strings). The call that crossed the budget is already paid, so it is counted in full.
   - Agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h, gates before push/PR/repo creation/Jira status change.
   - These defaults (`agentic_engine.policy.PLATFORM_POLICY`) are also the ceilings. A workspace may lower each one (`GET`/`PUT /workspaces/{id}/policy`, the "Run limits" card in Settings), never raise it.
   - A run gets the workspace's effective limits when it is created (`runs.policy`) and keeps them, resumes included. A rerun gets the limits as they are then.
@@ -184,3 +187,4 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | Rerun | A new run linked by `rerun_of` | The log stays immutable and the history stays truthful. Resuming from a checkpoint is a separate, later feature. |
 | Cost | Priced by the adapter when usage is logged, never recomputed | The append-only log stays truthful, a budget stop (3.3) can always be explained, and changing a price never rewrites past runs. |
 | Policy limits | Platform ceilings a workspace may only lower, frozen on each run when it is created | Safe by construction (mission principle 2), and a stop can always be explained by the limits the run was given. |
+| Budget | A workspace default a run may replace, metered in the engine on every priced usage | Stops right after the call that crosses it, across parallel agents, and survives restarts because the meter starts from the stored spend. |

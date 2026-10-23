@@ -21,12 +21,7 @@ async def list_price_overrides(
     async with sessions() as session:
         if await session.get(Workspace, workspace_id) is None:
             raise WorkspaceNotFoundError(workspace_id)
-        rows = await session.scalars(
-            select(WorkspaceModelPrice)
-            .where(WorkspaceModelPrice.workspace_id == workspace_id)
-            .order_by(WorkspaceModelPrice.model)
-        )
-        return {row.model: _price(row) for row in rows}
+        return await _overrides(session, workspace_id)
 
 
 async def replace_price_overrides(
@@ -60,6 +55,20 @@ async def workspace_price_table(
 ) -> PriceTable:
     """The prices the workspace's runs use. Raises `WorkspaceNotFoundError`."""
     return DEFAULT_PRICES.with_overrides(await list_price_overrides(sessions, workspace_id))
+
+
+async def price_table(session: AsyncSession, workspace_id: UUID) -> PriceTable:
+    """`workspace_price_table` within `session`."""
+    return DEFAULT_PRICES.with_overrides(await _overrides(session, workspace_id))
+
+
+async def _overrides(session: AsyncSession, workspace_id: UUID) -> dict[str, ModelPrice]:
+    rows = await session.scalars(
+        select(WorkspaceModelPrice)
+        .where(WorkspaceModelPrice.workspace_id == workspace_id)
+        .order_by(WorkspaceModelPrice.model)
+    )
+    return {row.model: _price(row) for row in rows}
 
 
 def _price(row: WorkspaceModelPrice) -> ModelPrice:

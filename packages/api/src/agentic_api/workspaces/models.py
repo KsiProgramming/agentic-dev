@@ -167,10 +167,32 @@ class RunLimits(BaseModel):
     wall_time_s: int = Field(
         description="Seconds a run may spend executing; time waiting at a gate does not count."
     )
+    budget_usd: float | None = Field(
+        default=None,
+        description="USD a run may spend, a hard stop once reached; unset is no cost cap.",
+    )
 
     @classmethod
     def of(cls, policy: Policy) -> "RunLimits":
         return cls.model_validate(policy.model_dump())
+
+
+BUDGET_MIN_USD = 0.01
+BUDGET_MAX_USD = 1_000_000
+
+
+def budget_field(what: str) -> Any:
+    return Field(
+        default=None,
+        ge=BUDGET_MIN_USD,
+        le=BUDGET_MAX_USD,
+        description=f"{what} From ${BUDGET_MIN_USD} to ${BUDGET_MAX_USD:,}; unset is no budget.",
+    )
+
+
+def to_usd(amount: float | None) -> Decimal | None:
+    """An API amount as the policy keeps it, to 8 decimals."""
+    return None if amount is None else Decimal(str(round(amount, 8)))
 
 
 def _lower_limit(ceiling: int, what: str) -> Any:
@@ -200,13 +222,19 @@ class RunLimitOverrides(BaseModel):
     wall_time_s: int | None = _lower_limit(
         PLATFORM_POLICY.wall_time_s, "Seconds a run may spend executing, gates aside."
     )
+    budget_usd: float | None = budget_field(
+        "The default budget of the workspace's runs, which a run may replace. It has no "
+        "platform ceiling."
+    )
 
     @classmethod
     def of(cls, overrides: PolicyOverrides) -> "RunLimitOverrides":
         return cls.model_validate(overrides.model_dump())
 
     def to_overrides(self) -> PolicyOverrides:
-        return PolicyOverrides.model_validate(self.model_dump())
+        return PolicyOverrides.model_validate(
+            {**self.model_dump(), "budget_usd": to_usd(self.budget_usd)}
+        )
 
 
 class WorkspacePolicyOut(BaseModel):

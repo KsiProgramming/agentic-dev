@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { FieldMessage } from "@/forms/schema-form/schema-fields";
+import { budgetSchema, parseBudget } from "@/runs/budget";
 import { DEFAULT_WORKSPACE_ID } from "@/workspace";
 
 import { ConfirmButton } from "./confirm-dialog";
@@ -29,7 +30,7 @@ import { ConnectionCard } from "./connection-card";
 const PURPOSE =
   "What one run may use. A run that goes over a limit stops with the reason. Lower a limit to tighten it; a run keeps the limits it started with.";
 
-type CountKey = Exclude<keyof RunLimits, "wall_time_s">;
+type CountKey = Exclude<keyof RunLimits, "wall_time_s" | "budget_usd">;
 
 const COUNT_FIELDS = [
   { key: "agents_alive", label: "Agents at once", help: "Agents running at the same time." },
@@ -60,6 +61,7 @@ function schemaFor(defaults: RunLimits) {
       max_depth: count(defaults.max_depth),
       wall_time_hours: minutes,
       wall_time_minutes: minutes,
+      budget_usd: budgetSchema(),
     })
     .superRefine((v, ctx) => {
       const seconds = wallTimeSeconds(v.wall_time_hours, v.wall_time_minutes);
@@ -100,6 +102,7 @@ function valuesOf(overrides: RunLimitOverrides): Values {
     max_depth: overrides.max_depth?.toString() ?? "",
     wall_time_hours: wall == null ? "" : String(Math.floor(wall / 3600)),
     wall_time_minutes: wall == null ? "" : String(Math.floor((wall % 3600) / 60)),
+    budget_usd: overrides.budget_usd?.toString() ?? "",
   };
 }
 
@@ -111,6 +114,7 @@ function overridesOf(values: Values): RunLimitOverrides {
     loop_iterations: number(values.loop_iterations),
     max_depth: number(values.max_depth),
     wall_time_s: wallTimeSeconds(values.wall_time_hours, values.wall_time_minutes),
+    budget_usd: parseBudget(values.budget_usd),
   };
 }
 
@@ -176,6 +180,7 @@ function LimitsForm({
       for (const issue of validationIssues(err.body)) {
         const field = issue.loc.at(-1);
         if (field === "wall_time_s") form.setError("wall_time_hours", { message: issue.msg });
+        if (field === "budget_usd") form.setError("budget_usd", { message: issue.msg });
         const known = COUNT_FIELDS.find((f) => f.key === field);
         if (known) form.setError(known.key, { message: issue.msg });
       }
@@ -214,6 +219,15 @@ function LimitsForm({
         minutes={form.register("wall_time_minutes")}
         disabled={pending}
       />
+      <LimitInput
+        label="Budget (USD)"
+        help="The most a run may spend; it stops once its cost reaches this. Empty: no budget, and runs are not capped. A run may set its own when it starts."
+        placeholder="No budget"
+        inputMode="decimal"
+        error={errors.budget_usd?.message}
+        registration={form.register("budget_usd")}
+        disabled={pending}
+      />
       {formError ? (
         <Alert variant="destructive">
           <AlertDescription>{formError}</AlertDescription>
@@ -234,7 +248,7 @@ function LimitsForm({
           <ConfirmButton
             label="Reset to defaults"
             title="Reset the run limits?"
-            description="New runs get the platform's limits again. Runs already started keep theirs."
+            description="New runs get the platform's limits again, and no budget. Runs already started keep theirs."
             confirmLabel="Reset limits"
             disabled={pending}
             onConfirm={() =>
@@ -254,6 +268,7 @@ function LimitInput({
   label,
   help,
   placeholder,
+  inputMode = "numeric",
   error,
   registration,
   disabled,
@@ -261,6 +276,7 @@ function LimitInput({
   label: string;
   help: string;
   placeholder: string;
+  inputMode?: "numeric" | "decimal";
   error: string | undefined;
   registration: UseFormRegisterReturn;
   disabled: boolean;
@@ -271,7 +287,7 @@ function LimitInput({
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Input
         id={id}
-        inputMode="numeric"
+        inputMode={inputMode}
         autoComplete="off"
         placeholder={placeholder}
         className="tabular-nums"

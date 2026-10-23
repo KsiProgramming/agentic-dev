@@ -264,7 +264,7 @@ async def test_over_that_is_not_a_list_fails_the_map() -> None:
 
 
 def policy(**limits: int) -> Policy:
-    return effective_policy(PolicyOverrides(**limits))
+    return effective_policy(PolicyOverrides.model_validate(limits))
 
 
 async def test_a_map_that_would_pass_the_spawn_limit_fails_before_its_items() -> None:

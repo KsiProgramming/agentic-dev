@@ -232,13 +232,17 @@ async def get_policy(workspace_id: UUID, request: Request) -> WorkspacePolicyOut
 @router.put(
     "/{workspace_id}/policy",
     operation_id="putPolicy",
-    responses={**_NOT_FOUND, 422: {"description": "A limit below 1 or above the platform's"}},
+    responses={
+        **_NOT_FOUND,
+        422: {"description": "A limit below 1 or above the platform's, or a budget out of range"},
+    },
 )
 async def put_policy(
     workspace_id: UUID, body: RunLimitOverrides, request: Request
 ) -> WorkspacePolicyOut:
     """Replace the workspace's own run limits; leave one unset to keep the platform's, and all of
-    them to reset. New runs get them; a run keeps the limits it was created with."""
+    them to reset. `budget_usd` is the default budget of new runs (unset: no budget), which a run
+    may replace. New runs get them; a run keeps the limits it was created with."""
     sessions = _sessions(request)
     try:
         await replace_policy_overrides(sessions, workspace_id, body.to_overrides())

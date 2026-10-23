@@ -57,6 +57,8 @@ class RunUsageRow:
     cache_write_tokens: int
     estimated_usd: Decimal
     cost_complete: bool
+    # The run's budget, frozen in its policy; `None` is no budget.
+    budget_usd: Decimal | None = None
 
 
 def encode_cursor(created_at: datetime, run_id: UUID) -> str:
@@ -96,6 +98,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.cache_write_tokens,
         Run.estimated_usd,
         Run.cost_complete,
+        Run.policy["budget_usd"].astext.label("budget_usd"),
     )
 
 
@@ -123,6 +126,7 @@ def _summary(row: Any) -> RunSummaryRow:
             cache_write_tokens=row.cache_write_tokens,
             estimated_usd=row.estimated_usd,
             cost_complete=row.cost_complete,
+            budget_usd=Decimal(row.budget_usd) if row.budget_usd is not None else None,
         ),
     )
 

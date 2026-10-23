@@ -1,3 +1,4 @@
+import { formatUsd } from "./cost";
 import type { RunEvent } from "./types";
 
 const MAX_LENGTH = 200;
@@ -17,15 +18,26 @@ const LIMIT_LABELS: Record<string, string> = {
   max_depth: "nesting depth",
   loop_iterations: "loop iterations",
   wall_time_s: "wall time",
+  budget_usd: "budget",
 };
 
-/** "agents spawned: 41, limit 40" or "wall time: limit 2h 0m". */
+/** A USD amount of the event, a decimal string ("1.2"). */
+function usd(value: unknown): string {
+  const n = typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(n) ? formatUsd(n) : str(value);
+}
+
+/** "agents spawned: 41, limit 40", "wall time: limit 2h 0m" or "budget: $1.20 spent, limit $1.00". */
 function policyLimit(payload: Record<string, unknown>): string {
   const limit = str(payload.limit);
   const label = LIMIT_LABELS[limit] ?? limit;
   const { value, observed } = payload;
   if (limit === "wall_time_s" && typeof value === "number") {
     return `${label}: limit ${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
+  }
+  if (limit === "budget_usd") {
+    const spent = payload.model ? `no price for ${str(payload.model)}` : `${usd(observed)} spent`;
+    return `${label}: ${spent}, limit ${usd(value)}`;
   }
   return `${label}: ${str(observed)}, limit ${str(value)}`;
 }

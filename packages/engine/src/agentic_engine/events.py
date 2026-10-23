@@ -37,7 +37,9 @@ MAP_ITEM_COMPLETED: Final = "map_item_completed"
 """A map's body ended for one item: `index`, `status`, and `error` if it did not complete."""
 POLICY_LIMIT_EXCEEDED: Final = "policy_limit_exceeded"
 """The run went over a policy limit: `limit`, `value` (the limit) and `observed`; the node that
-hit it, if one did. A `node_failed` or `run_failed` naming the reason follows."""
+hit it, if one did. A `node_failed` or `run_failed` naming the reason follows. For
+`limit: "budget_usd"` the amounts are USD decimal strings, and `model` names a model with no price
+when that is why the budget could not be held."""
 PR_OPENED: Final = "pr_opened"
 """A publishing tool node opened a pull request: `url`, `number`, `head`, `base`, `commit`."""
 

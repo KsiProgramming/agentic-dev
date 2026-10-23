@@ -9,7 +9,14 @@ import { StatusBadge, type RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-import { costCaveat, formatCost, formatTokens, usageDetails, type TokenUsage } from "../cost";
+import {
+  costCaveat,
+  formatCost,
+  formatTokens,
+  formatUsd,
+  usageDetails,
+  type TokenUsage,
+} from "../cost";
 import { RerunOf } from "../rerun";
 import { formatAbsolute, formatDuration, formatRelative, repoLabel } from "../summaries";
 import type { RunDetail } from "../use-run-detail";
@@ -42,6 +49,7 @@ export function RunHeader({
   actions?: ReactNode;
 }) {
   const repo = run?.repo ?? null;
+  const budget = run?.usage.budget_usd ?? null;
   return (
     <PageHeader
       title={facts.workflowName ?? run?.workflow.name ?? "Run"}
@@ -100,6 +108,9 @@ export function RunHeader({
                     className="rounded-sm tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                   >
                     {formatCost(facts.usage)}
+                    {budget !== null ? (
+                      <span className="text-muted-foreground"> of {formatUsd(budget)}</span>
+                    ) : null}
                     <span className="text-muted-foreground">
                       {" "}
                       · {formatTokens(facts.usage.inputTokens + facts.usage.outputTokens)} tokens
@@ -109,8 +120,17 @@ export function RunHeader({
                 <TooltipContent>
                   {usageDetails(facts.usage)}
                   {costCaveat(facts.usage) ? <p>{costCaveat(facts.usage)}</p> : null}
+                  {budget !== null ? (
+                    <p>The run stops once its cost reaches its {formatUsd(budget)} budget.</p>
+                  ) : null}
                 </TooltipContent>
               </Tooltip>
+            </Meta>
+          ) : budget !== null ? (
+            <Meta>
+              <span data-testid="run-cost" className="tabular-nums">
+                Budget {formatUsd(budget)}
+              </span>
             </Meta>
           ) : null}
           {run?.rerun_of ? (

@@ -34,7 +34,7 @@ def saver() -> InMemorySaver:
 
 
 def policy(**limits: int) -> Policy:
-    return effective_policy(PolicyOverrides(**limits))
+    return effective_policy(PolicyOverrides.model_validate(limits))
 
 
 def spec(root: object) -> WorkflowSpec:
