@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 3.2 policy limits:
+- Phase 3.2 policy limits ([#112](https://github.com/KsiProgramming/agentic-dev/pull/112)):
   - **Limits.** `agentic_engine.policy` holds the platform's run limits (agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h), which are also the ceilings. A workspace may lower each one with `GET`/`PUT /workspaces/{id}/policy` (Alembic `0016_policy_limits`). A run keeps the limits it was created with (`runs.policy`); a rerun gets the workspace's limits as they are then.
   - **Before a run.** `POST /runs` and rerun answer `422` (`code: policy_limits`, one error per problem) when a loop's `max_iterations`, a map's `max_concurrency` or the nesting depth is above the workspace's limits.
   - **While it runs.** An agent node, or a map for all its items' agents, that would go past agents spawned fails before it starts; agents past agents alive wait for a slot. The worker stops a run past its wall time, counting only time spent executing, not time waiting at a gate. A run over a limit ends `failed` with a `policy_limit_exceeded` event (`limit`, `value`, `observed`) and a readable reason. The old per-map cap of 40 items is replaced by the per-run count, and the docs template lists at most 39 modules (`repo.list_modules` takes a `limit`) so it fits.
