@@ -95,16 +95,20 @@ for (const colorScheme of ["light", "dark"] as const) {
     test("a finished run has no serious a11y issues", async ({ page, request }) => {
       const runId = await startRun(request, [WRITER]);
       await open(page, `/runs/${runId}`);
-      await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
-        timeout: 30_000,
-      });
+      await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+        "data-status",
+        "succeeded",
+        {
+          timeout: 30_000,
+        },
+      );
       await expectNoSeriousIssues(page);
     });
 
     test("a run waiting at a gate has no serious a11y issues", async ({ page, request }) => {
       const runId = await startRun(request, [WRITER, GATE]);
       await open(page, `/runs/${runId}`);
-      const dock = page.getByTestId("approval-dock");
+      const dock = page.getByTestId("approval-dock").filter({ visible: true });
       await expect(dock).toBeVisible({ timeout: 30_000 });
       await expectNoSeriousIssues(page);
 
@@ -189,7 +193,7 @@ test.describe("keyboard", () => {
   }) => {
     const runId = await startRun(request, [WRITER, GATE]);
     await page.goto(`/runs/${runId}`);
-    const dock = page.getByTestId("approval-dock");
+    const dock = page.getByTestId("approval-dock").filter({ visible: true });
     await expect(dock).toBeVisible({ timeout: 30_000 });
     await expect(page).toHaveTitle(/^● Needs approval · Run /);
 
@@ -202,9 +206,13 @@ test.describe("keyboard", () => {
 
     await page.keyboard.press("a");
     await expect(dock).toBeHidden({ timeout: 30_000 });
-    await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
-      timeout: 30_000,
-    });
+    await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+      "data-status",
+      "succeeded",
+      {
+        timeout: 30_000,
+      },
+    );
     // Other runs may still wait, which prefixes "(N) ● Needs approval · "; this run no longer does.
     await expect(page).not.toHaveTitle(/^● Needs approval · Run /);
   });

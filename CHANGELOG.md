@@ -192,7 +192,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - **Primary buttons.** Hover is `bg-primary/90` (was `/80`, 4.2:1 on white), so text keeps 4.5:1 contrast in both themes. The badge link hover matches.
   - **Runs list menu.** The row "⋯" menu is not modal, so it no longer hides the page with `aria-hidden` around focusable elements (axe `aria-hidden-focus`).
   - **Unknown run.** The console's "Run not found." page has its page heading, like every other page.
-  - **Tests.** The a11y spec scopes a settings alert to the page content (Next's route announcer is an alert too), and the keyboard gate test allows the "(N) ● Needs approval" prefix that other waiting runs add. The journey reads the run status of the page in view: Next keeps the previous run's console mounted but hidden after a rerun.
+  - **Tests.** The a11y spec scopes a settings alert to the page content (Next's route announcer is an alert too), and the keyboard gate test allows the "(N) ● Needs approval" prefix that other waiting runs add. The specs read a run's status and approval dock only where visible: Next keeps a previous run's console, and React a streamed copy of the page, hidden in the DOM. The sheet's layout check waits for its slide-in to finish.
 - A run's `usage` now adds up every node run (the new `RunState.usage`, with `Usage` allowed in checkpoints). Before, it counted only each node's latest result, which undercounted loops. `run_resumed`'s `completed_nodes` lists each node once.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main
