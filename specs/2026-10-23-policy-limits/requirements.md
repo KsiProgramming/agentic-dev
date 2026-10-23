@@ -73,4 +73,5 @@ Unblocks: 3.3 (budget reuses the policy model and the limit-stop event), 3.4 (va
 | Units | `wall_time_s` in seconds (≥ 1) in the API, shown as hours and minutes in the UI | Seconds let tests use a short limit. |
 
 ## Open questions
-- Does the docs template still fit 40 spawned agents per run once loop iterations and the reduce agent count too? Check `DOCS_CONCURRENCY` and its module cap in group 3. If not, cap the module list lower in the template rather than raise the limit.
+None. Settled during implementation:
+- **Docs template and 40 spawned agents:** it did not fit (up to 40 modules plus the writer). `repo.list_modules` now takes a `limit`, and the template asks for `agents_spawned - 1` modules.

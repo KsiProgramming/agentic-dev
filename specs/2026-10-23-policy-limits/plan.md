@@ -3,31 +3,31 @@
 The engine comes first, then the API and the UI, in slices that keep `main` working after each group.
 
 ## 1. Policy model
-- [ ] `packages/engine/src/agentic_engine/policy.py`:
+- [x] `packages/engine/src/agentic_engine/policy.py`:
   - `Policy` (frozen Pydantic model: `agents_alive`, `agents_spawned`, `max_depth`, `loop_iterations`, `wall_time_s`);
   - `PLATFORM_POLICY` (8, 40, 2, 5, 7200);
   - `PolicyOverrides` (all fields optional);
   - `effective_policy(overrides) -> Policy`, which takes the lower of each pair;
   - `PolicyLimitExceeded(Exception)` carrying `limit`, `value`, `observed` and `node_id`.
-- [ ] `spec/models.py`: keep `MAX_LOOP_ITERATIONS`, `MAX_AGENTS_ALIVE` and `MAX_AGENTS_SPAWNED` as aliases of `PLATFORM_POLICY` fields, so the schema caps stay the platform ceilings. Update their "Phase 3.2" docstrings.
-- [ ] `events.py`: add `POLICY_LIMIT_EXCEEDED` with a payload docstring.
-- [ ] Unit tests for `effective_policy` (null keeps the default, lower wins, higher is impossible).
+- [x] `spec/models.py`: keep `MAX_LOOP_ITERATIONS`, `MAX_AGENTS_ALIVE` and `MAX_AGENTS_SPAWNED` as aliases of `PLATFORM_POLICY` fields, so the schema caps stay the platform ceilings. Update their "Phase 3.2" docstrings.
+- [x] `events.py`: add `POLICY_LIMIT_EXCEEDED` with a payload docstring.
+- [x] Unit tests for `effective_policy` (null keeps the default, lower wins, higher is impossible).
 
 ## 2. Validation-time checks
-- [ ] `spec/models.py` (or `policy.py`): `policy_problems(spec, policy) -> list[str]`, depth first, in the existing message style. It covers loop iterations, map concurrency and container depth (loop and map count as a level).
-- [ ] Engine tests: one per check, plus a spec exactly at each limit that passes.
+- [x] `spec/models.py` (or `policy.py`): `policy_problems(spec, policy) -> list[str]`, depth first, in the existing message style. It covers loop iterations, map concurrency and container depth (loop and map count as a level).
+- [x] Engine tests: one per check, plus a spec exactly at each limit that passes.
 
 ## 3. Runtime enforcement in the engine
-- [ ] `graph/state.py`: add `spawned: Annotated[int, operator.add]` to `RunState`.
-- [ ] `compile_workflow(..., policy: Policy = PLATFORM_POLICY)`:
+- [x] `graph/state.py`: add `spawned: Annotated[int, operator.add]` to `RunState`.
+- [x] `compile_workflow(..., policy: Policy = PLATFORM_POLICY)`:
   - pass the policy to each step;
   - before each agent start, raise `PolicyLimitExceeded("agents_spawned", …)` if the count would pass the limit;
   - `_map_items` checks `spawned + agents_per_item × len(items)` instead of the old per-map `ValueError`.
-- [ ] A run-wide `asyncio.Semaphore(policy.agents_alive)` around `_run_step` agent calls, created per attempt (not checkpointed).
-- [ ] `graph/run.py` `_finish`: on `PolicyLimitExceeded`, emit `policy_limit_exceeded`, then `run_failed` with the readable reason. Running nodes end `node_cancelled`.
-- [ ] `run_workflow` / `resume_workflow` take `policy`.
-- [ ] Check the docs template fits 40 spawned agents in its worst case (open question). Adjust its module cap if not.
-- [ ] Engine tests on the fake runtime:
+- [x] A run-wide `asyncio.Semaphore(policy.agents_alive)` around `_run_step` agent calls, created per attempt (not checkpointed).
+- [x] `graph/run.py` `_finish`: on `PolicyLimitExceeded`, emit `policy_limit_exceeded`, then `run_failed` with the readable reason. Running nodes end `node_cancelled`.
+- [x] `run_workflow` / `resume_workflow` take `policy`.
+- [x] Check the docs template fits 40 spawned agents in its worst case (open question). It did not (40 modules + the writer), so `repo.list_modules` takes a `limit` and the template asks for `agents_spawned - 1` (`MAX_MODULES`).
+- [x] Engine tests on the fake runtime:
   - spawned is exceeded by a map;
   - spawned is exceeded by agents in sequence, including loop iterations;
   - the count survives a resume;

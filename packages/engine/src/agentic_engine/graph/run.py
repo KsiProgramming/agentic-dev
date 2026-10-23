@@ -14,6 +14,7 @@ from agentic_engine.agent import sum_usage
 from agentic_engine.events import (
     GATE_WAITING,
     NODE_STARTED,
+    POLICY_LIMIT_EXCEEDED,
     RUN_CANCELLED,
     RUN_COMPLETED,
     RUN_FAILED,
@@ -32,6 +33,7 @@ from agentic_engine.graph.state import (
     WorkflowRunStatus,
     initial_state,
 )
+from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.spec import WorkflowSpec
 from agentic_runtime import AgentRuntime, ToolExecutor
 
@@ -47,11 +49,15 @@ async def run_workflow(
     sink: EventSink | None = None,
     checkpointer: Checkpointer | None = None,
     tools: ToolExecutor | None = None,
+    policy: Policy = PLATFORM_POLICY,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
     A node that fails or is cancelled stops the run; its status becomes the run's status. If the
     caller is cancelled, the in-flight agent run is cancelled and `CancelledError` propagates.
+    A cancel whose message is a `PolicyLimitExceeded` (the worker's wall-time stop) ends the run
+    `failed`: `policy_limit_exceeded`, then `run_failed` with the reason as `error`. The run's
+    agents are held to `policy` (see `compile_workflow`).
     A gate pauses the run: it ends `waiting`, after `node_started` and `gate_waiting` (payload
     `title`, `prompt`, `artifact`) for the gate, and `resume_workflow` continues it with the
     decision.
@@ -70,7 +76,7 @@ async def run_workflow(
     await _start(log, spec, input)
     return await _finish(
         log,
-        lambda: compile_workflow(spec, runtime, log, checkpointer, tools),
+        lambda: compile_workflow(spec, runtime, log, checkpointer, tools, policy),
         initial_state(input),
         _config(spec, log.run_id),
     )
@@ -88,6 +94,7 @@ async def resume_workflow(
     attempt: int,
     tools: ToolExecutor | None = None,
     decision: GateDecision | None = None,
+    policy: Policy = PLATFORM_POLICY,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -101,7 +108,7 @@ async def resume_workflow(
     pauses at the gate again, and the pause is announced again.
     """
     log = RunEventLog(run_id, sink, next_seq=next_seq)
-    graph = compile_workflow(spec, runtime, log, checkpointer, tools)
+    graph = compile_workflow(spec, runtime, log, checkpointer, tools, policy)
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
     saved = snapshot.values
@@ -137,6 +144,9 @@ async def _finish(
         final = await graph.ainvoke(start, config)
         paused = await _paused_gate(graph, config)
     except asyncio.CancelledError as e:
+        if over := next((a for a in e.args if isinstance(a, PolicyLimitExceeded)), None):
+            await log_policy_stop(log, over)
+            raise
         # `task.cancel("cancelled by user")` names why; a bare cancel is the caller's.
         reason = next((a for a in e.args if isinstance(a, str) and a), "caller cancelled")
         await log.emit(RUN_CANCELLED, payload={"reason": reason})
@@ -147,6 +157,13 @@ async def _finish(
     if paused is not None:
         return await _wait(log, *paused)
     return await _report(log, final)
+
+
+async def log_policy_stop(log: RunEventLog, over: PolicyLimitExceeded) -> None:
+    """End a run that went over a policy limit: `policy_limit_exceeded`, then `run_failed` with
+    the reason as `error`."""
+    await log.emit(POLICY_LIMIT_EXCEEDED, node_id=over.node_id, payload=over.payload())
+    await log.emit(RUN_FAILED, payload={"error": over.reason})
 
 
 async def _paused_gate(

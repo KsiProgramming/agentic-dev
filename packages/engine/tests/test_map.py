@@ -20,7 +20,8 @@ from agentic_engine.graph import (
     run_workflow,
 )
 from agentic_engine.graph.compile import recursion_limit, step_nodes
-from agentic_engine.spec import MAX_AGENTS_SPAWNED, WorkflowSpec, parse_spec
+from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyOverrides, effective_policy
+from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime import (
     AgentEvent,
     AgentRequest,
@@ -259,17 +260,98 @@ async def test_over_that_is_not_a_list_fails_the_map() -> None:
     ]
 
 
-async def test_too_many_items_fail_the_map_with_the_limit() -> None:
-    runtime = CountingRuntime()
-    modules = [f"m{i}" for i in range(MAX_AGENTS_SPAWNED + 1)]
+# Policy limits (3.2)
 
-    result = await run(mapping(agent("writer")), runtime, tools=module_tools(modules))
+
+def policy(**limits: int) -> Policy:
+    return effective_policy(PolicyOverrides(**limits))
+
+
+async def test_a_map_that_would_pass_the_spawn_limit_fails_before_its_items() -> None:
+    runtime = CountingRuntime()
+    sink = InMemoryEventSink()
+
+    result = await run_workflow(
+        mapping(agent("writer")),
+        runtime,
+        "brief",
+        sink=sink,
+        checkpointer=saver(),
+        tools=module_tools(),
+        policy=policy(agents_spawned=2),
+    )
 
     assert result.status == "failed"
     assert result.stopped_at == "describe"
-    error = result.results["describe"].error
-    assert error is not None and f"limit of {MAX_AGENTS_SPAWNED}" in error
+    reason = "policy limit: agents spawned would reach 3, above the limit of 2"
+    assert result.results["describe"].error == reason
     assert runtime.requests == []
+    assert [(e.type, e.node_id) for e in sink.events][-4:] == [
+        ("node_started", "describe"),
+        ("policy_limit_exceeded", "describe"),
+        ("node_failed", "describe"),
+        ("run_failed", None),
+    ]
+    over = next(e for e in sink.events if e.type == "policy_limit_exceeded")
+    assert over.payload == {"limit": "agents_spawned", "value": 2, "observed": 3}
+    assert not [e for e in sink.events if e.type == "map_item_started"]
+
+
+async def test_too_many_items_for_the_platform_limit_fail_the_map() -> None:
+    runtime = CountingRuntime()
+    modules = [f"m{i}" for i in range(PLATFORM_POLICY.agents_spawned + 1)]
+
+    result = await run_workflow(
+        mapping(agent("writer")),
+        runtime,
+        "brief",
+        checkpointer=saver(),
+        tools=module_tools(modules),
+    )
+
+    assert result.status == "failed"
+    error = result.results["describe"].error
+    assert error is not None and "above the limit of 40" in error
+    assert runtime.requests == []
+
+
+async def test_map_items_count_with_the_agents_after_them() -> None:
+    # 3 items, then the reduce is a concat (no agent), then `after`: 4 agents in all.
+    fits = await run_workflow(
+        mapping(agent("writer")),
+        CountingRuntime(),
+        "brief",
+        checkpointer=saver(),
+        tools=module_tools(),
+        policy=policy(agents_spawned=4),
+    )
+    over = await run_workflow(
+        mapping(agent("writer")),
+        CountingRuntime(),
+        "brief",
+        checkpointer=saver(),
+        tools=module_tools(),
+        policy=policy(agents_spawned=3),
+    )
+
+    assert fits.status == "completed"
+    assert (over.status, over.stopped_at) == ("failed", "after")
+
+
+async def test_agents_alive_throttles_a_map_instead_of_failing_it() -> None:
+    runtime = CountingRuntime()
+
+    result = await run_workflow(
+        mapping(agent("writer"), max_concurrency=3),
+        runtime,
+        "brief",
+        checkpointer=saver(),
+        tools=module_tools(),
+        policy=policy(agents_alive=2),
+    )
+
+    assert result.status == "completed"
+    assert runtime.peak == 2
 
 
 async def test_a_failing_item_fails_the_map_and_stops_the_run() -> None:
