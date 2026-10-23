@@ -31,13 +31,13 @@ If you are on `main`, stop and offer to move the work to a new branch. If `origi
 git diff origin/main...HEAD -- CHANGELOG.md
 ```
 
-If the branch adds nothing there, write the entry now, under `## [Unreleased]`, following the file's own rules: headings `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`; one line (or one bullet with sub-bullets for a phase) per change; match the tone and detail of the entries around it. Leave the PR link for step 5, once the number exists. Show the user the entry before committing it.
+If the branch adds nothing there, write the entry now, under `## [Unreleased]`, following the file's own rules: headings `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`; one line (or one bullet with sub-bullets for a phase) per change; match the tone and detail of the entries around it. Leave the PR link for step 5, once the number exists. Show the user the entry before committing it. Commit it with the work, before the push in step 4: CI only checks for an entry, it cannot write one.
 
 ## 3. Roadmap phase
 
 If the branch touches a `specs/<date>-<slug>/` folder whose `requirements.md` has `Roadmap phase: <n>`:
 
-- **Implemented:** after the PR exists, use the `complete-phase` skill to mark the phase done (CI does it too, but its commit made with the default token does not rerun CI, which leaves the PR unmergeable).
+- **Implemented:** do **not** mark the phase done yourself (no `complete-phase` here). Once the PR is open, the `Roadmap phase marked done` job of `pr-checks.yml` commits the mark to the branch. Doing it locally as well races that commit and the push is rejected. Step 5 picks up the bot's commit.
 - **Planning only** (spec files, no code): label the PR `skip-roadmap` and `type:plan`.
 
 Find the phase's issue so the PR closes it on merge:
@@ -61,7 +61,12 @@ gh pr create --base main \
 
 ## 5. Finish the branch
 
-- Add the PR link to the changelog entry (`([#<n>](https://github.com/KsiProgramming/agentic-dev/pull/<n>))`), and mark the phase done if step 3 applies. Commit and push.
+The bot's roadmap commit is pushed with the default token, so it does not rerun CI: the PR's head would have no CI run and could not merge. One more push of yours fixes that, and it must come **after** the bot's commit, never next to it:
+
+1. If step 3 applies, wait for the `Roadmap phase marked done` check to finish (`gh pr checks <n> --watch`, or poll until it is not pending), then take its commit: `git pull --ff-only`. Never rebase or amend over it, and never force-push.
+2. Add the PR link to the changelog entry (`([#<n>](https://github.com/KsiProgramming/agentic-dev/pull/<n>))`), commit, and push. This push reruns every check on the final head.
+
+If a push is still rejected, `git pull --ff-only` and push again; do not amend a pushed commit.
 
 ## 6. Watch the checks
 

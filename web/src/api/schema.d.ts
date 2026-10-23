@@ -64,7 +64,11 @@ export interface paths {
          * @description Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first
          *     node, working on `repo` if given. Stream it from `events_url`. A workflow that publishes
          *     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
-         *     refused with `422`.
+         *     refused with `422`. So is one above the workspace's run limits (`GET
+         *     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
+         *     created with. Its budget is `budget_usd`, else the workspace's default; with a budget, every
+         *     agent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the
+         *     same way.
          */
         post: operations["createRun"];
         delete?: never;
@@ -83,7 +87,7 @@ export interface paths {
         /**
          * Stream Summaries
          * @description Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with
-         *     the run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,
+         *     the run's `RunSummary` whenever its status, timings, PR URL, waiting gate or usage change,
          *     including new runs. Each frame's `id` is when the run last changed. Only changes after
          *     connecting are sent; after a reconnect, list the runs again. The stream stays open.
          */
@@ -129,7 +133,10 @@ export interface paths {
          * Rerun
          * @description Queue a new run with the same workflow spec, input, repo and workspace as the ended run
          *     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
-         *     not changed. The spec is the one the original ran, even if its template has changed since.
+         *     not changed. The spec is the one the original ran, even if its template has changed since;
+         *     the limits are the workspace's as they are now, and a spec above them is refused with
+         *     `422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the
+         *     original run's spend does not count.
          */
         post: operations["rerunRun"];
         delete?: never;
@@ -262,6 +269,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pricing
+         * @description The model prices the workspace's runs are priced with.
+         */
+        get: operations["getPricing"];
+        /**
+         * Put Pricing
+         * @description Replace the workspace's price overrides. New usage is priced with them; runs already
+         *     logged keep their cost.
+         */
+        put: operations["putPricing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Policy
+         * @description The run limits the workspace's new runs get.
+         */
+        get: operations["getPolicy"];
+        /**
+         * Put Policy
+         * @description Replace the workspace's own run limits; leave one unset to keep the platform's, and all of
+         *     them to reset. `budget_usd` is the default budget of new runs (unset: no budget), which a run
+         *     may replace. New runs get them; a run keeps the limits it was created with.
+         */
+        put: operations["putPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/connections/github/install": {
         parameters: {
             query?: never;
@@ -359,6 +417,31 @@ export interface paths {
         get: operations["listTemplates"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate
+         * @description Check whether `workflow` could run in the workspace now, without running it: the schema,
+         *     node ids, loop and map rules, references between nodes (`reduce.from`, a publisher's
+         *     `from_node`), a gate before every publisher, tool names, and the workspace's run limits and,
+         *     with a budget, prices. An invalid workflow is answered `200` with `valid: false` and every
+         *     issue. `workflow_id` must be the spec's `id` (`id_mismatch` otherwise). Nothing is stored,
+         *     and no connection is needed.
+         */
+        post: operations["validateWorkflow"];
         delete?: never;
         options?: never;
         head?: never;
@@ -515,6 +598,11 @@ export interface components {
              * @description The workspace the run belongs to; its connections are used. Default: the default workspace.
              */
             workspace_id?: string | null;
+            /**
+             * Budget Usd
+             * @description USD the run may spend, a hard stop once reached. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
         };
         /** CreateRunResponse */
         CreateRunResponse: {
@@ -588,7 +676,18 @@ export interface components {
             /** Install Url */
             install_url: string;
         };
+        /** @enum {string} */
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "unknown_tool" | "policy_limit" | "budget_unpriced_model";
         JsonValue: unknown;
+        /** LongContextPrice */
+        LongContextPrice: {
+            /**
+             * Above Tokens
+             * @description Applies to a call whose prompt is over this size.
+             */
+            above_tokens: number;
+            price: components["schemas"]["Price"];
+        };
         /**
          * LoopNode
          * @description Runs its body again and again until `until` is true, at most `max_iterations` times.
@@ -627,8 +726,8 @@ export interface components {
          *     `over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's
          *     `until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string
          *     as is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the
-         *     others are keyed by node id, which repeats for every item. A map has at most
-         *     `MAX_AGENTS_SPAWNED` items; one that does not complete fails the map.
+         *     others are keyed by node id, which repeats for every item. Its items' agents count toward the
+         *     run's `agents_spawned` limit; one item that does not complete fails the map.
          */
         MapNode: {
             /**
@@ -649,6 +748,50 @@ export interface components {
             /** Max Concurrency */
             max_concurrency: number;
         };
+        /** ModelPricingOut */
+        ModelPricingOut: {
+            /** Model */
+            model: string;
+            /** @description The list price; unset for a model with none. */
+            default: components["schemas"]["Price"] | null;
+            /** @description The list price for long prompts, if the model has one. */
+            long_context: components["schemas"]["LongContextPrice"] | null;
+            /** @description The workspace's price. It replaces the list price, long prompts included. */
+            override: components["schemas"]["Price"] | null;
+        };
+        /** @enum {string} */
+        PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "budget_usd";
+        /**
+         * Price
+         * @description USD per million tokens.
+         */
+        Price: {
+            /** Input */
+            input: number;
+            /** Output */
+            output: number;
+            /**
+             * Cache Write 5M
+             * @description Writing to the 5 minute prompt cache.
+             */
+            cache_write_5m: number;
+            /**
+             * Cache Write 1H
+             * @description Writing to the 1 hour prompt cache.
+             */
+            cache_write_1h: number;
+            /**
+             * Cache Read
+             * @description Reading from the prompt cache.
+             */
+            cache_read: number;
+        };
+        /** PriceOverride */
+        PriceOverride: {
+            /** Model */
+            model: string;
+            price: components["schemas"]["Price"];
+        };
         /** PutClaudeConnection */
         PutClaudeConnection: {
             /**
@@ -657,6 +800,14 @@ export interface components {
              * @description The Anthropic API key. Stored encrypted; it is never returned.
              */
             api_key: string;
+        };
+        /** PutPricing */
+        PutPricing: {
+            /**
+             * Overrides
+             * @description The workspace's overrides, replacing all stored ones; `[]` resets every model to its list price.
+             */
+            overrides: components["schemas"]["PriceOverride"][];
         };
         /** Readiness */
         Readiness: {
@@ -759,6 +910,14 @@ export interface components {
         };
         /** @enum {string} */
         Requirement: "claude" | "github";
+        /** RerunRequest */
+        RerunRequest: {
+            /**
+             * Budget Usd
+             * @description USD the new run may spend. Unset: the workspace's default budget as it is now. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
+        };
         /** RunDetail */
         RunDetail: {
             /**
@@ -800,6 +959,7 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            usage: components["schemas"]["RunUsage"];
             /** Input */
             input: string;
             /**
@@ -812,6 +972,78 @@ export interface components {
              * @description From start to end; `null` until the run has ended.
              */
             readonly duration_ms: number | null;
+        };
+        /**
+         * RunLimitOverrides
+         * @description The workspace's own limits, each at or below the platform's; unset keeps the platform's.
+         */
+        RunLimitOverrides: {
+            /**
+             * Agents Alive
+             * @description Agents running at once. At most 8, the platform's limit; unset keeps it.
+             */
+            agents_alive?: number | null;
+            /**
+             * Agents Spawned
+             * @description Agents a run may start in all. At most 40, the platform's limit; unset keeps it.
+             */
+            agents_spawned?: number | null;
+            /**
+             * Max Depth
+             * @description How deep loops and maps may nest. At most 2, the platform's limit; unset keeps it.
+             */
+            max_depth?: number | null;
+            /**
+             * Loop Iterations
+             * @description The highest `max_iterations` a loop may have. At most 5, the platform's limit; unset keeps it.
+             */
+            loop_iterations?: number | null;
+            /**
+             * Wall Time S
+             * @description Seconds a run may spend executing, gates aside. At most 7200, the platform's limit; unset keeps it.
+             */
+            wall_time_s?: number | null;
+            /**
+             * Budget Usd
+             * @description The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
+        };
+        /**
+         * RunLimits
+         * @description The limits a run executes under.
+         */
+        RunLimits: {
+            /**
+             * Agents Alive
+             * @description Agents running at once.
+             */
+            agents_alive: number;
+            /**
+             * Agents Spawned
+             * @description Agents a run may start in all.
+             */
+            agents_spawned: number;
+            /**
+             * Max Depth
+             * @description How deep loops and maps may nest.
+             */
+            max_depth: number;
+            /**
+             * Loop Iterations
+             * @description The highest `max_iterations` a loop may have.
+             */
+            loop_iterations: number;
+            /**
+             * Wall Time S
+             * @description Seconds a run may spend executing; time waiting at a gate does not count.
+             */
+            wall_time_s: number;
+            /**
+             * Budget Usd
+             * @description USD a run may spend, a hard stop once reached; unset is no cost cap.
+             */
+            budget_usd?: number | null;
         };
         /** @enum {string} */
         RunStatus: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -860,6 +1092,7 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            usage: components["schemas"]["RunUsage"];
             /**
              * Duration Ms
              * @description From start to end; `null` until the run has ended.
@@ -875,6 +1108,38 @@ export interface components {
              * @description Pass as `cursor` for the next page.
              */
             next_cursor: string | null;
+        };
+        /**
+         * RunUsage
+         * @description Totals of the run's usage events, priced when each was logged.
+         */
+        RunUsage: {
+            /**
+             * Input Tokens
+             * @description Uncached input tokens.
+             */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /**
+             * Estimated Usd
+             * @description Estimated cost in USD of the priced usage.
+             */
+            estimated_usd: number;
+            /**
+             * Cost Complete
+             * @description False if some usage had no price (an unknown model): `estimated_usd` is then a lower bound.
+             */
+            cost_complete: boolean;
+            /**
+             * Budget Usd
+             * @description The run's budget: it stops once `estimated_usd` reaches it. Unset: no cap.
+             */
+            budget_usd?: number | null;
         };
         /**
          * SequenceNode
@@ -964,6 +1229,41 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             };
         };
+        /** ValidateWorkflowRequest */
+        ValidateWorkflowRequest: {
+            /**
+             * Workflow
+             * @description The workflow spec to check, as `POST /runs` takes it. It is not parsed first, so a spec that does not match the schema is answered with its issues.
+             */
+            workflow: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Workspace Id
+             * @description The workspace whose run limits and prices apply. Default: the default workspace.
+             */
+            workspace_id?: string | null;
+            /**
+             * Budget Usd
+             * @description The budget a run would set. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
+        };
+        /**
+         * ValidateWorkflowResponse
+         * @description Whether the workflow could run in the workspace now; `issues` names every problem.
+         */
+        ValidateWorkflowResponse: {
+            /** Valid */
+            valid: boolean;
+            /**
+             * Issues
+             * @description Each problem with its code, path, node and what to change, in run order. While the spec does not match the schema, only `schema` issues are listed.
+             */
+            issues: components["schemas"]["ValidationIssue"][];
+            /** @description The limits the workflow was checked against. */
+            policy: components["schemas"]["RunLimits"];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -976,6 +1276,43 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * ValidationIssue
+         * @description One reason a workflow cannot run: what is wrong (`code`), where (`path`, `node_id`) and
+         *     what to change (`message`). A `policy_limit` issue also names the `limit`, its `value` and
+         *     what the spec would reach (`observed`).
+         */
+        ValidationIssue: {
+            /** @description The kind of problem; stable, so clients may branch on it. */
+            code: components["schemas"]["IssueCode"];
+            /**
+             * Path
+             * @description Where in the spec, by its JSON field names, e.g. `root.steps[1].body`; empty for the document itself.
+             * @example root.steps[1].body
+             */
+            path: string;
+            /**
+             * Node Id
+             * @description The node to fix, if there is one.
+             */
+            node_id?: string | null;
+            /**
+             * Message
+             * @description The problem and what to change, for people.
+             */
+            message: string;
+            limit?: components["schemas"]["PolicyLimit"] | null;
+            /**
+             * Value
+             * @description The limit's value.
+             */
+            value?: number | null;
+            /**
+             * Observed
+             * @description What the spec would reach.
+             */
+            observed?: number | null;
         };
         /** WaitingGate */
         WaitingGate: {
@@ -1027,6 +1364,32 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * WorkspacePolicyOut
+         * @description The limits the workspace's new runs get: each of its `overrides`, else the platform's
+         *     `defaults`. A run keeps the limits it was created with.
+         */
+        WorkspacePolicyOut: {
+            /** @description The platform's limits, which are also the ceilings. */
+            defaults: components["schemas"]["RunLimits"];
+            overrides: components["schemas"]["RunLimitOverrides"];
+            effective: components["schemas"]["RunLimits"];
+        };
+        /**
+         * WorkspacePricing
+         * @description The prices the workspace's runs are priced with: each model's `override`, else its
+         *     `default`. A run keeps the cost it was priced with when its usage was logged.
+         */
+        WorkspacePricing: {
+            /**
+             * As Of
+             * Format: date
+             * @description When the list prices were last checked.
+             */
+            as_of: string;
+            /** Models */
+            models: components["schemas"]["ModelPricingOut"][];
         };
         /**
          * RunEvent
@@ -1199,14 +1562,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description Invalid request, or the workflow is above the workspace's limits */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };
@@ -1296,7 +1657,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RerunRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -1321,14 +1686,12 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description The workflow is above the workspace's limits as they are now */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };
@@ -1621,6 +1984,162 @@ export interface operations {
             };
         };
     };
+    getPricing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePricing"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    putPricing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutPricing"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePricing"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A negative price, a bad model id or a model given twice */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePolicyOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    putPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunLimitOverrides"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePolicyOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A limit below 1 or above the platform's, or a budget out of range */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     startGithubInstall: {
         parameters: {
             query?: never;
@@ -1815,6 +2334,46 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TemplateOut"][];
                 };
+            };
+        };
+    };
+    validateWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidateWorkflowResponse"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request itself is malformed (e.g. `workflow` is not an object) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

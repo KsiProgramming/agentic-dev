@@ -12,7 +12,15 @@ from pydantic import (
     model_validator,
 )
 
-from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools
+from agentic_api.workspaces.models import budget_field
+from agentic_engine.spec import (
+    ValidationIssue,
+    WorkflowSpec,
+    iter_nodes,
+    messages,
+    node_tools,
+    tool_issues,
+)
 from agentic_engine.templates import get_template
 from agentic_github import repo_full_name
 from agentic_sandbox import RepoSource
@@ -47,6 +55,18 @@ class TemplateRun(BaseModel):
             raise ValueError("; ".join(reasons)) from None
 
 
+class PolicyErrorDetail(BaseModel):
+    """The `detail` of a run refused because its workflow is above the workspace's run limits, or
+    has a budget that cannot be enforced (an agent's model has no price): `errors` names each
+    problem (node, limit and value), `message` says it for people. `issues` are the same
+    problems with their code, path and node, as `POST /workflows/{id}/validate` gives them."""
+
+    code: Literal["policy_limits"] = "policy_limits"
+    message: str
+    errors: list[str]
+    issues: list[ValidationIssue]
+
+
 class CreateRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -68,6 +88,9 @@ class CreateRunRequest(BaseModel):
         description="The workspace the run belongs to; its connections are used. Default: the "
         "default workspace.",
     )
+    budget_usd: float | None = budget_field(
+        "USD the run may spend, a hard stop once reached. Unset: the workspace's default budget."
+    )
 
     @model_validator(mode="after")
     def _one_workflow(self) -> Self:
@@ -75,6 +98,12 @@ class CreateRunRequest(BaseModel):
             raise ValueError("give either `workflow` or `template`")
         if self.template is not None:
             self.workflow = self.template.build_spec()
+        return self
+
+    @model_validator(mode="after")
+    def _known_tools(self) -> Self:
+        if issues := tool_issues(self.spec().root):
+            raise ValueError("; ".join(messages(issues)))
         return self
 
     @model_validator(mode="after")
@@ -107,6 +136,14 @@ def uses_github(spec: WorkflowSpec) -> bool:
     """Whether a node of `spec` names a `github.*` tool."""
     return any(
         tool.startswith("github.") for _, node in iter_nodes(spec.root) for tool in node_tools(node)
+    )
+
+
+class RerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    budget_usd: float | None = budget_field(
+        "USD the new run may spend. Unset: the workspace's default budget as it is now."
     )
 
 
@@ -156,6 +193,24 @@ class WaitingGate(BaseModel):
     title: str | None = None
 
 
+class RunUsage(BaseModel):
+    """Totals of the run's usage events, priced when each was logged."""
+
+    input_tokens: int = Field(description="Uncached input tokens.")
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    estimated_usd: float = Field(description="Estimated cost in USD of the priced usage.")
+    cost_complete: bool = Field(
+        description="False if some usage had no price (an unknown model): `estimated_usd` is "
+        "then a lower bound."
+    )
+    budget_usd: float | None = Field(
+        default=None,
+        description="The run's budget: it stops once `estimated_usd` reaches it. Unset: no cap.",
+    )
+
+
 class RunSummary(BaseModel):
     """A run as the runs list shows it. Status, timings, PR URL and the waiting gate come from
     the run's events."""
@@ -172,6 +227,7 @@ class RunSummary(BaseModel):
     pr_url: str | None = Field(description="The last pull request the run opened.")
     waiting_gate: WaitingGate | None = Field(description="Set while the run waits at a gate.")
     rerun_of: UUID | None = Field(description="The run this one repeats.")
+    usage: RunUsage
 
     @computed_field  # type: ignore[prop-decorator]
     @property

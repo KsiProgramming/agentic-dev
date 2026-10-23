@@ -88,6 +88,14 @@ export function runSummary(overrides: Partial<RunSummary> = {}): RunSummary {
     pr_url: null,
     waiting_gate: null,
     rerun_of: null,
+    usage: {
+      input_tokens: 12_000,
+      output_tokens: 3_400,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      estimated_usd: 0.0582,
+      cost_complete: true,
+    },
     ...overrides,
   };
 }

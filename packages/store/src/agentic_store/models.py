@@ -1,11 +1,13 @@
 """SQLAlchemy models. Alembic (in the api package) migrates `metadata`."""
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from pydantic import JsonValue
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -13,11 +15,13 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
     text,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -83,6 +87,38 @@ class Connection(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkspaceModelPrice(Base):
+    """A workspace's price for a model, overriding its list price. USD per million tokens."""
+
+    __tablename__ = "workspace_model_prices"
+
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    model: Mapped[str] = mapped_column(String(128), primary_key=True)
+    input: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    output: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    cache_write_5m: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    cache_write_1h: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    cache_read: Mapped[Decimal] = mapped_column(Numeric(12, 4))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkspacePolicy(Base):
+    """A workspace's own run limits, each lower than the platform's; `NULL` keeps the platform's
+    (`agentic_engine.policy.PLATFORM_POLICY`). `budget_usd` is the default budget of its runs;
+    `NULL` is no budget."""
+
+    __tablename__ = "workspace_policies"
+
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    agents_alive: Mapped[int | None] = mapped_column(Integer)
+    agents_spawned: Mapped[int | None] = mapped_column(Integer)
+    max_depth: Mapped[int | None] = mapped_column(Integer)
+    loop_iterations: Mapped[int | None] = mapped_column(Integer)
+    wall_time_s: Mapped[int | None] = mapped_column(Integer)
+    budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(16, 8))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Run(Base):
     """A run's mutable summary and what it was started with. Its history lives in `run_events`.
 
@@ -99,7 +135,8 @@ class Run(Base):
     are a projection of the run's events, written by `PostgresEventSink` with each event, so
     listing runs never scans the log. `template_id` and `repo_url` are set at creation, and
     `rerun_of` links a rerun to the run it repeats. `cancel_requested_at` is set when a user asks
-    to cancel the run; the worker then ends it `cancelled`."""
+    to cancel the run; the worker then ends it `cancelled`. `policy` holds the limits the run got
+    when it was created (`agentic_engine.policy.Policy`); they never change, resumes included."""
 
     __tablename__ = "runs"
     __table_args__ = (
@@ -118,6 +155,7 @@ class Run(Base):
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
     status: Mapped[str] = mapped_column(String(32))
     spec: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    policy: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     input: Mapped[str] = mapped_column(Text, server_default="")
     # The `RepoSource` the run works on, if any.
     repo: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
@@ -138,6 +176,14 @@ class Run(Base):
     rerun_of: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
     # When a user asked to cancel the run (`agentic_store.cancel`).
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Totals of the run's `usage` events.
+    input_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
+    cache_read_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
+    cache_write_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
+    estimated_usd: Mapped[Decimal] = mapped_column(Numeric(16, 8), server_default="0")
+    # False once a usage event had no price: `estimated_usd` is then a lower bound.
+    cost_complete: Mapped[bool] = mapped_column(Boolean, server_default=true())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

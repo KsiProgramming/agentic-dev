@@ -161,6 +161,7 @@ test("starting sends the template, its options and the repo, then opens the run"
     input: "",
     repo: { url: "https://github.com/acme/web" },
     workspace_id: DEFAULT_WORKSPACE_ID,
+    budget_usd: null,
   });
   expect(window.localStorage.getItem(`agentic:last-repo:${DEFAULT_WORKSPACE_ID}`)).toBe(
     "https://github.com/acme/web",
@@ -250,4 +251,39 @@ test("an install result from GitHub is shown above the gallery", async () => {
   renderWithQueries(<TemplatesView baseUrl="http://api.test" />);
 
   expect(screen.getByTestId("github-result").textContent).toBe("GitHub App installed.");
+});
+
+test("a run's own budget is sent, and a budget the API refuses is shown on its field", async () => {
+  const policy = {
+    defaults: {},
+    overrides: {},
+    effective: { budget_usd: 2 },
+  };
+  const fetch = stubApi(
+    connected({
+      [`GET /workspaces/${DEFAULT_WORKSPACE_ID}/policy`]: () => json(200, policy),
+      "POST /runs": () =>
+        json(422, {
+          detail: {
+            code: "policy_limits",
+            message: "The workflow is above the workspace's run limits: …",
+            errors: [
+              "agent 'writer' at root.steps[0]: model 'x' has no price, so the budget cannot be enforced",
+            ],
+          },
+        }),
+    }),
+  );
+  show("generate-docs");
+
+  await pickRepo("acme/web");
+  const budget = sheet().getByLabelText("Budget (USD)");
+  await waitFor(() => expect(budget.getAttribute("placeholder")).toBe("$2.00"));
+  fireEvent.change(budget, { target: { value: "0.5" } });
+  fireEvent.click(sheet().getByRole("button", { name: "Start run" }));
+
+  expect(await sheet().findByText(/model 'x' has no price/)).toBeDefined();
+  const post = fetch.mock.calls.find(([r]) => r.method === "POST")?.[0];
+  expect(((await post?.json()) as { budget_usd: number }).budget_usd).toBe(0.5);
+  expect(navigation.push).not.toHaveBeenCalled();
 });

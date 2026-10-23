@@ -3,6 +3,7 @@ paused at a gate."""
 
 import asyncio
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
@@ -11,9 +12,11 @@ from langgraph.types import Command
 from pydantic import JsonValue
 
 from agentic_engine.agent import sum_usage
+from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
     GATE_WAITING,
     NODE_STARTED,
+    POLICY_LIMIT_EXCEEDED,
     RUN_CANCELLED,
     RUN_COMPLETED,
     RUN_FAILED,
@@ -32,6 +35,7 @@ from agentic_engine.graph.state import (
     WorkflowRunStatus,
     initial_state,
 )
+from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.spec import WorkflowSpec
 from agentic_runtime import AgentRuntime, ToolExecutor
 
@@ -47,11 +51,18 @@ async def run_workflow(
     sink: EventSink | None = None,
     checkpointer: Checkpointer | None = None,
     tools: ToolExecutor | None = None,
+    policy: Policy = PLATFORM_POLICY,
+    spent: Decimal = Decimal(0),
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
     A node that fails or is cancelled stops the run; its status becomes the run's status. If the
     caller is cancelled, the in-flight agent run is cancelled and `CancelledError` propagates.
+    A cancel whose message is a `PolicyLimitExceeded` (the worker's wall-time stop) ends the run
+    `failed`: `policy_limit_exceeded`, then `run_failed` with the reason as `error`. The run's
+    agents are held to `policy` (see `compile_workflow`). With a budget, the run has already
+    spent `spent`; once its spend reaches the budget it ends `failed` the same way, and the
+    result says so.
     A gate pauses the run: it ends `waiting`, after `node_started` and `gate_waiting` (payload
     `title`, `prompt`, `artifact`) for the gate, and `resume_workflow` continues it with the
     decision.
@@ -67,12 +78,14 @@ async def run_workflow(
     same per-run tools. A spec with a gate needs `checkpointer`.
     """
     log = RunEventLog(run_id or uuid4(), sink or NullEventSink())
+    budget = budget_meter(policy, spent)
     await _start(log, spec, input)
     return await _finish(
         log,
-        lambda: compile_workflow(spec, runtime, log, checkpointer, tools),
+        lambda: compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget),
         initial_state(input),
         _config(spec, log.run_id),
+        budget,
     )
 
 
@@ -88,6 +101,8 @@ async def resume_workflow(
     attempt: int,
     tools: ToolExecutor | None = None,
     decision: GateDecision | None = None,
+    policy: Policy = PLATFORM_POLICY,
+    spent: Decimal = Decimal(0),
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -99,9 +114,13 @@ async def resume_workflow(
     A run paused at a gate continues with `decision`: the gate logs `gate_decided`, then approve
     goes on to the next node and reject ends the run `cancelled`. Without a decision the run
     pauses at the gate again, and the pause is announced again.
+
+    `spent` is what the run's earlier attempts spent: a run that has already spent its budget
+    stops before it runs another node.
     """
     log = RunEventLog(run_id, sink, next_seq=next_seq)
-    graph = compile_workflow(spec, runtime, log, checkpointer, tools)
+    budget = budget_meter(policy, spent)
+    graph = compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget)
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
     saved = snapshot.values
@@ -110,13 +129,13 @@ async def resume_workflow(
     completed = [n for n in ran if results[n].status == "completed"]
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
     if not saved:
-        return await _finish(log, lambda: graph, initial_state(input), config)
+        return await _finish(log, lambda: graph, initial_state(input), config, budget)
     if not snapshot.next:
         return await _report(log, RunState(**saved))
     paused = any(task.interrupts for task in snapshot.tasks)
     resume = decision.model_dump(mode="json") if paused and decision else None
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
-    return await _finish(log, lambda: graph, start, config)
+    return await _finish(log, lambda: graph, start, config, budget)
 
 
 def _config(spec: WorkflowSpec, run_id: UUID) -> RunnableConfig:
@@ -128,15 +147,26 @@ async def _finish(
     build: Callable[[], CompiledWorkflow],
     start: RunState | Command[Any] | None,
     config: RunnableConfig,
+    budget: BudgetMeter | None = None,
 ) -> WorkflowRunResult:
     """Build the graph and invoke it from `start` (`None` continues from the checkpoint, a
     `Command` continues a paused gate), then report the end, or the pause at a gate. A failure
-    to build is logged like one from the graph."""
+    to build is logged like one from the graph. A run that has spent its `budget`, before it
+    starts or as it goes, ends `failed` (`_stopped`)."""
+    graph: CompiledWorkflow | None = None
     try:
         graph = build()
+        if budget is not None:
+            budget.check()
         final = await graph.ainvoke(start, config)
         paused = await _paused_gate(graph, config)
+    except PolicyLimitExceeded as over:
+        assert graph is not None, "only the graph and the budget check raise it"
+        return await _stopped(log, graph, config, over)
     except asyncio.CancelledError as e:
+        if over := next((a for a in e.args if isinstance(a, PolicyLimitExceeded)), None):
+            await log_policy_stop(log, over)
+            raise
         # `task.cancel("cancelled by user")` names why; a bare cancel is the caller's.
         reason = next((a for a in e.args if isinstance(a, str) and a), "caller cancelled")
         await log.emit(RUN_CANCELLED, payload={"reason": reason})
@@ -147,6 +177,25 @@ async def _finish(
     if paused is not None:
         return await _wait(log, *paused)
     return await _report(log, final)
+
+
+async def log_policy_stop(log: RunEventLog, over: PolicyLimitExceeded) -> None:
+    """End a run that went over a policy limit: `policy_limit_exceeded`, then `run_failed` with
+    the reason as `error`."""
+    await log.emit(POLICY_LIMIT_EXCEEDED, node_id=over.node_id, payload=over.payload())
+    await log.emit(RUN_FAILED, payload={"error": over.reason})
+
+
+async def _stopped(
+    log: RunEventLog, graph: CompiledWorkflow, config: RunnableConfig, over: PolicyLimitExceeded
+) -> WorkflowRunResult:
+    """End a run its graph stopped over a policy limit (its budget), and summarise it from its
+    last checkpoint, if it has one."""
+    await log_policy_stop(log, over)
+    state = initial_state("")
+    if graph.checkpointer is not None and (saved := (await graph.aget_state(config)).values):
+        state = RunState(**saved)
+    return _result(log, state, "failed", stopped_at=over.node_id)
 
 
 async def _paused_gate(

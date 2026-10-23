@@ -16,6 +16,7 @@ from agentic_runtime import (
     Usage,
 )
 from agentic_runtime.claude import DEFAULT_MODEL, ClaudeRuntime
+from agentic_runtime.pricing import DEFAULT_PRICES, ModelPrice
 from agentic_runtime.testing import (
     MOCK_API_KEY,
     MockClaude,
@@ -48,10 +49,59 @@ async def test_text_turn_streams_deltas_then_usage_message_completed() -> None:
         TextDelta(text="Hel"),
         TextDelta(text="lo "),
         TextDelta(text="world"),
-        Usage(input_tokens=12, output_tokens=5),
+        Usage(model="claude-test", input_tokens=12, output_tokens=5),
         Message(text="Hello world"),
         Completed(),
     ]
+
+
+async def test_usage_keeps_cache_tokens_apart_and_is_priced() -> None:
+    reply = text_reply(
+        "a",
+        model="claude-opus-5-5",
+        input_tokens=1000,
+        output_tokens=100,
+        cache_read_input_tokens=10_000,
+        cache_creation_input_tokens=3000,
+        cache_creation={"ephemeral_5m_input_tokens": 1000, "ephemeral_1h_input_tokens": 2000},
+    )
+
+    events = await collect_and_check(runtime(MockClaude([reply])), request())
+
+    usage = next(e for e in events if isinstance(e, Usage))
+    # $4 x 1000 + $20 x 100 + $0.20 x 10,000 + $5 x 1000 + $8 x 2000, per million tokens.
+    assert usage == Usage(
+        model="claude-opus-5-5",
+        input_tokens=1000,
+        output_tokens=100,
+        cache_read_tokens=10_000,
+        cache_write_tokens=3000,
+        estimated_usd=0.029,
+    )
+
+
+async def test_cache_writes_without_a_ttl_breakdown_are_five_minute_writes() -> None:
+    reply = text_reply(
+        "a", model="claude-opus-5-5", input_tokens=0, output_tokens=0,
+        cache_creation_input_tokens=1_000_000,
+    )  # fmt: skip
+
+    events = await collect_and_check(runtime(MockClaude([reply])), request())
+
+    usage = next(e for e in events if isinstance(e, Usage))
+    assert (usage.cache_write_tokens, usage.estimated_usd) == (1_000_000, 5.0)
+
+
+async def test_usage_is_priced_with_the_runtime_price_table() -> None:
+    prices = DEFAULT_PRICES.with_overrides(
+        {"claude-test": ModelPrice.model_validate(dict.fromkeys(ModelPrice.model_fields, "1000"))}
+    )
+    reply = text_reply("a", input_tokens=12, output_tokens=5)
+
+    events = await collect_and_check(runtime(MockClaude([reply]), prices=prices), request())
+
+    usage = next(e for e in events if isinstance(e, Usage))
+    assert usage.estimated_usd == 0.017  # 17 tokens at $1000 per million
 
 
 async def test_request_mapping() -> None:
@@ -109,7 +159,7 @@ async def test_max_tokens_and_refusal_fail(reason: str) -> None:
 
     events = await collect_and_check(runtime(mock), request())
 
-    assert events[-2] == Usage(input_tokens=12, output_tokens=5)
+    assert events[-2] == Usage(model="claude-test", input_tokens=12, output_tokens=5)
     assert events[-1] == Failed(error=f"Claude stopped without finishing: {reason}")
 
 
@@ -172,11 +222,11 @@ async def test_tool_loop_two_turns() -> None:
 
     assert events == [
         TextDelta(text="Looking."),
-        Usage(input_tokens=20, output_tokens=8),
+        Usage(model="claude-test", input_tokens=20, output_tokens=8),
         ToolCall(call_id="toolu_1", name="repo.read_file", arguments={"path": "README.md"}),
         ToolResult(call_id="toolu_1", output="# Readme"),
         TextDelta(text="It is a readme."),
-        Usage(input_tokens=40, output_tokens=6),
+        Usage(model="claude-test", input_tokens=40, output_tokens=6),
         Message(text="It is a readme."),
         Completed(),
     ]

@@ -37,6 +37,11 @@ pushed to, bare repos under `SANDBOX_LOCAL_ROOT`, and pull requests are only num
 A user can cancel a run (`POST /runs/{id}/cancel`): the worker running it checks every
 `CANCEL_POLL_S`, cancels its graph and writes `run_cancelled`; a cancelled run that is claimed
 (queued, or paused at a gate) is ended at once, and a sandbox it kept is removed.
+
+A run executes under the policy it was created with (`StoredRun.policy`). The worker enforces its
+wall time: the run's time spent executing so far (`agentic_store.active_seconds`, which leaves out
+time paused at a gate) plus this attempt's must stay within `wall_time_s`. Past it, the worker
+cancels the graph with the limit, which writes `policy_limit_exceeded` and `run_failed`.
 """
 
 import asyncio
@@ -46,6 +51,7 @@ import os
 import signal
 import socket
 import sys
+import time
 from collections.abc import AsyncGenerator, Callable, Collection, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
@@ -65,11 +71,13 @@ from agentic_engine.gate import GateDecision
 from agentic_engine.graph import (
     Checkpointer,
     WorkflowRunResult,
+    log_policy_stop,
     record_unstarted_run,
     resume_workflow,
     run_workflow,
 )
 from agentic_engine.logging import configure_logging
+from agentic_engine.policy import PolicyLimitExceeded
 from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools, writer_node_ids
 from agentic_github import (
     FAKE_REPOS,
@@ -102,6 +110,7 @@ from agentic_store import (
     USER_CANCEL_REASON,
     PostgresEventSink,
     StoredRun,
+    active_seconds,
     cancel_requested,
     claim_run,
     dequeue_run,
@@ -116,6 +125,7 @@ from agentic_store import (
     renew_lease,
     run_ended,
     waiting_run_ids,
+    workspace_price_table,
 )
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
@@ -263,6 +273,8 @@ def run_runtimes(
         run: StoredRun, tools: ToolExecutor | None
     ) -> AsyncGenerator[AgentRuntime]:
         key = await claude_key(run)
+        # Fixed for the attempt; a resumed attempt reads the workspace's prices again.
+        prices = await workspace_price_table(sessions, run.workspace_id)
         with registered(key):
             client = make_client(key)
             try:
@@ -272,6 +284,7 @@ def run_runtimes(
                     max_tokens=settings.claude_max_tokens,
                     max_turns=settings.claude_max_turns,
                     tools=tools,
+                    prices=prices,
                 )
             finally:
                 await client.close()
@@ -391,11 +404,24 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
         finally:
             await release_run(worker.sessions, run.id, worker.settings.worker_id)
         return
+    used = await active_seconds(worker.sessions, run.id)
+    began = time.monotonic()
     attempt = asyncio.create_task(_attempt(worker, run, sink))
     heartbeat = asyncio.create_task(_keep_lease(worker, run.id, lost))
     cancel = asyncio.create_task(_watch_cancel(worker, run.id))
+    wall = asyncio.create_task(asyncio.sleep(max(0.0, run.policy.wall_time_s - used)))
     try:
-        await asyncio.wait({attempt, heartbeat, cancel}, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait({attempt, heartbeat, cancel, wall}, return_when=asyncio.FIRST_COMPLETED)
+        if wall.done() and not attempt.done():
+            observed = round(used + time.monotonic() - began)
+            over = PolicyLimitExceeded("wall_time_s", run.policy.wall_time_s, observed)
+            # As for a cancel, but the graph writes `policy_limit_exceeded` and `run_failed`.
+            attempt.cancel(over)  # pyright: ignore[reportArgumentType]
+            with contextlib.suppress(asyncio.CancelledError):
+                await attempt
+            await _end_over_limit(worker, run, sink, over)
+            log.info("run %s stopped: %s", run.id, over.reason)
+            return
         if cancel.done() and not attempt.done():
             # The sink stays attached, so the graph writes `node_cancelled` and `run_cancelled`.
             attempt.cancel(USER_CANCEL_REASON)
@@ -416,6 +442,7 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
     finally:
         heartbeat.cancel()
         cancel.cancel()
+        wall.cancel()
         if not attempt.done():
             attempt.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -470,6 +497,24 @@ async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> Non
             await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
                 RUN_CANCELLED, payload={"reason": USER_CANCEL_REASON}
             )
+    if run.repo is not None:
+        await worker.sandboxes.discard(run.id)
+
+
+async def _end_over_limit(
+    worker: Worker, run: StoredRun, sink: EventSink, over: PolicyLimitExceeded
+) -> None:
+    """End a run that went over its wall time, unless its graph already wrote its end (it does
+    when it was cut off mid-node): `policy_limit_exceeded` and `run_failed` after its last event,
+    or, for a run that never started, `run_started` and `run_failed`. Its sandbox is removed."""
+    if not await run_ended(worker.sessions, run.id):
+        last_seq = await max_event_seq(worker.sessions, run.id)
+        if last_seq == 0:
+            await record_unstarted_run(
+                run.spec, run.input, run_id=run.id, sink=sink, status="failed", reason=over.reason
+            )
+        else:
+            await log_policy_stop(RunEventLog(run.id, sink, next_seq=last_seq + 1), over)
     if run.repo is not None:
         await worker.sandboxes.discard(run.id)
 
@@ -594,7 +639,8 @@ async def _workflow(
     decision: GateDecision | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
-    run paused at a gate continues with `decision`."""
+    run paused at a gate continues with `decision`. A run with a budget counts what its earlier
+    attempts spent (`runs.estimated_usd` when it was claimed)."""
     if last_seq == 0:
         log.info("run %s started", run.id)
         return await run_workflow(
@@ -605,6 +651,8 @@ async def _workflow(
             sink=sink,
             checkpointer=worker.checkpointer,
             tools=tools,
+            policy=run.policy,
+            spent=run.spent,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -618,6 +666,8 @@ async def _workflow(
         attempt=run.attempt,
         tools=tools,
         decision=decision,
+        policy=run.policy,
+        spent=run.spent,
     )
 
 

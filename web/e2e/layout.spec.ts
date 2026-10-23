@@ -75,6 +75,8 @@ test("templates", async ({ page }) => {
 async function checkSheet(page: Page, name: string) {
   const sheet = page.getByTestId("new-run-sheet");
   await expect(sheet).toBeVisible();
+  // Measure it where it rests, not while it slides in.
+  await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   await expectNoHorizontalScroll(page);
   const box = (await sheet.boundingBox())!;
   const viewport = page.viewportSize()!;
@@ -125,9 +127,13 @@ test("settings, GitHub needs attention", async ({ page }) => {
 test("a finished run", async ({ page, request }) => {
   const runId = await startRun(request, [WRITER]);
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
-    timeout: 30_000,
-  });
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    "succeeded",
+    {
+      timeout: 30_000,
+    },
+  );
   await expect(page.getByRole("button", { name: "Rerun" })).toBeVisible();
   await checkPage(page, "run-finished");
 });
@@ -135,9 +141,13 @@ test("a finished run", async ({ page, request }) => {
 test("runs, with a run's menu open", async ({ page, request }) => {
   const runId = await startRun(request, [WRITER]);
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
-    timeout: 30_000,
-  });
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    "succeeded",
+    {
+      timeout: 30_000,
+    },
+  );
   await page.goto("/runs");
   const row = page.locator(`[data-run-id="${runId}"]`).filter({ visible: true });
   await row.getByRole("button", { name: /^Actions for/ }).click();
@@ -149,7 +159,7 @@ test("runs, with a run's menu open", async ({ page, request }) => {
 test("a run waiting at a gate", async ({ page, request }) => {
   const runId = await startRun(request, [WRITER, GATE]);
   await page.goto(`/runs/${runId}`);
-  const dock = page.getByTestId("approval-dock");
+  const dock = page.getByTestId("approval-dock").filter({ visible: true });
   await expect(dock).toBeVisible({ timeout: 30_000 });
   await checkPage(page, "run-waiting");
 

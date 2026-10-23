@@ -17,11 +17,20 @@ it is continued. A loop writes `node_started` once, `loop_iteration_started` bef
 `iterations`) when it stops, or `node_failed` if its condition cannot be evaluated. A map writes
 `node_started` (payload `items`), `map_item_started` and `map_item_completed` around each item's
 body, whose events carry `item`, then its end; a reduce writes the events of an agent node.
+
+The run's `Policy` is enforced as it goes: at most `agents_alive` agents run at once across the
+whole run, and an agent node (or a map, for all its items' agents) that would take the run past
+`agents_spawned` does not start. It writes `node_started`, `policy_limit_exceeded` and
+`node_failed` with the reason instead, which ends the run. A run with a budget counts each agent
+usage on its `BudgetMeter`: once the budget is spent, the agent that spent it and every other
+running node end `node_cancelled`, and `PolicyLimitExceeded` leaves the graph for the runner to
+end the run.
 """
 
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
@@ -30,6 +39,7 @@ from langgraph.types import Send
 from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, AgentNodeStatus, run_agent_node, sum_usage
+from agentic_engine.budget import BudgetMeter
 from agentic_engine.events import (
     LOOP_CONDITION_EVALUATED,
     LOOP_ITERATION_STARTED,
@@ -39,6 +49,7 @@ from agentic_engine.events import (
     NODE_COMPLETED,
     NODE_FAILED,
     NODE_STARTED,
+    POLICY_LIMIT_EXCEEDED,
     PR_OPENED,
     NullEventSink,
     RunEventLog,
@@ -48,8 +59,8 @@ from agentic_engine.gate import run_gate_node
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.graph.state import MapItem, RunState, RunUpdate
+from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.spec import (
-    MAX_AGENTS_SPAWNED,
     PUBLISH_TOOLS,
     AgentNode,
     GateNode,
@@ -71,6 +82,19 @@ type StepNode = AgentNode | ToolNode | GateNode
 
 class CompileError(ValueError):
     """The spec uses something this compiler does not support yet."""
+
+
+@dataclass
+class _Limits:
+    """A run's policy, the slots of its `agents_alive` limit, and its budget meter if it has a
+    budget, shared by all its nodes for one attempt."""
+
+    policy: Policy
+    budget: BudgetMeter | None = None
+    alive: asyncio.Semaphore = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.alive = asyncio.Semaphore(self.policy.agents_alive)
 
 
 def step_nodes(root: Node) -> list[StepNode]:
@@ -137,16 +161,21 @@ def compile_workflow(
     log: RunEventLog | None = None,
     checkpointer: Checkpointer | None = None,
     tools: ToolExecutor | None = None,
+    policy: Policy = PLATFORM_POLICY,
+    budget: BudgetMeter | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, and
     both write to `log`, if given. With `checkpointer`, the state is saved after each node, in
-    the run's thread; a spec with a gate needs one, since a paused run continues from it."""
+    the run's thread; a spec with a gate needs one, since a paused run continues from it. The
+    run's agents are held to `policy`'s `agents_alive` and `agents_spawned`, and their usage to
+    `budget`; the spec itself is checked against it before the run (`policy_errors`)."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
     steps = step_nodes(spec.root)
     if checkpointer is None and (gate := next((n for n in steps if isinstance(n, GateNode)), None)):
         raise CompileError(f"gate {gate.id!r} needs a checkpointer to pause the run")
     builder = StateGraph(RunState)
+    limits = _Limits(policy, budget)
 
     def add(node: Node, then: str) -> str:
         """Add `node`, going on to `then` once it completes (to `END` otherwise), and return the
@@ -168,19 +197,21 @@ def compile_workflow(
             case MapNode():
                 over = compile_list(node.over)
                 worker, join = item_node_id(node), join_node_id(node)
-                builder.add_node(node.id, _map_entry(node, over, log))
+                builder.add_node(node.id, _map_entry(node, over, log, limits))
                 builder.add_conditional_edges(node.id, _fan_out(node, over), [worker, join, END])
-                builder.add_node(worker, _map_item(node, runtime, tools, log), input_schema=MapItem)
+                builder.add_node(
+                    worker, _map_item(node, runtime, tools, log, limits), input_schema=MapItem
+                )
                 builder.add_edge(worker, join)
                 builder.add_node(join, _map_join(node, log))
                 go_on(join, node.id, then)
                 return node.id
             case ReduceNode():
-                builder.add_node(node.id, _reduce(node, runtime, tools, log))
+                builder.add_node(node.id, _reduce(node, runtime, tools, log, limits))
                 go_on(node.id, node.id, then)
                 return node.id
             case AgentNode() | ToolNode() | GateNode():
-                builder.add_node(node.id, _step(node, runtime, tools, log))
+                builder.add_node(node.id, _step(node, runtime, tools, log, limits))
                 go_on(node.id, node.id, then)
                 return node.id
 
@@ -199,12 +230,56 @@ def compile_workflow(
 
 
 def _step(
-    node: StepNode, runtime: AgentRuntime, tools: ToolExecutor | None, log: RunEventLog
+    node: StepNode,
+    runtime: AgentRuntime,
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     async def step(state: RunState) -> RunUpdate:
-        return _update(node.id, await _run_step(node, runtime, tools, log, state["last_text"]))
+        def run() -> Awaitable[AgentNodeResult]:
+            return _run_step(node, runtime, tools, log, limits, state["last_text"])
+
+        if isinstance(node, AgentNode):
+            return await _spawn(node.id, state, limits, log, run)
+        return _update(node.id, await run())
 
     return step
+
+
+async def _spawn(
+    node_id: str,
+    state: RunState,
+    limits: _Limits,
+    log: RunEventLog,
+    run: Callable[[], Awaitable[AgentNodeResult]],
+) -> RunUpdate:
+    """Run the agent node `node_id` and count it as spawned, unless that would take the run past
+    its `agents_spawned` limit: then it fails without starting."""
+    if (refused := await _refuse_spawn(node_id, state, 1, limits, log)) is not None:
+        return _update(node_id, refused)
+    return {**_update(node_id, await run()), "spawned": 1}
+
+
+async def _refuse_spawn(
+    node_id: str,
+    state: RunState,
+    count: int,
+    limits: _Limits,
+    log: RunEventLog,
+    started: dict[str, JsonValue] | None = None,
+) -> AgentNodeResult | None:
+    """If spawning `count` more agents for `node_id` would take the run past its
+    `agents_spawned` limit, log the node's start (payload `started`), the limit and the node's
+    failure with the reason, and return its failed result; else `None`."""
+    observed = state.get("spawned", 0) + count
+    if observed <= limits.policy.agents_spawned:
+        return None
+    over = PolicyLimitExceeded("agents_spawned", limits.policy.agents_spawned, observed, node_id)
+    await log.emit(NODE_STARTED, node_id=node_id, payload=started)
+    await log.emit(POLICY_LIMIT_EXCEEDED, node_id=node_id, payload=over.payload())
+    await log.emit(NODE_FAILED, node_id=node_id, payload={"error": over.reason})
+    return AgentNodeResult(status="failed", text=state["last_text"], usage=None, error=over.reason)
 
 
 async def _run_step(
@@ -212,14 +287,19 @@ async def _run_step(
     runtime: AgentRuntime,
     tools: ToolExecutor | None,
     log: RunEventLog,
+    limits: _Limits,
     input: str,
     item: int | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
-    a map)."""
+    a map). An agent waits for one of the run's `agents_alive` slots before it starts, and its
+    usage is counted on the run's budget: once that is spent, the node ends `node_cancelled` and
+    `PolicyLimitExceeded` is raised."""
 
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item)
+        if isinstance(event, Usage) and limits.budget is not None:
+            limits.budget.add(event, node.id)
 
     # Streamed text is merged so the log gets at most one `text_delta` per 250 ms.
     buffer = DeltaBuffer(write)
@@ -232,7 +312,8 @@ async def _run_step(
             case GateNode():
                 return await run_gate_node(node, input, log)
             case AgentNode():
-                return await run_agent_node(node, runtime, input, on_event)
+                async with limits.alive:
+                    return await run_agent_node(node, runtime, input, on_event)
 
     # A gate runs again from its start when the run continues; the runner logs its start.
     if not isinstance(node, GateNode):
@@ -242,7 +323,7 @@ async def _run_step(
             result = await run()
         finally:
             await buffer.close()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, PolicyLimitExceeded):
         await log.emit(NODE_CANCELLED, node_id=node.id, item=item)
         raise
     if (pull := _pull_request(node, result)) is not None:
@@ -333,25 +414,22 @@ def _results_context(state: RunState) -> dict[str, JsonValue]:
 
 
 def _map_items(map: MapNode, over: CompiledList, state: RunState) -> list[JsonValue]:
-    """The items `map` runs its body for. Raises `ExpressionError` if `over` fails, and
-    `ValueError` if there are more than a run may spawn agents for."""
-    items = over.evaluate(last=state["last_text"], results=_results_context(state))
-    if len(items) > MAX_AGENTS_SPAWNED:
-        raise ValueError(
-            f"{len(items)} items is more than the limit of {MAX_AGENTS_SPAWNED} per map"
-        )
-    return items
+    """The items `map` runs its body for. Raises `ExpressionError` if `over` fails."""
+    return over.evaluate(last=state["last_text"], results=_results_context(state))
 
 
 def _map_entry(
-    map: MapNode, over: CompiledList, log: RunEventLog
+    map: MapNode, over: CompiledList, log: RunEventLog, limits: _Limits
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
-    """Starts the map, or fails it if its items cannot be had; `_fan_out` then sends them."""
+    """Starts the map, counting all its items' agents as spawned, or fails it if its items cannot
+    be had or their agents would take the run past its `agents_spawned` limit; `_fan_out` then
+    sends them. The items run in one LangGraph step, so they cannot count themselves."""
+    agents_per_item = sum(isinstance(n, AgentNode) for n in step_nodes(map.body))
 
     async def enter(state: RunState) -> RunUpdate:
         try:
             items = _map_items(map, over, state)
-        except ValueError as e:  # `ExpressionError` is a `ValueError`
+        except ExpressionError as e:
             await log.emit(NODE_STARTED, node_id=map.id)
             error = f"over failed: {e}"
             await log.emit(NODE_FAILED, node_id=map.id, payload={"error": error})
@@ -359,8 +437,12 @@ def _map_entry(
                 status="failed", text=state["last_text"], usage=None, error=error
             )
             return {"results": {map.id: failed}, "order": [map.id]}
-        await log.emit(NODE_STARTED, node_id=map.id, payload={"items": len(items)})
-        return {}
+        started: dict[str, JsonValue] = {"items": len(items)}
+        spawned = agents_per_item * len(items)
+        if refused := await _refuse_spawn(map.id, state, spawned, limits, log, started):
+            return {"results": {map.id: refused}, "order": [map.id]}
+        await log.emit(NODE_STARTED, node_id=map.id, payload=started)
+        return {"spawned": spawned}
 
     return enter
 
@@ -389,7 +471,11 @@ def _item_input(item: JsonValue) -> str:
 
 
 def _map_item(
-    map: MapNode, runtime: AgentRuntime, tools: ToolExecutor | None, log: RunEventLog
+    map: MapNode,
+    runtime: AgentRuntime,
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
 ) -> Callable[[MapItem], Awaitable[RunUpdate]]:
     """Runs `map`'s body for one item, each step on the previous one's output, stopping at the
     first step that does not complete. At most `max_concurrency` items run at once."""
@@ -405,7 +491,7 @@ def _map_item(
             text, usage, error = task["item_input"], list[Usage](), None
             result = AgentNodeResult(status="completed", text=text, usage=None)
             for step in steps:
-                result = await _run_step(step, runtime, tools, log, text, index)
+                result = await _run_step(step, runtime, tools, log, limits, text, index)
                 if result.usage:
                     usage.append(result.usage)
                 if result.status != "completed":
@@ -463,7 +549,11 @@ def ordered_items(state: RunState, map_id: str) -> list[AgentNodeResult]:
 
 
 def _reduce(
-    reduce: ReduceNode, runtime: AgentRuntime, tools: ToolExecutor | None, log: RunEventLog
+    reduce: ReduceNode,
+    runtime: AgentRuntime,
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     """Combines the outputs of the map `reduce.from_`, in item order: `concat` joins them, and
     `agent` runs an agent turn on them as a JSON array of `{item, output}`."""
@@ -490,7 +580,13 @@ def _reduce(
             {"item": item, "output": output} for item, output in zip(items, outputs, strict=True)
         ]
         input = json.dumps(pairs, ensure_ascii=False, indent=2)
-        return _update(reduce.id, await _run_step(agent, runtime, tools, log, input))
+        return await _spawn(
+            reduce.id,
+            state,
+            limits,
+            log,
+            lambda: _run_step(agent, runtime, tools, log, limits, input),
+        )
 
     return combine
 

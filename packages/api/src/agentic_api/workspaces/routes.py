@@ -9,17 +9,31 @@ from agentic_api.workspaces.claude_keys import ClaudeKeyVerifier
 from agentic_api.workspaces.models import (
     ConnectionErrorDetail,
     ConnectionOut,
+    LongContextPrice,
+    ModelPricingOut,
+    Price,
     PutClaudeConnection,
+    PutPricing,
+    RunLimitOverrides,
+    RunLimits,
     WorkspaceOut,
+    WorkspacePolicyOut,
+    WorkspacePricing,
 )
+from agentic_engine.policy import PLATFORM_POLICY, effective_policy
+from agentic_runtime import DEFAULT_PRICES, PRICES_AS_OF
 from agentic_secrets import KeyProvider
 from agentic_store import (
     WorkspaceNotFoundError,
     delete_connection,
+    get_policy_overrides,
     get_workspace,
     list_connections,
+    list_price_overrides,
     list_workspaces,
     put_connection,
+    replace_policy_overrides,
+    replace_price_overrides,
 )
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -134,3 +148,104 @@ async def delete_claude(workspace_id: UUID, request: Request) -> None:
         raise _not_found(workspace_id) from None
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "the workspace has no Claude connection")
+
+
+async def _pricing(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
+) -> WorkspacePricing:
+    try:
+        overrides = await list_price_overrides(sessions, workspace_id)
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    # List-priced models in list order, then the workspace's own models.
+    models = [*DEFAULT_PRICES, *sorted(m for m in overrides if m not in DEFAULT_PRICES)]
+    out: list[ModelPricingOut] = []
+    for model in models:
+        pricing = DEFAULT_PRICES.get(model)
+        long_context = (
+            LongContextPrice(
+                above_tokens=pricing.long_context_above, price=Price.of(pricing.long_context)
+            )
+            if pricing is not None
+            and pricing.long_context is not None
+            and pricing.long_context_above is not None
+            else None
+        )
+        override = overrides.get(model)
+        out.append(
+            ModelPricingOut(
+                model=model,
+                default=Price.of(pricing.base) if pricing is not None else None,
+                long_context=long_context,
+                override=Price.of(override) if override is not None else None,
+            )
+        )
+    return WorkspacePricing(as_of=PRICES_AS_OF, models=out)
+
+
+@router.get("/{workspace_id}/pricing", operation_id="getPricing", responses=_NOT_FOUND)
+async def get_pricing(workspace_id: UUID, request: Request) -> WorkspacePricing:
+    """The model prices the workspace's runs are priced with."""
+    return await _pricing(_sessions(request), workspace_id)
+
+
+@router.put(
+    "/{workspace_id}/pricing",
+    operation_id="putPricing",
+    responses={
+        **_NOT_FOUND,
+        422: {"description": "A negative price, a bad model id or a model given twice"},
+    },
+)
+async def put_pricing(workspace_id: UUID, body: PutPricing, request: Request) -> WorkspacePricing:
+    """Replace the workspace's price overrides. New usage is priced with them; runs already
+    logged keep their cost."""
+    sessions = _sessions(request)
+    overrides = {o.model: o.price.to_model_price() for o in body.overrides}
+    try:
+        await replace_price_overrides(sessions, workspace_id, overrides)
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    return await _pricing(sessions, workspace_id)
+
+
+async def _policy(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
+) -> WorkspacePolicyOut:
+    try:
+        overrides = await get_policy_overrides(sessions, workspace_id)
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    return WorkspacePolicyOut(
+        defaults=RunLimits.of(PLATFORM_POLICY),
+        overrides=RunLimitOverrides.of(overrides),
+        effective=RunLimits.of(effective_policy(overrides)),
+    )
+
+
+@router.get("/{workspace_id}/policy", operation_id="getPolicy", responses=_NOT_FOUND)
+async def get_policy(workspace_id: UUID, request: Request) -> WorkspacePolicyOut:
+    """The run limits the workspace's new runs get."""
+    return await _policy(_sessions(request), workspace_id)
+
+
+@router.put(
+    "/{workspace_id}/policy",
+    operation_id="putPolicy",
+    responses={
+        **_NOT_FOUND,
+        422: {"description": "A limit below 1 or above the platform's, or a budget out of range"},
+    },
+)
+async def put_policy(
+    workspace_id: UUID, body: RunLimitOverrides, request: Request
+) -> WorkspacePolicyOut:
+    """Replace the workspace's own run limits; leave one unset to keep the platform's, and all of
+    them to reset. `budget_usd` is the default budget of new runs (unset: no budget), which a run
+    may replace. New runs get them; a run keeps the limits it was created with."""
+    sessions = _sessions(request)
+    try:
+        await replace_policy_overrides(sessions, workspace_id, body.to_overrides())
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    return await _policy(sessions, workspace_id)

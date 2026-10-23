@@ -37,13 +37,15 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0013_run_template_parameters"
+    assert version == "0017_optional_budget"
     assert {
         "runs",
         "run_events",
         "workspaces",
         "connections",
         "approvals",
+        "workspace_model_prices",
+        "workspace_policies",
     } | CHECKPOINT_TABLES <= set(table_names)
     # The migrations match the `agentic_store` models.
     await asyncio.to_thread(command.check, config)
@@ -175,3 +177,65 @@ async def test_the_github_connections_revision_downgrades_and_upgrades(postgres_
     assert not {"external_id", "account_login"} & await connection_columns(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
     assert {"external_id", "account_login"} <= await connection_columns(postgres_url)
+
+
+async def test_the_policy_revision_gives_existing_runs_the_platform_policy(
+    postgres_url: str,
+) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.downgrade, config, "0015_workspace_model_prices")
+    assert "workspace_policies" not in await table_names(postgres_url)
+
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        run_id = (
+            await conn.execute(
+                text(
+                    "INSERT INTO runs (id, workspace_id, status, spec) VALUES (gen_random_uuid(), "
+                    "'00000000-0000-0000-0000-000000000001', 'completed', '{}') RETURNING id"
+                )
+            )
+        ).scalar_one()
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.connect() as conn:
+        policy = (
+            await conn.execute(text("SELECT policy FROM runs WHERE id = :id"), {"id": run_id})
+        ).scalar_one()
+    await engine.dispose()
+
+    assert policy == {
+        "agents_alive": 8,
+        "agents_spawned": 40,
+        "max_depth": 2,
+        "loop_iterations": 5,
+        "wall_time_s": 7200,
+    }
+    assert "workspace_policies" in await table_names(postgres_url)
+
+
+async def policy_columns(postgres_url: str) -> set[str]:
+    engine = create_async_engine(postgres_url)
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'workspace_policies'"
+            )
+        )
+        columns = set(rows.scalars())
+    await engine.dispose()
+    return columns
+
+
+async def test_the_budget_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert "budget_usd" in await policy_columns(postgres_url)
+
+    await asyncio.to_thread(command.downgrade, config, "0016_policy_limits")
+    assert "budget_usd" not in await policy_columns(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert "budget_usd" in await policy_columns(postgres_url)

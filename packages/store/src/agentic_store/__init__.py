@@ -48,9 +48,23 @@ from agentic_store.models import (
     Run,
     RunEventRow,
     Workspace,
+    WorkspaceModelPrice,
+    WorkspacePolicy,
     metadata,
 )
 from agentic_store.notify import listen
+from agentic_store.policy import (
+    PolicyViolationError,
+    active_seconds,
+    check_workflow,
+    get_policy_overrides,
+    replace_policy_overrides,
+)
+from agentic_store.pricing import (
+    list_price_overrides,
+    replace_price_overrides,
+    workspace_price_table,
+)
 from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run
 from agentic_store.rerun import RunNotEndedError, create_rerun
 from agentic_store.runs import StoredRun, create_run, get_run
@@ -63,6 +77,7 @@ from agentic_store.sink import (
 from agentic_store.summaries import (
     InvalidCursorError,
     RunSummaryRow,
+    RunUsageRow,
     get_run_summary,
     list_changed_run_summaries,
     list_run_summaries,
@@ -82,6 +97,7 @@ __all__ = [
     "Connection",
     "ConnectionInfo",
     "InvalidCursorError",
+    "PolicyViolationError",
     "PostgresEventSink",
     "Run",
     "RunEndedError",
@@ -90,12 +106,17 @@ __all__ = [
     "RunNotFoundError",
     "RunNotWaitingError",
     "RunSummaryRow",
+    "RunUsageRow",
     "StoredRun",
     "Workspace",
     "WorkspaceInfo",
+    "WorkspaceModelPrice",
     "WorkspaceNotFoundError",
+    "WorkspacePolicy",
     "WrongGateError",
+    "active_seconds",
     "cancel_requested",
+    "check_workflow",
     "claim_run",
     "create_rerun",
     "create_run",
@@ -103,12 +124,14 @@ __all__ = [
     "dequeue_run",
     "enqueue_run",
     "get_github_installation",
+    "get_policy_overrides",
     "get_run",
     "get_run_summary",
     "get_workspace",
     "leased_run_ids",
     "list_changed_run_summaries",
     "list_connections",
+    "list_price_overrides",
     "list_run_events",
     "list_run_summaries",
     "list_workspaces",
@@ -124,7 +147,10 @@ __all__ = [
     "record_approval",
     "release_run",
     "renew_lease",
+    "replace_policy_overrides",
+    "replace_price_overrides",
     "request_cancel",
     "run_ended",
     "waiting_run_ids",
+    "workspace_price_table",
 ]

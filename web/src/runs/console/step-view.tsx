@@ -6,16 +6,18 @@ import type { ReactNode } from "react";
 import { StatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 
+import { costCaveat, formatCost, formatTokens, usageDetails } from "../cost";
 import { formatDuration } from "../summaries";
-import type {
-  Iteration,
-  MapItem,
-  MessageTurn,
-  Step,
-  StepStatus,
-  TokenUsage,
-  ToolTurn,
-  Turn,
+import {
+  stepUsage,
+  type Iteration,
+  type MapItem,
+  type MessageTurn,
+  type Step,
+  type StepStatus,
+  type TokenUsage,
+  type ToolTurn,
+  type Turn,
 } from "../timeline";
 import { AgentMessage } from "./agent-message";
 import { itemName } from "./item-name";
@@ -30,8 +32,6 @@ export interface StepViewOptions {
   /** Extra content for a step, e.g. the approval panel of the gate the run waits at. */
   extra?: (step: Step) => ReactNode;
 }
-
-const numbers = new Intl.NumberFormat("en-US");
 
 function elapsed(startedAt: string, endedAt: string | null, now: number): string {
   const end = endedAt ? Date.parse(endedAt) : now;
@@ -90,9 +90,18 @@ function TitleLine({
 }
 
 function UsageFooter({ usage }: { usage: TokenUsage }) {
+  const caveat = costCaveat(usage);
   return (
-    <p data-testid="usage" className="text-xs text-muted-foreground tabular-nums">
-      {numbers.format(usage.inputTokens)} in · {numbers.format(usage.outputTokens)} out tokens
+    <p
+      data-testid="usage"
+      title={usageDetails(usage)}
+      className="text-xs text-muted-foreground tabular-nums"
+    >
+      {formatTokens(usage.inputTokens)} in · {formatTokens(usage.outputTokens)} out ·{" "}
+      <span data-testid="usage-cost" title={caveat ?? undefined}>
+        {formatCost(usage)}
+      </span>
+      {caveat ? <span className="sr-only"> ({caveat})</span> : null}
     </p>
   );
 }
@@ -199,6 +208,7 @@ function ErrorLine({ error }: { error: string }) {
 function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
   const live = step.status === "running";
   const entries = segments(step.turns);
+  const usage = stepUsage(step);
   const hasRail =
     entries.length > 0 || (step.items?.length ?? 0) > 0 || (step.iterations?.length ?? 0) > 0;
   return (
@@ -255,7 +265,7 @@ function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
         </a>
       ) : null}
       {step.error ? <ErrorLine error={step.error} /> : null}
-      {step.usage ? <UsageFooter usage={step.usage} /> : null}
+      {usage ? <UsageFooter usage={usage} /> : null}
     </>
   );
 }

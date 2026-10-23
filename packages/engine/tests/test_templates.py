@@ -7,6 +7,7 @@ from pydantic import JsonValue, ValidationError
 
 from agentic_engine.spec import AgentNode, GateNode, MapNode, SequenceNode, ToolNode, iter_nodes
 from agentic_engine.templates import TEMPLATES, DocsParams, build_docs_spec, get_template
+from agentic_engine.templates.docs import MAX_MODULES
 
 
 def _ids(params: DocsParams) -> list[str]:
@@ -39,7 +40,7 @@ def test_default_options_build_the_docs_flow() -> None:
         "list_modules", "document", "combine", "writer", "approve", "publish",
     ]  # fmt: skip
     assert steps["list_modules"] == ToolNode(
-        type="tool", id="list_modules", tool="repo.list_modules"
+        type="tool", id="list_modules", tool="repo.list_modules", args={"limit": MAX_MODULES}
     )
     assert isinstance(steps["document"], MapNode)
     assert steps["document"].over == "results.list_modules.data.modules"
@@ -58,7 +59,7 @@ def test_options_reach_the_spec() -> None:
     )
     steps = _steps(params)
 
-    assert steps["list_modules"].args == {"include": ["packages/*"]}
+    assert steps["list_modules"].args == {"limit": MAX_MODULES, "include": ["packages/*"]}
     writer = steps["writer"].instructions
     assert "`documentation/modules/README.md`" in writer
     assert "Only write files under `documentation/modules/`" in writer

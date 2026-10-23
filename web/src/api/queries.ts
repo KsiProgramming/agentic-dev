@@ -10,6 +10,13 @@ export type Template = components["schemas"]["TemplateOut"];
 export type Connection = components["schemas"]["ConnectionOut"];
 export type Repo = components["schemas"]["RepoOut"];
 export type Requirement = Template["requires"][number];
+export type WorkspacePricing = components["schemas"]["WorkspacePricing"];
+export type ModelPricing = WorkspacePricing["models"][number];
+export type Price = components["schemas"]["Price"];
+export type PriceOverride = components["schemas"]["PriceOverride"];
+export type WorkspacePolicy = components["schemas"]["WorkspacePolicyOut"];
+export type RunLimits = components["schemas"]["RunLimits"];
+export type RunLimitOverrides = components["schemas"]["RunLimitOverrides"];
 
 /** What the API says about the workspace's GitHub repos. */
 export type GithubRepos =
@@ -23,6 +30,14 @@ export type GithubRepos =
 /** Every query about one workspace's connections lives under this key. */
 export function connectionsKey(workspaceId: string) {
   return ["workspace", workspaceId, "connections"] as const;
+}
+
+export function pricingKey(workspaceId: string) {
+  return ["workspace", workspaceId, "pricing"] as const;
+}
+
+export function policyKey(workspaceId: string) {
+  return ["workspace", workspaceId, "policy"] as const;
 }
 
 export function reposKey(workspaceId: string) {
@@ -198,5 +213,97 @@ export function useDisconnectGithub({
       void queries.invalidateQueries({ queryKey: connectionsKey(workspaceId) });
       void queries.invalidateQueries({ queryKey: reposKey(workspaceId) });
     },
+  });
+}
+
+/** The model prices the workspace's runs are priced with. */
+export function usePricing({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  return useQuery({
+    queryKey: pricingKey(workspaceId),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/pricing", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the prices");
+      return data;
+    },
+  });
+}
+
+/** Replaces the workspace's price overrides; `[]` resets every model to its list price. */
+export function useSavePricing({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async (overrides: PriceOverride[]) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).PUT("/workspaces/{workspace_id}/pricing", {
+          params: { path: { workspace_id: workspaceId } },
+          body: { overrides },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not save the prices");
+      return data;
+    },
+    onSuccess: (pricing) => queries.setQueryData(pricingKey(workspaceId), pricing),
+  });
+}
+
+/** The run limits the workspace's new runs get. */
+export function usePolicy({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  return useQuery({
+    queryKey: policyKey(workspaceId),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/policy", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the run limits");
+      return data;
+    },
+  });
+}
+
+/** Replaces the workspace's own run limits; `{}` resets them to the platform's. */
+export function useSavePolicy({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async (overrides: RunLimitOverrides) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).PUT("/workspaces/{workspace_id}/policy", {
+          params: { path: { workspace_id: workspaceId } },
+          body: overrides,
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not save the run limits");
+      return data;
+    },
+    onSuccess: (policy) => queries.setQueryData(policyKey(workspaceId), policy),
   });
 }

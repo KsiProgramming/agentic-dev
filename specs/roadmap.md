@@ -55,10 +55,10 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 
 | # | Phase | Done when | Status |
 |---|---|---|---|
-| 3.1 | Usage normalisation → cost per node/run | Run console shows tokens and estimated USD per node and per run; the runs list shows cost per run | — |
-| 3.2 | Policy limits: agents alive/spawned, depth, iterations, wall time | Exceeding a limit stops the run cleanly with a reason | — |
-| 3.3 | **Optional budget**: if set, hard stop at 100%; if unset, no cap | AC-7 for budgeted runs; an unbudgeted run continues and still reports cost | — |
-| 3.4 | Validation endpoint `POST /workflows/{id}/validate` (schema, ports, cycles, policy) | Invalid specs return actionable errors | — |
+| 3.1 | Usage normalisation → cost per node/run | Run console shows tokens and estimated USD per node and per run; the runs list shows cost per run | ✅ Done ([#111](https://github.com/KsiProgramming/agentic-dev/pull/111)) |
+| 3.2 | Policy limits: agents alive/spawned, depth, iterations, wall time | Exceeding a limit stops the run cleanly with a reason | ✅ Done ([#112](https://github.com/KsiProgramming/agentic-dev/pull/112)) |
+| 3.3 | **Optional budget**: if set, hard stop at 100%; if unset, no cap | AC-7 for budgeted runs; an unbudgeted run continues and still reports cost | ✅ Done ([#113](https://github.com/KsiProgramming/agentic-dev/pull/113)) |
+| 3.4 | Validation endpoint `POST /workflows/{id}/validate` (schema, ports, cycles, policy) | Invalid specs return actionable errors | ✅ Done ([#114](https://github.com/KsiProgramming/agentic-dev/pull/114)) |
 | 3.5 | Graph tab in the run console: read-only graph (React Flow) with status colours; selecting a node opens the node detail from 2.5 | Clicking a node in the graph shows what the agent did | — |
 | 3.6 | Editable artifacts in the approval dock (2.6): diff view, edit before approving | Gate is approved from the UI with edits | — |
 | 3.7 | Audit log view for admins | Every run and approval is listed per workspace | — |

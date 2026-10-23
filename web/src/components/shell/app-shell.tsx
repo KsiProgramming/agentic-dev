@@ -22,20 +22,24 @@ function MobileNav({ baseUrl }: { baseUrl?: string }) {
       : "Open navigation";
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button type="button" variant="ghost" size="icon" aria-label={label} className="relative">
-          <MenuIcon aria-hidden="true" />
-          {waiting > 0 ? (
-            <span
-              aria-hidden="true"
-              data-testid="menu-waiting-badge"
-              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-status-waiting px-1 text-[10px] font-semibold text-background tabular-nums"
-            >
-              {countLabel(waiting)}
-            </span>
-          ) : null}
-        </Button>
-      </SheetTrigger>
+      {/* The badge sits beside the button, not in it: text inside would be the button's visible
+          label, which its name must match (WCAG 2.5.3), and the name already says the count. */}
+      <span className="relative inline-flex">
+        <SheetTrigger asChild>
+          <Button type="button" variant="ghost" size="icon" aria-label={label}>
+            <MenuIcon aria-hidden="true" />
+          </Button>
+        </SheetTrigger>
+        {waiting > 0 ? (
+          <span
+            aria-hidden="true"
+            data-testid="menu-waiting-badge"
+            className="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-status-waiting px-1 text-[10px] font-semibold text-background tabular-nums"
+          >
+            {countLabel(waiting)}
+          </span>
+        ) : null}
+      </span>
       <SheetContent side="left" className="w-64 p-0" aria-describedby={undefined}>
         <SheetTitle className="sr-only">Navigation</SheetTitle>
         <Sidebar onNavigate={() => setOpen(false)} baseUrl={baseUrl} />

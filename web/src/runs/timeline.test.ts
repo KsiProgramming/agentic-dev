@@ -86,7 +86,11 @@ describe("buildTimeline on a recorded docs run", () => {
       [1, false, "reviewer"],
       [2, true, "reviewer"],
     ]);
-    expect(loop.iterations?.[1]?.steps[0]?.usage).toEqual({ inputTokens: 900, outputTokens: 40 });
+    expect(loop.iterations?.[1]?.steps[0]?.usage).toMatchObject({
+      costComplete: false,
+      inputTokens: 900,
+      outputTokens: 40,
+    });
   });
 
   it("records the gate's title and decision", () => {

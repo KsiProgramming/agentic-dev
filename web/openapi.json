@@ -199,7 +199,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`.",
+        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workspace's default; with a budget, every\nagent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the\nsame way.",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -229,14 +229,7 @@
             "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection"
           },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "Invalid request, or the workflow is above the workspace's limits"
           }
         }
       }
@@ -247,7 +240,7 @@
           "runs"
         ],
         "summary": "Stream Summaries",
-        "description": "Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with\nthe run's `RunSummary` whenever its status, timings, PR URL or waiting gate change,\nincluding new runs. Each frame's `id` is when the run last changed. Only changes after\nconnecting are sent; after a reconnect, list the runs again. The stream stays open.",
+        "description": "Live changes to the workspace's runs as Server-Sent Events: a `run_summary` frame with\nthe run's `RunSummary` whenever its status, timings, PR URL, waiting gate or usage change,\nincluding new runs. Each frame's `id` is when the run last changed. Only changes after\nconnecting are sent; after a reconnect, list the runs again. The stream stays open.",
         "operationId": "streamRunSummaries",
         "parameters": [
           {
@@ -372,7 +365,7 @@
           "runs"
         ],
         "summary": "Rerun",
-        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since.",
+        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the\noriginal run's spend does not count.",
         "operationId": "rerunRun",
         "parameters": [
           {
@@ -386,6 +379,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RerunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "description": "Successful Response",
@@ -404,14 +414,7 @@
             "description": "The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection"
           },
           "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
+            "description": "The workflow is above the workspace's limits as they are now"
           }
         }
       }
@@ -814,6 +817,196 @@
         }
       }
     },
+    "/workspaces/{workspace_id}/pricing": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Get Pricing",
+        "description": "The model prices the workspace's runs are priced with.",
+        "operationId": "getPricing",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePricing"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Put Pricing",
+        "description": "Replace the workspace's price overrides. New usage is priced with them; runs already\nlogged keep their cost.",
+        "operationId": "putPricing",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutPricing"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePricing"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "A negative price, a bad model id or a model given twice"
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/policy": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Get Policy",
+        "description": "The run limits the workspace's new runs get.",
+        "operationId": "getPolicy",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePolicyOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Put Policy",
+        "description": "Replace the workspace's own run limits; leave one unset to keep the platform's, and all of\nthem to reset. `budget_usd` is the default budget of new runs (unset: no budget), which a run\nmay replace. New runs get them; a run keeps the limits it was created with.",
+        "operationId": "putPolicy",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunLimitOverrides"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspacePolicyOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "A limit below 1 or above the platform's, or a budget out of range"
+          }
+        }
+      }
+    },
     "/workspaces/{workspace_id}/connections/github/install": {
       "post": {
         "tags": [
@@ -1085,6 +1278,55 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/validate": {
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Validate",
+        "description": "Check whether `workflow` could run in the workspace now, without running it: the schema,\nnode ids, loop and map rules, references between nodes (`reduce.from`, a publisher's\n`from_node`), a gate before every publisher, tool names, and the workspace's run limits and,\nwith a budget, prices. An invalid workflow is answered `200` with `valid: false` and every\nissue. `workflow_id` must be the spec's `id` (`id_mismatch` otherwise). Nothing is stored,\nand no connection is needed.",
+        "operationId": "validateWorkflow",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateWorkflowResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "The request itself is malformed (e.g. `workflow` is not an object)"
           }
         }
       }
@@ -1391,6 +1633,20 @@
             ],
             "title": "Workspace Id",
             "description": "The workspace the run belongs to; its connections are used. Default: the default workspace."
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "USD the run may spend, a hard stop once reached. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget."
           }
         },
         "additionalProperties": false,
@@ -1521,7 +1777,42 @@
         "title": "InstallUrlOut",
         "description": "Where to send the browser to install the GitHub App. The URL is valid for 10 minutes."
       },
+      "IssueCode": {
+        "type": "string",
+        "enum": [
+          "schema",
+          "id_mismatch",
+          "duplicate_node_id",
+          "invalid_expression",
+          "not_allowed_in_loop",
+          "not_allowed_in_map",
+          "reference",
+          "publish_not_tool_node",
+          "publish_without_gate",
+          "unknown_tool",
+          "policy_limit",
+          "budget_unpriced_model"
+        ]
+      },
       "JsonValue": {},
+      "LongContextPrice": {
+        "properties": {
+          "above_tokens": {
+            "type": "integer",
+            "title": "Above Tokens",
+            "description": "Applies to a call whose prompt is over this size."
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "above_tokens",
+          "price"
+        ],
+        "title": "LongContextPrice"
+      },
       "LoopNode": {
         "properties": {
           "type": {
@@ -1676,7 +1967,134 @@
           "max_concurrency"
         ],
         "title": "MapNode",
-        "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. A map has at most\n`MAX_AGENTS_SPAWNED` items; one that does not complete fails the map."
+        "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. Its items' agents count toward the\nrun's `agents_spawned` limit; one item that does not complete fails the map."
+      },
+      "ModelPricingOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Price"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The list price; unset for a model with none."
+          },
+          "long_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LongContextPrice"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The list price for long prompts, if the model has one."
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Price"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace's price. It replaces the list price, long prompts included."
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "default",
+          "long_context",
+          "override"
+        ],
+        "title": "ModelPricingOut"
+      },
+      "PolicyLimit": {
+        "type": "string",
+        "enum": [
+          "agents_alive",
+          "agents_spawned",
+          "max_depth",
+          "loop_iterations",
+          "wall_time_s",
+          "budget_usd"
+        ]
+      },
+      "Price": {
+        "properties": {
+          "input": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Input"
+          },
+          "output": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Output"
+          },
+          "cache_write_5m": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Cache Write 5M",
+            "description": "Writing to the 5 minute prompt cache."
+          },
+          "cache_write_1h": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Cache Write 1H",
+            "description": "Writing to the 1 hour prompt cache."
+          },
+          "cache_read": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Cache Read",
+            "description": "Reading from the prompt cache."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "input",
+          "output",
+          "cache_write_5m",
+          "cache_write_1h",
+          "cache_read"
+        ],
+        "title": "Price",
+        "description": "USD per million tokens."
+      },
+      "PriceOverride": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "title": "Model"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "model",
+          "price"
+        ],
+        "title": "PriceOverride"
       },
       "PutClaudeConnection": {
         "properties": {
@@ -1696,6 +2114,25 @@
           "api_key"
         ],
         "title": "PutClaudeConnection"
+      },
+      "PutPricing": {
+        "properties": {
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/PriceOverride"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Overrides",
+            "description": "The workspace's overrides, replacing all stored ones; `[]` resets every model to its list price."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "overrides"
+        ],
+        "title": "PutPricing"
       },
       "Readiness": {
         "properties": {
@@ -1921,6 +2358,27 @@
           "github"
         ]
       },
+      "RerunRequest": {
+        "properties": {
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "USD the new run may spend. Unset: the workspace's default budget as it is now. From $0.01 to $1,000,000; unset is no budget."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RerunRequest"
+      },
       "RunDetail": {
         "properties": {
           "id": {
@@ -2026,6 +2484,9 @@
             "title": "Rerun Of",
             "description": "The run this one repeats."
           },
+          "usage": {
+            "$ref": "#/components/schemas/RunUsage"
+          },
           "input": {
             "type": "string",
             "title": "Input"
@@ -2070,11 +2531,155 @@
           "pr_url",
           "waiting_gate",
           "rerun_of",
+          "usage",
           "input",
           "failure_reason",
           "duration_ms"
         ],
         "title": "RunDetail"
+      },
+      "RunLimitOverrides": {
+        "properties": {
+          "agents_alive": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agents Alive",
+            "description": "Agents running at once. At most 8, the platform's limit; unset keeps it."
+          },
+          "agents_spawned": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 40.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agents Spawned",
+            "description": "Agents a run may start in all. At most 40, the platform's limit; unset keeps it."
+          },
+          "max_depth": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Depth",
+            "description": "How deep loops and maps may nest. At most 2, the platform's limit; unset keeps it."
+          },
+          "loop_iterations": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loop Iterations",
+            "description": "The highest `max_iterations` a loop may have. At most 5, the platform's limit; unset keeps it."
+          },
+          "wall_time_s": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 7200.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Time S",
+            "description": "Seconds a run may spend executing, gates aside. At most 7200, the platform's limit; unset keeps it."
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RunLimitOverrides",
+        "description": "The workspace's own limits, each at or below the platform's; unset keeps the platform's."
+      },
+      "RunLimits": {
+        "properties": {
+          "agents_alive": {
+            "type": "integer",
+            "title": "Agents Alive",
+            "description": "Agents running at once."
+          },
+          "agents_spawned": {
+            "type": "integer",
+            "title": "Agents Spawned",
+            "description": "Agents a run may start in all."
+          },
+          "max_depth": {
+            "type": "integer",
+            "title": "Max Depth",
+            "description": "How deep loops and maps may nest."
+          },
+          "loop_iterations": {
+            "type": "integer",
+            "title": "Loop Iterations",
+            "description": "The highest `max_iterations` a loop may have."
+          },
+          "wall_time_s": {
+            "type": "integer",
+            "title": "Wall Time S",
+            "description": "Seconds a run may spend executing; time waiting at a gate does not count."
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "USD a run may spend, a hard stop once reached; unset is no cost cap."
+          }
+        },
+        "type": "object",
+        "required": [
+          "agents_alive",
+          "agents_spawned",
+          "max_depth",
+          "loop_iterations",
+          "wall_time_s"
+        ],
+        "title": "RunLimits",
+        "description": "The limits a run executes under."
       },
       "RunStatus": {
         "type": "string",
@@ -2192,6 +2797,9 @@
             "title": "Rerun Of",
             "description": "The run this one repeats."
           },
+          "usage": {
+            "$ref": "#/components/schemas/RunUsage"
+          },
           "duration_ms": {
             "anyOf": [
               {
@@ -2220,6 +2828,7 @@
           "pr_url",
           "waiting_gate",
           "rerun_of",
+          "usage",
           "duration_ms"
         ],
         "title": "RunSummary",
@@ -2253,6 +2862,60 @@
           "next_cursor"
         ],
         "title": "RunSummaryPage"
+      },
+      "RunUsage": {
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "description": "Uncached input tokens."
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "type": "integer",
+            "title": "Cache Write Tokens"
+          },
+          "estimated_usd": {
+            "type": "number",
+            "title": "Estimated Usd",
+            "description": "Estimated cost in USD of the priced usage."
+          },
+          "cost_complete": {
+            "type": "boolean",
+            "title": "Cost Complete",
+            "description": "False if some usage had no price (an unknown model): `estimated_usd` is then a lower bound."
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "The run's budget: it stops once `estimated_usd` reaches it. Unset: no cap."
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "estimated_usd",
+          "cost_complete"
+        ],
+        "title": "RunUsage",
+        "description": "Totals of the run's usage events, priced when each was logged."
       },
       "SequenceNode": {
         "properties": {
@@ -2440,6 +3103,79 @@
         "title": "ToolNode",
         "description": "One call of a platform tool with fixed arguments; no model is involved. Its output is the\nnext node's input, and an error result fails the node."
       },
+      "ValidateWorkflowRequest": {
+        "properties": {
+          "workflow": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Workflow",
+            "description": "The workflow spec to check, as `POST /runs` takes it. It is not parsed first, so a spec that does not match the schema is answered with its issues."
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id",
+            "description": "The workspace whose run limits and prices apply. Default: the default workspace."
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "The budget a run would set. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow"
+        ],
+        "title": "ValidateWorkflowRequest"
+      },
+      "ValidateWorkflowResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "type": "array",
+            "title": "Issues",
+            "description": "Each problem with its code, path, node and what to change, in run order. While the spec does not match the schema, only `schema` issues are listed."
+          },
+          "policy": {
+            "$ref": "#/components/schemas/RunLimits",
+            "description": "The limits the workflow was checked against."
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid",
+          "issues",
+          "policy"
+        ],
+        "title": "ValidateWorkflowResponse",
+        "description": "Whether the workflow could run in the workspace now; `issues` names every problem."
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -2479,6 +3215,82 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ValidationIssue": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/IssueCode",
+            "description": "The kind of problem; stable, so clients may branch on it."
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Where in the spec, by its JSON field names, e.g. `root.steps[1].body`; empty for the document itself.",
+            "examples": [
+              "root.steps[1].body"
+            ]
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id",
+            "description": "The node to fix, if there is one."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "The problem and what to change, for people."
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "The limit's value."
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed",
+            "description": "What the spec would reach."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "path",
+          "message"
+        ],
+        "title": "ValidationIssue",
+        "description": "One reason a workflow cannot run: what is wrong (`code`), where (`path`, `node_id`) and\nwhat to change (`message`). A `policy_limit` issue also names the `limit`, its `value` and\nwhat the spec would reach (`observed`)."
       },
       "WaitingGate": {
         "properties": {
@@ -2625,6 +3437,52 @@
           "created_at"
         ],
         "title": "WorkspaceOut"
+      },
+      "WorkspacePolicyOut": {
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/RunLimits",
+            "description": "The platform's limits, which are also the ceilings."
+          },
+          "overrides": {
+            "$ref": "#/components/schemas/RunLimitOverrides"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/RunLimits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "defaults",
+          "overrides",
+          "effective"
+        ],
+        "title": "WorkspacePolicyOut",
+        "description": "The limits the workspace's new runs get: each of its `overrides`, else the platform's\n`defaults`. A run keeps the limits it was created with."
+      },
+      "WorkspacePricing": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of",
+            "description": "When the list prices were last checked."
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPricingOut"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "models"
+        ],
+        "title": "WorkspacePricing",
+        "description": "The prices the workspace's runs are priced with: each model's `override`, else its\n`default`. A run keeps the cost it was priced with when its usage was logged."
       },
       "RunEvent": {
         "additionalProperties": false,

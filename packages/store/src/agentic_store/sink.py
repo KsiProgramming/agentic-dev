@@ -1,9 +1,10 @@
 """Persists a run's event stream to Postgres."""
 
-from typing import Any
+from decimal import Decimal
+from typing import Any, Final
 from uuid import UUID
 
-from sqlalchemy import func, null, select, update
+from sqlalchemy import false, func, null, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import (
@@ -18,7 +19,10 @@ from agentic_engine.events import (
     RunEvent,
     RunStatus,
 )
+from agentic_runtime import Usage
 from agentic_store.models import Run, RunEventRow
+
+USAGE: Final = "usage"
 
 RUN_EVENTS_CHANNEL = "run_events"
 """Postgres `NOTIFY` channel; the payload of each notification is `<run_id>:<seq>`."""
@@ -44,11 +48,14 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     | `node_failed` with an `error` | `failure_reason="node <id>: <error>"` |
     | `run_completed`, `run_cancelled` | end status, `finished_at`; clears the gate and reason |
     | `run_failed` | `failed`, `finished_at`, clears `waiting_gate`; `failure_reason` = `error` |
+    | `usage` | adds its tokens and `estimated_usd`; `cost_complete=false` if it has no price |
     """
     values: dict[str, Any] = {}
     if status := RUN_STATUS.get(event.type) or RUN_END_STATUS.get(event.type):
         values["status"] = status
     payload = event.payload
+    if event.type == USAGE and isinstance(usage := event.agent_event(), Usage):
+        return _usage_values(usage)
     if event.type == RUN_STARTED:
         values["started_at"] = func.coalesce(Run.started_at, event.created_at)
     elif event.type in (RUN_RESUMED, GATE_DECIDED):
@@ -75,6 +82,21 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
                 values["failure_reason"] = error
         else:
             values["failure_reason"] = None
+    return values
+
+
+def _usage_values(usage: Usage) -> dict[str, Any]:
+    """Increments in SQL, so concurrent map items never lose each other's usage."""
+    values: dict[str, Any] = {
+        "input_tokens": Run.input_tokens + usage.input_tokens,
+        "output_tokens": Run.output_tokens + usage.output_tokens,
+        "cache_read_tokens": Run.cache_read_tokens + usage.cache_read_tokens,
+        "cache_write_tokens": Run.cache_write_tokens + usage.cache_write_tokens,
+    }
+    if usage.estimated_usd is None:
+        values["cost_complete"] = false()
+    else:
+        values["estimated_usd"] = Run.estimated_usd + Decimal(str(usage.estimated_usd))
     return values
 
 

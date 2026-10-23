@@ -109,7 +109,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - **Timeline (default tab):** the run reads top to bottom on a vertical rail. Each node hangs off it by a status icon (with a screen-reader label) and shows its duration; a finished node has no badge, and only states that need attention say so in words ("Needs approval", "Failed"). Map items (named by their path) and loop iterations are nested on their own rail. Inside a step:
   - Streamed `text_delta` events are **merged on the client** into one growing message per agent turn. The `message` event replaces the merged text when it arrives. A message is rendered as Markdown with raw HTML and images dropped, so payloads stay data.
   - Each tool call is one quiet line with an icon, a verb and its target ("Read `src/app.ts`"); opening it shows its arguments and result (JSON pretty-printed, collapsed after 2 levels, copyable). Consecutive reads, listings and searches collapse into one summary line ("Read 12 files, listed 3 folders"). Calls that change something (writes, commits, pull requests) and failed calls stand on their own line with a preview of their first lines. Only running and failed calls get a status icon.
-  - Usage and cost appear as a quiet footer line.
+  - Usage and cost appear as a quiet footer line ("12.3K in · 2.1K out · $0.042"); a map or loop node shows the total of its items. The header shows the run's total. A cost with unpriced usage shows "—" (or "≥ $x") and says why in a tooltip.
 - **Raw events tab:** the event table, with filters by type and node. Consecutive chunks of one message are folded into one row (expandable to the chunks). It is kept for debugging and audit.
 - **Graph tab:** added in 3.5.
 - **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with:
@@ -136,17 +136,42 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - `POST /runs/{id}/cancel`: sets `runs.cancel_requested_at` and returns `202`. Only workers write events, so the worker running the run ends it (it checks every second); a queued run, or one waiting at a gate (queued again), is ended by the worker that claims it. The run ends `cancelled` with reason `cancelled by user`. An ended run answers `409`.
 - **Delta volume:** the Claude adapter keeps streaming `text_delta`. The engine buffers deltas per node and writes at most one merged `text_delta` event every 250 ms. This keeps the log small and the stream live, while the client still merges what it receives.
 
+## Workflow validation (API contract)
+
+- `POST /workflows/{id}/validate` checks a spec without running it.
+  - Body: `workflow` (raw JSON), optional `workspace_id` and `budget_usd`.
+  - Answer: `200 {valid, issues, policy}`. An invalid spec is a normal answer, not an error. `404` means an unknown workspace, and `422` a malformed request.
+  - It stores nothing and needs no connection. Until 5.1 stores workflows, `{id}` must equal the spec's `id` (`id_mismatch` otherwise).
+- One validator, `agentic_engine.spec.validate_workflow`, serves the endpoint, the spec model and `POST /runs`.
+  - Each issue has a stable `code`, the spec `path` (`root.steps[1].body`), the `node_id` to fix and a `message`. Policy issues also have `limit`, `value` and `observed`.
+  - Codes: `schema`, `id_mismatch`, `duplicate_node_id`, `invalid_expression`, `not_allowed_in_loop`, `not_allowed_in_map`, `reference`, `publish_not_tool_node`, `publish_without_gate`, `unknown_tool`, `policy_limit`, `budget_unpriced_model`.
+  - A spec off the schema gets only `schema` issues. Otherwise every issue is listed, in run order.
+- Tool names must be platform tools (`PLATFORM_TOOLS`); the tool servers register exactly these, and a test keeps them in sync. `POST /runs` refuses an unknown one with `422`.
+- `POST /runs` and rerun put the same issues in their `policy_limits` detail (`issues`), next to `errors`.
+
 ## Security & secrets
 
 - Secrets are encrypted with a KMS key per workspace (cloud KMS in production; a local key file in dev). They never appear in logs or agent context.
 - Policy limits are enforced in the engine at validation time and at runtime:
   - **Budget (USD): optional.** No default cap. If set, it is a hard stop at 100%. If unset, the run continues and cost is still tracked.
+    - A workspace may set a default budget (the "Budget" field of the "Run limits" card), and a run may set its own when it starts (`budget_usd` on `POST /runs` and rerun), which replaces it. It has no platform ceiling. From $0.01 to $1,000,000.
+    - The run's budget is frozen in `runs.policy` with its other limits. With a budget, every agent's model must have a price in the workspace, or the run is refused with `422`: a cap that cannot be measured is not a cap.
+    - The engine meters it: the worker seeds a meter with the run's spend so far (`runs.estimated_usd`, so earlier attempts and the time before a gate count), and each `usage` event adds its `estimated_usd`. Once the spend reaches the budget, or a usage has no price, the running nodes end `node_cancelled` and the run ends like any other limit (`policy_limit_exceeded` with `limit: "budget_usd"` and USD amounts as decimal strings). The call that crossed the budget is already paid, so it is counted in full.
   - Agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h, gates before push/PR/repo creation/Jira status change.
+  - These defaults (`agentic_engine.policy.PLATFORM_POLICY`) are also the ceilings. A workspace may lower each one (`GET`/`PUT /workspaces/{id}/policy`, the "Run limits" card in Settings), never raise it.
+  - A run gets the workspace's effective limits when it is created (`runs.policy`) and keeps them, resumes included. A rerun gets the limits as they are then.
+  - Checked before the run (`POST /runs` and rerun answer `422`): loop `max_iterations`, map `max_concurrency` against agents alive, and nesting depth. Checked while it runs: agents spawned (every agent start, a map's items all at once when it starts) and agents alive (extra agents wait for a slot). The worker checks wall time, which counts only time spent executing, not time waiting at a gate.
+  - A run over a limit ends `failed`: a `policy_limit_exceeded` event (`limit`, `value`, `observed`), then the failure with a readable reason.
 
 ## Observability
 
 - OpenTelemetry traces across API, engine nodes and tool calls.
 - Cost and token metrics per node, run, user and workspace, derived from usage events.
+- **Pricing:**
+  - The adapter prices each provider call when it emits its `usage` event, from the workspace's price table: list prices in `agentic_runtime.pricing` (dated by `PRICES_AS_OF`, checked by hand against the provider's pricing page) with the workspace's overrides on top (`GET`/`PUT /workspaces/{id}/pricing`).
+  - Cache reads and writes are counted and priced apart from input.
+  - The logged `estimated_usd` never changes, and the `runs` row keeps the run's totals.
+  - A model with no price logs its tokens with no cost, and the run's cost is then marked incomplete.
 - Structured JSON logs with secrets redacted.
 
 ## Testing & quality
@@ -173,3 +198,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | UI kit | shadcn/ui + Tailwind tokens (not MUI, Chakra or Ant) | We own the component code, it is accessible through Radix, it gives a modern, neutral enterprise look, and it themes through CSS variables. |
 | Event display | Merge deltas on the client, buffer writes on the server (250 ms) | The append-only log and SSE replay stay unchanged. The UI shows messages, not chunks. |
 | Rerun | A new run linked by `rerun_of` | The log stays immutable and the history stays truthful. Resuming from a checkpoint is a separate, later feature. |
+| Cost | Priced by the adapter when usage is logged, never recomputed | The append-only log stays truthful, a budget stop (3.3) can always be explained, and changing a price never rewrites past runs. |
+| Policy limits | Platform ceilings a workspace may only lower, frozen on each run when it is created | Safe by construction (mission principle 2), and a stop can always be explained by the limits the run was given. |
+| Budget | A workspace default a run may replace, metered in the engine on every priced usage | Stops right after the call that crosses it, across parallel agents, and survives restarts because the meter starts from the stored spend. |
+| Validation | `200` with structured issues from one engine validator | The canvas and the Architect read issues as data, not as failures. One validator means they never disagree with what a run accepts. |
