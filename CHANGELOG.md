@@ -187,6 +187,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ### Fixed
 - `github.openPR` no longer fails with "git fetch failed: transport 'file' not allowed" after an approved gate. git checks the file transport when fetching the writer's bundle, and `push_bundle` only allowed it for `file://` test remotes. It is now allowed for the bundle fetch only, and fetch and push to GitHub stay https only.
 - The "Generate docs" writer no longer fails with "Claude stopped without finishing: max_tokens": the Claude runtime's defaults are now 32,000 output tokens per call (was 4,096) and 50 tool-use turns (was 10), and compose passes `CLAUDE_MAX_TOKENS` and `CLAUDE_MAX_TURNS` to the worker.
+- The compose e2e job passes again (it had failed on `main` since 2.5) ([#114](https://github.com/KsiProgramming/agentic-dev/pull/114)):
+  - **Mobile menu button.** The waiting-count badge sits beside the button, not inside it, so the button's visible text no longer differs from its name (axe `label-content-name-mismatch`, WCAG 2.5.3).
+  - **Primary buttons.** Hover is `bg-primary/90` (was `/80`, 4.2:1 on white), so text keeps 4.5:1 contrast in both themes. The badge link hover matches.
+  - **Runs list menu.** The row "⋯" menu is not modal, so it no longer hides the page with `aria-hidden` around focusable elements (axe `aria-hidden-focus`).
+  - **Unknown run.** The console's "Run not found." page has its page heading, like every other page.
+  - **Tests.** The a11y spec scopes a settings alert to the page content (Next's route announcer is an alert too), and the keyboard gate test allows the "(N) ● Needs approval" prefix that other waiting runs add.
 - A run's `usage` now adds up every node run (the new `RunState.usage`, with `Usage` allowed in checkpoints). Before, it counted only each node's latest result, which undercounted loops. `run_resumed`'s `completed_nodes` lists each node once.
 
 [Unreleased]: https://github.com/KsiProgramming/agentic-dev/commits/main

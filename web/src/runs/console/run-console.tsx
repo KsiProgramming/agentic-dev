@@ -5,6 +5,7 @@ import { ArrowDownIcon, CirclePauseIcon, ListTreeIcon, RadioIcon, TableIcon } fr
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { PageHeader } from "@/components/page-header";
 import { useConsoleWaiting } from "@/components/shell/attention";
 import { EmptyState, ErrorState } from "@/components/states";
 import type { RunStatus } from "@/components/status-badge";
@@ -157,7 +158,13 @@ function Console({
   };
 
   if (status === "not_found" || detail.data === null) {
-    return <ErrorState message="Run not found." />;
+    // Every page has one heading, a missing run too.
+    return (
+      <section className="flex flex-col gap-6">
+        <PageHeader title="Run" />
+        <ErrorState message="Run not found." />
+      </section>
+    );
   }
 
   const run = detail.data;

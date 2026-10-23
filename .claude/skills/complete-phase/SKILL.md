@@ -1,11 +1,11 @@
 ---
 name: complete-phase
-description: Mark the roadmap phase implemented on the current branch as completed in specs/roadmap.md, setting its Status to "✅ Done ([#<pr>](<pr-url>))" and committing the change. Use this when the user says a phase or feature is finished, wants to mark a roadmap phase done/completed, is about to open or merge the PR that implements a phase, or the "Roadmap phase marked done" CI check failed.
+description: Mark the roadmap phase implemented on the current branch as completed in specs/roadmap.md, setting its Status to "✅ Done ([#<pr>](<pr-url>))" and committing the change. Use this when the user says a phase or feature is finished, wants to mark a roadmap phase done/completed, or the "Roadmap phase marked done" CI check failed. Not while opening a PR from a branch of this repo: CI marks the phase itself then (see the open-pr skill).
 ---
 
 # Mark a roadmap phase as completed
 
-`specs/roadmap.md` has a Status column per phase. The PR that implements a phase sets it to `✅ Done ([#<pr>](<pr-url>))`. The `Roadmap phase marked done` job in `.github/workflows/pr-checks.yml` does this automatically on same-repo PRs and fails the PR if it is still missing. This skill does the same thing locally, before pushing, so the branch is already correct.
+`specs/roadmap.md` has a Status column per phase. The PR that implements a phase sets it to `✅ Done ([#<pr>](<pr-url>))`. The `Roadmap phase marked done` job in `.github/workflows/pr-checks.yml` does this automatically on same-repo PRs and fails the PR if it is still missing. This skill does the same thing locally, for when CI did not: a fork's PR, or a failed check. On a same-repo PR, check first that the bot's commit is not already on the branch (`git pull --ff-only`), or the two commits race.
 
 All the logic lives in `scripts/check_roadmap.py`; use it rather than editing the table by hand, so the skill and CI always agree.
 

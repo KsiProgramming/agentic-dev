@@ -82,7 +82,8 @@ for (const colorScheme of ["light", "dark"] as const) {
       await pretendConnections(page, "none");
       await open(page, "/settings");
       await page.getByRole("button", { name: "Save key" }).click();
-      await expect(page.getByRole("alert")).toBeVisible();
+      // In the page's content: Next's route announcer is an (empty) alert too.
+      await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
       await expectNoSeriousIssues(page);
       await page.unrouteAll();
       await pretendConnections(page, "github-gone");
@@ -204,7 +205,8 @@ test.describe("keyboard", () => {
     await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
       timeout: 30_000,
     });
-    await expect(page).not.toHaveTitle(/Needs approval · Run /);
+    // Other runs may still wait, which prefixes "(N) ● Needs approval · "; this run no longer does.
+    await expect(page).not.toHaveTitle(/^● Needs approval · Run /);
   });
 
   test("the theme menu works from the keyboard", async ({ page }) => {
