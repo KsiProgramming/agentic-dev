@@ -26,7 +26,7 @@ from agentic_engine.gate import GateDecision
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.policy import PolicyOverrides
-from agentic_engine.spec import PUBLISH_TOOLS, WRITE_TOOLS, WorkflowSpec, parse_spec
+from agentic_engine.spec import PUBLISH_TOOLS, READ_TOOLS, WRITE_TOOLS, WorkflowSpec, parse_spec
 from agentic_engine.templates import DocsParams, build_docs_spec
 from agentic_engine.templates.docs import PAGE_SEPARATOR
 from agentic_runtime import (
@@ -61,7 +61,7 @@ from agentic_store import (
     request_cancel,
 )
 from agentic_tools.github import PUBLISH_TOOL_NAMES, GithubPublisher
-from agentic_tools.repo import COMMIT_AUTHOR, WRITE_TOOL_NAMES, open_repo_tools
+from agentic_tools.repo import COMMIT_AUTHOR, READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.testing import FakeGithub, bare_remote
 from agentic_worker.main import RuntimeFactory, WorkerSettings, run
 
@@ -1068,6 +1068,7 @@ async def test_done_when_a_docs_run_opens_a_pr(
 
 
 def test_the_engine_and_the_tool_servers_agree_on_tool_names() -> None:
+    assert READ_TOOLS == READ_TOOL_NAMES
     assert WRITE_TOOLS == WRITE_TOOL_NAMES
     assert PUBLISH_TOOLS == PUBLISH_TOOL_NAMES
 

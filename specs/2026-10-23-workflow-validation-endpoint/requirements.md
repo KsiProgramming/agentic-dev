@@ -68,9 +68,9 @@ Unblocks: 4.2 (port type errors use the same issue shape), 5.1 (stored workflows
 | Error shape | Structured `ValidationIssue` with a stable `code`, `path`, `node_id` and `message` | "Actionable" means a client can put the error on the right node and a person can read the fix. Stable codes let the Architect repair loop branch on them. |
 | Where the checks live | One `validate_workflow` in `agentic_engine.spec`, used by the endpoint, the model validators and `POST /runs` | One source, so the canvas, the Architect and the run never disagree (mission 1). This was the user's choice ("engine-first, one source"). |
 | Raw JSON in the body | `workflow: dict[str, JsonValue]`, parsed by the validator | A typed `WorkflowSpec` body would turn every schema error into a FastAPI `422` and skip the other checks. |
-| Platform tool list | A `known_tools` argument, filled by the API from the tool servers' names | The engine does not depend on `agentic_tools`. The API already depends on the tool packages it wires. |
+| Platform tool list | `PLATFORM_TOOLS` in `agentic_engine.spec`, next to `WRITE_TOOLS` and `PUBLISH_TOOLS`; `validate_workflow` takes it as the default `known_tools` | The engine already names the write and publish tools. A worker test checks that the tool servers register exactly these names, so they cannot drift, and the engine does not depend on `agentic_tools`. |
 | Errors after a schema failure | Only schema issues | The structural and policy checks need a parsed spec. Fixing the schema issues reveals the rest. |
 | `POST /runs` compatibility | Add `issues`, keep `errors: list[str]` | The web client and tests read `errors` today. Nothing breaks, and new clients use `issues`. |
 
 ## Open questions
-- Where the canonical platform tool list comes from (a constant in `agentic_tools`, or the names the worker registers). Settle it in task group 1 by reading how the worker builds its tool registry. Prefer the code the worker already runs, so the two never drift.
+- None. The platform tool list was settled during implementation (see Decisions).

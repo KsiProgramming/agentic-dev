@@ -11,9 +11,9 @@ from pydantic import JsonValue
 from agentic_runtime import AgentRequest, ClaudeRuntime, ToolResult
 from agentic_runtime.testing import MockClaude, collect_and_check, text_reply, tool_use_reply
 from agentic_sandbox import Sandbox
-from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
+from agentic_tools.repo import READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
 
-READS = ["repo.list_files", "repo.list_modules", "repo.read_file", "repo.search"]
+READS = sorted(READ_TOOL_NAMES)
 
 
 async def sh(box: Sandbox, script: str) -> tuple[int, str]:

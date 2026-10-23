@@ -47,7 +47,7 @@
       {"type":"map","id":"each","over":"[\"a\"]","max_concurrency":20,
        "body":{"type":"agent","id":"w","role":"r","instructions":"i","tools":["repo.nope"]}}]}}}' | jq
   ```
-  Expected: `valid: false` with one `schema` issue at `root.steps[1].max_concurrency` (node `each`, above the ceiling of 8). Only schema issues are returned while the schema fails. Set `max_concurrency` to 4 and send it again. Expected: `not_allowed_in_loop` (node `review`, path `root.steps[0]`) and `unknown_tool` (node `w`, path `root.steps[1].body`), in that order.
+  Expected: `valid: false` with one `schema` issue at `root.steps[1].max_concurrency` (node `each`, above the ceiling of 8). Only schema issues are returned while the schema fails. Set `max_concurrency` to 4 and send it again. Expected: `not_allowed_in_loop` (node `ok`, path `root.steps[0].body`: the node to move out of the loop) and `unknown_tool` (node `w`, path `root.steps[1].body`), in that order.
 - [ ] The same spec with every problem fixed returns `valid: true`.
 
 ## Merge criteria

@@ -56,6 +56,7 @@ from agentic_store.notify import listen
 from agentic_store.policy import (
     PolicyViolationError,
     active_seconds,
+    check_workflow,
     get_policy_overrides,
     replace_policy_overrides,
 )
@@ -115,6 +116,7 @@ __all__ = [
     "WrongGateError",
     "active_seconds",
     "cancel_requested",
+    "check_workflow",
     "claim_run",
     "create_rerun",
     "create_run",

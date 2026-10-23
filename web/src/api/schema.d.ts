@@ -423,6 +423,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate
+         * @description Check whether `workflow` could run in the workspace now, without running it: the schema,
+         *     node ids, loop and map rules, references between nodes (`reduce.from`, a publisher's
+         *     `from_node`), a gate before every publisher, tool names, and the workspace's run limits and,
+         *     with a budget, prices. An invalid workflow is answered `200` with `valid: false` and every
+         *     issue. `workflow_id` must be the spec's `id` (`id_mismatch` otherwise). Nothing is stored,
+         *     and no connection is needed.
+         */
+        post: operations["validateWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -651,6 +676,8 @@ export interface components {
             /** Install Url */
             install_url: string;
         };
+        /** @enum {string} */
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "unknown_tool" | "policy_limit" | "budget_unpriced_model";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -732,6 +759,8 @@ export interface components {
             /** @description The workspace's price. It replaces the list price, long prompts included. */
             override: components["schemas"]["Price"] | null;
         };
+        /** @enum {string} */
+        PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "budget_usd";
         /**
          * Price
          * @description USD per million tokens.
@@ -1200,6 +1229,41 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             };
         };
+        /** ValidateWorkflowRequest */
+        ValidateWorkflowRequest: {
+            /**
+             * Workflow
+             * @description The workflow spec to check, as `POST /runs` takes it. It is not parsed first, so a spec that does not match the schema is answered with its issues.
+             */
+            workflow: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Workspace Id
+             * @description The workspace whose run limits and prices apply. Default: the default workspace.
+             */
+            workspace_id?: string | null;
+            /**
+             * Budget Usd
+             * @description The budget a run would set. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget.
+             */
+            budget_usd?: number | null;
+        };
+        /**
+         * ValidateWorkflowResponse
+         * @description Whether the workflow could run in the workspace now; `issues` names every problem.
+         */
+        ValidateWorkflowResponse: {
+            /** Valid */
+            valid: boolean;
+            /**
+             * Issues
+             * @description Each problem with its code, path, node and what to change, in run order. While the spec does not match the schema, only `schema` issues are listed.
+             */
+            issues: components["schemas"]["ValidationIssue"][];
+            /** @description The limits the workflow was checked against. */
+            policy: components["schemas"]["RunLimits"];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1212,6 +1276,43 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * ValidationIssue
+         * @description One reason a workflow cannot run: what is wrong (`code`), where (`path`, `node_id`) and
+         *     what to change (`message`). A `policy_limit` issue also names the `limit`, its `value` and
+         *     what the spec would reach (`observed`).
+         */
+        ValidationIssue: {
+            /** @description The kind of problem; stable, so clients may branch on it. */
+            code: components["schemas"]["IssueCode"];
+            /**
+             * Path
+             * @description Where in the spec, by its JSON field names, e.g. `root.steps[1].body`; empty for the document itself.
+             * @example root.steps[1].body
+             */
+            path: string;
+            /**
+             * Node Id
+             * @description The node to fix, if there is one.
+             */
+            node_id?: string | null;
+            /**
+             * Message
+             * @description The problem and what to change, for people.
+             */
+            message: string;
+            limit?: components["schemas"]["PolicyLimit"] | null;
+            /**
+             * Value
+             * @description The limit's value.
+             */
+            value?: number | null;
+            /**
+             * Observed
+             * @description What the spec would reach.
+             */
+            observed?: number | null;
         };
         /** WaitingGate */
         WaitingGate: {
@@ -2233,6 +2334,46 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TemplateOut"][];
                 };
+            };
+        };
+    };
+    validateWorkflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidateWorkflowResponse"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request itself is malformed (e.g. `workflow` is not an object) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

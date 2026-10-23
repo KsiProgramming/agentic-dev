@@ -1281,6 +1281,55 @@
           }
         }
       }
+    },
+    "/workflows/{workflow_id}/validate": {
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Validate",
+        "description": "Check whether `workflow` could run in the workspace now, without running it: the schema,\nnode ids, loop and map rules, references between nodes (`reduce.from`, a publisher's\n`from_node`), a gate before every publisher, tool names, and the workspace's run limits and,\nwith a budget, prices. An invalid workflow is answered `200` with `valid: false` and every\nissue. `workflow_id` must be the spec's `id` (`id_mismatch` otherwise). Nothing is stored,\nand no connection is needed.",
+        "operationId": "validateWorkflow",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateWorkflowResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "The request itself is malformed (e.g. `workflow` is not an object)"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1728,6 +1777,23 @@
         "title": "InstallUrlOut",
         "description": "Where to send the browser to install the GitHub App. The URL is valid for 10 minutes."
       },
+      "IssueCode": {
+        "type": "string",
+        "enum": [
+          "schema",
+          "id_mismatch",
+          "duplicate_node_id",
+          "invalid_expression",
+          "not_allowed_in_loop",
+          "not_allowed_in_map",
+          "reference",
+          "publish_not_tool_node",
+          "publish_without_gate",
+          "unknown_tool",
+          "policy_limit",
+          "budget_unpriced_model"
+        ]
+      },
       "JsonValue": {},
       "LongContextPrice": {
         "properties": {
@@ -1951,6 +2017,17 @@
           "override"
         ],
         "title": "ModelPricingOut"
+      },
+      "PolicyLimit": {
+        "type": "string",
+        "enum": [
+          "agents_alive",
+          "agents_spawned",
+          "max_depth",
+          "loop_iterations",
+          "wall_time_s",
+          "budget_usd"
+        ]
       },
       "Price": {
         "properties": {
@@ -3026,6 +3103,79 @@
         "title": "ToolNode",
         "description": "One call of a platform tool with fixed arguments; no model is involved. Its output is the\nnext node's input, and an error result fails the node."
       },
+      "ValidateWorkflowRequest": {
+        "properties": {
+          "workflow": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Workflow",
+            "description": "The workflow spec to check, as `POST /runs` takes it. It is not parsed first, so a spec that does not match the schema is answered with its issues."
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id",
+            "description": "The workspace whose run limits and prices apply. Default: the default workspace."
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "The budget a run would set. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow"
+        ],
+        "title": "ValidateWorkflowRequest"
+      },
+      "ValidateWorkflowResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "type": "array",
+            "title": "Issues",
+            "description": "Each problem with its code, path, node and what to change, in run order. While the spec does not match the schema, only `schema` issues are listed."
+          },
+          "policy": {
+            "$ref": "#/components/schemas/RunLimits",
+            "description": "The limits the workflow was checked against."
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid",
+          "issues",
+          "policy"
+        ],
+        "title": "ValidateWorkflowResponse",
+        "description": "Whether the workflow could run in the workspace now; `issues` names every problem."
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -3065,6 +3215,82 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ValidationIssue": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/IssueCode",
+            "description": "The kind of problem; stable, so clients may branch on it."
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Where in the spec, by its JSON field names, e.g. `root.steps[1].body`; empty for the document itself.",
+            "examples": [
+              "root.steps[1].body"
+            ]
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id",
+            "description": "The node to fix, if there is one."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "The problem and what to change, for people."
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "The limit's value."
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed",
+            "description": "What the spec would reach."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "path",
+          "message"
+        ],
+        "title": "ValidationIssue",
+        "description": "One reason a workflow cannot run: what is wrong (`code`), where (`path`, `node_id`) and\nwhat to change (`message`). A `policy_limit` issue also names the `limit`, its `value` and\nwhat the spec would reach (`observed`)."
       },
       "WaitingGate": {
         "properties": {

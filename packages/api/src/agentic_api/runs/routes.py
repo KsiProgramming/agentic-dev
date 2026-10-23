@@ -288,7 +288,9 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
 
 def _over_policy(error: PolicyViolationError) -> HTTPException:
     detail = PolicyErrorDetail(
-        message=f"The workflow is above the workspace's run limits: {error}", errors=error.errors
+        message=f"The workflow is above the workspace's run limits: {error}",
+        errors=error.errors,
+        issues=error.issues,
     )
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump())
 

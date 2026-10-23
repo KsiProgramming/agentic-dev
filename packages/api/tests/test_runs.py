@@ -1026,6 +1026,32 @@ async def test_a_workflow_above_the_workspace_limits_is_refused(
     ]
     assert detail["message"].startswith("The workflow is above the workspace's run limits: ")
     assert listed["items"] == []
+    [issue] = detail["issues"]
+    assert issue["code"] == "policy_limit"
+    assert (issue["path"], issue["node_id"], issue["limit"], issue["value"]) == (
+        "root.steps[0]",
+        "revise",
+        "loop_iterations",
+        2,
+    )
+    assert issue["message"] == detail["errors"][0]
+
+
+async def test_a_workflow_naming_an_unknown_tool_is_refused(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workspace_id = await policy_workspace(sessions)
+    workflow = spec_json("valid/single-agent.json")
+    workflow["root"]["tools"] = ["web.fetch"]
+    body = {"workflow": workflow, "workspace_id": str(workspace_id)}
+
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json=body)
+        listed = (await client.get("/runs", params={"workspace_id": str(workspace_id)})).json()
+
+    assert response.status_code == 422, response.text
+    assert "unknown tool 'web.fetch'" in response.text
+    assert listed["items"] == []
 
 
 async def test_a_run_keeps_the_limits_it_was_created_with(
