@@ -3,7 +3,7 @@
 New primitives are added as members of the `Node` union; existing specs keep validating.
 """
 
-from collections.abc import Collection, Iterator
+from collections.abc import Callable, Collection, Iterator
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -353,6 +353,33 @@ def policy_errors(root: Node, policy: Policy) -> list[str]:
                 pass
 
     visit(root, "root", 0)
+    return errors
+
+
+def budget_errors(
+    root: Node, policy: Policy, priced: Callable[[str], bool], default_model: str
+) -> list[str]:
+    """Why the budget of `policy` cannot be held to the spec under `root`, in spec order; empty
+    if it can, or if there is no budget. Every agent (a reduce's too) must run on a model that
+    `priced` knows: its own `model`, else `default_model`. A usage with no price cannot be
+    counted against a budget."""
+    if policy.budget_usd is None:
+        return []
+    errors: list[str] = []
+    for path, node in iter_nodes(root):
+        match node:
+            case AgentNode():
+                model = node.model
+            case ReduceNode() if node.agent is not None:
+                model = node.agent.model
+            case _:
+                continue
+        model = model or default_model
+        if not priced(model):
+            errors.append(
+                f"{node.type} {node.id!r} at {path}: model {model!r} has no price, so the "
+                "budget cannot be enforced"
+            )
     return errors
 
 

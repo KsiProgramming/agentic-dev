@@ -21,7 +21,10 @@ body, whose events carry `item`, then its end; a reduce writes the events of an 
 The run's `Policy` is enforced as it goes: at most `agents_alive` agents run at once across the
 whole run, and an agent node (or a map, for all its items' agents) that would take the run past
 `agents_spawned` does not start. It writes `node_started`, `policy_limit_exceeded` and
-`node_failed` with the reason instead, which ends the run.
+`node_failed` with the reason instead, which ends the run. A run with a budget counts each agent
+usage on its `BudgetMeter`: once the budget is spent, the agent that spent it and every other
+running node end `node_cancelled`, and `PolicyLimitExceeded` leaves the graph for the runner to
+end the run.
 """
 
 import asyncio
@@ -36,6 +39,7 @@ from langgraph.types import Send
 from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, AgentNodeStatus, run_agent_node, sum_usage
+from agentic_engine.budget import BudgetMeter
 from agentic_engine.events import (
     LOOP_CONDITION_EVALUATED,
     LOOP_ITERATION_STARTED,
@@ -82,10 +86,11 @@ class CompileError(ValueError):
 
 @dataclass
 class _Limits:
-    """A run's policy, and the slots of its `agents_alive` limit, shared by all its nodes for one
-    attempt."""
+    """A run's policy, the slots of its `agents_alive` limit, and its budget meter if it has a
+    budget, shared by all its nodes for one attempt."""
 
     policy: Policy
+    budget: BudgetMeter | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -157,19 +162,20 @@ def compile_workflow(
     checkpointer: Checkpointer | None = None,
     tools: ToolExecutor | None = None,
     policy: Policy = PLATFORM_POLICY,
+    budget: BudgetMeter | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, and
     both write to `log`, if given. With `checkpointer`, the state is saved after each node, in
     the run's thread; a spec with a gate needs one, since a paused run continues from it. The
-    run's agents are held to `policy`'s `agents_alive` and `agents_spawned`; the spec itself is
-    checked against it before the run (`policy_errors`)."""
+    run's agents are held to `policy`'s `agents_alive` and `agents_spawned`, and their usage to
+    `budget`; the spec itself is checked against it before the run (`policy_errors`)."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
     steps = step_nodes(spec.root)
     if checkpointer is None and (gate := next((n for n in steps if isinstance(n, GateNode)), None)):
         raise CompileError(f"gate {gate.id!r} needs a checkpointer to pause the run")
     builder = StateGraph(RunState)
-    limits = _Limits(policy)
+    limits = _Limits(policy, budget)
 
     def add(node: Node, then: str) -> str:
         """Add `node`, going on to `then` once it completes (to `END` otherwise), and return the
@@ -286,10 +292,14 @@ async def _run_step(
     item: int | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
-    a map). An agent waits for one of the run's `agents_alive` slots before it starts."""
+    a map). An agent waits for one of the run's `agents_alive` slots before it starts, and its
+    usage is counted on the run's budget: once that is spent, the node ends `node_cancelled` and
+    `PolicyLimitExceeded` is raised."""
 
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item)
+        if isinstance(event, Usage) and limits.budget is not None:
+            limits.budget.add(event, node.id)
 
     # Streamed text is merged so the log gets at most one `text_delta` per 250 ms.
     buffer = DeltaBuffer(write)
@@ -313,7 +323,7 @@ async def _run_step(
             result = await run()
         finally:
             await buffer.close()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, PolicyLimitExceeded):
         await log.emit(NODE_CANCELLED, node_id=node.id, item=item)
         raise
     if (pull := _pull_request(node, result)) is not None:
