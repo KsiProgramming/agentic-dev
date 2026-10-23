@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 3.1 usage and cost per node and run:
+- Phase 3.1 usage and cost per node and run ([#111](https://github.com/KsiProgramming/agentic-dev/pull/111)):
   - **Priced usage events.** A `usage` event now has its `model` and its cache reads and writes apart from uncached input (`cache_read_tokens`, `cache_write_tokens`). The Claude adapter prices every API call when it emits the event, from `agentic_runtime.pricing` (Anthropic list prices as of 2026-10-23, with 5 minute and 1 hour cache writes and Haiku 5.5's long-prompt prices). A model with no price logs its tokens with no cost. A logged cost never changes.
   - **Run totals.** `runs` keeps the tokens and estimated USD of its usage events, added in SQL as each one is written (Alembic `0014_run_usage`, which also adds up runs logged before it). `GET /runs`, `GET /runs/{id}` and the summary stream have a `usage` object, and `cost_complete` is false once some usage had no price.
   - **Workspace prices.** `GET`/`PUT /workspaces/{id}/pricing` lists the list prices with the workspace's overrides, and replaces the overrides (Alembic `0015_workspace_model_prices`). The worker prices a run with its workspace's prices.
