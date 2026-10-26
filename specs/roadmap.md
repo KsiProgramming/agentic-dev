@@ -60,7 +60,7 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 | 3.3 | **Optional budget**: if set, hard stop at 100%; if unset, no cap | AC-7 for budgeted runs; an unbudgeted run continues and still reports cost | ✅ Done ([#113](https://github.com/KsiProgramming/agentic-dev/pull/113)) |
 | 3.4 | Validation endpoint `POST /workflows/{id}/validate` (schema, ports, cycles, policy) | Invalid specs return actionable errors | ✅ Done ([#114](https://github.com/KsiProgramming/agentic-dev/pull/114)) |
 | 3.5 | Graph tab in the run console: read-only graph (React Flow) with status colours; selecting a node opens the node detail from 2.5 | Clicking a node in the graph shows what the agent did | ✅ Done ([#115](https://github.com/KsiProgramming/agentic-dev/pull/115)) |
-| 3.6 | Editable artifacts in the approval dock (2.6): diff view, edit before approving | Gate is approved from the UI with edits | — |
+| 3.6 | Editable artifacts in the approval dock (2.6): diff view, edit before approving | Gate is approved from the UI with edits | ✅ Done ([#116](https://github.com/KsiProgramming/agentic-dev/pull/116)) |
 | 3.7 | Audit log view for admins | Every run and approval is listed per workspace | — |
 
 ## Milestone 4: Parallel and Audit
