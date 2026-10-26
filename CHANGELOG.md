@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 3.5 Graph tab in the run console:
+- Phase 3.5 Graph tab in the run console ([#115](https://github.com/KsiProgramming/agentic-dev/pull/115)):
   - **Graph.** The run console has a Graph tab (`?tab=graph`): the run's workflow drawn read-only with React Flow (`@xyflow/react`), top to bottom in run order. A map or a loop is a box holding its body, with how far it got ("2 of 3 items · 1 failed", "Iteration 2 of 5"); a reduce is linked to its map. Each node shows its live status as an icon and a label, "Not started" until the run reaches it.
   - **Node detail.** Clicking a node, or Enter on it, opens a sheet with what it did: the timeline's step view, once per map item or loop iteration for a node inside one. Each node is a button with an accessible name ("worker, agent, Done").
   - **API.** `GET /runs/{id}` returns the run's workflow `spec`. The spec models keep one JSON Schema for requests and responses, so the web client names `WorkflowSpec` once.
