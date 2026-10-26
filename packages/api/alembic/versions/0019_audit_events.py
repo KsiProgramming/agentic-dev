@@ -30,7 +30,8 @@ CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events
     FOR EACH ROW EXECUTE FUNCTION audit_events_append_only()
 """
 
-# In time order, so ids grow with `at` like the rows written from now on. A cancelled run's
+# In time order, so ids grow with `at` like the rows written from now on. An approval with no
+# edits holds SQL NULL or JSON `null`. A cancelled run's
 # status before the request is not known any more.
 BACKFILL = """
 INSERT INTO audit_events (workspace_id, at, action, actor_type, run_id, node_id, details)
@@ -55,10 +56,14 @@ SELECT workspace_id, at, action, actor_type, run_id, node_id, details FROM (
         'user', a.run_id, a.node_id,
         jsonb_build_object(
             'comment', a.comment,
-            'edited_files', COALESCE(jsonb_array_length(a.edits), 0),
-            'edited_paths', COALESCE(
-                (SELECT jsonb_agg(e -> 'path') FROM jsonb_array_elements(a.edits) e), '[]'::jsonb
-            )
+            'edited_files', CASE jsonb_typeof(a.edits)
+                WHEN 'array' THEN jsonb_array_length(a.edits) ELSE 0 END,
+            'edited_paths', CASE jsonb_typeof(a.edits)
+                WHEN 'array' THEN COALESCE(
+                    (SELECT jsonb_agg(e -> 'path') FROM jsonb_array_elements(a.edits) e),
+                    '[]'::jsonb
+                )
+                ELSE '[]'::jsonb END
         )
     FROM approvals a JOIN runs r ON r.id = a.run_id
     UNION ALL

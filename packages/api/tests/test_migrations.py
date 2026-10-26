@@ -306,6 +306,26 @@ async def test_the_audit_revision_backfills_runs_and_approvals(postgres_url: str
             ),
             {"run": first},
         )
+        # An approval stored with no edits holds JSON `null`.
+        rejected = (
+            await conn.execute(
+                text(insert_run),
+                {
+                    "status": "cancelled",
+                    "created": datetime.fromisoformat("2026-10-01T09:00:00+00:00"),
+                    "finished": datetime.fromisoformat("2026-10-01T09:05:00+00:00"),
+                    "cancel": None,
+                    "rerun_of": None,
+                },
+            )
+        ).scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO approvals (run_id, node_id, decision, edits, created_at) "
+                "VALUES (:run, 'approve', 'reject', 'null'::jsonb, '2026-10-01T09:02:00Z')"
+            ),
+            {"run": rejected},
+        )
         second = (
             await conn.execute(
                 text(insert_run),
@@ -344,6 +364,19 @@ async def test_the_audit_revision_backfills_runs_and_approvals(postgres_url: str
     assert rows[1].details == {"comment": "ok", "edited_files": 1, "edited_paths": ["a.md"]}
     assert rows[3].details["rerun_of"] == str(first)
     assert rows[5].details["status"] == "cancelled"
+    async with engine.connect() as conn:
+        decision = (
+            await conn.execute(
+                text(
+                    "SELECT action, details FROM audit_events "
+                    "WHERE run_id = :run AND action LIKE 'gate.%'"
+                ),
+                {"run": rejected},
+            )
+        ).one()
+    await engine.dispose()
+    assert decision.action == "gate.rejected"
+    assert decision.details == {"comment": None, "edited_files": 0, "edited_paths": []}
 
 
 async def test_audit_events_are_append_only(postgres_url: str) -> None:

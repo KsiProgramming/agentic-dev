@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 3.7 audit log view for admins:
+- Phase 3.7 audit log view for admins ([#117](https://github.com/KsiProgramming/agentic-dev/pull/117)):
   - **Audit log.** An append-only `audit_events` table (Alembic `0019_audit_events`; a trigger refuses updates and deletes) records each action in a workspace, written in the same transaction as the change: runs started, rerun, cancel requested and ended, gate approvals and rejections (comment and edited paths, never contents), connections added and removed (key hint, never the key), and changes to run limits (before and after) and model prices. Runs and approvals made before are backfilled. Who acted is `system` for a run ending, and a user with no name until sign-in exists.
   - **API.** `GET /workspaces/{id}/audit` lists it newest first, with cursor pagination and filters by `action`, `run_id`, `since` and `until`; each entry carries its run's template, repo and status.
   - **UI.** An "Audit log" page (`/audit`) in the sidebar: time, action, actor, run (linked to its console) and a one-line description of what changed, as a table from 768 px and cards below; filters by category, run id and dates in the URL, Load more and Refresh.
