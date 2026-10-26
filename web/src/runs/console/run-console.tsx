@@ -1,19 +1,28 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDownIcon, CirclePauseIcon, ListTreeIcon, RadioIcon, TableIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  CirclePauseIcon,
+  ListTreeIcon,
+  NetworkIcon,
+  RadioIcon,
+  TableIcon,
+} from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
 import { useConsoleWaiting } from "@/components/shell/attention";
-import { EmptyState, ErrorState } from "@/components/states";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import type { RunStatus } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { pendingGate, type PendingGate } from "../gates";
+import { NodeDetailSheet } from "../graph/node-detail-sheet";
+import { RunGraph } from "../graph/run-graph";
 import { displayStatus } from "../status";
 import { badgeStatus, statusLabel } from "../summaries";
 import { usageOfRun } from "../cost";
@@ -32,7 +41,9 @@ import { RawEvents } from "./raw-events";
 import { RunHeader, type HeaderFacts } from "./run-header";
 import { StepList } from "./step-view";
 
-type Tab = "timeline" | "raw";
+type Tab = "timeline" | "graph" | "raw";
+
+const TABS: readonly Tab[] = ["timeline", "graph", "raw"];
 
 /** The run console. Retry reconnects by mounting a fresh event stream. */
 export function RunConsole({ runId, baseUrl }: { runId: string; baseUrl?: string }) {
@@ -101,8 +112,9 @@ function lastPullRequest(steps: Step[]): string | null {
   return url;
 }
 
-/** In the waiting step: the decision is made in the dock at the bottom of the page. */
-function WaitingMarker() {
+/** In the waiting step: the decision is made in the dock at the bottom of the page. `onGo` runs
+ * before the dock takes focus, e.g. to close the sheet the marker is in. */
+function WaitingMarker({ onGo }: { onGo?: () => void }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-[13px]" data-testid="waiting-marker">
       <CirclePauseIcon aria-hidden="true" className="size-4 text-status-waiting" />
@@ -112,7 +124,13 @@ function WaitingMarker() {
         variant="link"
         size="sm"
         className="h-auto px-0"
-        onClick={() => document.getElementById(DOCK_ID)?.focus()}
+        onClick={() => {
+          const focusDock = () => document.getElementById(DOCK_ID)?.focus();
+          if (!onGo) return focusDock();
+          onGo();
+          // Once the sheet is gone: it gives focus back to what opened it as it closes.
+          setTimeout(focusDock, 0);
+        }}
       >
         Go to the decision
       </Button>
@@ -145,13 +163,18 @@ function Console({
     void client.invalidateQueries({ queryKey: runDetailKey(runId) });
   }, [client, runId, status, gate?.nodeId, prUrl]);
 
+  // The graph node whose detail is open.
+  const [openNode, setOpenNode] = useState<string | null>(null);
+  const closeNode = () => setOpenNode(null);
+
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const tab: Tab = params.get("tab") === "raw" ? "raw" : "timeline";
+  const asked = params.get("tab");
+  const tab: Tab = TABS.find((t) => t === asked) ?? "timeline";
   const setTab = (next: string) => {
     const query = new URLSearchParams(params);
-    if (next === "raw") query.set("tab", "raw");
+    if (next !== "timeline" && TABS.some((t) => t === next)) query.set("tab", next);
     else query.delete("tab");
     const search = query.toString();
     router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
@@ -168,6 +191,10 @@ function Console({
   }
 
   const run = detail.data;
+  const waitingMarker = (step: Step, onGo?: () => void) =>
+    gate && step.id === gate.nodeId && step.status === "waiting" ? (
+      <WaitingMarker onGo={onGo} />
+    ) : null;
   const facts = headerFacts(status, events, gate, run, timeline, prUrl, now);
   const activity = status === "live" && !gate ? currentActivity(timeline) : null;
   const failure = run?.status === "failed" ? run.failure_reason : null;
@@ -198,6 +225,10 @@ function Console({
             <ListTreeIcon aria-hidden="true" />
             Timeline
           </TabsTrigger>
+          <TabsTrigger value="graph">
+            <NetworkIcon aria-hidden="true" />
+            Graph
+          </TabsTrigger>
           <TabsTrigger value="raw">
             <TableIcon aria-hidden="true" />
             Raw events
@@ -219,16 +250,29 @@ function Console({
           ) : (
             <StepList
               steps={timeline.steps}
-              options={{
-                now,
-                extra: (step) =>
-                  gate && step.id === gate.nodeId && step.status === "waiting" ? (
-                    <WaitingMarker />
-                  ) : null,
-              }}
+              options={{ now, extra: (step) => waitingMarker(step) }}
             />
           )}
           {activity ? <ActivityLine activity={activity} /> : null}
+        </TabsContent>
+
+        <TabsContent value="graph" className="pt-2">
+          {run ? (
+            <>
+              <RunGraph spec={run.spec} steps={timeline.steps} onOpen={setOpenNode} />
+              <NodeDetailSheet
+                nodeId={openNode}
+                spec={run.spec}
+                steps={timeline.steps}
+                options={{ now, extra: (step) => waitingMarker(step, closeNode) }}
+                onClose={closeNode}
+              />
+            </>
+          ) : detail.isError ? (
+            <ErrorState message="Could not load the workflow." onRetry={() => detail.refetch()} />
+          ) : (
+            <LoadingState label="Loading the workflow…" />
+          )}
         </TabsContent>
 
         <TabsContent value="raw" className="pt-2">

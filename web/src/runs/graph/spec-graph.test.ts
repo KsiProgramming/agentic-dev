@@ -57,7 +57,9 @@ describe("specToGraph on the docs run's spec", () => {
 
   it("says what each node does", () => {
     expect(byId(nodes, "list_modules").data.detail).toBe("repo.list_modules");
-    expect(byId(nodes, "module-writer").data.detail).toBe("Technical writer documenting one module");
+    expect(byId(nodes, "module-writer").data.detail).toBe(
+      "Technical writer documenting one module",
+    );
     expect(byId(nodes, "approve").data.detail).toBe("Open the docs PR?");
     expect(byId(nodes, "combine").data.detail).toBe("Concat of document");
   });
