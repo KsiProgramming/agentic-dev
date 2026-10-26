@@ -61,6 +61,8 @@ export interface Step {
   iterations: Iteration[] | null;
   /** Set for a map node: one entry per item, each with its own steps. */
   items: MapItem[] | null;
+  /** How many items a map node has, once it started. */
+  itemCount: number | null;
   /** Why a loop stopped: `condition` or `max_iterations`. */
   stopReason: string | null;
 }
@@ -122,6 +124,7 @@ function newStep(id: string, at: string): Step {
     prUrl: null,
     iterations: null,
     items: null,
+    itemCount: null,
     stopReason: null,
   };
 }
@@ -231,7 +234,10 @@ class Builder {
         step = newStep(nodeId, at);
         scope.steps.push(step);
       }
-      if (payload.items !== undefined) step.items ??= [];
+      if (payload.items !== undefined) {
+        step.items ??= [];
+        step.itemCount = num(payload.items);
+      }
       return;
     }
 

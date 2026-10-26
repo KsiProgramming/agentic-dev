@@ -205,7 +205,7 @@ function ErrorLine({ error }: { error: string }) {
 
 /** What a node did, in order, on its own rail: messages, tool calls, map items, iterations;
  * then its gate, pull request, error and token usage. */
-function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
+export function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
   const live = step.status === "running";
   const entries = segments(step.turns);
   const usage = stepUsage(step);

@@ -9,6 +9,10 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 3.5 Graph tab in the run console ([#115](https://github.com/KsiProgramming/agentic-dev/pull/115)):
+  - **Graph.** The run console has a Graph tab (`?tab=graph`): the run's workflow drawn read-only with React Flow (`@xyflow/react`), top to bottom in run order. A map or a loop is a box holding its body, with how far it got ("2 of 3 items · 1 failed", "Iteration 2 of 5"); a reduce is linked to its map. Each node shows its live status as an icon and a label, "Not started" until the run reaches it.
+  - **Node detail.** Clicking a node, or Enter on it, opens a sheet with what it did: the timeline's step view, once per map item or loop iteration for a node inside one. Each node is a button with an accessible name ("worker, agent, Done").
+  - **API.** `GET /runs/{id}` returns the run's workflow `spec`. The spec models keep one JSON Schema for requests and responses, so the web client names `WorkflowSpec` once.
 - `specs/ideas.md`, a backlog for ideas not yet on the roadmap (status from Raw to Promoted, one template per idea), seeded with user-authored tools, skills, a repo healer and Markdown upload for definitions ([#110](https://github.com/KsiProgramming/agentic-dev/pull/110)).
 - Phase 3.4 workflow validation endpoint ([#114](https://github.com/KsiProgramming/agentic-dev/pull/114)):
   - **Endpoint.** `POST /workflows/{id}/validate` checks a workflow spec (raw JSON) against a workspace without running it: schema, node ids, loop and map rules, references between nodes (`reduce.from`, a publisher's `from_node`), a gate before every publisher, tool names, the workspace's run limits and, with a budget (`budget_usd` or the workspace default), model prices. It answers `200 {valid, issues, policy}`; an invalid spec is a normal answer. Nothing is stored and no connection is needed. `{id}` must be the spec's `id` until 5.1 stores workflows.

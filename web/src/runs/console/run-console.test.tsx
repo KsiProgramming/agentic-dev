@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { mockReactFlow } from "@/testing/react-flow";
 
 import docsRun from "../fixtures/docs-run.json";
+import docsSpec from "../fixtures/docs-run-spec.json";
 import { FakeEventSource, runEvent, runSummary } from "../testing";
 import type { RunEvent } from "../types";
 import type { RunDetail } from "../use-run-detail";
@@ -31,6 +33,7 @@ function detail(overrides: Partial<RunDetail> = {}): RunDetail {
     ...runSummary({ id: RUN_ID, status: "running", finished_at: null, duration_ms: null }),
     input: "",
     failure_reason: null,
+    spec: docsSpec as RunDetail["spec"],
     ...overrides,
   } as RunDetail;
 }
@@ -70,6 +73,8 @@ function expectStatus(status: string, label: string) {
   expect(badge.dataset.status).toBe(status);
   expect(badge.textContent).toBe(label);
 }
+
+beforeAll(mockReactFlow);
 
 beforeEach(() => {
   nav.search = "";
@@ -438,4 +443,33 @@ test("a rerun links back to the run it repeats", async () => {
   const link = await screen.findByRole("link", { name: ORIGINAL.slice(0, 8) });
   expect(link.getAttribute("href")).toBe(`/runs/${ORIGINAL}`);
   expect(link.parentElement?.textContent).toBe(`Rerun of ${ORIGINAL.slice(0, 8)}`);
+});
+
+test("?tab=graph opens the graph of the run's workflow", async () => {
+  nav.search = "tab=graph";
+  api(detail({ status: "completed" }));
+  const source = show();
+
+  act(() => {
+    for (const event of docsRun as RunEvent[]) source.emit(event);
+  });
+
+  expect(screen.getByRole("tab", { name: "Graph" }).getAttribute("aria-selected")).toBe("true");
+  await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7));
+  const reviewer = screen.getAllByTestId("graph-node").find((n) => n.dataset.nodeId === "reviewer");
+  expect(reviewer?.dataset.status).toBe("completed");
+});
+
+test("switching to the graph puts it in the URL", async () => {
+  api(detail());
+  show();
+  await screen.findByRole("heading", { name: "Generate docs" });
+
+  const graph = screen.getByRole("tab", { name: "Graph" });
+  // Radix tabs switch on mouse down.
+  fireEvent.mouseDown(graph, { button: 0 });
+
+  expect(nav.replace).toHaveBeenCalledWith("/runs/00000000-0000-0000-0000-000000000001?tab=graph", {
+    scroll: false,
+  });
 });

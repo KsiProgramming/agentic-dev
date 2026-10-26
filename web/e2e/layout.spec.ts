@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS_DEMO, pretendConnections } from "./connections";
-import { startRun, GATE, WRITER } from "./runs";
+import { COMBINE, startRun, GATE, MAP, WRITER } from "./runs";
 
 /** Every page renders in the shell with no horizontal page scroll (roadmap 2.2), and the main
  * nav is reachable: full sidebar from 1280 px, icon rail from 1024 px, a drawer below that. */
@@ -181,6 +181,28 @@ test("a run waiting at a gate", async ({ page, request }) => {
   const dockTop = (await dock.boundingBox())!.y;
   expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(dockTop + 1);
   await screenshot(page, "run-waiting-end");
+});
+
+test("a run's graph, waiting at a gate", async ({ page, request }) => {
+  const runId = await startRun(request, [MAP, COMBINE, GATE]);
+  await page.goto(`/runs/${runId}?tab=graph`);
+  const dock = page.getByTestId("approval-dock").filter({ visible: true });
+  await expect(dock).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("graph-node")).toHaveCount(4);
+  await checkPage(page, "run-graph");
+
+  // The graph pans and zooms in its own box, which ends above the dock once scrolled down.
+  const graph = page.getByTestId("run-graph");
+  const box = (await graph.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const scrolled = (await graph.boundingBox())!;
+  expect(scrolled.y + scrolled.height).toBeLessThanOrEqual((await dock.boundingBox())!.y + 1);
+
+  await page.locator('[data-testid="graph-node"][data-node-id="worker"]').click();
+  await expect(page.getByTestId("node-detail")).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await screenshot(page, "run-graph-detail");
 });
 
 test("an unknown run", async ({ page }) => {
