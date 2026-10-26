@@ -1,0 +1,52 @@
+{
+  "spec_version": "0",
+  "id": "generate-docs",
+  "name": "Generate docs",
+  "description": "The workflow of docs-run.json: list modules, document each, combine, review, approve.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      { "type": "tool", "id": "list_modules", "tool": "repo.list_modules", "args": {} },
+      {
+        "type": "map",
+        "id": "document",
+        "over": "results.list_modules.data.modules",
+        "max_concurrency": 3,
+        "body": {
+          "type": "agent",
+          "id": "module-writer",
+          "role": "Technical writer documenting one module",
+          "instructions": "Document the module.",
+          "provider": null,
+          "model": null,
+          "tools": ["repo.list_files", "repo.read_file"]
+        }
+      },
+      {
+        "type": "reduce",
+        "id": "combine",
+        "from": "document",
+        "strategy": "concat",
+        "separator": null,
+        "agent": null
+      },
+      {
+        "type": "loop",
+        "id": "revise",
+        "until": "last.text.contains('APPROVE')",
+        "max_iterations": 3,
+        "body": {
+          "type": "agent",
+          "id": "reviewer",
+          "role": "Reviewer of the documentation",
+          "instructions": "Review the pages. Reply APPROVE when they are good.",
+          "provider": null,
+          "model": null,
+          "tools": []
+        }
+      },
+      { "type": "gate", "id": "approve", "title": "Open the docs PR?", "prompt": null }
+    ]
+  }
+}
