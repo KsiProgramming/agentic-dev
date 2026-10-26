@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 3.6 editable artifacts at the gate:
+- Phase 3.6 editable artifacts at the gate ([#116](https://github.com/KsiProgramming/agentic-dev/pull/116)):
   - **Review sheet.** "Review details" on a gate with changed files opens a wide sheet: the files listed with their status (a picker below 1024 px) and a Monaco diff of the selected one, side by side from 1024 px and inline below. Monaco (`@monaco-editor/react`, `monaco-editor`) is bundled with the app, with no CDN, and loaded only when the sheet opens. Binary, large, deleted and renamed files are listed read-only with the reason.
   - **Edit, then approve.** The changed side of an editable file takes edits, kept while the console is open. Each edited file is marked "Edited" and can be discarded, Approve becomes "Approve with N edits" in the dock and the sheet, Reject warns that the edits are dropped, and leaving the page with edits asks first. A refused edit is shown in the sheet.
   - **After the decision.** The gate's step reads "Approved with edits to N files", and "View edits" shows each edit as a read-only diff, in the timeline and in the graph's node sheet.
