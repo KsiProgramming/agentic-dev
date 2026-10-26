@@ -20,6 +20,7 @@ import {
   type Turn,
 } from "../timeline";
 import { AgentMessage } from "./agent-message";
+import { GateDecision } from "./gate-decision";
 import { itemName } from "./item-name";
 import { DotMarker, IconMarker, Rail, RailItem, StatusMarker } from "./rail";
 import { stepBadge } from "./step-status";
@@ -240,18 +241,7 @@ export function StepBody({ step, options }: { step: Step; options: StepViewOptio
           ))}
         </Rail>
       ) : null}
-      {step.gate ? (
-        <p className="text-[13px]">
-          <span className="font-medium">{step.gate.title}</span>
-          {step.gate.decision ? (
-            <span className="text-muted-foreground">
-              {" "}
-              · {step.gate.decision === "approve" ? "Approved" : "Rejected"}
-              {step.gate.comment ? `: ${step.gate.comment}` : ""}
-            </span>
-          ) : null}
-        </p>
-      ) : null}
+      {step.gate ? <GateDecision gate={step.gate} /> : null}
       {options.extra?.(step)}
       {step.prUrl ? (
         <a

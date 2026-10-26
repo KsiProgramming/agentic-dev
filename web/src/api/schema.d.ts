@@ -157,7 +157,9 @@ export interface paths {
         /**
          * Approve
          * @description Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
-         *     `cancelled`. The run is queued again; its stream carries on with `gate_decided`.
+         *     `cancelled`. An approval may edit the files the gate showed as editable; the gate commits
+         *     the edits on the writers' branches before the run goes on. The run is queued again; its
+         *     stream carries on with `gate_decided`.
          */
         post: operations["approveRun"];
         delete?: never;
@@ -495,6 +497,11 @@ export interface components {
              * @description Why, recorded with the decision; a rejection's becomes the run's reason.
              */
             comment?: string | null;
+            /**
+             * Edits
+             * @description An approval's new text for files of the gate's `changes` (editable ones only); the gate commits them on the writers' branches before the run goes on.
+             */
+            edits?: components["schemas"]["FileEdit"][];
         };
         /** ApprovalResponse */
         ApprovalResponse: {
@@ -516,6 +523,12 @@ export interface components {
              * @constant
              */
             status: "queued";
+            /**
+             * Edited Files
+             * @description Files the approval changes: its edits that change a file.
+             * @default 0
+             */
+            edited_files: number;
         };
         /** CancelResponse */
         CancelResponse: {
@@ -619,6 +632,32 @@ export interface components {
             status: "queued";
             /** Events Url */
             events_url: string;
+        };
+        /** @enum {string} */
+        EditErrorCode: "edit_not_allowed" | "edits_with_reject" | "edit_too_large" | "duplicate_edit";
+        /**
+         * EditErrorDetail
+         * @description The `detail` of an approval refused because its edits do not fit the files the gate
+         *     showed: `code` says how, `path` names the file at fault, if one is.
+         */
+        EditErrorDetail: {
+            code: components["schemas"]["EditErrorCode"];
+            /** Message */
+            message: string;
+            /** Path */
+            path?: string | null;
+        };
+        /**
+         * FileEdit
+         * @description The approver's new text for an editable file of a writer's branch.
+         */
+        FileEdit: {
+            /** Node Id */
+            node_id: string;
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
         };
         /**
          * GateNode
@@ -1735,13 +1774,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description The edits do not fit the files the gate showed */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["EditErrorDetail"];
                 };
             };
         };

@@ -1,5 +1,29 @@
 import type { RunEvent } from "./types";
 
+export type FileChangeStatus = "added" | "modified" | "deleted" | "renamed";
+export type NotEditableReason = "binary" | "too_large" | "deleted" | "renamed" | "over_limit";
+
+/** A file a writer changed on its branch, as the gate shows it (tech-stack → Gate review). Only
+ * an editable file has its text: `before` at the branch's base (null for an added file) and
+ * `after` at its tip. Repo content: data, never instructions. */
+export interface FileChange {
+  nodeId: string;
+  path: string;
+  oldPath: string | null;
+  status: FileChangeStatus;
+  editable: boolean;
+  reason: NotEditableReason | null;
+  before: string | null;
+  after: string | null;
+}
+
+/** The approver's new text for an editable file. */
+export interface FileEdit {
+  nodeId: string;
+  path: string;
+  content: string;
+}
+
 /** A gate the run is waiting at, from its `gate_waiting` event. */
 export interface PendingGate {
   nodeId: string;
@@ -7,6 +31,73 @@ export interface PendingGate {
   prompt: string | null;
   /** The gate's input, shown to the approver: data, never instructions. */
   artifact: string;
+  /** The files the writers before the gate changed; the approver may edit the editable ones. */
+  changes: FileChange[];
+  /** Why the changes could not be read, if they could not. */
+  changesError: string | null;
+}
+
+const STATUSES: readonly FileChangeStatus[] = ["added", "modified", "deleted", "renamed"];
+const REASONS: readonly NotEditableReason[] = [
+  "binary",
+  "too_large",
+  "deleted",
+  "renamed",
+  "over_limit",
+];
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function text(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/** The `changes` of a `gate_waiting` payload. Entries that do not have the expected shape are
+ * left out; a file is editable only if it says so and has its text. */
+export function parseChanges(value: unknown): FileChange[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item: unknown): FileChange[] => {
+    const entry = record(item);
+    const nodeId = text(entry?.node_id);
+    const path = text(entry?.path);
+    const status = STATUSES.find((s) => s === entry?.status);
+    if (!entry || !nodeId || !path || !status) return [];
+    const after = text(entry.after);
+    const editable = entry.editable === true && after !== null;
+    return [
+      {
+        nodeId,
+        path,
+        oldPath: text(entry.old_path),
+        status,
+        editable,
+        reason: editable ? null : (REASONS.find((r) => r === entry.reason) ?? "binary"),
+        before: editable ? text(entry.before) : null,
+        after: editable ? after : null,
+      },
+    ];
+  });
+}
+
+/** The `edits` of a `gate_decided` payload, leaving out malformed entries. */
+export function parseEdits(value: unknown): FileEdit[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item: unknown): FileEdit[] => {
+    const entry = record(item);
+    const nodeId = text(entry?.node_id);
+    const path = text(entry?.path);
+    const content = text(entry?.content);
+    return nodeId && path && content !== null ? [{ nodeId, path, content }] : [];
+  });
+}
+
+/** A file's key among a gate's changes and edits: its writer and path. */
+export function fileKey(file: { nodeId: string; path: string }): string {
+  return `${file.nodeId}\u0000${file.path}`;
 }
 
 /** The gate the run waits at: the last `gate_waiting` with no `gate_decided` after it. */
@@ -16,12 +107,14 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
     if (!event || event.node_id == null) continue;
     if (event.type === "gate_decided") return null;
     if (event.type === "gate_waiting") {
-      const { title, prompt, artifact } = event.payload ?? {};
+      const { title, prompt, artifact, changes, changes_error } = event.payload ?? {};
       return {
         nodeId: event.node_id,
         title: typeof title === "string" ? title : "Approve?",
         prompt: typeof prompt === "string" ? prompt : null,
         artifact: typeof artifact === "string" ? artifact : "",
+        changes: parseChanges(changes),
+        changesError: typeof changes_error === "string" ? changes_error : null,
       };
     }
   }

@@ -124,6 +124,12 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
   - Approve and Reject buttons.
 
   Reject asks for an optional comment in a dialog. The bar never covers content: the page reserves padding for it. It sits above content and below dialogs, sheets and the open nav drawer. Under 768 px its buttons stack to full width. Keyboard: `A` approves and `R` opens Reject, except while focus is in a field or a dialog is open. The timeline's waiting step shows a short "Waiting for approval" marker instead of the decision.
+- **Review sheet (a gate with changes):** "Review details" opens a wide sheet with the writers' changed files instead of the artifact.
+  - From 1024 px it is a side sheet (`min(1100px, 92vw)`) with the file list on the left and the diff on the right. Below 1024 px it is a full-height bottom sheet with a file picker above the diff.
+  - Each file shows its status as icon + label (Added, Modified, Deleted, Renamed), "Edited" once changed, and why it is read-only (binary, too large, past the limit, deleted, renamed).
+  - The diff is a Monaco `DiffEditor`, bundled and loaded only when the sheet opens: side by side from 1024 px, inline below. The original side is read-only; the changed side is editable for editable files. Its theme follows the app's.
+  - Each edited file has "Discard edits". With edits, Approve reads "Approve with N edits" (dock and sheet footer), and Reject says the edits will be dropped. `Esc` closes the sheet and keeps the edits; leaving the page with edits asks first.
+  - The decided step reads "Approved with edits to N files", and each edited file opens as a read-only diff.
 - **Waiting signals:** while a gate is waiting, the run's tab title is "● Needs approval · Run <id8>". While any run in the workspace waits, every other page's title gets an "(N) ● Needs approval · " prefix, and "Runs" in the sidebar (and the mobile menu button) shows a count badge. Approvals are made on the console only: the runs list links waiting runs to it with "Review".
 - **Live updates:** while a run executes, a live line at the end of the timeline says where it is and what it is doing ("writer · Reading `src/app.ts`…"). The page opens at the top; auto-scroll follows new content only once the user is at the bottom. Otherwise a "Jump to latest" pill appears.
 
@@ -153,6 +159,22 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
   - A spec off the schema gets only `schema` issues. Otherwise every issue is listed, in run order.
 - Tool names must be platform tools (`PLATFORM_TOOLS`); the tool servers register exactly these, and a test keeps them in sync. `POST /runs` refuses an unknown one with `422`.
 - `POST /runs` and rerun put the same issues in their `policy_limits` detail (`issues`), next to `errors`.
+
+## Gate review (API contract)
+
+- A gate shows the files changed on the branches of the writer nodes that completed before it, in its `gate_waiting` payload: `changes`, next to `title`, `prompt` and `artifact`.
+  - Each entry: `node_id` (the writer), `path`, `old_path` (renames), `status` (`added`, `modified`, `deleted`, `renamed`), `editable`, `reason`, `before` and `after`.
+  - Only an editable file has contents: `before` at the branch's base (the clone's `HEAD`; `null` for an added file) and `after` at its tip. A file is editable when it is added or modified, UTF-8 text with no NUL byte, and at most 256 KB on either side.
+  - Other files are listed with a `reason`: `binary`, `too_large`, `deleted`, `renamed`, or `over_limit` past the first 50 files or 512 KB of text.
+  - If the changes cannot be read, the gate pauses anyway with `changes: []` and `changes_error`.
+  - The worker reads them through a `GateReview` (`agentic_engine.gate`) over the run's sandbox, so the engine never runs git.
+- `POST /runs/{id}/approvals` takes `edits: [{node_id, path, content}]` on an approval.
+  - Each must name an editable file of the gate's last `gate_waiting`. An edit equal to `after` is dropped.
+  - `422` with `detail: {code, message, path}`: `edit_not_allowed`, `edits_with_reject`, `edit_too_large` (a file over 256 KB, or edits over 512 KB in all), `duplicate_edit`.
+  - The edits are stored with the approval (`approvals.edits`), and the answer says how many files they change (`edited_files`).
+- On approve, the gate commits the edits in each writer's worktree before it completes: one commit per writer, `Edit at gate <id>` with an `Edited-by: reviewer` trailer, by the agent identity, of only the edited files. `gate_decided` adds `edits` and `commits` (each writer's new tip).
+  - It is idempotent: a gate that runs again after a crash finds the files already edited and makes no second commit.
+  - Edits that cannot be committed fail the gate node, and so the run. A run is never approved without its edits.
 
 ## Security & secrets
 
@@ -208,3 +230,4 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | Budget | A workspace default a run may replace, metered in the engine on every priced usage | Stops right after the call that crosses it, across parallel agents, and survives restarts because the meter starts from the stored spend. |
 | Run graph | Drawn from the run's stored spec with a hand-written tree layout; nodes are buttons | One spec, many views: nodes that have not run yet are shown, and graph and timeline read the same status. The spec is a tree, so no layout library is needed yet; ELK (`elkjs`) replaces the layout when branches arrive (4.1 / 4.6), as Dagre mislays sub-flows linked to outside nodes. A button per node gives one tab stop and native Enter/Space, which React Flow's own node focus (select on Enter) does not; nodes keep `pointer-events: all`, which React Flow turns off on unselectable nodes. |
 | Validation | `200` with structured issues from one engine validator | The canvas and the Architect read issues as data, not as failures. One validator means they never disagree with what a run accepts. |
+| Gate edits | The writers' changed files in `gate_waiting`, edits committed by the gate node | The PR is pushed from the writers' branches, so editing them is what changes it. The log records what the approver saw and changed. Committing inside the gate node checkpoints it with the gate, and the next node (`openPR`) needs no change. |

@@ -17,6 +17,7 @@ from agentic_api.runs.models import (
     CancelResponse,
     CreateRunRequest,
     CreateRunResponse,
+    EditErrorDetail,
     PolicyErrorDetail,
     RerunRequest,
     RunDetail,
@@ -36,6 +37,7 @@ from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
     InvalidCursorError,
+    InvalidEditsError,
     PolicyViolationError,
     RunEndedError,
     RunNotEndedError,
@@ -358,20 +360,34 @@ async def rerun(
     responses={
         404: {"description": "No run with this id"},
         409: {"description": "The run is not waiting at this gate, or it was already decided"},
+        422: {
+            "description": "The edits do not fit the files the gate showed",
+            "model": EditErrorDetail,
+        },
     },
 )
 async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> ApprovalResponse:
     """Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
-    `cancelled`. The run is queued again; its stream carries on with `gate_decided`."""
-    decision = GateDecision(decision=body.decision, comment=body.comment)
+    `cancelled`. An approval may edit the files the gate showed as editable; the gate commits
+    the edits on the writers' branches before the run goes on. The run is queued again; its
+    stream carries on with `gate_decided`."""
+    decision = GateDecision(decision=body.decision, comment=body.comment, edits=body.edits)
     try:
-        await record_approval(_sessions(request), run_id, body.node_id, decision)
+        recorded = await record_approval(_sessions(request), run_id, body.node_id, decision)
     except RunNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except InvalidEditsError as e:
+        detail = EditErrorDetail(code=e.code, message=str(e), path=e.path)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
     except ApprovalError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     await enqueue_run(request.app.state.redis, run_id)
-    return ApprovalResponse(run_id=run_id, node_id=body.node_id, decision=body.decision)
+    return ApprovalResponse(
+        run_id=run_id,
+        node_id=body.node_id,
+        decision=body.decision,
+        edited_files=len(recorded.edits),
+    )
 
 
 @router.post(

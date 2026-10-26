@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from agentic_api.workspaces.models import budget_field
+from agentic_engine.gate import MAX_REVIEW_FILES, EditErrorCode, FileEdit
 from agentic_engine.spec import (
     ValidationIssue,
     WorkflowSpec,
@@ -163,6 +164,12 @@ class ApprovalRequest(BaseModel):
         max_length=2000,
         description="Why, recorded with the decision; a rejection's becomes the run's reason.",
     )
+    edits: list[FileEdit] = Field(
+        default_factory=list[FileEdit],
+        max_length=MAX_REVIEW_FILES,
+        description="An approval's new text for files of the gate's `changes` (editable ones "
+        "only); the gate commits them on the writers' branches before the run goes on.",
+    )
 
 
 class ApprovalResponse(BaseModel):
@@ -170,6 +177,18 @@ class ApprovalResponse(BaseModel):
     node_id: str
     decision: Literal["approve", "reject"]
     status: Literal["queued"] = "queued"
+    edited_files: int = Field(
+        default=0, description="Files the approval changes: its edits that change a file."
+    )
+
+
+class EditErrorDetail(BaseModel):
+    """The `detail` of an approval refused because its edits do not fit the files the gate
+    showed: `code` says how, `path` names the file at fault, if one is."""
+
+    code: EditErrorCode
+    message: str
+    path: str | None = None
 
 
 class CancelResponse(BaseModel):

@@ -55,7 +55,7 @@ from agentic_engine.events import (
     RunEventLog,
 )
 from agentic_engine.expr import CompiledList, ExpressionError, compile_condition, compile_list
-from agentic_engine.gate import run_gate_node
+from agentic_engine.gate import GateReview, run_gate_node
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.graph.state import MapItem, RunState, RunUpdate
@@ -86,11 +86,13 @@ class CompileError(ValueError):
 
 @dataclass
 class _Limits:
-    """A run's policy, the slots of its `agents_alive` limit, and its budget meter if it has a
-    budget, shared by all its nodes for one attempt."""
+    """A run's policy, the slots of its `agents_alive` limit, its budget meter if it has a
+    budget, and the review its gates show and edit branches through, shared by all its nodes for
+    one attempt."""
 
     policy: Policy
     budget: BudgetMeter | None = None
+    review: GateReview | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -163,19 +165,21 @@ def compile_workflow(
     tools: ToolExecutor | None = None,
     policy: Policy = PLATFORM_POLICY,
     budget: BudgetMeter | None = None,
+    review: GateReview | None = None,
 ) -> CompiledWorkflow:
-    """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, and
-    both write to `log`, if given. With `checkpointer`, the state is saved after each node, in
-    the run's thread; a spec with a gate needs one, since a paused run continues from it. The
-    run's agents are held to `policy`'s `agents_alive` and `agents_spawned`, and their usage to
-    `budget`; the spec itself is checked against it before the run (`policy_errors`)."""
+    """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
+    commit their edits through `review`, and all write to `log`, if given. With `checkpointer`,
+    the state is saved after each node, in the run's thread; a spec with a gate needs one, since
+    a paused run continues from it. The run's agents are held to `policy`'s `agents_alive` and
+    `agents_spawned`, and their usage to `budget`; the spec itself is checked against it before
+    the run (`policy_errors`)."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
     steps = step_nodes(spec.root)
     if checkpointer is None and (gate := next((n for n in steps if isinstance(n, GateNode)), None)):
         raise CompileError(f"gate {gate.id!r} needs a checkpointer to pause the run")
     builder = StateGraph(RunState)
-    limits = _Limits(policy, budget)
+    limits = _Limits(policy, budget, review)
 
     def add(node: Node, then: str) -> str:
         """Add `node`, going on to `then` once it completes (to `END` otherwise), and return the
@@ -310,7 +314,7 @@ async def _run_step(
             case ToolNode():
                 return await run_tool_node(node, tools, on_event)
             case GateNode():
-                return await run_gate_node(node, input, log)
+                return await run_gate_node(node, input, log, limits.review)
             case AgentNode():
                 async with limits.alive:
                     return await run_agent_node(node, runtime, input, on_event)

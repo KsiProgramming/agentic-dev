@@ -17,7 +17,7 @@ from agentic_sandbox.worktree import GIT_SAFETY
 _NO_BRANCH = 8
 _NO_COMMITS = 9
 _SHA = re.compile(r"^[0-9a-f]{40}$")
-_BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
+BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
 
 # `$1` the branch, `$2` the bundle to write, `$3` the checkout (trusted by git although root owns
 # it). Prints the base commit. The options hold no shell syntax.
@@ -44,7 +44,7 @@ async def export_branch(sandbox: Sandbox, branch: str) -> BranchBundle:
     """Bundle the commits `branch` has on top of the clone's `HEAD`. `sandbox` is the run's
     sandbox, not a worktree. Raises `SandboxError` if the branch does not exist or has no
     commits of its own, or if the bundle cannot be made or is too large."""
-    if not _BRANCH.match(branch) or ".." in branch:
+    if not BRANCH_PATTERN.match(branch) or ".." in branch:
         raise ValueError(f"not a branch name: {branch!r}")
     path = f"{sandbox.staging_dir}/{uuid4().hex}.bundle"
     result = await sandbox.exec(

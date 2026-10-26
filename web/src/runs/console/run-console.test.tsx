@@ -10,9 +10,23 @@ import docsSpec from "../fixtures/docs-run-spec.json";
 import { FakeEventSource, runEvent, runSummary } from "../testing";
 import type { RunEvent } from "../types";
 import type { RunDetail } from "../use-run-detail";
+import type { DiffViewProps } from "./diff-view";
 import { RunConsole } from "./run-console";
 
 const RUN_ID = "00000000-0000-0000-0000-000000000001";
+
+// Monaco needs a real browser: a textarea stands in for the diff's editable side.
+vi.mock("./diff-view", () => ({
+  default: (props: DiffViewProps) => (
+    <textarea
+      aria-label={props.labels.modified}
+      data-original={props.original}
+      value={props.modified}
+      readOnly={props.readOnly}
+      onChange={(e) => props.onChange?.(e.target.value)}
+    />
+  ),
+}));
 
 const nav = vi.hoisted(() => ({ search: "", replace: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -317,6 +331,185 @@ test("a refused decision is shown in the dock and can be tried again", async () 
 
   expect((await screen.findByRole("alert")).textContent).toBe("the run is not waiting at gate");
   expect(screen.getByRole("button", { name: /Approve/ })).toHaveProperty("disabled", false);
+});
+
+const PAGE = {
+  node_id: "writer",
+  path: "docs/a.md",
+  old_path: null,
+  status: "added",
+  editable: true,
+  reason: null,
+  before: null,
+  after: "# A\n",
+};
+const LOGO = { ...PAGE, path: "logo.png", editable: false, reason: "binary", after: null };
+
+/** A run waiting at gate `gate` after a writer that added `docs/a.md` and a binary file. */
+function waitAtGateWithChanges(source: FakeEventSource) {
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({ ...runEvent(2, "node_started"), node_id: "gate" });
+    source.emit({
+      ...runEvent(3, "gate_waiting", {
+        title: "Open a PR?",
+        prompt: "Approving pushes the branch.",
+        artifact: "abc123 on agent/x/writer",
+        changes: [PAGE, LOGO],
+      }),
+      node_id: "gate",
+    });
+  });
+}
+
+async function openReview(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("button", { name: "Review details" }));
+  return screen.findByTestId("gate-review");
+}
+
+test("a gate's changed files open in the review sheet, and edits go with the approval", async () => {
+  const fetch = api(detail({ status: "waiting" }), async () =>
+    json({ run_id: RUN_ID, node_id: "gate", decision: "approve", status: "queued" }, 202),
+  );
+  const source = show();
+  waitAtGateWithChanges(source);
+
+  const review = await openReview();
+  const page = await within(review).findByLabelText("docs/a.md, after (editable)");
+  expect(page).toHaveProperty("value", "# A\n");
+  expect(within(review).getByText("Added", { selector: "span" })).toBeDefined();
+  fireEvent.change(page, { target: { value: "# A, reviewed\n" } });
+
+  expect(within(review).getByText("1 file edited")).toBeDefined();
+  expect(within(review).getAllByText("Edited").length).toBeGreaterThan(0);
+  const dock = screen.getByTestId("approval-dock");
+  // The sheet is modal: the dock behind it is hidden from assistive tech until it closes.
+  expect(
+    within(dock).getByRole("button", { name: /Approve with 1 edit/, hidden: true }),
+  ).toBeDefined();
+  // Typing in the editor never approves.
+  fireEvent.keyDown(page, { key: "a" });
+  expect(approvals(fetch)).toEqual([]);
+
+  // A binary file is listed, read-only, and the edit survives switching files.
+  const picker = within(review).getByLabelText(/File 1 of 2/);
+  fireEvent.change(picker, { target: { value: "writer\u0000logo.png" } });
+  expect(within(review).getByTestId("read-only-reason").textContent).toBe(
+    "Binary file: not shown.",
+  );
+  fireEvent.change(within(review).getByLabelText(/File 2 of 2/), {
+    target: { value: "writer\u0000docs/a.md" },
+  });
+  expect(await within(review).findByLabelText("docs/a.md, after (editable)")).toHaveProperty(
+    "value",
+    "# A, reviewed\n",
+  );
+
+  fireEvent.click(within(review).getByRole("button", { name: /Approve with 1 edit/ }));
+
+  await within(dock).findByText(/Approved\. The run carries on/);
+  expect(await approvals(fetch)[0]!.json()).toEqual({
+    node_id: "gate",
+    decision: "approve",
+    edits: [{ node_id: "writer", path: "docs/a.md", content: "# A, reviewed\n" }],
+  });
+});
+
+test("discarding a file's edits, or typing its text back, leaves nothing to send", async () => {
+  api(detail({ status: "waiting" }));
+  const source = show();
+  waitAtGateWithChanges(source);
+  const review = await openReview();
+  const page = await within(review).findByLabelText("docs/a.md, after (editable)");
+
+  fireEvent.change(page, { target: { value: "# B\n" } });
+  fireEvent.click(within(review).getByRole("button", { name: "Discard edits" }));
+
+  expect(await within(review).findByLabelText("docs/a.md, after (editable)")).toHaveProperty(
+    "value",
+    "# A\n",
+  );
+  expect(within(review).getByRole("button", { name: /^Approve$/ })).toBeDefined();
+  fireEvent.change(within(review).getByLabelText("docs/a.md, after (editable)"), {
+    target: { value: "# A\n" },
+  });
+  expect(within(review).queryByText("Edited")).toBeNull();
+});
+
+test("rejecting with edits says they are dropped", async () => {
+  api(detail({ status: "waiting" }));
+  const source = show();
+  waitAtGateWithChanges(source);
+  const review = await openReview();
+  fireEvent.change(await within(review).findByLabelText("docs/a.md, after (editable)"), {
+    target: { value: "# B\n" },
+  });
+
+  fireEvent.click(within(review).getByRole("button", { name: "Reject" }));
+
+  const dialog = await screen.findByRole("dialog", { name: /Reject/ });
+  expect(dialog.textContent).toContain("Your edits to 1 file are dropped.");
+});
+
+test("an edit the API refuses is shown in the sheet, naming the file", async () => {
+  api(detail({ status: "waiting" }), async () =>
+    json(
+      {
+        detail: {
+          code: "edit_too_large",
+          message: "docs/a.md is 300000 bytes (at most 262144)",
+          path: "docs/a.md",
+        },
+      },
+      422,
+    ),
+  );
+  const source = show();
+  waitAtGateWithChanges(source);
+  const review = await openReview();
+  fireEvent.change(await within(review).findByLabelText("docs/a.md, after (editable)"), {
+    target: { value: "# B\n" },
+  });
+
+  fireEvent.click(within(review).getByRole("button", { name: /Approve with 1 edit/ }));
+
+  expect((await within(review).findByRole("alert")).textContent).toBe(
+    "docs/a.md is 300000 bytes (at most 262144)",
+  );
+  expect(within(review).getByRole("button", { name: /Approve with 1 edit/ })).toHaveProperty(
+    "disabled",
+    false,
+  );
+});
+
+test("a gate approved with edits says so, and shows them read-only", async () => {
+  api(detail({ status: "running" }));
+  const source = show();
+  waitAtGateWithChanges(source);
+  act(() =>
+    source.emit({
+      ...runEvent(4, "gate_decided", {
+        decision: "approve",
+        comment: null,
+        edits: [{ node_id: "writer", path: "docs/a.md", content: "# A, reviewed\n" }],
+        commits: { writer: "f".repeat(40) },
+      }),
+      node_id: "gate",
+    }),
+  );
+
+  const step = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "gate")!;
+  expect(within(step).getByTestId("gate-decision").textContent).toBe(
+    "· Approved with edits to 1 file",
+  );
+  fireEvent.click(within(step).getByRole("button", { name: "View edits" }));
+
+  const review = await screen.findByTestId("gate-review");
+  const page = await within(review).findByLabelText("docs/a.md, after");
+  expect(page).toHaveProperty("value", "# A, reviewed\n");
+  expect(page).toHaveProperty("readOnly", true);
+  expect(page.dataset.original).toBe("# A\n");
+  expect(within(review).queryByRole("button", { name: /Approve/ })).toBeNull();
 });
 
 test("an opened pull request is linked in the header and its step", async () => {

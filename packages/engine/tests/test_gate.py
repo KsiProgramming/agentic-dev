@@ -106,6 +106,7 @@ async def test_run_pauses_at_gate() -> None:
         "title": "Approve gate",
         "prompt": "Check.",
         "artifact": "draft notes",
+        "changes": [],
     }
 
 
@@ -211,7 +212,12 @@ async def test_gate_first_shows_the_run_input() -> None:
     run = Run(spec)
 
     assert (await run.start()).waiting_at == "gate"
-    assert run.sink.events[-1].payload == {"title": "Start?", "prompt": None, "artifact": "go"}
+    assert run.sink.events[-1].payload == {
+        "title": "Start?",
+        "prompt": None,
+        "artifact": "go",
+        "changes": [],
+    }
     result = await run.resume(APPROVE)
     assert (result.status, result.text) == ("completed", "go")
 

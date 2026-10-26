@@ -67,7 +67,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from agentic_engine.events import RUN_CANCELLED, RUN_FAILED, EventSink, RunEvent, RunEventLog
-from agentic_engine.gate import GateDecision
+from agentic_engine.gate import GateDecision, GateReview
 from agentic_engine.graph import (
     Checkpointer,
     WorkflowRunResult,
@@ -130,6 +130,7 @@ from agentic_store import (
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
+from agentic_worker.review import SandboxGateReview
 
 log = logging.getLogger("agentic_worker")
 
@@ -540,6 +541,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
         return "failed"
     async with contextlib.AsyncExitStack() as stack:
         tools: ToolExecutor | None = None
+        review: SandboxGateReview | None = None
         if run.repo is not None:
             token = await _clone_token(worker, run.id, target)
             try:
@@ -558,6 +560,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
                 return "failed"
             # Entered after the sandbox, so the MCP clients close before the sandbox is destroyed.
             writers = writer_node_ids(run.spec.root, WRITE_TOOL_NAMES)
+            review = SandboxGateReview(sandbox, run.id, writers)
             tools = await stack.enter_async_context(
                 open_repo_tools(sandbox, run_id=run.id, writers=writers)
             )
@@ -575,7 +578,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             log.warning("run %s cannot start: %s", run.id, e)
             await _fail(run, sink, last_seq, str(e))
             return "failed"
-        result = await _workflow(worker, run, sink, last_seq, runtime, tools, decision)
+        result = await _workflow(worker, run, sink, last_seq, runtime, tools, decision, review)
         if result.status == "waiting" and run.repo is not None:
             worker.sandboxes.keep(run.id)
         return result.status
@@ -637,9 +640,11 @@ async def _workflow(
     runtime: AgentRuntime,
     tools: ToolExecutor | None,
     decision: GateDecision | None = None,
+    review: GateReview | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
-    run paused at a gate continues with `decision`. A run with a budget counts what its earlier
+    run paused at a gate continues with `decision`, and its gates show and edit the writers'
+    branches through `review`. A run with a budget counts what its earlier
     attempts spent (`runs.estimated_usd` when it was claimed)."""
     if last_seq == 0:
         log.info("run %s started", run.id)
@@ -653,6 +658,7 @@ async def _workflow(
             tools=tools,
             policy=run.policy,
             spent=run.spent,
+            review=review,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -668,6 +674,7 @@ async def _workflow(
         decision=decision,
         policy=run.policy,
         spent=run.spent,
+        review=review,
     )
 
 
