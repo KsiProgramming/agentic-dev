@@ -82,10 +82,11 @@ export function nodeStatuses(spec: WorkflowSpec, steps: Step[]): Map<string, Nod
  * map or a loop is shown inside its outermost container, which keeps only the items and
  * iterations that ran it, each holding only that node's run: one entry per item or iteration.
  * `null` if the node has not run.
+ *
+ * Node ids are unique in a spec, so a node that ran inside a container belongs there, even if
+ * an event without an `item` (e.g. a budget stop) also put a step of it at this level.
  */
 export function focusStep(steps: Step[], nodeId: string): Step | null {
-  const own = steps.find((step) => step.id === nodeId);
-  if (own) return own;
   for (const step of steps) {
     const items = (step.items ?? []).flatMap((item) => {
       const found = focusStep(item.steps, nodeId);
@@ -109,5 +110,5 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
       };
     }
   }
-  return null;
+  return steps.find((step) => step.id === nodeId) ?? null;
 }

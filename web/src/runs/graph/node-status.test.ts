@@ -113,6 +113,24 @@ describe("focusStep", () => {
     ]);
   });
 
+  it("keeps a map body node in its map when a budget stop names it without an item", () => {
+    const stopped = buildTimeline([
+      event(1, "run_started", null),
+      event(2, "node_started", "document", { items: 1 }),
+      event(3, "map_item_started", "document", { index: 0, item: "a" }),
+      event(4, "node_started", "module-writer", { item: 0 }),
+      event(5, "message", "module-writer", { item: 0, text: "Reading a." }),
+      event(6, "node_cancelled", "module-writer", { item: 0 }),
+      event(7, "policy_limit_exceeded", "module-writer", { limit: "budget_usd" }),
+      event(8, "run_failed", null, { error: "policy limit: budget of $0.10 reached" }),
+    ]).steps;
+
+    const focused = focusStep(stopped, "module-writer")!;
+
+    expect(focused.id).toBe("document");
+    expect(focused.items?.[0]?.steps[0]?.turns).toHaveLength(1);
+  });
+
   it("is null for a node that has not run", () => {
     expect(focusStep(upTo(5), "module-writer")).toBeNull();
     expect(focusStep(upTo(5), "approve")).toBeNull();

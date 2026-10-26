@@ -71,6 +71,16 @@ describe("RunGraph", () => {
     expect(within(sheet).getAllByTestId("tool-group").length).toBeGreaterThan(0);
   });
 
+  it("lets the pointer reach the nodes, not the pane under them", async () => {
+    const { container } = render(<Graph steps={stepsUpTo(88)} />);
+    await waitFor(() => node("module-writer"));
+
+    // jsdom ignores pointer-events on click, so check the style a browser hit-tests with.
+    const wrappers = container.querySelectorAll<HTMLElement>(".react-flow__node");
+    expect(wrappers).toHaveLength(7);
+    for (const wrapper of wrappers) expect(wrapper.style.pointerEvents).toBe("all");
+  });
+
   it("says a node has not run yet", async () => {
     render(<Graph steps={stepsUpTo(5)} />);
 

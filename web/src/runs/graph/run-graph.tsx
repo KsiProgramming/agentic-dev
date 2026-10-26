@@ -24,7 +24,15 @@ export function RunGraph({
   onOpen: (nodeId: string) => void;
 }) {
   // Laid out once per spec; new events only change the states the nodes read.
-  const graph = useMemo(() => specToGraph(spec), [spec]);
+  const graph = useMemo(() => {
+    const { nodes, edges } = specToGraph(spec);
+    // React Flow turns pointer events off on a node that is neither selectable nor draggable:
+    // the pane under it would take the click. Each node is a button of its own, so keep them.
+    return {
+      nodes: nodes.map((node) => ({ ...node, style: { pointerEvents: "all" as const } })),
+      edges,
+    };
+  }, [spec]);
   const states = useMemo(() => nodeStatuses(spec, steps), [spec, steps]);
   const context = useMemo(() => ({ states, open: onOpen }), [states, onOpen]);
   const { resolvedTheme } = useTheme();
