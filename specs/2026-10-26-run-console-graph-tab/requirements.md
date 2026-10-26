@@ -30,8 +30,8 @@ Unblocks: 5.2 (canvas renders a spec, reusing the spec → graph mapping and nod
   - React Flow read-only: no dragging, no connecting, no deleting; pan and zoom allowed; `fitView` on open; zoom controls; light and dark theme from tokens.
   - The canvas sits in its own bounded box (height from the viewport, reserved padding for the approval dock), so it never causes page scroll sideways at 375, 768 or 1440 px.
   - The waiting gate shows "Needs approval"; a failed node shows "Failed". Status is icon + label.
-- **Node detail:** clicking (or Enter on a focused node) opens a sheet (side sheet 480 px from 768 px, bottom sheet below) with the 2.5 step view for that node: messages, tool calls, usage footer. For a body node in a map, the sheet lists the node's run per item (by item name); for a loop body node, per iteration. A not-started node says "This step has not run yet". A gate node shows the waiting marker linking to the dock.
-- **Accessibility:** nodes are focusable and reachable by keyboard, each has an accessible name ("worker, agent, Done"), and status changes keep the console's existing `aria-live` announcement.
+- **Node detail:** clicking (or Enter on a focused node) opens a sheet (side sheet 480 px from 768 px, bottom sheet below) with the 2.5 step view for that node: messages, tool calls, usage footer. For a body node in a map, the sheet lists the node's run per item (by item name); for a loop body node, per iteration. A node that ran inside a container is always shown there, even when an event without an `item` (a budget stop's `policy_limit_exceeded`) also names it. A not-started node says "This step has not run yet". A gate node shows the waiting marker linking to the dock.
+- **Accessibility:** each node is a button (one tab stop, Enter or Space opens it), each has an accessible name ("worker, agent, Done"), and status changes keep the console's existing `aria-live` announcement.
 - **Docs:** `specs/tech-stack.md` "Graph tab" line replaced with the rules above.
 
 ### Out of scope
@@ -39,14 +39,15 @@ Unblocks: 5.2 (canvas renders a spec, reusing the spec → graph mapping and nod
 - Editing the graph, palette, side panel forms: 5.2 to 5.4.
 - Validation issues drawn on nodes: 5.6.
 - `parallel`, `router`, `orchestrator`, `subflow` nodes: they do not exist yet (4.1, 4.6, 6.1, 6.5); the mapping has one `switch` over node types, so each adds a case.
-- A layout library (dagre, elkjs): the spec is a tree, so a hand-written layout is enough until the 200-node canvas work (10.4).
+- A layout library: the spec is a chain with boxes today, so a hand-written layout is enough. ELK (`elkjs`) replaces it when branching arrives (4.1 `parallel` or 4.6 `router`); Dagre is ruled out because it lays out a box wrongly when a node inside it links to one outside (React Flow → Layouting).
 
 ## Decisions
 | Decision | Choice | Rationale |
 |---|---|---|
 | Where the graph comes from | The run's stored spec on `GET /runs/{id}` (`spec`) | One spec, many views (mission 1). Events alone cannot show nodes that have not started. |
 | Spec only on the detail | `RunDetail.spec`, not `RunSummary` | The runs list does not need it and stays small. |
-| Layout | Hand-written, deterministic top-to-bottom layout; no layout library | The spec is a tree (3.4: no cycles), so placement is simple and testable as a pure function. Only `@xyflow/react` is added. |
+| Layout | Hand-written, deterministic top-to-bottom layout now; ELK (`elkjs`) from 4.1 or 4.6 | The spec is a tree (3.4: no cycles) with no branches yet, so placement is simple and testable as a pure function. Only `@xyflow/react` is added. Branches need edge routing around boxes, which ELK does and Dagre does not do correctly for sub-flows. Only the inside of `specToGraph` changes then. |
+| Node interaction | Each node is a `<button>`; React Flow's node focus and selection are off, and each node keeps `pointer-events: all` | One tab stop and native Enter/Space per node (React Flow's own focus only selects on Enter). React Flow turns pointer events off on nodes that are neither selectable nor draggable, which let the pane take every click (found in manual testing). |
 | Containers | Loop and map as React Flow group nodes holding their body; items and iterations shown as counts | Shows the spec's real shape while keeping the graph the size of the spec, not of the run. |
 | Status source | The same `buildTimeline(events)` the Timeline tab uses | Graph and timeline can never disagree; no new events or endpoints. |
 | Node detail | A sheet reusing the 2.5 step view | Same reading of "what the agent did" in both tabs; the sheet pattern already exists (2.6). |
