@@ -37,6 +37,34 @@ with no network takes seconds to time out."""
 _NODE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
 _WRONG_BRANCH = 9
 
+WRITE_OUTSIDE = 4
+WRITE_NOT_A_FILE = 5
+WRITE_FILE_SCRIPT = """
+staged=$2
+fail() { rm -f -- "$staged"; exit "$1"; }
+root=$(pwd -P)
+dir=$(dirname -- "$1")
+name=$(basename -- "$1")
+probe=$dir
+while [ ! -e "$probe" ] && [ ! -L "$probe" ]; do probe=$(dirname -- "$probe"); done
+[ -d "$probe" ] || fail 5
+cd -P -- "$probe" 2>/dev/null || fail 4
+case "$(pwd -P)/" in "$root"/*) ;; *) fail 4 ;; esac
+cd -- "$root" || fail 1
+mkdir -p -- "$dir" 2>/dev/null || fail 5
+cd -P -- "$dir" 2>/dev/null || fail 4
+case "$(pwd -P)/" in "$root"/*) ;; *) fail 4 ;; esac
+[ -L "$name" ] && fail 4
+[ -d "$name" ] && fail 5
+mv -f -- "$staged" "./$name" || fail 1
+"""
+"""Moves the staged file `$2` (from `put_file`) to the path `$1`, relative to the current
+directory (a worktree), creating its parent directories. The deepest part of the parent that
+exists, and then the parent itself, must resolve inside the worktree, and the target must not be
+a symlink or a directory, so a write never leaves it. The staged file is removed if the write is
+refused: exit `WRITE_OUTSIDE` for a path that leaves the worktree, `WRITE_NOT_A_FILE` for a
+directory or file in the way."""
+
 # `$1` branch, `$2` worktree path, `$3` the checkout (trusted by git although root owns it), `$4`
 # and `$5` the identity. A worktree that already exists on the branch is reused. The options hold
 # no shell syntax.

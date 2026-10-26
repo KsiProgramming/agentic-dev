@@ -37,7 +37,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0017_optional_budget"
+    assert version == "0018_approval_edits"
     assert {
         "runs",
         "run_events",
@@ -239,3 +239,28 @@ async def test_the_budget_revision_downgrades_and_upgrades(postgres_url: str) ->
     assert "budget_usd" not in await policy_columns(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
     assert "budget_usd" in await policy_columns(postgres_url)
+
+
+async def approval_columns(postgres_url: str) -> set[str]:
+    engine = create_async_engine(postgres_url)
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'approvals'"
+            )
+        )
+        columns = set(rows.scalars())
+    await engine.dispose()
+    return columns
+
+
+async def test_the_approval_edits_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert "edits" in await approval_columns(postgres_url)
+
+    await asyncio.to_thread(command.downgrade, config, "0017_optional_budget")
+    assert "edits" not in await approval_columns(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert "edits" in await approval_columns(postgres_url)

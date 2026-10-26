@@ -29,6 +29,9 @@ from agentic_sandbox import (
     AGENT_IDENTITY,
     GIT_SAFETY,
     MAX_PUT_FILE_BYTES,
+    WRITE_FILE_SCRIPT,
+    WRITE_NOT_A_FILE,
+    WRITE_OUTSIDE,
     Sandbox,
     SandboxError,
 )
@@ -116,30 +119,6 @@ _BINARY_SCRIPT = (
 for f in "$@"; do is_text "$f" || printf '%s\\n' "$f"; done
 """
 )
-
-# Moves the staged file `$2` to the repo-relative path `$1`, creating its parent directories.
-# The deepest part of the parent that exists, and then the parent itself, must resolve inside
-# the root, and the target must not be a symlink or a directory, so a write never leaves the
-# worktree. The staged file is removed if the write is refused.
-_WRITE_SCRIPT = """
-staged=$2
-fail() { rm -f -- "$staged"; exit "$1"; }
-root=$(pwd -P)
-dir=$(dirname -- "$1")
-name=$(basename -- "$1")
-probe=$dir
-while [ ! -e "$probe" ] && [ ! -L "$probe" ]; do probe=$(dirname -- "$probe"); done
-[ -d "$probe" ] || fail 5
-cd -P -- "$probe" 2>/dev/null || fail 4
-case "$(pwd -P)/" in "$root"/*) ;; *) fail 4 ;; esac
-cd -- "$root" || fail 1
-mkdir -p -- "$dir" 2>/dev/null || fail 5
-cd -P -- "$dir" 2>/dev/null || fail 4
-case "$(pwd -P)/" in "$root"/*) ;; *) fail 4 ;; esac
-[ -L "$name" ] && fail 4
-[ -d "$name" ] && fail 5
-mv -f -- "$staged" "./$name" || fail 1
-"""
 
 # Commits every change with message `$1` as `$2 <$3>`, then prints the short commit id, the
 # branch and the changed paths. The options hold no shell syntax.
@@ -451,11 +430,11 @@ class _RepoTools:
         except SandboxError as e:
             raise ToolError(str(e)) from None
         result = await self._sandbox.exec(
-            ["sh", "-c", _WRITE_SCRIPT, "write_file", f"./{relative}", staged]
+            ["sh", "-c", WRITE_FILE_SCRIPT, "write_file", f"./{relative}", staged]
         )
-        if result.exit_code == OUTSIDE:
+        if result.exit_code == WRITE_OUTSIDE:
             raise ToolError(f"path must stay inside the repository: {path}")
-        if result.exit_code == _NOT_A_FILE:
+        if result.exit_code == WRITE_NOT_A_FILE:
             raise ToolError(f"a directory or file is in the way of: {path}")
         if result.exit_code != 0:
             raise ToolError("could not write the file")

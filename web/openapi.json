@@ -425,7 +425,7 @@
           "runs"
         ],
         "summary": "Approve",
-        "description": "Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it\n`cancelled`. The run is queued again; its stream carries on with `gate_decided`.",
+        "description": "Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it\n`cancelled`. An approval may edit the files the gate showed as editable; the gate commits\nthe edits on the writers' branches before the run goes on. The run is queued again; its\nstream carries on with `gate_decided`.",
         "operationId": "approveRun",
         "parameters": [
           {
@@ -467,11 +467,11 @@
             "description": "The run is not waiting at this gate, or it was already decided"
           },
           "422": {
-            "description": "Validation Error",
+            "description": "The edits do not fit the files the gate showed",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/EditErrorDetail"
                 }
               }
             }
@@ -1427,6 +1427,15 @@
             ],
             "title": "Comment",
             "description": "Why, recorded with the decision; a rejection's becomes the run's reason."
+          },
+          "edits": {
+            "items": {
+              "$ref": "#/components/schemas/FileEdit"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Edits",
+            "description": "An approval's new text for files of the gate's `changes` (editable ones only); the gate commits them on the writers' branches before the run goes on."
           }
         },
         "additionalProperties": false,
@@ -1461,6 +1470,12 @@
             "const": "queued",
             "title": "Status",
             "default": "queued"
+          },
+          "edited_files": {
+            "type": "integer",
+            "title": "Edited Files",
+            "description": "Files the approval changes: its edits that change a file.",
+            "default": 0
           }
         },
         "type": "object",
@@ -1677,6 +1692,72 @@
           "events_url"
         ],
         "title": "CreateRunResponse"
+      },
+      "EditErrorCode": {
+        "type": "string",
+        "enum": [
+          "edit_not_allowed",
+          "edits_with_reject",
+          "edit_too_large",
+          "duplicate_edit"
+        ]
+      },
+      "EditErrorDetail": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/EditErrorCode"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "EditErrorDetail",
+        "description": "The `detail` of an approval refused because its edits do not fit the files the gate\nshowed: `code` says how, `path` names the file at fault, if one is."
+      },
+      "FileEdit": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Node Id"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node_id",
+          "path",
+          "content"
+        ],
+        "title": "FileEdit",
+        "description": "The approver's new text for an editable file of a writer's branch."
       },
       "GateNode": {
         "properties": {

@@ -3,6 +3,7 @@
 from agentic_store.approvals import (
     AlreadyDecidedError,
     ApprovalError,
+    InvalidEditsError,
     RunNotFoundError,
     RunNotWaitingError,
     WrongGateError,
@@ -97,6 +98,7 @@ __all__ = [
     "Connection",
     "ConnectionInfo",
     "InvalidCursorError",
+    "InvalidEditsError",
     "PolicyViolationError",
     "PostgresEventSink",
     "Run",

@@ -400,6 +400,7 @@ async def test_done_when_a_run_pauses_at_a_gate_and_resumes_on_approval(
             "node_id": "gate",
             "decision": "approve",
             "status": "queued",
+            "edited_files": 0,
         }
         rest = await collect(client, run_id, headers={"Last-Event-ID": str(paused[-1].id)})
 
@@ -430,6 +431,44 @@ async def test_a_rejected_gate_cancels_the_run(
     assert "list" not in {f.data["node_id"] for f in rest}
     run = await get_run(sessions, run_id)
     assert run is not None and run.status == "cancelled"
+
+
+async def test_edits_that_do_not_fit_the_gate_are_refused(
+    postgres_url: str, redis_url: str
+) -> None:
+    """The gate fixture has no repo, so its pause shows no files: no edit fits it."""
+    edit = {"node_id": "writer", "path": "NOTES.md", "content": "# Notes\n"}
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_gated_run(client)
+        paused = await until_waiting(client, run_id)
+        not_shown = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={"node_id": "gate", "decision": "approve", "edits": [edit]},
+        )
+        with_reject = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={"node_id": "gate", "decision": "reject", "edits": [edit]},
+        )
+        malformed = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={"node_id": "gate", "decision": "approve", "edits": [{"path": "NOTES.md"}]},
+        )
+        approved = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        await collect(client, run_id)
+
+    assert paused[-1].data["payload"]["changes"] == []
+    assert not_shown.status_code == 422
+    assert not_shown.json()["detail"] == {
+        "code": "edit_not_allowed",
+        "message": "NOTES.md of node 'writer' is not an editable file of this gate",
+        "path": "NOTES.md",
+    }
+    assert with_reject.status_code == 422
+    assert with_reject.json()["detail"]["code"] == "edits_with_reject"
+    assert malformed.status_code == 422
+    assert approved.status_code == 202
 
 
 async def test_approvals_that_do_not_fit_are_refused(postgres_url: str, redis_url: str) -> None:

@@ -22,7 +22,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import RunEvent
-from agentic_engine.gate import GateDecision
+from agentic_engine.gate import FileEdit, GateDecision
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.policy import PolicyOverrides
@@ -742,6 +742,64 @@ async def test_a_writer_s_commit_survives_the_gate(
     name, email = COMMIT_AUTHOR
     assert branch_log.branches == [f"agent/{run_id}/writer"]
     assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
+
+
+async def test_an_approval_s_edits_are_committed_on_the_writer_s_branch(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """Done when (3.6), backend: the gate shows the writer's files, and an approval's edits are
+    committed on its branch before the run goes on."""
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    branch_log = BranchLog()
+    sandboxes = RecordingSandboxes(
+        FakeSandboxManager(local_root=repos, base_dir=boxes), inspect=branch_log
+    )
+
+    async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
+        repo = RepoSource(url=str(repos / "hello"))
+        run_id = await submit(sessions, redis_url, load_spec("gate-approval.json"), repo)
+        await wait_for_status(sessions, run_id, "waiting")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+        sandboxes.closed.clear()
+        waiting = [e for e in await list_run_events(sessions, run_id) if e.type == "gate_waiting"]
+        assert waiting[-1].payload["changes"] == [
+            {
+                "node_id": "writer",
+                "path": "NOTES.md",
+                "old_path": None,
+                "status": "added",
+                "editable": True,
+                "reason": None,
+                "before": None,
+                "after": "# Notes\n\nWritten by an agent.\n",
+            }
+        ]
+
+        edit = FileEdit(node_id="writer", path="NOTES.md", content="# Notes\n\nReviewed.\n")
+        decision = GateDecision(decision="approve", edits=[edit])
+        await record_approval(sessions, run_id, "gate", decision)
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+
+    events = await list_run_events(sessions, run_id)
+    decided = next(e for e in events if e.type == "gate_decided")
+    assert decided.payload["edits"] == [edit.model_dump(mode="json")]
+    commits = decided.payload["commits"]
+    assert isinstance(commits, dict) and set(commits) == {"writer"}
+    name, email = COMMIT_AUTHOR
+    assert branch_log.commits == [
+        f"{name} <{email}>|Edit at gate gate",
+        "NOTES.md",
+        f"{name} <{email}>|Add NOTES.md",
+        "NOTES.md",
+    ]
 
 
 async def test_cancelling_a_run_at_a_gate_removes_the_sandbox_it_kept(

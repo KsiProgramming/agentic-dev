@@ -26,7 +26,7 @@ from agentic_engine.events import (
     NullEventSink,
     RunEventLog,
 )
-from agentic_engine.gate import GateDecision
+from agentic_engine.gate import FileChange, GateDecision, GateReview, GateReviewError
 from agentic_engine.graph.checkpoint import Checkpointer, thread_config
 from agentic_engine.graph.compile import CompiledWorkflow, compile_workflow, recursion_limit
 from agentic_engine.graph.state import (
@@ -53,6 +53,7 @@ async def run_workflow(
     tools: ToolExecutor | None = None,
     policy: Policy = PLATFORM_POLICY,
     spent: Decimal = Decimal(0),
+    review: GateReview | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -64,8 +65,9 @@ async def run_workflow(
     spent `spent`; once its spend reaches the budget it ends `failed` the same way, and the
     result says so.
     A gate pauses the run: it ends `waiting`, after `node_started` and `gate_waiting` (payload
-    `title`, `prompt`, `artifact`) for the gate, and `resume_workflow` continues it with the
-    decision.
+    `title`, `prompt`, `artifact`, `changes`) for the gate, and `resume_workflow` continues it
+    with the decision. `changes` are the files the writers that ran before the gate changed, from
+    `review` (none without one), and an approval's edits are committed through it.
 
     Every step is written to `sink` in order: `run_started`, then per node `node_started`, its
     agent events and `node_<status>`, then `run_<status>`. An exception from the graph is logged
@@ -82,10 +84,11 @@ async def run_workflow(
     await _start(log, spec, input)
     return await _finish(
         log,
-        lambda: compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget),
+        lambda: compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget, review),
         initial_state(input),
         _config(spec, log.run_id),
         budget,
+        review,
     )
 
 
@@ -103,6 +106,7 @@ async def resume_workflow(
     decision: GateDecision | None = None,
     policy: Policy = PLATFORM_POLICY,
     spent: Decimal = Decimal(0),
+    review: GateReview | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -120,7 +124,7 @@ async def resume_workflow(
     """
     log = RunEventLog(run_id, sink, next_seq=next_seq)
     budget = budget_meter(policy, spent)
-    graph = compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget)
+    graph = compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget, review)
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
     saved = snapshot.values
@@ -129,13 +133,13 @@ async def resume_workflow(
     completed = [n for n in ran if results[n].status == "completed"]
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
     if not saved:
-        return await _finish(log, lambda: graph, initial_state(input), config, budget)
+        return await _finish(log, lambda: graph, initial_state(input), config, budget, review)
     if not snapshot.next:
         return await _report(log, RunState(**saved))
     paused = any(task.interrupts for task in snapshot.tasks)
     resume = decision.model_dump(mode="json") if paused and decision else None
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
-    return await _finish(log, lambda: graph, start, config, budget)
+    return await _finish(log, lambda: graph, start, config, budget, review)
 
 
 def _config(spec: WorkflowSpec, run_id: UUID) -> RunnableConfig:
@@ -148,6 +152,7 @@ async def _finish(
     start: RunState | Command[Any] | None,
     config: RunnableConfig,
     budget: BudgetMeter | None = None,
+    review: GateReview | None = None,
 ) -> WorkflowRunResult:
     """Build the graph and invoke it from `start` (`None` continues from the checkpoint, a
     `Command` continues a paused gate), then report the end, or the pause at a gate. A failure
@@ -175,7 +180,7 @@ async def _finish(
         await log.emit(RUN_FAILED, payload={"error": f"{type(exc).__name__}: {exc}"})
         raise
     if paused is not None:
-        return await _wait(log, *paused)
+        return await _wait(log, *paused, review)
     return await _report(log, final)
 
 
@@ -213,10 +218,29 @@ async def _paused_gate(
 
 
 async def _wait(
-    log: RunEventLog, state: RunState, gate_id: str, request: dict[str, JsonValue]
+    log: RunEventLog,
+    state: RunState,
+    gate_id: str,
+    request: dict[str, JsonValue],
+    review: GateReview | None,
 ) -> WorkflowRunResult:
+    """Announce the pause at `gate_id`, with the files the writers that completed before it
+    changed. If they cannot be read, the gate pauses without them and says why
+    (`changes_error`)."""
+    ran = [n for n in dict.fromkeys(state["order"]) if state["results"][n].status == "completed"]
+    changes: list[FileChange] = []
+    error: str | None = None
+    if review is not None:
+        try:
+            changes = await review.changes(ran)
+        except GateReviewError as e:
+            error = str(e)
+    shown: list[JsonValue] = [c.model_dump(mode="json") for c in changes]
+    payload: dict[str, JsonValue] = {**request, "changes": shown}
+    if error is not None:
+        payload["changes_error"] = error
     await log.emit(NODE_STARTED, node_id=gate_id)
-    await log.emit(GATE_WAITING, node_id=gate_id, payload=request)
+    await log.emit(GATE_WAITING, node_id=gate_id, payload=payload)
     return _result(log, state, "waiting", waiting_at=gate_id)
 
 

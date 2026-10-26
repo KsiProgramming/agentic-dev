@@ -220,4 +220,6 @@ class Approval(Base):
     comment: Mapped[str | None] = mapped_column(Text)
     # Who decided; unset until users and auth exist.
     decided_by: Mapped[str | None] = mapped_column(String(255))
+    # An approval's edits (`FileEdit`s as JSON), which the gate commits; NULL is none.
+    edits: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
