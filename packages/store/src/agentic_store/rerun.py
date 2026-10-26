@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.spec import parse_spec
 from agentic_store.approvals import RunNotFoundError
+from agentic_store.audit import audit, usd
 from agentic_store.cancel import ENDED_STATUSES
 from agentic_store.models import Run
 from agentic_store.policy import run_policy
@@ -52,5 +53,17 @@ async def create_rerun(
                 template_parameters=original.template_parameters,
                 rerun_of=original.id,
             )
+        )
+        audit(
+            session,
+            original.workspace_id,
+            "run.rerun",
+            run_id=new_id,
+            details={
+                "rerun_of": str(original.id),
+                "template_id": original.template_id,
+                "repo_url": original.repo_url,
+                "budget_usd": usd(policy.budget_usd),
+            },
         )
     return new_id

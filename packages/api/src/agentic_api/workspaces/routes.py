@@ -1,12 +1,15 @@
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_api.workspaces.claude_keys import ClaudeKeyVerifier
 from agentic_api.workspaces.models import (
+    AuditEventOut,
+    AuditPage,
     ConnectionErrorDetail,
     ConnectionOut,
     LongContextPrice,
@@ -24,10 +27,13 @@ from agentic_engine.policy import PLATFORM_POLICY, effective_policy
 from agentic_runtime import DEFAULT_PRICES, PRICES_AS_OF
 from agentic_secrets import KeyProvider
 from agentic_store import (
+    AuditAction,
+    InvalidCursorError,
     WorkspaceNotFoundError,
     delete_connection,
     get_policy_overrides,
     get_workspace,
+    list_audit_events,
     list_connections,
     list_price_overrides,
     list_workspaces,
@@ -249,3 +255,42 @@ async def put_policy(
     except WorkspaceNotFoundError:
         raise _not_found(workspace_id) from None
     return await _policy(sessions, workspace_id)
+
+
+@router.get(
+    "/{workspace_id}/audit",
+    operation_id="listAuditEvents",
+    responses={**_NOT_FOUND, 422: {"description": "Invalid filter, `limit` or `cursor`"}},
+)
+async def audit_log(
+    workspace_id: UUID,
+    request: Request,
+    action: Annotated[
+        list[AuditAction] | None,
+        Query(description="Only these actions; may be given several times."),
+    ] = None,
+    run_id: Annotated[UUID | None, Query(description="Only entries about this run.")] = None,
+    since: Annotated[datetime | None, Query(description="Entries at or after this time.")] = None,
+    until: Annotated[datetime | None, Query(description="Entries before this time.")] = None,
+    cursor: Annotated[str | None, Query(description="`next_cursor` of the previous page.")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> AuditPage:
+    """The workspace's audit log, newest first, one page at a time: runs started, rerun,
+    cancelled and ended, gate decisions, and changes to connections, run limits and prices.
+    Filters combine. Entries are never changed or removed."""
+    try:
+        rows, next_cursor = await list_audit_events(
+            _sessions(request),
+            workspace_id,
+            limit=limit,
+            cursor=cursor,
+            actions=action or (),
+            run_id=run_id,
+            since=since,
+            until=until,
+        )
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    except InvalidCursorError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    return AuditPage(items=[AuditEventOut.of(row) for row in rows], next_cursor=next_cursor)

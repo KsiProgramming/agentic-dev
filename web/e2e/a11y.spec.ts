@@ -64,6 +64,14 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoSeriousIssues(page);
     });
 
+    test("audit log has no serious a11y issues", async ({ page, request }) => {
+      await startRun(request, [WRITER], "E2E audit a11y");
+      await open(page, "/audit");
+      await expect(page.locator("[data-action]").filter({ visible: true }).first()).toBeVisible();
+      await expect(page.getByRole("status")).toHaveCount(0); // the log has loaded
+      await expectNoSeriousIssues(page);
+    });
+
     test("settings has no serious a11y issues", async ({ page }) => {
       await open(page, "/settings");
       await expect(page.getByTestId("claude-status")).toBeVisible();

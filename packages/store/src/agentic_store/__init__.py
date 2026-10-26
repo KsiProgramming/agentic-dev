@@ -10,6 +10,8 @@ from agentic_store.approvals import (
     pending_decision,
     record_approval,
 )
+from agentic_store.audit import AUDIT_ACTIONS, AuditAction
+from agentic_store.audit_log import AuditEventRow, AuditRunRef, list_audit_events
 from agentic_store.cancel import (
     USER_CANCEL_REASON,
     RunEndedError,
@@ -44,6 +46,7 @@ from agentic_store.models import (
     CONNECTION_COLUMNS_CHECK,
     DEFAULT_WORKSPACE_ID,
     Approval,
+    AuditEvent,
     Base,
     Connection,
     Run,
@@ -85,6 +88,7 @@ from agentic_store.summaries import (
 )
 
 __all__ = [
+    "AUDIT_ACTIONS",
     "CONNECTION_COLUMNS_CHECK",
     "DEFAULT_WORKSPACE_ID",
     "GITHUB",
@@ -94,6 +98,10 @@ __all__ = [
     "AlreadyDecidedError",
     "Approval",
     "ApprovalError",
+    "AuditAction",
+    "AuditEvent",
+    "AuditEventRow",
+    "AuditRunRef",
     "Base",
     "Connection",
     "ConnectionInfo",
@@ -131,6 +139,7 @@ __all__ = [
     "get_run_summary",
     "get_workspace",
     "leased_run_ids",
+    "list_audit_events",
     "list_changed_run_summaries",
     "list_connections",
     "list_price_overrides",

@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_runtime import DEFAULT_PRICES, ModelPrice, PriceTable
+from agentic_store.audit import audit
 from agentic_store.connections import WorkspaceNotFoundError
 from agentic_store.models import Workspace, WorkspaceModelPrice
 
@@ -36,6 +37,17 @@ async def replace_price_overrides(
         workspace = await session.get(Workspace, workspace_id, with_for_update=True)
         if workspace is None:
             raise WorkspaceNotFoundError(workspace_id)
+        before = await _overrides(session, workspace_id)
+        added = sorted(overrides.keys() - before.keys())
+        removed = sorted(before.keys() - overrides.keys())
+        changed = sorted(m for m in overrides.keys() & before.keys() if overrides[m] != before[m])
+        if added or removed or changed:
+            audit(
+                session,
+                workspace_id,
+                "pricing.updated",
+                details={"added": [*added], "changed": [*changed], "removed": [*removed]},
+            )
         await session.execute(
             delete(WorkspaceModelPrice).where(WorkspaceModelPrice.workspace_id == workspace_id)
         )

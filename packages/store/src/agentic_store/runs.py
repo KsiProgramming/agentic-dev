@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_engine.policy import PLATFORM_POLICY, Policy
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_sandbox import RepoSource
+from agentic_store.audit import audit, usd
 from agentic_store.models import DEFAULT_WORKSPACE_ID, Run
 from agentic_store.policy import run_policy
 
@@ -60,6 +61,17 @@ async def create_run(
                 template_id=template_id,
                 template_parameters=template_parameters,
             )
+        )
+        audit(
+            session,
+            workspace_id,
+            "run.created",
+            run_id=run_id,
+            details={
+                "template_id": template_id,
+                "repo_url": repo.url if repo else None,
+                "budget_usd": usd(policy.budget_usd),
+            },
         )
     return run_id
 

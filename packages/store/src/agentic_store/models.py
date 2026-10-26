@@ -223,3 +223,29 @@ class Approval(Base):
     # An approval's edits (`FileEdit`s as JSON), which the gate commits; NULL is none.
     edits: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditEvent(Base):
+    """One action in a workspace, append only (a trigger refuses `UPDATE` and `DELETE`). It is
+    written in the transaction of the change it records (`agentic_store.audit`), so it exists if
+    and only if the change was committed. `actor_type` is `user` or `system` (the worker);
+    `actor_id` is unset until users and auth exist. `run_id` has no foreign key, so an entry
+    outlives what it names."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        CheckConstraint("actor_type IN ('user', 'system')", name="ck_audit_events_actor_type"),
+        # Listing a workspace's activity, newest first.
+        Index("ix_audit_events_workspace_at", "workspace_id", text("at DESC"), text("id DESC")),
+        Index("ix_audit_events_run_id", "run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    action: Mapped[str] = mapped_column(String(64))
+    actor_type: Mapped[str] = mapped_column(String(16))
+    actor_id: Mapped[str | None] = mapped_column(String(255))
+    run_id: Mapped[UUID | None]
+    node_id: Mapped[str | None] = mapped_column(String(64))
+    details: Mapped[dict[str, JsonValue]] = mapped_column(JSONB, server_default="{}")

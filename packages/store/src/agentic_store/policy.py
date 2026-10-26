@@ -20,6 +20,7 @@ from agentic_engine.spec import (
     validate_workflow,
 )
 from agentic_runtime.claude import DEFAULT_MODEL
+from agentic_store.audit import audit
 from agentic_store.connections import WorkspaceNotFoundError
 from agentic_store.models import RunEventRow, Workspace, WorkspacePolicy
 from agentic_store.pricing import price_table
@@ -54,6 +55,17 @@ async def replace_policy_overrides(
         workspace = await session.get(Workspace, workspace_id, with_for_update=True)
         if workspace is None:
             raise WorkspaceNotFoundError(workspace_id)
+        before = await _overrides(session, workspace_id)
+        if before != overrides:
+            audit(
+                session,
+                workspace_id,
+                "policy.updated",
+                details={
+                    "before": before.model_dump(mode="json"),
+                    "after": overrides.model_dump(mode="json"),
+                },
+            )
         row = await session.get(WorkspacePolicy, workspace_id)
         if row is None:
             row = WorkspacePolicy(workspace_id=workspace_id)

@@ -1,14 +1,14 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, field_validator
 
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyOverrides
 from agentic_github import installation_settings_url
 from agentic_runtime import ModelPrice
-from agentic_store import ConnectionInfo, WorkspaceInfo
+from agentic_store import AuditAction, AuditEventRow, ConnectionInfo, WorkspaceInfo
 
 Provider = Literal["claude", "github"]
 
@@ -244,3 +244,52 @@ class WorkspacePolicyOut(BaseModel):
     defaults: RunLimits = Field(description="The platform's limits, which are also the ceilings.")
     overrides: RunLimitOverrides
     effective: RunLimits
+
+
+class AuditActor(BaseModel):
+    """Who acted: `system` is the platform (a run ending); `user` has no `id` until sign-in."""
+
+    type: Literal["user", "system"]
+    id: str | None = None
+
+
+class AuditRunRef(BaseModel):
+    """The entry's run as it is now."""
+
+    template_id: str | None
+    repo_url: str | None
+    status: str
+
+
+class AuditEventOut(BaseModel):
+    """One action in the workspace. `details` depends on `action` (see the audit log contract);
+    it never holds file contents or secrets, and USD amounts are decimal strings."""
+
+    id: int
+    at: datetime
+    action: AuditAction
+    actor: AuditActor
+    run_id: UUID | None = None
+    node_id: str | None = None
+    details: dict[str, JsonValue]
+    run: AuditRunRef | None = None
+
+    @classmethod
+    def of(cls, row: AuditEventRow) -> "AuditEventOut":
+        return cls(
+            id=row.id,
+            at=row.at,
+            action=cast(AuditAction, row.action),
+            actor=AuditActor(type=cast(Literal["user", "system"], row.actor_type), id=row.actor_id),
+            run_id=row.run_id,
+            node_id=row.node_id,
+            details=row.details,
+            run=AuditRunRef.model_validate(row.run, from_attributes=True) if row.run else None,
+        )
+
+
+class AuditPage(BaseModel):
+    items: list[AuditEventOut]
+    next_cursor: str | None = Field(
+        default=None, description="Pass as `cursor` for the next page; unset on the last page."
+    )
