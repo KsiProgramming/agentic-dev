@@ -42,7 +42,9 @@ async def test_branch_changes_lists_every_kind_of_change(sandbox: Sandbox) -> No
     changes = await branch_changes(sandbox, tree.branch)
 
     assert changes.branch == tree.branch
-    assert changes.base_sha == await sh(sandbox, "git rev-parse HEAD")
+    # The clone is root's in the Docker sandbox: git needs it marked safe.
+    head = 'git -c safe.directory="$(pwd -P)" rev-parse HEAD'
+    assert changes.base_sha == await sh(sandbox, head)
     assert sorted(changes.files, key=lambda f: f.path) == [
         ChangedFile(path="README.md", status="modified", before_size=13, after_size=16),
         ChangedFile(path="docs/guide.md", status="deleted", before_size=9),
