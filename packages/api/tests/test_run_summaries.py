@@ -216,6 +216,17 @@ async def test_a_runs_detail_has_its_input_and_failure_reason(
     assert detail["template_id"] is None
     assert detail["rerun_of"] is None
     assert detail["duration_ms"] >= 0
+    assert WorkflowSpec.model_validate(detail["spec"]) == two_step_spec()
+
+
+async def test_only_a_runs_detail_has_its_spec(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    await add_run(sessions, workspace, *COMPLETED)
+
+    page = await list_runs(client, workspace)
+
+    assert "spec" not in page["items"][0]
 
 
 async def test_an_unknown_run_is_404(client: AsyncClient) -> None:

@@ -44,6 +44,8 @@ class RunSummaryRow:
     input: str
     failure_reason: str | None
     usage: "RunUsageRow"
+    # The workflow spec the run was created with; read only for one run's detail.
+    spec: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -102,7 +104,7 @@ def _select() -> Select[*tuple[Any, ...]]:
     )
 
 
-def _summary(row: Any) -> RunSummaryRow:
+def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
     return RunSummaryRow(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -128,6 +130,7 @@ def _summary(row: Any) -> RunSummaryRow:
             cost_complete=row.cost_complete,
             budget_usd=Decimal(row.budget_usd) if row.budget_usd is not None else None,
         ),
+        spec=spec,
     )
 
 
@@ -183,5 +186,6 @@ async def get_run_summary(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID
 ) -> RunSummaryRow | None:
     async with sessions() as session:
-        row = (await session.execute(_select().where(Run.id == run_id))).one_or_none()
-    return None if row is None else _summary(row)
+        query = _select().add_columns(Run.spec).where(Run.id == run_id)
+        row = (await session.execute(query)).one_or_none()
+    return None if row is None else _summary(row, spec=row.spec)

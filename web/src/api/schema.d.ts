@@ -109,7 +109,7 @@ export interface paths {
         };
         /**
          * Get
-         * @description One run's summary, with its `input` and, if it failed, why.
+         * @description One run's summary, with its `input`, its workflow `spec` and, if it failed, why.
          */
         get: operations["getRun"];
         put?: never;
@@ -967,6 +967,8 @@ export interface components {
              * @description Why the run failed, if it did.
              */
             failure_reason: string | null;
+            /** @description The workflow spec the run was created with. */
+            spec: components["schemas"]["WorkflowSpec"];
             /**
              * Duration Ms
              * @description From start to end; `null` until the run has ended.

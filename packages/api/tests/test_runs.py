@@ -32,7 +32,7 @@ from agentic_api.settings import Settings
 from agentic_engine.events import RunEventLog
 from agentic_engine.graph import checkpoint_serde
 from agentic_engine.policy import PolicyOverrides, effective_policy
-from agentic_engine.spec import parse_spec
+from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime import AgentRuntime, Failed
 from agentic_runtime.fake import FakeRuntime
 from agentic_store import (
@@ -916,6 +916,8 @@ async def test_an_ended_run_is_rerun_as_a_new_linked_run(
     )
     assert listed[0]["id"] == new_id and listed[0]["rerun_of"] == original_id
     assert detail["rerun_of"] == original_id
+    # The rerun's detail draws the same workflow as the original's.
+    assert WorkflowSpec.model_validate(detail["spec"]) == WorkflowSpec.model_validate(original.spec)
 
 
 async def test_a_rerun_of_a_rerun_links_to_its_parent(

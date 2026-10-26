@@ -241,6 +241,7 @@ class RunSummary(BaseModel):
 class RunDetail(RunSummary):
     input: str
     failure_reason: str | None = Field(description="Why the run failed, if it did.")
+    spec: WorkflowSpec = Field(description="The workflow spec the run was created with.")
 
 
 class RunSummaryPage(BaseModel):

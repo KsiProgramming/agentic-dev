@@ -318,7 +318,7 @@
           "runs"
         ],
         "summary": "Get",
-        "description": "One run's summary, with its `input` and, if it failed, why.",
+        "description": "One run's summary, with its `input`, its workflow `spec` and, if it failed, why.",
         "operationId": "getRun",
         "parameters": [
           {
@@ -2503,6 +2503,10 @@
             "title": "Failure Reason",
             "description": "Why the run failed, if it did."
           },
+          "spec": {
+            "$ref": "#/components/schemas/WorkflowSpec",
+            "description": "The workflow spec the run was created with."
+          },
           "duration_ms": {
             "anyOf": [
               {
@@ -2534,6 +2538,7 @@
           "usage",
           "input",
           "failure_reason",
+          "spec",
           "duration_ms"
         ],
         "title": "RunDetail"

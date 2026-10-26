@@ -31,6 +31,7 @@ from agentic_api.runs.models import (
 from agentic_api.workspaces.models import to_usd
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
+from agentic_engine.spec import WorkflowSpec
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
@@ -231,11 +232,16 @@ async def stream_summaries(
     responses={404: {"description": "No run with this id"}},
 )
 async def get(run_id: UUID, request: Request) -> RunDetail:
-    """One run's summary, with its `input` and, if it failed, why."""
+    """One run's summary, with its `input`, its workflow `spec` and, if it failed, why."""
     row = await get_run_summary(_sessions(request), run_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
-    return RunDetail(**_summary_fields(row), input=row.input, failure_reason=row.failure_reason)
+    return RunDetail(
+        **_summary_fields(row),
+        input=row.input,
+        failure_reason=row.failure_reason,
+        spec=WorkflowSpec.model_validate(row.spec),
+    )
 
 
 @router.post(

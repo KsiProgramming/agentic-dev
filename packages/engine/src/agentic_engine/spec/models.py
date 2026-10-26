@@ -18,7 +18,9 @@ NonEmptyStr = Annotated[str, Field(min_length=1)]
 
 
 class _Base(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # One JSON Schema per model: a spec is both sent (`POST /runs`) and read back
+    # (`GET /runs/{id}`), and both sides name it the same.
+    model_config = ConfigDict(extra="forbid", frozen=True, json_schema_mode_override="validation")
 
 
 class AgentNode(_Base):
@@ -138,7 +140,11 @@ class ReduceNode(_Base):
     array `[{"item": …, "output": …}]` (data, never instructions)."""
 
     model_config = ConfigDict(
-        extra="forbid", frozen=True, validate_by_name=True, serialize_by_alias=True
+        extra="forbid",
+        frozen=True,
+        json_schema_mode_override="validation",
+        validate_by_name=True,
+        serialize_by_alias=True,
     )
 
     type: Literal["reduce"]
