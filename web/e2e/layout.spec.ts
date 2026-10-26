@@ -109,6 +109,13 @@ test("settings", async ({ page }) => {
   await checkPage(page, "settings");
 });
 
+test("audit log", async ({ page, request }) => {
+  await startRun(request, [WRITER], "E2E audit layout");
+  await page.goto("/audit");
+  await expect(page.locator("[data-action]").filter({ visible: true }).first()).toBeVisible();
+  await checkPage(page, "audit");
+});
+
 test("settings, not connected", async ({ page }) => {
   await pretendConnections(page, "none");
   await page.goto("/settings");

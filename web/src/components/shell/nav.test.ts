@@ -16,6 +16,7 @@ describe("isActive", () => {
 describe("breadcrumbsFor", () => {
   test("a section page is the only crumb", () => {
     expect(breadcrumbsFor("/settings")).toEqual([{ label: "Settings" }]);
+    expect(breadcrumbsFor("/audit")).toEqual([{ label: "Audit log" }]);
   });
 
   test("a run links back to Runs and shortens its id", () => {

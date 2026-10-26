@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import GATE_WAITING
 from agentic_engine.gate import EditError, EditErrorCode, FileChange, GateDecision, check_edits
+from agentic_store.audit import audit
 from agentic_store.models import Approval, Run, RunEventRow
 
 
@@ -80,6 +81,7 @@ async def record_approval(
             except EditError as e:
                 raise InvalidEditsError(e.code, str(e), e.path) from e
             decision = decision.model_copy(update={"edits": edits})
+            workspace_id = run.workspace_id
             session.add(
                 Approval(
                     run_id=run_id,
@@ -94,6 +96,19 @@ async def record_approval(
                 update(Run)
                 .where(Run.id == run_id)
                 .values(status="queued", worker_id=None, lease_expires_at=None, attempt=0)
+            )
+            audit(
+                session,
+                workspace_id,
+                "gate.approved" if decision.decision == "approve" else "gate.rejected",
+                run_id=run_id,
+                node_id=node_id,
+                # Paths only: the edited contents stay in the approval and the run's events.
+                details={
+                    "comment": decision.comment,
+                    "edited_files": len(edits),
+                    "edited_paths": [e.path for e in edits],
+                },
             )
     except IntegrityError as e:
         raise AlreadyDecidedError(f"gate {node_id!r} of run {run_id} was already decided") from e

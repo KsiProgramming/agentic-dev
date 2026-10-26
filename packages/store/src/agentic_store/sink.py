@@ -20,6 +20,7 @@ from agentic_engine.events import (
     RunStatus,
 )
 from agentic_runtime import Usage
+from agentic_store.audit import audit, usd
 from agentic_store.models import Run, RunEventRow
 
 USAGE: Final = "usage"
@@ -106,7 +107,8 @@ class PostgresEventSink:
 
     The run's row must exist (see `create_run`). In the same transaction each event updates the
     run's summary columns (see `summary_values`): `run_started` and `run_resumed` set it to
-    `running`, `gate_waiting` to `waiting`, and the final run event sets its end status."""
+    `running`, `gate_waiting` to `waiting`, and the final run event sets its end status and adds
+    the run's `run.ended` audit entry."""
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
@@ -129,10 +131,34 @@ class PostgresEventSink:
                     .where(Run.id == event.run_id)
                     .values(**values, updated_at=event.created_at)
                 )
+            if event.type in RUN_END_STATUS:
+                await _audit_end(session, event)
             # Delivered on commit, so a listener that wakes up can already read the row.
             await session.execute(
                 select(func.pg_notify(RUN_EVENTS_CHANNEL, f"{event.run_id}:{event.seq}"))
             )
+
+
+async def _audit_end(session: AsyncSession, event: RunEvent) -> None:
+    """The `run.ended` audit entry, from the run's summary as the end event left it."""
+    run = await session.get(Run, event.run_id)
+    if run is None:
+        return
+    audit(
+        session,
+        run.workspace_id,
+        "run.ended",
+        actor_type="system",
+        run_id=run.id,
+        at=event.created_at,
+        details={
+            "status": run.status,
+            "failure_reason": run.failure_reason,
+            "pr_url": run.pr_url,
+            "estimated_usd": usd(run.estimated_usd),
+            "cost_complete": run.cost_complete,
+        },
+    )
 
 
 async def max_event_seq(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> int:

@@ -25,6 +25,7 @@ from agentic_secrets import (
     hint,
     new_dek,
 )
+from agentic_store.audit import audit
 from agentic_store.models import Connection, Workspace
 
 log = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ async def put_connection(
                 Connection.workspace_id == workspace_id, Connection.provider == provider
             )
         )
+        replaced = connection is not None
         if connection is None:
             connection = Connection(
                 id=uuid4(), workspace_id=workspace_id, provider=provider, created_at=now
@@ -122,6 +124,12 @@ async def put_connection(
         connection.secret_ciphertext = ciphertext
         connection.key_hint = hint(secret)
         connection.updated_at = now
+        audit(
+            session,
+            workspace_id,
+            "connection.added",
+            details={"provider": provider, "key_hint": connection.key_hint, "replaced": replaced},
+        )
         return _connection_info(connection)
 
 
@@ -142,6 +150,7 @@ async def put_github_connection(
                 Connection.workspace_id == workspace_id, Connection.provider == GITHUB
             )
         )
+        replaced = connection is not None
         if connection is None:
             connection = Connection(
                 id=uuid4(), workspace_id=workspace_id, provider=GITHUB, created_at=now
@@ -151,6 +160,12 @@ async def put_github_connection(
         connection.account_login = account_login
         connection.account_type = account_type
         connection.updated_at = now
+        audit(
+            session,
+            workspace_id,
+            "connection.added",
+            details={"provider": GITHUB, "account_login": account_login, "replaced": replaced},
+        )
         return _connection_info(connection)
 
 
@@ -175,11 +190,24 @@ async def delete_connection(
     async with sessions.begin() as session:
         if await session.get(Workspace, workspace_id) is None:
             raise WorkspaceNotFoundError(workspace_id)
-        deleted = await session.scalar(
-            delete(Connection)
-            .where(Connection.workspace_id == workspace_id, Connection.provider == provider)
-            .returning(Connection.id)
-        )
+        deleted = (
+            await session.execute(
+                delete(Connection)
+                .where(Connection.workspace_id == workspace_id, Connection.provider == provider)
+                .returning(Connection.key_hint, Connection.account_login)
+            )
+        ).first()
+        if deleted is not None:
+            audit(
+                session,
+                workspace_id,
+                "connection.removed",
+                details={
+                    "provider": provider,
+                    "key_hint": deleted.key_hint,
+                    "account_login": deleted.account_login,
+                },
+            )
     return deleted is not None
 
 

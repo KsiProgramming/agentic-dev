@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import RUN_END_STATUS
 from agentic_store.approvals import RunNotFoundError
+from agentic_store.audit import audit
 from agentic_store.models import Run
 
 USER_CANCEL_REASON: Final = "cancelled by user"
@@ -37,6 +38,8 @@ async def request_cancel(sessions: async_sessionmaker[AsyncSession], run_id: UUI
             raise RunNotFoundError(f"run {run_id} not found")
         # Read before the update, which also refreshes `run`.
         before = run.status
+        first_request = run.cancel_requested_at is None
+        workspace_id = run.workspace_id
         if before in ENDED_STATUSES:
             raise RunEndedError(f"run {run_id} has already ended ({before})")
         values: dict[str, object] = {
@@ -50,6 +53,14 @@ async def request_cancel(sessions: async_sessionmaker[AsyncSession], run_id: UUI
                 "attempt": 0,
             }
         await session.execute(update(Run).where(Run.id == run_id).values(values))
+        if first_request:
+            audit(
+                session,
+                workspace_id,
+                "run.cancel_requested",
+                run_id=run_id,
+                details={"status": before},
+            )
         return before
 
 

@@ -322,6 +322,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit Log
+         * @description The workspace's audit log, newest first, one page at a time: runs started, rerun,
+         *     cancelled and ended, gate decisions, and changes to connections, run limits and prices.
+         *     Filters combine. Entries are never changed or removed.
+         */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/connections/github/install": {
         parameters: {
             query?: never;
@@ -529,6 +551,70 @@ export interface components {
              * @default 0
              */
             edited_files: number;
+        };
+        /**
+         * AuditActor
+         * @description Who acted: `system` is the platform (a run ending); `user` has no `id` until sign-in.
+         */
+        AuditActor: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "user" | "system";
+            /** Id */
+            id?: string | null;
+        };
+        /**
+         * AuditEventOut
+         * @description One action in the workspace. `details` depends on `action` (see the audit log contract);
+         *     it never holds file contents or secrets, and USD amounts are decimal strings.
+         */
+        AuditEventOut: {
+            /** Id */
+            id: number;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated";
+            actor: components["schemas"]["AuditActor"];
+            /** Run Id */
+            run_id?: string | null;
+            /** Node Id */
+            node_id?: string | null;
+            /** Details */
+            details: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            run?: components["schemas"]["AuditRunRef"] | null;
+        };
+        /** AuditPage */
+        AuditPage: {
+            /** Items */
+            items: components["schemas"]["AuditEventOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page; unset on the last page.
+             */
+            next_cursor?: string | null;
+        };
+        /**
+         * AuditRunRef
+         * @description The entry's run as it is now.
+         */
+        AuditRunRef: {
+            /** Template Id */
+            template_id: string | null;
+            /** Repo Url */
+            repo_url: string | null;
+            /** Status */
+            status: string;
         };
         /** CancelResponse */
         CancelResponse: {
@@ -2173,6 +2259,54 @@ export interface operations {
                 content?: never;
             };
             /** @description A limit below 1 or above the platform's, or a budget out of range */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                /** @description Only these actions; may be given several times. */
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated")[] | null;
+                /** @description Only entries about this run. */
+                run_id?: string | null;
+                /** @description Entries at or after this time. */
+                since?: string | null;
+                /** @description Entries before this time. */
+                until?: string | null;
+                /** @description `next_cursor` of the previous page. */
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid filter, `limit` or `cursor` */
             422: {
                 headers: {
                     [name: string]: unknown;

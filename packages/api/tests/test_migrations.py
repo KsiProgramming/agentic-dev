@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ from alembic import command
 from alembic.config import Config
 from langgraph.checkpoint.postgres.base import BasePostgresSaver
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 pytestmark = pytest.mark.integration
@@ -37,7 +39,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0018_approval_edits"
+    assert version == "0019_audit_events"
     assert {
         "runs",
         "run_events",
@@ -46,6 +48,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         "approvals",
         "workspace_model_prices",
         "workspace_policies",
+        "audit_events",
     } | CHECKPOINT_TABLES <= set(table_names)
     # The migrations match the `agentic_store` models.
     await asyncio.to_thread(command.check, config)
@@ -264,3 +267,107 @@ async def test_the_approval_edits_revision_downgrades_and_upgrades(postgres_url:
     assert "edits" not in await approval_columns(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
     assert "edits" in await approval_columns(postgres_url)
+
+
+async def test_the_audit_revision_backfills_runs_and_approvals(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.downgrade, config, "0018_approval_edits")
+    assert "audit_events" not in await table_names(postgres_url)
+
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        insert_run = (
+            "INSERT INTO runs (id, workspace_id, status, spec, created_at, finished_at, "
+            "cancel_requested_at, rerun_of, template_id, policy) VALUES (gen_random_uuid(), "
+            "'00000000-0000-0000-0000-000000000001', :status, '{}', :created, :finished, "
+            ":cancel, :rerun_of, 'audit-backfill', "
+            '\'{"budget_usd": "5"}\'::jsonb) RETURNING id'
+        )
+        first = (
+            await conn.execute(
+                text(insert_run),
+                {
+                    "status": "completed",
+                    "created": datetime.fromisoformat("2026-10-01T10:00:00+00:00"),
+                    "finished": datetime.fromisoformat("2026-10-01T10:05:00+00:00"),
+                    "cancel": None,
+                    "rerun_of": None,
+                },
+            )
+        ).scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO approvals (run_id, node_id, decision, comment, edits, created_at) "
+                "VALUES (:run, 'approve', 'approve', 'ok', "
+                '\'[{"node_id": "w", "path": "a.md", "content": "x"}]\'::jsonb, '
+                "'2026-10-01T10:02:00Z')"
+            ),
+            {"run": first},
+        )
+        second = (
+            await conn.execute(
+                text(insert_run),
+                {
+                    "status": "cancelled",
+                    "created": datetime.fromisoformat("2026-10-01T11:00:00+00:00"),
+                    "finished": datetime.fromisoformat("2026-10-01T11:01:00+00:00"),
+                    "cancel": datetime.fromisoformat("2026-10-01T11:00:30+00:00"),
+                    "rerun_of": first,
+                },
+            )
+        ).scalar_one()
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT action, actor_type, run_id, node_id, details FROM audit_events "
+                    "WHERE run_id IN (:a, :b) ORDER BY id"
+                ),
+                {"a": first, "b": second},
+            )
+        ).all()
+    await engine.dispose()
+
+    assert [(r.action, r.actor_type, r.run_id) for r in rows] == [
+        ("run.created", "user", first),
+        ("gate.approved", "user", first),
+        ("run.ended", "system", first),
+        ("run.rerun", "user", second),
+        ("run.cancel_requested", "user", second),
+        ("run.ended", "system", second),
+    ]
+    assert rows[0].details == {"template_id": "audit-backfill", "repo_url": None, "budget_usd": "5"}
+    assert rows[1].node_id == "approve"
+    assert rows[1].details == {"comment": "ok", "edited_files": 1, "edited_paths": ["a.md"]}
+    assert rows[3].details["rerun_of"] == str(first)
+    assert rows[5].details["status"] == "cancelled"
+
+
+async def test_audit_events_are_append_only(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO audit_events (workspace_id, action, actor_type) "
+                "VALUES ('00000000-0000-0000-0000-000000000001', 'policy.updated', 'user')"
+            )
+        )
+    for statement in (
+        "UPDATE audit_events SET action = 'x'",
+        "DELETE FROM audit_events",
+    ):
+        with pytest.raises(DBAPIError, match="append-only"):
+            async with engine.begin() as conn:
+                await conn.execute(text(statement))
+    await engine.dispose()
+
+    await asyncio.to_thread(command.downgrade, config, "0018_approval_edits")
+    assert "audit_events" not in await table_names(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert "audit_events" in await table_names(postgres_url)

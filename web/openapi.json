@@ -1007,6 +1007,166 @@
         }
       }
     },
+    "/workspaces/{workspace_id}/audit": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Audit Log",
+        "description": "The workspace's audit log, newest first, one page at a time: runs started, rerun,\ncancelled and ended, gate decisions, and changes to connections, run limits and prices.\nFilters combine. Entries are never changed or removed.",
+        "operationId": "listAuditEvents",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "run.created",
+                      "run.rerun",
+                      "run.cancel_requested",
+                      "run.ended",
+                      "gate.approved",
+                      "gate.rejected",
+                      "connection.added",
+                      "connection.removed",
+                      "policy.updated",
+                      "pricing.updated"
+                    ],
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only these actions; may be given several times.",
+              "title": "Action"
+            },
+            "description": "Only these actions; may be given several times."
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries about this run.",
+              "title": "Run Id"
+            },
+            "description": "Only entries about this run."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entries at or after this time.",
+              "title": "Since"
+            },
+            "description": "Entries at or after this time."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entries before this time.",
+              "title": "Until"
+            },
+            "description": "Entries before this time."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` of the previous page.",
+              "title": "Cursor"
+            },
+            "description": "`next_cursor` of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Invalid filter, `limit` or `cursor`"
+          }
+        }
+      }
+    },
     "/workspaces/{workspace_id}/connections/github/install": {
       "post": {
         "tags": [
@@ -1485,6 +1645,183 @@
           "decision"
         ],
         "title": "ApprovalResponse"
+      },
+      "AuditActor": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "system"
+            ],
+            "title": "Type"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "AuditActor",
+        "description": "Who acted: `system` is the platform (a run ending); `user` has no `id` until sign-in."
+      },
+      "AuditEventOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "run.created",
+              "run.rerun",
+              "run.cancel_requested",
+              "run.ended",
+              "gate.approved",
+              "gate.rejected",
+              "connection.added",
+              "connection.removed",
+              "policy.updated",
+              "pricing.updated"
+            ],
+            "title": "Action"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/AuditActor"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "details": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Details"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuditRunRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "action",
+          "actor",
+          "details"
+        ],
+        "title": "AuditEventOut",
+        "description": "One action in the workspace. `details` depends on `action` (see the audit log contract);\nit never holds file contents or secrets, and USD amounts are decimal strings."
+      },
+      "AuditPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass as `cursor` for the next page; unset on the last page."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AuditPage"
+      },
+      "AuditRunRef": {
+        "properties": {
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "repo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Url"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_id",
+          "repo_url",
+          "status"
+        ],
+        "title": "AuditRunRef",
+        "description": "The entry's run as it is now."
       },
       "CancelResponse": {
         "properties": {

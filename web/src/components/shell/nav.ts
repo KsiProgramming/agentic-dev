@@ -1,4 +1,10 @@
-import { HistoryIcon, LayoutTemplateIcon, SettingsIcon, type LucideIcon } from "lucide-react";
+import {
+  HistoryIcon,
+  LayoutTemplateIcon,
+  ScrollTextIcon,
+  SettingsIcon,
+  type LucideIcon,
+} from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -11,6 +17,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/runs", label: "Runs", icon: HistoryIcon },
   { href: "/templates", label: "Templates", icon: LayoutTemplateIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
+  { href: "/audit", label: "Audit log", icon: ScrollTextIcon },
 ];
 
 /** Whether `href`'s section contains `pathname`: `/runs/abc` is under Runs, `/runsx` is not. */

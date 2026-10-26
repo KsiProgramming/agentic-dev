@@ -82,7 +82,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 
 ### Layout
 
-- **App shell:** a left sidebar (Runs, Templates, Settings; workspace switcher at the top) and a top bar (breadcrumbs, theme, user). The sidebar collapses to icons from 1024 to 1279 px and becomes a drawer below 1024 px.
+- **App shell:** a left sidebar (Runs, Templates, Settings, Audit log; workspace switcher at the top) and a top bar (breadcrumbs, theme, user). The sidebar collapses to icons from 1024 to 1279 px and becomes a drawer below 1024 px.
 - **Breakpoints:** mobile-first. Designed and tested at 375, 768, 1024 and 1440 px. No horizontal page scroll at any width. Wide content (JSON, logs) scrolls inside its own box.
 - **Page header:** title, short description and primary actions on the right. On mobile the actions stack below the title.
 - **Tables on desktop, cards on mobile:** a list keeps its columns at ≥ 768 px and turns into stacked cards below that.
@@ -133,6 +133,13 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - **Waiting signals:** while a gate is waiting, the run's tab title is "● Needs approval · Run <id8>". While any run in the workspace waits, every other page's title gets an "(N) ● Needs approval · " prefix, and "Runs" in the sidebar (and the mobile menu button) shows a count badge. Approvals are made on the console only: the runs list links waiting runs to it with "Review".
 - **Live updates:** while a run executes, a live line at the end of the timeline says where it is and what it is doing ("writer · Reading `src/app.ts`…"). The page opens at the top; auto-scroll follows new content only once the user is at the bottom. Otherwise a "Jump to latest" pill appears.
 
+### Audit log
+
+- **Page (`/audit`):** the workspace's activity, newest first: page header (title, one-line description, Refresh), filters, then the list. It does not update live; Refresh reloads it.
+- **List:** a table from 768 px with Time, Action, Actor, Run and Details; stacked cards below. Time is relative with the exact time in a tooltip (`tabular-nums`). Action is icon + label. Actor is "System" for the worker, else "—" with a tooltip saying names come with sign-in. Run is the run's id8 in mono, linking to its console, with the template and repo under it.
+- **Details:** one line of text per action, built by a formatter from `details` ("Approved `approve` with edits to 2 files · "looks good""). Never rendered as HTML or Markdown. An unknown action shows its name.
+- **Filters:** category (Runs, Approvals, Settings), run id and a date range, kept in the URL. "Load more" fetches the next page.
+
 ### Interaction and accessibility
 
 - WCAG 2.2 AA: visible focus rings, colour contrast ≥ 4.5:1, every action reachable by keyboard, `aria-live="polite"` for run status changes.
@@ -175,6 +182,26 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - On approve, the gate commits the edits in each writer's worktree before it completes: one commit per writer, `Edit at gate <id>` with an `Edited-by: reviewer` trailer, by the agent identity, of only the edited files. `gate_decided` adds `edits` and `commits` (each writer's new tip).
   - It is idempotent: a gate that runs again after a crash finds the files already edited and makes no second commit.
   - Edits that cannot be committed fail the gate node, and so the run. A run is never approved without its edits.
+
+## Audit log (API contract)
+
+- `audit_events` is append-only: a trigger refuses `UPDATE` and `DELETE`. Columns: `id`, `workspace_id`, `at`, `action`, `actor_type` (`user` | `system`), `actor_id` (`NULL` until users exist), `run_id`, `node_id`, `details` (JSON).
+- Each row is written in the transaction of the change it records, so a row exists if and only if the change was committed:
+
+  | Action | Written by | `details` |
+  |---|---|---|
+  | `run.created` | `create_run` | `template_id`, `repo_url`, `budget_usd` |
+  | `run.rerun` | `create_rerun` | `rerun_of`, `budget_usd` |
+  | `run.cancel_requested` | `request_cancel`, first request only | `status` (before) |
+  | `run.ended` | the event sink, on the run's end event; actor `system` | `status`, `failure_reason`, `pr_url`, `estimated_usd` |
+  | `gate.approved`, `gate.rejected` | `record_approval` | `comment`, `edited_files`, `edited_paths` |
+  | `connection.added`, `connection.removed` | the connection writers | `provider`, `key_hint` or `account_login` |
+  | `policy.updated` | `replace_policy_overrides` | `before`, `after` (the workspace's overrides) |
+  | `pricing.updated` | `replace_price_overrides` | `added`, `changed`, `removed` (model names) |
+
+- `details` never holds file contents or secrets: edited paths, not edits; key hints, not keys. USD amounts are decimal strings.
+- Runs and approvals made before the table existed are backfilled by its migration. Older settings changes are not recorded.
+- `GET /workspaces/{id}/audit`: `{items, next_cursor}`, newest first, with `cursor`, `limit` (1–200, default 50), `action` (repeatable), `run_id`, `since` and `until`. Each item: `id`, `at`, `action`, `actor {type, id}`, `run_id`, `node_id`, `details`, and `run {template_id, repo_url, status}` when it has a run. `404` is an unknown workspace, `422` a bad cursor or filter.
 
 ## Security & secrets
 
@@ -231,3 +258,4 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | Run graph | Drawn from the run's stored spec with a hand-written tree layout; nodes are buttons | One spec, many views: nodes that have not run yet are shown, and graph and timeline read the same status. The spec is a tree, so no layout library is needed yet; ELK (`elkjs`) replaces the layout when branches arrive (4.1 / 4.6), as Dagre mislays sub-flows linked to outside nodes. A button per node gives one tab stop and native Enter/Space, which React Flow's own node focus (select on Enter) does not; nodes keep `pointer-events: all`, which React Flow turns off on unselectable nodes. |
 | Validation | `200` with structured issues from one engine validator | The canvas and the Architect read issues as data, not as failures. One validator means they never disagree with what a run accepts. |
 | Gate edits | The writers' changed files in `gate_waiting`, edits committed by the gate node | The PR is pushed from the writers' branches, so editing them is what changes it. The log records what the approver saw and changed. Committing inside the gate node checkpoints it with the gate, and the next node (`openPR`) needs no change. |
+| Audit log | An append-only `audit_events` table written in each change's transaction | It records settings changes no other table keeps, and its rows never change, unlike `runs`. Writing it with the change means no row is missing or invented. Who acted is a nullable `actor_id` until users exist. |
