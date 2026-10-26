@@ -12,8 +12,8 @@ Checkable as: on the Graph tab of a docs run, every node of the run's spec is dr
 - [ ] `GET /runs` items do not include `spec`.
 
 ### Mapping and status (Vitest, no DOM)
-- [ ] `specToGraph` on the docs template spec: one node per spec node, the map drawn as a container holding its body, `reduce` with a dashed edge from the map, edges in sequence order.
-- [ ] Specs with a loop (with a nested sequence body), a gate and a tool node give the expected nodes, parents and edges; the layout is deterministic (same input → same positions) and no two sibling nodes overlap.
+- [ ] `specToGraph` on the docs run's spec (`fixtures/docs-run-spec.json`, matching `docs-run.json`): one node per spec node, the map drawn as a container holding its body, the `reduce` edge from its map labelled "reduces", edges in sequence order.
+- [ ] Specs with a loop (with a nested sequence body), a gate and a tool node give the expected nodes, parents and edges; a reduce that is not right after its map gets a dashed edge; the layout is deterministic (same input → same positions) and no two sibling nodes overlap.
 - [ ] `nodeStatuses`: nodes with no events are "Not started"; running, waiting, completed, failed and cancelled steps map to the right status; a map body node with one failed item is "Failed"; map and loop summaries read "3 of 5 items · 1 failed" and "iteration 2 of 5".
 - [ ] `stepsForNode` returns one step per map item and per loop iteration for body nodes.
 
@@ -22,10 +22,10 @@ Checkable as: on the Graph tab of a docs run, every node of the run's spec is dr
 - [ ] Clicking an agent node opens the detail sheet with its merged message and tool call lines; a not-started node shows "This step has not run yet".
 - [ ] New events (SSE) change a node's status without re-laying out the graph.
 - [ ] `?tab=graph` opens the Graph tab; switching tabs updates the URL.
-- [ ] Keyboard: every node is reachable with Tab and has an accessible name ("writer, agent, Completed"); Enter or Space on a focused node opens its detail sheet; Escape closes it and focus returns to the node.
+- [ ] Keyboard: every node is a button reachable with Tab, with an accessible name ("worker, agent, Done"); Enter or Space on a focused node opens its detail sheet; Escape closes it and focus returns to the node.
 
 ### End to end (Playwright, CI "Compose smoke test + e2e")
-- [ ] `graph.spec.ts`: on the docs fixture run, open Graph, click a map worker, see what it did per item; the waiting gate node shows "Needs approval" and the approval dock is still visible.
+- [ ] `graph.spec.ts`: on a run of a map, a reduce and a gate (fake runtime), open Graph, click the map worker, see what it did per item; the waiting gate node shows "Needs approval" and the approval dock is still visible.
 - [ ] axe finds no serious issues on the Graph tab, light and dark.
 - [ ] Keyboard only: from the Graph tab trigger, Tab to a map worker node, press Enter, and the detail sheet opens with what it did; the approval dock's `A` / `R` shortcuts still work while the graph has focus but not while the sheet is open.
 - [ ] Screenshots at 375, 768 and 1440 px show the graph in its own box with no horizontal page scroll.

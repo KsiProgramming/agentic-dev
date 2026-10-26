@@ -41,3 +41,14 @@ export const FAILING = {
   until: "iteration",
   max_iterations: 2,
 };
+
+/** A map over two items, each written by an agent, then combined: containers on the graph. */
+export const MAP = {
+  type: "map",
+  id: "each",
+  over: '["alpha", "beta"]',
+  max_concurrency: 2,
+  body: { type: "agent", id: "worker", role: "Writer", instructions: "Say hello." },
+};
+
+export const COMBINE = { type: "reduce", id: "combine", from: "each", strategy: "concat" };

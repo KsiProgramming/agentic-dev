@@ -24,14 +24,14 @@ Unblocks: 5.2 (canvas renders a spec, reusing the spec → graph mapping and nod
   - a `sequence` draws its steps as a vertical chain; the root sequence and sequences nested in a sequence are not drawn as boxes;
   - `loop` and `map` are **container groups** with their body drawn inside them (React Flow parent nodes);
   - `agent`, `tool`, `gate` and `reduce` are leaf nodes showing an icon per type, the node id (mono) and its role/tool/title in one line;
-  - `reduce.from` is drawn as a dashed reference edge from its map.
+  - a `reduce` is linked to its map, labelled "reduces" (dashed when the map is not the step right before it).
 - **Status overlay** `nodeStatuses(spec, steps)`: each node's status from the timeline (`buildTimeline`), by node id. Nodes not started yet are "Not started" (muted). Container summaries: a map shows "3 of 5 items · 1 failed", a loop "iteration 2 of 5". A body node inside a map takes the aggregate status of its items (failed > running > waiting > completed). Updates arrive live from the existing SSE stream; the layout is computed once per spec, only node data changes.
 - **Graph tab:** a third tab "Graph" (`?tab=graph`) next to Timeline and Raw events.
   - React Flow read-only: no dragging, no connecting, no deleting; pan and zoom allowed; `fitView` on open; zoom controls; light and dark theme from tokens.
   - The canvas sits in its own bounded box (height from the viewport, reserved padding for the approval dock), so it never causes page scroll sideways at 375, 768 or 1440 px.
   - The waiting gate shows "Needs approval"; a failed node shows "Failed". Status is icon + label.
 - **Node detail:** clicking (or Enter on a focused node) opens a sheet (side sheet 480 px from 768 px, bottom sheet below) with the 2.5 step view for that node: messages, tool calls, usage footer. For a body node in a map, the sheet lists the node's run per item (by item name); for a loop body node, per iteration. A not-started node says "This step has not run yet". A gate node shows the waiting marker linking to the dock.
-- **Accessibility:** nodes are focusable and reachable by keyboard, each has an accessible name ("writer, agent, Completed"), and status changes keep the console's existing `aria-live` announcement.
+- **Accessibility:** nodes are focusable and reachable by keyboard, each has an accessible name ("worker, agent, Done"), and status changes keep the console's existing `aria-live` announcement.
 - **Docs:** `specs/tech-stack.md` "Graph tab" line replaced with the rules above.
 
 ### Out of scope
