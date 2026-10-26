@@ -29,6 +29,9 @@ import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 
 import { gateSummary, type PendingGate } from "../gates";
 import { AgentMessage } from "./agent-message";
+import type { GateFile } from "./gate-files";
+import { GateReviewSheet } from "./gate-review-sheet";
+import { useGateEdits } from "./use-gate-edits";
 import { useGateShortcuts } from "./use-gate-shortcuts";
 
 type Decision = "approve" | "reject";
@@ -38,6 +41,46 @@ export const DOCK_ID = "approval-dock";
 
 /** Longest reject comment, as the API accepts. */
 const COMMENT_MAX = 2000;
+
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/** Approve, or "Approve with N edits" once the approver edited files. */
+function ApproveButton({
+  edits,
+  pending,
+  disabled,
+  onClick,
+  shortcut,
+}: {
+  edits: number;
+  pending: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  shortcut: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-keyshortcuts={shortcut ? "A" : undefined}
+    >
+      {pending ? (
+        <LoaderCircleIcon
+          aria-hidden="true"
+          data-icon="inline-start"
+          className="motion-safe:animate-spin"
+        />
+      ) : (
+        <CheckIcon aria-hidden="true" data-icon="inline-start" />
+      )}
+      {edits > 0 ? `Approve with ${plural(edits, "edit")}` : "Approve"}
+      {shortcut ? <Kbd>A</Kbd> : null}
+    </Button>
+  );
+}
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
@@ -94,7 +137,8 @@ const DockBar = forwardRef<HTMLElement, { children: ReactNode }>(function DockBa
  * The approval dock (tech-stack → Approval dock): while a gate waits, a bar fixed to the bottom
  * of the viewport with the gate's title, a one-line summary, "Review details", Reject (asks for
  * an optional comment) and Approve. The page keeps an empty block of the dock's height at its
- * end, so the dock never covers content. `A` approves and `R` opens Reject.
+ * end, so the dock never covers content. `A` approves and `R` opens Reject. A gate with changed
+ * files opens them in the review sheet, where the approver may edit them before approving.
  */
 export function ApprovalDock({
   runId,
@@ -117,6 +161,13 @@ export function ApprovalDock({
   const commentId = useId();
   const summary = gateSummary(gate);
   const busy = pending !== null || sent !== null;
+  const edits = useGateEdits(gate.changes);
+  const files: GateFile[] = gate.changes.map((change) => ({
+    change,
+    original: change.before ?? "",
+    modified: edits.textOf(change),
+    edited: edits.isEdited(change),
+  }));
 
   async function decide(decision: Decision, note?: string) {
     if (busy) return;
@@ -129,11 +180,25 @@ export function ApprovalDock({
         response,
       } = await createApiClient(baseUrl).POST("/runs/{run_id}/approvals", {
         params: { path: { run_id: runId } },
-        body: { node_id: gate.nodeId, decision, ...(note ? { comment: note } : {}) },
+        body: {
+          node_id: gate.nodeId,
+          decision,
+          ...(note ? { comment: note } : {}),
+          ...(decision === "approve" && edits.count > 0
+            ? {
+                edits: edits.edits.map((e) => ({
+                  node_id: e.nodeId,
+                  path: e.path,
+                  content: e.content,
+                })),
+              }
+            : {}),
+        },
       });
       if (!data) throw new ApiError(response.status, body, "The decision was not accepted");
       setSent(decision);
       setRejecting(false);
+      setDetails(false);
       // The dock goes away once the run moves on; the toast keeps the outcome visible.
       toast.success(`${decision === "approve" ? "Approved" : "Rejected"}: ${gate.title}`);
     } catch (err) {
@@ -192,24 +257,13 @@ export function ApprovalDock({
                 Reject
                 <Kbd>R</Kbd>
               </Button>
-              <Button
-                type="button"
-                onClick={() => void decide("approve")}
+              <ApproveButton
+                edits={edits.count}
+                pending={pending === "approve"}
                 disabled={busy}
-                aria-keyshortcuts="A"
-              >
-                {pending === "approve" ? (
-                  <LoaderCircleIcon
-                    aria-hidden="true"
-                    data-icon="inline-start"
-                    className="motion-safe:animate-spin"
-                  />
-                ) : (
-                  <CheckIcon aria-hidden="true" data-icon="inline-start" />
-                )}
-                Approve
-                <Kbd>A</Kbd>
-              </Button>
+                onClick={() => void decide("approve")}
+                shortcut
+              />
             </div>
           )}
         </div>
@@ -222,27 +276,81 @@ export function ApprovalDock({
         ) : null}
       </DockBar>
 
-      <Sheet open={details} onOpenChange={setDetails}>
-        <SheetContent
-          side={wide ? "right" : "bottom"}
-          className="data-[side=bottom]:max-h-[85svh] data-[side=right]:w-full! data-[side=right]:sm:max-w-[560px]!"
-          data-testid="gate-details"
-        >
-          <SheetHeader className="border-b pr-12">
-            <SheetTitle>{gate.title}</SheetTitle>
-            <SheetDescription>
-              {gate.prompt ?? "Review what the run produced before it goes on."}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-            {gate.artifact ? (
-              <AgentMessage text={gate.artifact} />
-            ) : (
-              <p className="text-muted-foreground">This gate has nothing more to show.</p>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
+      {gate.changes.length > 0 ? (
+        <GateReviewSheet
+          open={details}
+          onOpenChange={setDetails}
+          title={gate.title}
+          description={
+            gate.prompt ??
+            "Review the files the run changed, and edit them if needed, before it goes on."
+          }
+          files={files}
+          onEdit={edits.edit}
+          onDiscard={edits.discard}
+          notice={
+            error && !rejecting ? (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null
+          }
+          footer={
+            <>
+              <p className="text-sm text-muted-foreground md:mr-auto" aria-live="polite">
+                {edits.count > 0
+                  ? `${plural(edits.count, "file")} edited`
+                  : "Edit a file to change it before approving."}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRejecting(true)}
+                disabled={busy}
+              >
+                <XIcon aria-hidden="true" data-icon="inline-start" />
+                Reject
+              </Button>
+              <ApproveButton
+                edits={edits.count}
+                pending={pending === "approve"}
+                disabled={busy}
+                onClick={() => void decide("approve")}
+                shortcut={false}
+              />
+            </>
+          }
+        />
+      ) : (
+        <Sheet open={details} onOpenChange={setDetails}>
+          <SheetContent
+            side={wide ? "right" : "bottom"}
+            className="data-[side=bottom]:max-h-[85svh] data-[side=right]:w-full! data-[side=right]:sm:max-w-[560px]!"
+            data-testid="gate-details"
+          >
+            <SheetHeader className="border-b pr-12">
+              <SheetTitle>{gate.title}</SheetTitle>
+              <SheetDescription>
+                {gate.prompt ?? "Review what the run produced before it goes on."}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+              {gate.changesError ? (
+                <Alert className="mb-3">
+                  <AlertDescription>
+                    The changed files could not be read: {gate.changesError}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              {gate.artifact ? (
+                <AgentMessage text={gate.artifact} />
+              ) : (
+                <p className="text-muted-foreground">This gate has nothing more to show.</p>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
 
       <Dialog
         open={rejecting}
@@ -256,6 +364,7 @@ export function ApprovalDock({
             <DialogTitle>Reject “{gate.title}”?</DialogTitle>
             <DialogDescription>
               The run stops here and nothing after the gate happens.
+              {edits.count > 0 ? ` Your edits to ${plural(edits.count, "file")} are dropped.` : ""}
             </DialogDescription>
           </DialogHeader>
           <form

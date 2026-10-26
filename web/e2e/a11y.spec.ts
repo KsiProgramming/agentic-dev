@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS_DEMO, pretendConnections } from "./connections";
-import { COMBINE, GATE, MAP, startRun, WRITER } from "./runs";
+import { apiURL, COMBINE, GATE, MAP, startReviewRun, startRun, WRITER } from "./runs";
 
 /** WCAG 2.2 AA, as the mission's UI quality target asks. */
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -121,6 +121,21 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByRole("dialog", { name: /Reject/ })).toBeVisible();
       await expectNoSeriousIssues(page);
       await page.keyboard.press("Escape");
+    });
+
+    test("the gate review sheet has no serious a11y issues", async ({ page, request }) => {
+      test.setTimeout(120_000);
+      const runId = await startReviewRun(request, "E2E review a11y");
+      await open(page, `/runs/${runId}`);
+      const dock = page.getByTestId("approval-dock").filter({ visible: true });
+      await expect(dock).toBeVisible({ timeout: 60_000 });
+
+      await dock.getByRole("button", { name: "Review details" }).click();
+      const review = page.getByTestId("gate-review");
+      await expect(review.locator(".monaco-diff-editor")).toBeVisible({ timeout: 30_000 });
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+      await request.post(`${apiURL}/runs/${runId}/cancel`);
     });
 
     test("a run's graph and a node's detail have no serious a11y issues", async ({

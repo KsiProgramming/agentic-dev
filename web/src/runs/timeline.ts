@@ -1,4 +1,5 @@
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
+import { parseChanges, parseEdits, type FileChange, type FileEdit } from "./gates";
 import type { RunEvent } from "./types";
 
 export type { TokenUsage } from "./cost";
@@ -43,6 +44,10 @@ export interface GateInfo {
   title: string;
   decision: string | null;
   comment: string | null;
+  /** The files the writers before the gate changed, as it showed them. */
+  changes: FileChange[];
+  /** The approver's edits to them, once decided. */
+  edits: FileEdit[];
 }
 
 export interface Step {
@@ -259,7 +264,13 @@ class Builder {
         return;
       case "gate_waiting":
         step.status = "waiting";
-        step.gate = { title: str(payload.title) ?? "Approve?", decision: null, comment: null };
+        step.gate = {
+          title: str(payload.title) ?? "Approve?",
+          decision: null,
+          comment: null,
+          changes: parseChanges(payload.changes),
+          edits: [],
+        };
         return;
       case "gate_decided":
         step.status = "running";
@@ -267,6 +278,8 @@ class Builder {
           title: step.gate?.title ?? "Approve?",
           decision: str(payload.decision),
           comment: str(payload.comment),
+          changes: step.gate?.changes ?? [],
+          edits: parseEdits(payload.edits),
         };
         return;
       case "pr_opened":

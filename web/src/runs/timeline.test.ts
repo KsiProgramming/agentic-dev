@@ -98,6 +98,8 @@ describe("buildTimeline on a recorded docs run", () => {
       title: "Open the docs PR?",
       decision: "approve",
       comment: null,
+      changes: [],
+      edits: [],
     });
   });
 

@@ -3,11 +3,16 @@ import { expect, type APIRequestContext } from "@playwright/test";
 // The API the browser talks to (compose publishes it on the host).
 export const apiURL = process.env.E2E_API_URL ?? "http://localhost:8000";
 
-/** Starts a run of `steps` in a sequence through the API and returns its id. */
+/** The fake GitHub App's repo (`AGENTIC_GITHUB=fake`), as a run names it. */
+export const DOCS_DEMO_URL = "https://github.com/e2e-org/docs-demo";
+
+/** Starts a run of `steps` in a sequence through the API and returns its id. With `repo`, the
+ * run works on that repo in a sandbox. */
 export async function startRun(
   request: APIRequestContext,
   steps: unknown[],
   name = "E2E layout",
+  repo?: string,
 ): Promise<string> {
   const response = await request.post(`${apiURL}/runs`, {
     data: {
@@ -18,6 +23,7 @@ export async function startRun(
         root: { type: "sequence", id: "main", steps },
       },
       input: "hello",
+      ...(repo ? { repo: { url: repo } } : {}),
     },
   });
   expect(response.status()).toBe(202);
@@ -52,3 +58,47 @@ export const MAP = {
 };
 
 export const COMBINE = { type: "reduce", id: "combine", from: "each", strategy: "concat" };
+
+/** A writer on the run's repo: the fake runtime calls each tool once, so it writes and commits
+ * `NOTES.md` (the `repo.write_file` example). */
+export const REPO_WRITER = {
+  type: "agent",
+  id: "writer",
+  role: "Writer",
+  instructions: "Write NOTES.md and commit it.",
+  tools: ["repo.write_file", "repo.commit"],
+};
+
+/** A gate after `REPO_WRITER`: it shows the files the writer changed. */
+export const REVIEW_GATE = {
+  type: "gate",
+  id: "approve",
+  title: "Open a pull request with the notes?",
+  prompt: "Approving pushes the writer's branch and opens a pull request.",
+};
+
+/** Opens a pull request from `REPO_WRITER`'s branch (the fake GitHub App answers). */
+export const PUBLISH = {
+  type: "tool",
+  id: "publish",
+  tool: "github.openPR",
+  args: { from_node: "writer", title: "Add notes", body: "Written by an agent." },
+};
+
+/** Starts writer → gate → pull request on the fixture repo; it pauses with `NOTES.md` to review. */
+export function startReviewRun(request: APIRequestContext, name = "E2E review"): Promise<string> {
+  return startRun(request, [REPO_WRITER, REVIEW_GATE, PUBLISH], name, DOCS_DEMO_URL);
+}
+
+/** The run's events, read once it has ended (its stream closes after the final event). */
+export async function endedRunEvents(
+  request: APIRequestContext,
+  runId: string,
+): Promise<{ type: string; node_id: string | null; payload: Record<string, unknown> }[]> {
+  const response = await request.get(`${apiURL}/runs/${runId}/events`);
+  expect(response.status()).toBe(200);
+  return (await response.text())
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => JSON.parse(line.slice("data:".length)));
+}

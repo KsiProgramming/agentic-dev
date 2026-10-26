@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS_DEMO, pretendConnections } from "./connections";
-import { COMBINE, startRun, GATE, MAP, WRITER } from "./runs";
+import { apiURL, COMBINE, startReviewRun, startRun, GATE, MAP, WRITER } from "./runs";
 
 /** Every page renders in the shell with no horizontal page scroll (roadmap 2.2), and the main
  * nav is reachable: full sidebar from 1280 px, icon rail from 1024 px, a drawer below that. */
@@ -203,6 +203,35 @@ test("a run's graph, waiting at a gate", async ({ page, request }) => {
   await expect(page.getByTestId("node-detail")).toBeVisible();
   await expectNoHorizontalScroll(page);
   await screenshot(page, "run-graph-detail");
+});
+
+test("the gate review sheet", async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const runId = await startReviewRun(request, "E2E review layout");
+  await page.goto(`/runs/${runId}`);
+  const dock = page.getByTestId("approval-dock").filter({ visible: true });
+  await expect(dock).toBeVisible({ timeout: 60_000 });
+  await dock.getByRole("button", { name: "Review details" }).click();
+  const review = page.getByTestId("gate-review");
+  const diff = review.locator(".monaco-diff-editor");
+  await expect(diff).toBeVisible({ timeout: 30_000 });
+
+  // From 1024 px the files are listed beside a side-by-side diff; below, a picker sits above an
+  // inline one. Either way the diff fits the viewport and scrolls in its own box.
+  const viewport = page.viewportSize()!;
+  if (viewport.width >= 1024) {
+    await expect(review.getByRole("navigation", { name: "Changed files" })).toBeVisible();
+    await expect(review.locator(".editor.original")).toBeVisible();
+  } else {
+    await expect(review.getByLabel(/File 1 of/)).toBeVisible();
+  }
+  const box = (await diff.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  await expect(review.getByRole("button", { name: /^Approve/ })).toBeInViewport({ ratio: 1 });
+  await expectNoHorizontalScroll(page);
+  await screenshot(page, "run-review");
+  await page.keyboard.press("Escape");
+  await request.post(`${apiURL}/runs/${runId}/cancel`);
 });
 
 test("an unknown run", async ({ page }) => {
