@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS_DEMO, pretendConnections } from "./connections";
-import { apiURL, COMBINE, startReviewRun, startRun, GATE, MAP, WRITER } from "./runs";
+import { apiURL, COMBINE, FAILING, startReviewRun, startRun, GATE, MAP, WRITER } from "./runs";
 
 /** Every page renders in the shell with no horizontal page scroll (roadmap 2.2), and the main
  * nav is reachable: full sidebar from 1280 px, icon rail from 1024 px, a drawer below that. */
@@ -156,6 +156,17 @@ test("a finished run", async ({ page, request }) => {
   await checkPage(page, "run-finished");
 });
 
+test("a failed run", async ({ page, request }) => {
+  const runId = await startRun(request, [FAILING]);
+  await page.goto(`/runs/${runId}`);
+  const banner = page.getByTestId("run-banner");
+  await expect(banner).toHaveAttribute("data-kind", "failed", { timeout: 30_000 });
+  // Done when (11.6): the failing step and its reason are seen without scrolling.
+  await expect(banner).toContainText("Failed at broken");
+  await expect(banner).toBeInViewport({ ratio: 1 });
+  await checkPage(page, "run-failed");
+});
+
 test("runs, with a run's menu open", async ({ page, request }) => {
   const runId = await startRun(request, [WRITER]);
   await page.goto(`/runs/${runId}`);
@@ -192,9 +203,9 @@ test("a run waiting at a gate", async ({ page, request }) => {
     await expect(dock.getByRole("button", { name })).toBeInViewport({ ratio: 1 });
   }
 
-  // Scrolled to the end, the last of the timeline is above the dock, not under it.
+  // Scrolled to the end, the selected step is above the dock, not under it.
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  const last = page.getByTestId("step").last();
+  const last = page.getByTestId("step-panel");
   const lastBox = (await last.boundingBox())!;
   const dockTop = (await dock.boundingBox())!.y;
   expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(dockTop + 1);
@@ -203,7 +214,7 @@ test("a run waiting at a gate", async ({ page, request }) => {
 
 test("a run's graph, waiting at a gate", async ({ page, request }) => {
   const runId = await startRun(request, [MAP, COMBINE, GATE]);
-  await page.goto(`/runs/${runId}?tab=graph`);
+  await page.goto(`/runs/${runId}?view=graph`);
   const dock = page.getByTestId("approval-dock").filter({ visible: true });
   await expect(dock).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("graph-node")).toHaveCount(4);
@@ -218,9 +229,16 @@ test("a run's graph, waiting at a gate", async ({ page, request }) => {
   expect(scrolled.y + scrolled.height).toBeLessThanOrEqual((await dock.boundingBox())!.y + 1);
 
   await page.locator('[data-testid="graph-node"][data-node-id="worker"]').click();
-  await expect(page.getByTestId("node-detail")).toBeVisible();
+  await expect(page.getByTestId("step-panel")).toHaveAttribute("data-key", "each[1]/worker");
   await expectNoHorizontalScroll(page);
-  await screenshot(page, "run-graph-detail");
+  await screenshot(page, "run-graph-step");
+
+  // An event's payload opens in a drawer that fits the viewport.
+  await page.getByRole("tab", { name: "Events" }).click();
+  await page.getByTestId("event-row").first().getByRole("button").click();
+  await expect(page.getByTestId("event-drawer")).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await screenshot(page, "run-event-drawer");
 });
 
 test("the gate review sheet", async ({ page, request }) => {

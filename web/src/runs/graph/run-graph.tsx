@@ -11,16 +11,18 @@ import { specToGraph, type WorkflowSpec } from "./spec-graph";
 
 /**
  * The run's workflow drawn read-only, each node coloured by its live status. Clicking a node (or
- * Enter on it) calls `onOpen` with its id. The graph pans and zooms inside its own box, so the
- * page never scrolls sideways.
+ * Enter on it) calls `onOpen` with its id; `selected` is marked. The graph pans and zooms inside
+ * its own box, so the page never scrolls sideways.
  */
 export function RunGraph({
   spec,
   steps,
+  selected = null,
   onOpen,
 }: {
   spec: WorkflowSpec;
   steps: Step[];
+  selected?: string | null;
   onOpen: (nodeId: string) => void;
 }) {
   // Laid out once per spec; new events only change the states the nodes read.
@@ -34,7 +36,7 @@ export function RunGraph({
     };
   }, [spec]);
   const states = useMemo(() => nodeStatuses(spec, steps), [spec, steps]);
-  const context = useMemo(() => ({ states, open: onOpen }), [states, onOpen]);
+  const context = useMemo(() => ({ states, selected, open: onOpen }), [states, selected, onOpen]);
   const { resolvedTheme } = useTheme();
 
   return (

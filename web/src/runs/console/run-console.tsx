@@ -1,29 +1,20 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowDownIcon,
-  CirclePauseIcon,
-  ListTreeIcon,
-  NetworkIcon,
-  RadioIcon,
-  TableIcon,
-  TimerOffIcon,
-} from "lucide-react";
+import { ArrowDownIcon, CirclePauseIcon, ListTreeIcon, NetworkIcon, RadioIcon } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
 import { useConsoleWaiting } from "@/components/shell/attention";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import type { RunStatus } from "@/components/status-badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { pendingGate, type PendingGate } from "../gates";
-import { NodeDetailSheet } from "../graph/node-detail-sheet";
 import { RunGraph } from "../graph/run-graph";
+import { allSpecNodes, type NodeKind } from "../graph/spec-graph";
 import { displayStatus } from "../status";
 import { badgeStatus, runTimes, statusLabel, wallClockLine } from "../summaries";
 import { usageOfRun } from "../cost";
@@ -38,13 +29,26 @@ import { ActivityLine } from "./activity-line";
 import { ApprovalDock, DOCK_ID } from "./approval-dock";
 import { canRerun, RerunButton } from "../rerun";
 import { CancelRunButton } from "./cancel-run-button";
-import { RawEvents } from "./raw-events";
+import { RunBanner, type BannerState } from "./run-banner";
 import { RunHeader, type HeaderFacts } from "./run-header";
-import { StepList } from "./step-view";
+import { stepsProgress } from "./run-stats";
+import { RunTiles } from "./run-tiles";
+import {
+  defaultEntry,
+  failingEntry,
+  findEntry,
+  stepEntries,
+  stepRows,
+  type StepRow,
+} from "./step-entries";
+import { guessKind, StepList } from "./step-list";
+import { STEP_TABS, StepPanel, type StepTab } from "./step-panel";
 
-type Tab = "timeline" | "graph" | "raw";
+type View = "list" | "graph";
 
-const TABS: readonly Tab[] = ["timeline", "graph", "raw"];
+/** From 1280 px the step list and the selected step sit side by side. */
+const XL_UP = "(min-width: 1280px)";
+const PANEL_ID = "step-panel";
 
 /** The run console. Retry reconnects by mounting a fresh event stream. */
 export function RunConsole({ runId, baseUrl }: { runId: string; baseUrl?: string }) {
@@ -126,9 +130,8 @@ function lastPullRequest(steps: Step[]): string | null {
   return url;
 }
 
-/** In the waiting step: the decision is made in the dock at the bottom of the page. `onGo` runs
- * before the dock takes focus, e.g. to close the sheet the marker is in. */
-function WaitingMarker({ onGo }: { onGo?: () => void }) {
+/** In the waiting gate's output: the decision is made in the dock at the bottom of the page. */
+function WaitingMarker() {
   return (
     <div className="flex flex-wrap items-center gap-2 text-meta" data-testid="waiting-marker">
       <CirclePauseIcon aria-hidden="true" className="size-4 text-status-waiting" />
@@ -138,18 +141,69 @@ function WaitingMarker({ onGo }: { onGo?: () => void }) {
         variant="link"
         size="sm"
         className="h-auto px-0"
-        onClick={() => {
-          const focusDock = () => document.getElementById(DOCK_ID)?.focus();
-          if (!onGo) return focusDock();
-          onGo();
-          // Once the sheet is gone: it gives focus back to what opened it as it closes.
-          setTimeout(focusDock, 0);
-        }}
+        onClick={() => document.getElementById(DOCK_ID)?.focus()}
       >
         Go to the decision
       </Button>
     </div>
   );
+}
+
+/** The console's place in the URL: the step list or the graph, the selected step and its tab.
+ * Links from before 11.6 still open: `?tab=graph` is the graph, `?tab=raw` the Events tab. */
+function useConsoleParams() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const asked = params.get("tab");
+  const view: View = params.get("view") === "graph" || asked === "graph" ? "graph" : "list";
+  const tab: StepTab =
+    asked === "raw" ? "events" : (STEP_TABS.find((t) => t === asked) ?? "output");
+  const step = params.get("step");
+  const update = useCallback(
+    (changes: Record<string, string | null>) => {
+      const query = new URLSearchParams(params);
+      const old = query.get("tab");
+      if (old === "graph") query.set("view", "graph");
+      if (old === "raw") query.set("tab", "events");
+      if (old === "graph" || old === "timeline") query.delete("tab");
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === null) query.delete(key);
+        else query.set(key, value);
+      }
+      const search = query.toString();
+      router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
+    },
+    [params, pathname, router],
+  );
+  return { view, tab, step, update };
+}
+
+/** Why the run failed, from its `run_failed` event, before the summary has it. */
+function runFailure(events: ReceivedRunEvent[]): string | null {
+  const error = events.findLast((e) => e.type === "run_failed")?.payload?.error;
+  return typeof error === "string" && error ? error : null;
+}
+
+/** The step a click on graph node `nodeId` shows: the run of it that needs attention first. */
+function rowForNode(rows: StepRow[], nodeId: string): StepRow | null {
+  const runs = rows.filter((r) => r.step.id === nodeId);
+  for (const status of ["failed", "waiting", "running", "cancelled"] as const) {
+    const found = runs.find((r) => r.step.status === status);
+    if (found) return found;
+  }
+  return runs.at(-1) ?? null;
+}
+
+/** Shows the selected step: beside the list from 1280 px, below it under that, so it is
+ * scrolled to. */
+function revealPanel(focus: boolean) {
+  setTimeout(() => {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) return;
+    if (!window.matchMedia?.(XL_UP).matches) panel.scrollIntoView?.({ block: "start" });
+    if (focus) panel.focus({ preventScroll: true });
+  }, 0);
 }
 
 function Console({
@@ -165,11 +219,14 @@ function Console({
   const detail = useRunDetail(runId, baseUrl);
   const client = useQueryClient();
   const timeline = useMemo(() => buildTimeline(events), [events]);
+  const entries = useMemo(() => stepEntries(timeline.steps), [timeline]);
+  const rows = useMemo(() => stepRows(entries), [entries]);
   const gate = status === "live" ? pendingGate(events) : null;
   const prUrl = lastPullRequest(timeline.steps);
   const live = status === "connecting" || status === "live";
   const now = useNow(1000, live);
   const follow = useFollowScroll(events.length, status === "live");
+  const { view, tab, step: asked, update } = useConsoleParams();
   useConsoleWaiting(gate !== null);
 
   // The summary (repo, PR, failure reason) moves on with the run: fetch it again when it does.
@@ -177,22 +234,27 @@ function Console({
     void client.invalidateQueries({ queryKey: runDetailKey(runId) });
   }, [client, runId, status, gate?.nodeId, prUrl]);
 
-  // The graph node whose detail is open.
-  const [openNode, setOpenNode] = useState<string | null>(null);
-  const closeNode = () => setOpenNode(null);
+  const spec = detail.data?.spec ?? null;
+  const kinds = useMemo(
+    () => new Map<string, NodeKind>(spec ? allSpecNodes(spec).map((n) => [n.id, n.type]) : []),
+    [spec],
+  );
+  const kindOf = useCallback((nodeId: string) => kinds.get(nodeId) ?? null, [kinds]);
 
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const asked = params.get("tab");
-  const tab: Tab = TABS.find((t) => t === asked) ?? "timeline";
-  const setTab = (next: string) => {
-    const query = new URLSearchParams(params);
-    if (next !== "timeline" && TABS.some((t) => t === next)) query.set("tab", next);
-    else query.delete("tab");
-    const search = query.toString();
-    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
-  };
+  const select = useCallback(
+    (key: string) => {
+      update({ step: key });
+      revealPanel(false);
+    },
+    [update],
+  );
+  const openNode = useCallback(
+    (nodeId: string) => {
+      const row = rowForNode(rows, nodeId);
+      if (row) select(row.key);
+    },
+    [rows, select],
+  );
 
   if (status === "not_found" || detail.data === null) {
     // Every page has one heading, a missing run too.
@@ -205,18 +267,34 @@ function Console({
   }
 
   const run = detail.data;
-  const waitingMarker = (step: Step, onGo?: () => void) =>
-    gate && step.id === gate.nodeId && step.status === "waiting" ? (
-      <WaitingMarker onGo={onGo} />
-    ) : null;
   const facts = headerFacts(status, events, gate, run, timeline, prUrl, now);
   const activity = status === "live" && !gate ? currentActivity(timeline) : null;
-  const failure = run?.status === "failed" ? run.failure_reason : null;
-  // Why an expired run ended; a user's cancel needs no explanation.
-  const expired =
-    facts.status.label === "Expired"
-      ? (timeline.cancelReason ?? run?.cancel_reason ?? "Approval expired")
-      : null;
+  // The step the URL names; else the running one while live (followed as the run moves), the
+  // waiting gate, the failing step or the last agent's answer.
+  const selected = findEntry(entries, asked) ?? defaultEntry(entries, live);
+  const kind = selected ? (kindOf(selected.step.id) ?? guessKind(selected.step)) : null;
+
+  let banner: BannerState | null = null;
+  if (facts.status.status === "failed") {
+    const failing = failingEntry(entries);
+    banner = {
+      kind: "failed",
+      step: failing,
+      reason:
+        failing?.step.error ??
+        run?.failure_reason ??
+        runFailure(events) ??
+        "The run failed for a reason it did not log.",
+    };
+  } else if (gate) {
+    banner = { kind: "waiting", gate, runId };
+  } else if (facts.status.label === "Expired") {
+    // Why an expired run ended; a user's cancel needs no explanation.
+    banner = {
+      kind: "expired",
+      reason: timeline.cancelReason ?? run?.cancel_reason ?? "Approval expired",
+    };
+  }
 
   return (
     <section className="flex flex-col gap-6">
@@ -225,6 +303,7 @@ function Console({
         run={run}
         facts={facts}
         now={now}
+        events={events}
         actions={
           canCancel(facts.status.status) ? (
             <CancelRunButton runId={runId} baseUrl={baseUrl} />
@@ -234,82 +313,102 @@ function Console({
         }
       />
 
+      <RunTiles
+        facts={facts}
+        budget={run?.usage.budget_usd ?? null}
+        progress={spec ? stepsProgress(spec, timeline.steps) : null}
+        createdRepo={rows.find((r) => r.step.createdRepo)?.step.createdRepo ?? null}
+      />
+
+      {banner ? (
+        <RunBanner
+          banner={banner}
+          onGoToStep={(key) => {
+            update({ step: key, tab: null });
+            revealPanel(true);
+          }}
+        />
+      ) : null}
+
       {status === "error" ? (
         <ErrorState message="Lost the connection to the event stream." onRetry={onRetry} />
       ) : null}
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList aria-label="Run views">
-          <TabsTrigger value="timeline">
-            <ListTreeIcon aria-hidden="true" />
-            Timeline
-          </TabsTrigger>
-          <TabsTrigger value="graph">
-            <NetworkIcon aria-hidden="true" />
-            Graph
-          </TabsTrigger>
-          <TabsTrigger value="raw">
-            <TableIcon aria-hidden="true" />
-            Raw events
-          </TabsTrigger>
-        </TabsList>
+      <div className="flex min-w-0 flex-col gap-6 xl:grid xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] xl:items-start">
+        <Tabs
+          value={view}
+          onValueChange={(next) => update({ view: next === "graph" ? "graph" : null })}
+          className="min-w-0"
+        >
+          <TabsList aria-label="Run views">
+            <TabsTrigger value="list">
+              <ListTreeIcon aria-hidden="true" />
+              Steps
+            </TabsTrigger>
+            <TabsTrigger value="graph">
+              <NetworkIcon aria-hidden="true" />
+              Graph
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="timeline" className="flex flex-col gap-5 pt-2">
-          {failure ? (
-            <Alert variant="destructive">
-              <AlertDescription className="break-words">{failure}</AlertDescription>
-            </Alert>
-          ) : null}
-          {expired ? (
-            <Alert>
-              <TimerOffIcon aria-hidden="true" />
-              <AlertDescription className="break-words">
-                {expired}: nobody approved or rejected the gate before its time to live ran out.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {timeline.steps.length === 0 ? (
-            live ? (
-              <EmptyState icon={RadioIcon} message="Waiting for the run to start…" />
+          <TabsContent value="list" className="pt-2">
+            {entries.length === 0 ? (
+              live ? (
+                <EmptyState icon={RadioIcon} message="Waiting for the run to start…" />
+              ) : (
+                <EmptyState icon={RadioIcon} message="This run ended before its first step." />
+              )
             ) : (
-              <EmptyState icon={RadioIcon} message="This run ended before its first step." />
-            )
-          ) : (
-            <StepList
-              steps={timeline.steps}
-              options={{ now, extra: (step) => waitingMarker(step) }}
-            />
-          )}
-          {activity ? <ActivityLine activity={activity} /> : null}
-        </TabsContent>
-
-        <TabsContent value="graph" className="pt-2">
-          {run ? (
-            <>
-              <RunGraph spec={run.spec} steps={timeline.steps} onOpen={setOpenNode} />
-              <NodeDetailSheet
-                nodeId={openNode}
-                spec={run.spec}
-                steps={timeline.steps}
-                options={{ now, extra: (step) => waitingMarker(step, closeNode) }}
-                onClose={closeNode}
+              <StepList
+                entries={entries}
+                selected={selected?.key ?? null}
+                now={now}
+                kindOf={kindOf}
+                onSelect={select}
+                footer={activity ? <ActivityLine activity={activity} /> : null}
               />
-            </>
-          ) : detail.isError ? (
-            <ErrorState message="Could not load the workflow." onRetry={() => detail.refetch()} />
-          ) : (
-            <LoadingState label="Loading the workflow…" />
-          )}
-        </TabsContent>
+            )}
+          </TabsContent>
 
-        <TabsContent value="raw" className="pt-2">
-          {events.length === 0 ? (
-            <EmptyState icon={RadioIcon} message="Waiting for events…" />
-          ) : (
-            <RawEvents events={events} />
-          )}
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="graph" className="pt-2">
+            {spec ? (
+              <RunGraph
+                spec={spec}
+                steps={timeline.steps}
+                selected={selected?.step.id ?? null}
+                onOpen={openNode}
+              />
+            ) : detail.isError ? (
+              <ErrorState message="Could not load the workflow." onRetry={() => detail.refetch()} />
+            ) : (
+              <LoadingState label="Loading the workflow…" />
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {selected && kind ? (
+          <div id={PANEL_ID} tabIndex={-1} className="min-w-0 scroll-mt-20 outline-none">
+            <StepPanel
+              row={selected}
+              kind={kind}
+              entries={entries}
+              spec={spec}
+              runInput={run?.input ?? null}
+              first={rows[0]?.key === selected.key}
+              events={events}
+              now={now}
+              tab={tab}
+              onTab={(next) => update({ tab: next === "output" ? null : next })}
+              onSelect={select}
+              extra={
+                gate && selected.step.id === gate.nodeId && selected.step.status === "waiting" ? (
+                  <WaitingMarker />
+                ) : null
+              }
+            />
+          </div>
+        ) : null}
+      </div>
 
       {/* Announced once when a gate starts waiting; the dock itself never takes focus. */}
       <div aria-live="polite" className="sr-only">

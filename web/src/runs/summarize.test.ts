@@ -13,8 +13,10 @@ test.each([
     "1 in / 2 out tokens, ~$0.0013",
   ],
   ["run_failed", { error: "RuntimeError: boom" }, "RuntimeError: boom"],
-  ["tool_call", { name: "list_files", arguments: { path: "." } }, 'list_files({"path":"."})'],
+  ["tool_call", { name: "repo.read_file", arguments: { path: "a.ts" } }, "Read a.ts"],
+  ["tool_call", { name: "lint", arguments: { path: "." } }, "Called lint ."],
   ["tool_result", { output: "README.md" }, "README.md"],
+  ["tool_result", { output: '{"modules": ["a", "b"]}' }, "JSON, 1 entry"],
   ["node_completed", {}, ""],
   [
     "policy_limit_exceeded",
@@ -36,7 +38,7 @@ test.each([
     { limit: "budget_usd", value: "1", observed: "0", model: "m" },
     "budget: no price for m, limit $1.00",
   ],
-  ["something_new", { a: 1 }, '{"a":1}'],
+  ["something_new", { a: 1, b: { c: 2 }, d: [1, 2] }, "a: 1 · b: 1 entry · d: 2 entries"],
 ])("%s → one line of text", (type, payload, expected) => {
   expect(summarizePayload(runEvent(1, type, payload))).toBe(expected);
 });

@@ -49,6 +49,7 @@ test("a gate is approved with edits, and the pull request carries them", async (
     "succeeded",
     { timeout: 60_000 },
   );
+  await page.locator('[data-testid="step-row"][data-node-id="approve"]').click();
   await expect(page.getByTestId("gate-decision")).toHaveText("· Approved with edits to 1 file");
   await page.getByRole("button", { name: "View edits" }).click();
   await expect(await modifiedEditor(page)).toContainText("Reviewed at the gate.");

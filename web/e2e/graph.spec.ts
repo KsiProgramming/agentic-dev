@@ -2,7 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { apiURL, COMBINE, GATE, MAP, startRun } from "./runs";
 
-/** Roadmap 3.5: clicking a node in the graph shows what the agent did. */
+/** Roadmap 3.5 and 11.6: clicking a node in the graph shows what the agent did, in the step
+ * panel beside it. */
 
 function graphNode(page: Page, nodeId: string) {
   return page.locator(`[data-testid="graph-node"][data-node-id="${nodeId}"]`);
@@ -11,7 +12,7 @@ function graphNode(page: Page, nodeId: string) {
 /** A run of a map, a reduce and a gate, opened on its Graph tab once it waits at the gate. */
 async function openWaitingGraph(page: Page, request: Parameters<typeof startRun>[0]) {
   const runId = await startRun(request, [MAP, COMBINE, GATE], "E2E graph");
-  await page.goto(`/runs/${runId}?tab=graph`);
+  await page.goto(`/runs/${runId}?view=graph`);
   await expect(page.getByTestId("approval-dock").filter({ visible: true })).toBeVisible({
     timeout: 30_000,
   });
@@ -30,15 +31,13 @@ test("clicking a node in the graph shows what the agent did", async ({ page, req
   );
 
   await graphNode(page, "worker").click();
-  const sheet = page.getByTestId("node-detail");
-  await expect(sheet.getByRole("heading", { name: "worker" })).toBeVisible();
-  const items = sheet.getByTestId("map-item");
-  await expect(items).toHaveCount(2);
-  await expect(items.first().getByRole("heading", { level: 4 })).toHaveText("alpha");
-  await expect(sheet.getByTestId("agent-message").first()).toBeVisible();
-
-  await page.keyboard.press("Escape");
-  await expect(sheet).toBeHidden();
+  await expect(graphNode(page, "worker")).toHaveAttribute("aria-pressed", "true");
+  // The last item's run of the node, its answer in Output.
+  const panel = page.getByTestId("step-panel");
+  await expect(panel).toHaveAttribute("data-key", "each[1]/worker");
+  await expect(panel.getByRole("heading", { level: 2 })).toHaveText("beta");
+  await expect(panel.getByTestId("agent-message").first()).toBeVisible();
+  await expect(page).toHaveURL(/step=each%5B1%5D%2Fworker/);
   await request.post(`${apiURL}/runs/${runId}/cancel`);
 });
 
@@ -54,15 +53,7 @@ test("the graph is used with the keyboard only", async ({ page, request }) => {
   await expect(worker).toBeFocused();
 
   await page.keyboard.press("Enter");
-  const sheet = page.getByTestId("node-detail");
-  await expect(sheet.getByTestId("map-item")).toHaveCount(2);
-
-  // The dock's shortcuts are off while the sheet is open.
-  await page.keyboard.press("a");
-  await expect(page.getByTestId("approval-dock").filter({ visible: true })).toBeVisible();
-
-  await page.keyboard.press("Escape");
-  await expect(sheet).toBeHidden();
+  await expect(page.getByTestId("step-panel")).toHaveAttribute("data-key", "each[1]/worker");
   await expect(worker).toBeFocused();
 
   // With focus on the graph, A approves the gate.

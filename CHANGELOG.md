@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 11.6 run console v3:
+  - **Header and figures.** The workflow name with its status and id; repo › branch, what started the run and when; the pull request as the primary action, Rerun or Cancel, and a "⋯" menu (Copy link, Download events). Five tiles under it: active time (time waited under it), cost against the budget, tokens, steps done of total, and output (the PR, or the repo the run created).
+  - **Banner.** A failed run names the step it failed at and why, with "Go to step"; a run waiting at a gate shows the gate, its time left, Review and "Open in Inbox"; an expired run says why it ended.
+  - **Steps and the selected step.** The body is a step list (or the graph) beside the selected step from 1280 px, stacked below. Each row says in one line what the step did, with its duration and cost; map items, branches and iterations nest under their node. The selected step has Output (the agent's answer, capped with "Show full output", and the files it wrote as cards), Activity (its messages and tool calls), Input (from the spec and the run), Usage and Events. A finished run opens on its last agent's answer, a live one follows the running step; the place is kept in the URL (`?step=`, `?tab=`, `?view=graph`), and old `?tab=graph` / `?tab=raw` links still open.
+  - **Raw events.** One 32 px row per event with a one-line summary that never holds JSON; a row opens its payload in a drawer.
+  - The graph's node sheet is gone: a node selects its step in the panel.
 - Phase 11.5 Inbox ([#134](https://github.com/KsiProgramming/agentic-dev/pull/134)):
   - **Inbox.** `/inbox` lists the gates waiting in the workspace, oldest first, with the workflow, repo, waiting time and time left before expiry. Selecting one (kept in the URL, `?run=`) shows its review beside the list from 1024 px, below it under that: what approving lets go on (each writer's branch into its base), the run's active time and cost so far, the changed files (opening the review sheet, editable) or the gate's summary, and Approve, Reject (with comment) and Open run, with `A` / `R`. After a decision the next gate is selected.
   - **Shell.** "Inbox" is the first sidebar entry and carries the waiting count, moved from "Runs".

@@ -23,7 +23,9 @@ interface Row {
 }
 
 async function rows(page: Page): Promise<Row[]> {
-  await page.getByRole("tab", { name: "Raw events" }).click();
+  // The selected step's Events, then every step's.
+  await page.getByRole("tab", { name: "Events" }).click();
+  await page.getByLabel("Step").selectOption("");
   // The panel renders after the click: read the rows once they are there.
   await expect(page.getByTestId("event-row").first()).toBeVisible();
   return page.getByTestId("event-row").evaluateAll((els) =>

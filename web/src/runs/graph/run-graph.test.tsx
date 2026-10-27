@@ -9,7 +9,6 @@ import docsRun from "../fixtures/docs-run.json";
 import docsSpec from "../fixtures/docs-run-spec.json";
 import { buildTimeline, type Step } from "../timeline";
 import type { RunEvent } from "../types";
-import { NodeDetailSheet } from "./node-detail-sheet";
 import { RunGraph } from "./run-graph";
 import type { WorkflowSpec } from "./spec-graph";
 
@@ -22,19 +21,12 @@ function stepsUpTo(seq: number): Step[] {
   return buildTimeline(events.filter((e) => e.seq <= seq)).steps;
 }
 
-/** The graph and its detail sheet, as the console puts them together. */
+/** The graph, selecting the node clicked, as the console uses it. */
 function Graph({ steps }: { steps: Step[] }) {
-  const [open, setOpen] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   return (
     <TooltipProvider>
-      <RunGraph spec={spec} steps={steps} onOpen={setOpen} />
-      <NodeDetailSheet
-        nodeId={open}
-        spec={spec}
-        steps={steps}
-        options={{ now: Date.parse("2026-10-22T18:30:00Z") }}
-        onClose={() => setOpen(null)}
-      />
+      <RunGraph spec={spec} steps={steps} selected={selected} onOpen={setSelected} />
     </TooltipProvider>
   );
 }
@@ -62,18 +54,13 @@ describe("RunGraph", () => {
     expect(within(node("revise")).getByText("Iteration 2 of 3")).toBeTruthy();
   });
 
-  it("shows what an agent did when its node is clicked, once per map item", async () => {
+  it("selects the node clicked, and marks it", async () => {
     render(<Graph steps={stepsUpTo(88)} />);
 
     fireEvent.click(await waitFor(() => node("module-writer")));
 
-    const sheet = await screen.findByTestId("node-detail");
-    expect(within(sheet).getByRole("heading", { name: "module-writer" })).toBeTruthy();
-    const items = within(sheet).getAllByTestId("map-item");
-    expect(items).toHaveLength(3);
-    expect(within(items[0]!).getByRole("heading", { level: 4 }).textContent).toBe("packages/api");
-    expect(within(sheet).getAllByTestId("agent-message")).toHaveLength(6);
-    expect(within(sheet).getAllByTestId("tool-group").length).toBeGreaterThan(0);
+    expect(node("module-writer").getAttribute("aria-pressed")).toBe("true");
+    expect(node("approve").getAttribute("aria-pressed")).toBe("false");
   });
 
   it("lets the pointer reach the nodes, not the pane under them", async () => {
@@ -84,15 +71,6 @@ describe("RunGraph", () => {
     const wrappers = container.querySelectorAll<HTMLElement>(".react-flow__node");
     expect(wrappers).toHaveLength(7);
     for (const wrapper of wrappers) expect(wrapper.style.pointerEvents).toBe("all");
-  });
-
-  it("says a node has not run yet", async () => {
-    render(<Graph steps={stepsUpTo(5)} />);
-
-    fireEvent.click(await waitFor(() => node("approve")));
-
-    const sheet = await screen.findByTestId("node-detail");
-    expect(within(sheet).getByText("This step has not run yet.")).toBeTruthy();
   });
 
   it("updates a node's status as events arrive, without drawing the graph again", async () => {
@@ -107,7 +85,7 @@ describe("RunGraph", () => {
     expect(within(node("document")).getByText("1 of 3 items")).toBeTruthy();
   });
 
-  it("is reached by keyboard: each node is a button, Escape closes its detail and refocuses it", async () => {
+  it("is reached by keyboard: each node is a button of its own", async () => {
     render(<Graph steps={stepsUpTo(88)} />);
     const writer = await waitFor(() => node("module-writer"));
 
@@ -115,15 +93,5 @@ describe("RunGraph", () => {
     expect(writer.tabIndex).toBe(0);
     act(() => writer.focus());
     expect(document.activeElement).toBe(writer);
-
-    fireEvent.click(writer);
-    const sheet = await screen.findByTestId("node-detail");
-    // The sheet takes focus, not a value in it whose tooltip would take the first Escape.
-    await waitFor(() => expect(document.activeElement).toBe(sheet));
-    fireEvent.keyDown(sheet, { key: "Escape" });
-
-    await waitFor(() => expect(screen.queryByTestId("node-detail")).toBeNull());
-    // Focus goes back to the node the sheet was opened from.
-    await waitFor(() => expect(document.activeElement).toBe(node("module-writer")));
   });
 });

@@ -1,23 +1,32 @@
 "use client";
 
-import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
-import type { ReactNode } from "react";
-
 import {
-  Duration,
-  IdChip,
-  Money,
-  RelativeTime,
-  TokenCount,
-  WaitingTime,
-} from "@/components/display";
+  DownloadIcon,
+  EllipsisIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+  LinkIcon,
+} from "lucide-react";
+import type { ReactNode } from "react";
+import { toast } from "sonner";
+
+import { IdChip, RelativeTime, shortId } from "@/components/display";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge, type RunStatus } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import type { TokenUsage } from "../cost";
 import { RerunOf } from "../rerun";
 import { repoLabel } from "../summaries";
+import type { ReceivedRunEvent } from "../types";
 import type { RunDetail } from "../use-run-detail";
+import { pullRequestNumber } from "./run-stats";
 
 export interface HeaderFacts {
   status: { status: RunStatus; label: string };
@@ -34,118 +43,145 @@ export interface HeaderFacts {
   usage: TokenUsage | null;
 }
 
-function Meta({ children }: { children: ReactNode }) {
-  return <li className="flex min-w-0 items-center gap-1.5">{children}</li>;
+/** What started the run: "Manual", "API" or "Rerun of <id>". */
+function Trigger({ run }: { run: RunDetail }) {
+  if (run.rerun_of) return <RerunOf runId={run.rerun_of} />;
+  return (
+    <span>{run.trigger === "manual" ? "Manual" : run.trigger === "api" ? "API" : "Rerun"}</span>
+  );
 }
 
-/** The run console's header: what ran, where, when, how it is going, and what can be done. */
+/** Saves the events the console received as `run-<id8>-events.json`, built in the browser. */
+function downloadEvents(runId: string, events: ReceivedRunEvent[]) {
+  // As the API logged them: without when this browser received them.
+  const plain = events.map((event) => {
+    const copy: Partial<ReceivedRunEvent> = { ...event };
+    delete copy.receivedAt;
+    return copy;
+  });
+  const blob = new Blob([JSON.stringify(plain, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `run-${shortId(runId)}-events.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function copyLink() {
+  void navigator.clipboard
+    ?.writeText(window.location.href)
+    .then(() => toast.success("Link copied"))
+    .catch(() => toast.error("Could not copy the link"));
+}
+
+/** The run's other actions, in a "⋯" menu: Copy link, Download events. */
+function RunMenu({ runId, events }: { runId: string; events: ReceivedRunEvent[] }) {
+  // Not modal: a modal menu hides the rest of the page with `aria-hidden` while its links and
+  // buttons stay focusable (axe: aria-hidden-focus).
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" size="icon-sm" aria-label="More actions">
+          <EllipsisIcon aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={copyLink}>
+          <LinkIcon aria-hidden="true" />
+          Copy link
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={events.length === 0}
+          onSelect={() => downloadEvents(runId, events)}
+        >
+          <DownloadIcon aria-hidden="true" />
+          Download events
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The run console's header: what ran, its status and id; where (repo › branch), who started it
+ * and when; then the pull request as the primary action once opened, Rerun or Cancel, and "⋯".
+ */
 export function RunHeader({
   runId,
   run,
   facts,
   now,
+  events,
   actions,
 }: {
   runId: string;
   run: RunDetail | null | undefined;
   facts: HeaderFacts;
   now: number;
+  events: ReceivedRunEvent[];
   actions?: ReactNode;
 }) {
   const repo = run?.repo ?? null;
-  const budget = run?.usage.budget_usd ?? null;
+  const branch = run?.branch ?? repo?.ref ?? null;
   return (
     <PageHeader
       title={facts.workflowName ?? run?.workflow.name ?? "Run"}
+      aside={
+        <>
+          <span aria-live="polite">
+            <StatusBadge
+              data-testid="run-status"
+              status={facts.status.status}
+              label={facts.status.label}
+            />
+          </span>
+          <IdChip id={runId} label="run id" />
+        </>
+      }
       description={
         <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-meta">
-          <Meta>
-            <span aria-live="polite">
-              <StatusBadge
-                data-testid="run-status"
-                status={facts.status.status}
-                label={facts.status.label}
-              />
-            </span>
-          </Meta>
           {repo ? (
-            <Meta>
+            <li className="flex min-w-0 items-center gap-1.5">
               <span className="truncate font-mono text-foreground">{repoLabel(repo.url)}</span>
-              {repo.ref ? (
+              {branch ? (
                 <span className="flex min-w-0 items-center gap-1 font-mono">
+                  <span aria-hidden="true">›</span>
                   <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
-                  <span className="truncate">{repo.ref}</span>
+                  <span className="truncate">{branch}</span>
                 </span>
               ) : null}
-            </Meta>
+            </li>
+          ) : null}
+          {run ? (
+            <li className="flex min-w-0 items-center gap-1.5">
+              <Trigger run={run} />
+            </li>
           ) : null}
           {facts.startedAt ? (
-            <Meta>
+            <li className="flex min-w-0 items-center gap-1.5">
               <RelativeTime
                 iso={facts.startedAt}
                 now={now}
                 prefix="Started "
                 detail={facts.wallClock}
               />
-            </Meta>
-          ) : null}
-          {facts.activeMs !== null ? (
-            <Meta>
-              <span data-testid="run-time" className="tabular-nums">
-                <Duration data-testid="run-duration" ms={facts.activeMs} />
-                {facts.waitingMs > 0 || facts.waitingLive ? (
-                  <span className="text-muted-foreground">
-                    {" · "}
-                    <WaitingTime ms={facts.waitingMs} live={facts.waitingLive} />
-                  </span>
-                ) : null}
-              </span>
-            </Meta>
-          ) : null}
-          {facts.usage ? (
-            <Meta>
-              <Money data-testid="run-cost" usage={facts.usage} budget={budget} />
-              <span className="text-muted-foreground">
-                ·{" "}
-                <TokenCount
-                  value={facts.usage.inputTokens + facts.usage.outputTokens}
-                  label="tokens"
-                  usage={facts.usage}
-                />
-              </span>
-            </Meta>
-          ) : budget !== null ? (
-            <Meta>
-              <span data-testid="run-cost">
-                Budget <Money usd={budget} />
-              </span>
-            </Meta>
-          ) : null}
-          {run?.rerun_of ? (
-            <Meta>
-              <RerunOf runId={run.rerun_of} />
-            </Meta>
-          ) : null}
-          {facts.prUrl ? (
-            <Meta>
-              <a
-                data-testid="pull-request"
-                href={facts.prUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-              >
-                Pull request #{facts.prUrl.split("/").at(-1)}
-                <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
-              </a>
-            </Meta>
+            </li>
           ) : null}
         </ul>
       }
       actions={
         <>
+          {facts.prUrl ? (
+            <Button asChild size="sm">
+              <a data-testid="pull-request" href={facts.prUrl} target="_blank" rel="noreferrer">
+                <GitPullRequestIcon aria-hidden="true" data-icon="inline-start" />
+                Pull request {pullRequestNumber(facts.prUrl)}
+              </a>
+            </Button>
+          ) : null}
           {actions}
-          <IdChip id={runId} label="run id" className="h-8" />
+          <RunMenu runId={runId} events={events} />
         </>
       }
     />
