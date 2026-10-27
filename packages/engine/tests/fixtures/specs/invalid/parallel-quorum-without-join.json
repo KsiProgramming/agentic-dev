@@ -1,0 +1,31 @@
+{
+  "spec_version": "0",
+  "id": "parallel-quorum-without-join",
+  "name": "Quorum with join all",
+  "root": {
+    "type": "parallel",
+    "id": "review",
+    "join": "all",
+    "quorum": 2,
+    "branches": [
+      {
+        "type": "agent",
+        "id": "security",
+        "role": "Security reviewer",
+        "instructions": "Review the code in your input for security problems. List each finding with a severity."
+      },
+      {
+        "type": "agent",
+        "id": "dependencies",
+        "role": "Dependency reviewer",
+        "instructions": "Review the dependencies named in your input for outdated or risky packages."
+      },
+      {
+        "type": "agent",
+        "id": "style",
+        "role": "Style reviewer",
+        "instructions": "Review the code in your input for readability and naming problems."
+      }
+    ]
+  }
+}

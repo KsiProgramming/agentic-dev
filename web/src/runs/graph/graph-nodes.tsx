@@ -8,6 +8,7 @@ import {
   MergeIcon,
   RepeatIcon,
   ShieldCheckIcon,
+  SplitIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -39,6 +40,7 @@ const KIND: Record<NodeKind, { icon: LucideIcon; label: string }> = {
   reduce: { icon: MergeIcon, label: "reduce" },
   loop: { icon: RepeatIcon, label: "loop" },
   map: { icon: LayersIcon, label: "map" },
+  parallel: { icon: SplitIcon, label: "parallel" },
   sequence: { icon: LayersIcon, label: "sequence" },
 };
 
@@ -136,7 +138,8 @@ export function LeafNodeView({ data }: NodeProps<LeafNode>) {
   );
 }
 
-/** A loop or map: a box holding its body, its header opening what the node did. */
+/** A loop, map or parallel: a box holding its body (a parallel's branches side by side), its
+ * header opening what the node did. */
 export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
   const { state, open } = useNodeState(data.nodeId);
   const Icon = KIND[data.kind].icon;

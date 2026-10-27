@@ -833,7 +833,7 @@ export interface components {
             install_url: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -864,7 +864,7 @@ export interface components {
             /** Id */
             id: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"];
             /**
              * Until
              * @description CEL condition checked after each iteration; true stops the loop.
@@ -900,7 +900,7 @@ export interface components {
              */
             over: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"];
             /** Max Concurrency */
             max_concurrency: number;
         };
@@ -971,6 +971,39 @@ export interface components {
         };
         /** @enum {string} */
         NewRepoReason: "no_connection" | "installation_gone" | "personal_account";
+        /**
+         * ParallelNode
+         * @description Runs its branches at the same time, each on the parallel's input, and joins them.
+         *
+         *     `join` says when the parallel is done: `all` once every branch completed, `any` once one
+         *     did, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on
+         *     the first branch that does not complete, the others once the join can no longer be met) and
+         *     the branches still running end `node_cancelled`. Its output is the completed branches'
+         *     outputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the
+         *     branch, and it holds no gate, writer or publisher. Every agent in the branches counts toward
+         *     the run's `agents_spawned` limit when the parallel starts.
+         */
+        ParallelNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "parallel";
+            /** Id */
+            id: string;
+            /** Branches */
+            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"])[];
+            /**
+             * Join
+             * @enum {string}
+             */
+            join: "all" | "any" | "quorum";
+            /**
+             * Quorum
+             * @description `quorum` only, and required: how many branches must complete.
+             */
+            quorum?: number | null;
+        };
         /** @enum {string} */
         PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "budget_usd";
         /**
@@ -1368,7 +1401,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"])[];
         };
         /** StartInstall */
         StartInstall: {
@@ -1562,7 +1595,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"];
         };
         /** WorkspaceOut */
         WorkspaceOut: {

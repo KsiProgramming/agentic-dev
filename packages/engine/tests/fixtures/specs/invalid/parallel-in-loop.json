@@ -1,0 +1,30 @@
+{
+  "spec_version": "0",
+  "id": "parallel-in-loop",
+  "name": "Parallel in a loop",
+  "root": {
+    "type": "loop",
+    "id": "revise",
+    "until": "last.contains(\"DONE\")",
+    "max_iterations": 2,
+    "body": {
+      "type": "parallel",
+      "id": "review",
+      "join": "all",
+      "branches": [
+        {
+          "type": "agent",
+          "id": "security",
+          "role": "Security reviewer",
+          "instructions": "Review the code in your input for security problems. List each finding with a severity."
+        },
+        {
+          "type": "agent",
+          "id": "dependencies",
+          "role": "Dependency reviewer",
+          "instructions": "Review the dependencies named in your input for outdated or risky packages."
+        }
+      ]
+    }
+  }
+}

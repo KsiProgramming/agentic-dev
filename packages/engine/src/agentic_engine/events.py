@@ -35,6 +35,11 @@ MAP_ITEM_STARTED: Final = "map_item_started"
 """A map starts running its body for one item: `index` (from 0), `item`."""
 MAP_ITEM_COMPLETED: Final = "map_item_completed"
 """A map's body ended for one item: `index`, `status`, and `error` if it did not complete."""
+PARALLEL_BRANCH_STARTED: Final = "parallel_branch_started"
+"""A parallel starts one of its branches: `index` (from 0), `branch_id`."""
+PARALLEL_BRANCH_COMPLETED: Final = "parallel_branch_completed"
+"""A parallel's branch ended: `index`, `branch_id`, `status` (`cancelled` once the parallel's
+join was decided without it), and `error` if it did not complete."""
 POLICY_LIMIT_EXCEEDED: Final = "policy_limit_exceeded"
 """The run went over a policy limit: `limit`, `value` (the limit) and `observed`; the node that
 hit it, if one did. A `node_failed` or `run_failed` naming the reason follows. For
@@ -58,7 +63,8 @@ RUN_END_STATUS: Final[dict[str, RunStatus]] = {
 class RunEvent(BaseModel):
     """One row of the run event log. For agent events, `type` is the `AgentEvent` type and
     `payload` is the serialised event; payloads are data, never instructions. The events of a
-    node inside a map also carry `item`, the index of the item it ran for."""
+    node inside a map also carry `item`, the index of the item it ran for, and those of a node
+    inside a parallel `branch`, the index of its branch."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -72,7 +78,7 @@ class RunEvent(BaseModel):
     def agent_event(self) -> AgentEvent:
         """The `AgentEvent` this row holds. Raises `ValidationError` for lifecycle events."""
         return agent_event_adapter.validate_python(
-            {k: v for k, v in self.payload.items() if k != "item"}
+            {k: v for k, v in self.payload.items() if k not in ("item", "branch")}
         )
 
 
@@ -115,10 +121,14 @@ class RunEventLog:
         node_id: str | None = None,
         payload: dict[str, JsonValue] | None = None,
         item: int | None = None,
+        branch: int | None = None,
     ) -> None:
-        """Write one event. `item` tags the event of a node that runs inside a map."""
+        """Write one event. `item` tags the event of a node that runs inside a map, `branch` one
+        inside a parallel."""
         if item is not None:
             payload = {**(payload or {}), "item": item}
+        if branch is not None:
+            payload = {**(payload or {}), "branch": branch}
         # `seq` is taken before the await, so it follows emit order.
         self._seq += 1
         await self._sink.emit(
@@ -132,10 +142,13 @@ class RunEventLog:
             )
         )
 
-    async def agent_event(self, node_id: str, event: AgentEvent, item: int | None = None) -> None:
+    async def agent_event(
+        self, node_id: str, event: AgentEvent, item: int | None = None, branch: int | None = None
+    ) -> None:
         await self.emit(
             event.type,
             node_id=node_id,
             payload=agent_event_adapter.dump_python(event, mode="json"),
             item=item,
+            branch=branch,
         )

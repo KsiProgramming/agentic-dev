@@ -71,6 +71,15 @@ INVALID: dict[str, tuple[str, str, str | None]] = {
     "missing-instructions": ("schema", "root.instructions", "writer"),
     "nested-loop": ("not_allowed_in_loop", "root.body", "inner"),
     "nested-map": ("not_allowed_in_map", "root.body", "inner"),
+    "parallel-in-loop": ("not_allowed_in_loop", "root.body", "review"),
+    "parallel-in-map": ("not_allowed_in_map", "root.body", "review"),
+    "parallel-one-branch": ("schema", "root.branches", "review"),
+    "parallel-quorum-too-high": ("schema", "root", "review"),
+    "parallel-quorum-without-join": ("schema", "root", "review"),
+    "parallel-too-many-branches": ("schema", "root.branches", "review"),
+    "parallel-with-gate": ("not_allowed_in_parallel", "root.branches[1].steps[1]", "check"),
+    "parallel-with-loop": ("not_allowed_in_parallel", "root.branches[1]", "revise"),
+    "parallel-with-writer": ("not_allowed_in_parallel", "root.branches[1]", "writer"),
     "open-pr-by-agent": ("publish_not_tool_node", "root.steps[0]", "writer"),
     "open-pr-gate-before-writer": ("publish_without_gate", "root.steps[2]", "publish"),
     "open-pr-unknown-from-node": ("reference", "root.steps[2]", "publish"),
@@ -199,6 +208,25 @@ def test_limits_lowered_by_the_workspace_are_policy_issues() -> None:
     assert [(i.code, i.path, i.node_id, i.limit, i.value, i.observed) for i in issues] == [
         ("policy_limit", "root.steps[0]", "revise", "loop_iterations", 2, 3),
         ("policy_limit", "root.steps[1]", "each", "agents_alive", 3, 4),
+    ]
+    assert validate(raw) == []
+
+
+def test_a_parallel_with_more_branches_than_agents_alive_is_a_policy_issue() -> None:
+    lowered = PLATFORM_POLICY.model_copy(update={"agents_alive": 2})
+    raw = workflow(
+        {
+            "type": "parallel",
+            "id": "review",
+            "join": "all",
+            "branches": [agent("a"), agent("b"), agent("c")],
+        }
+    )
+
+    issues = validate(raw, lowered)
+
+    assert [(i.code, i.path, i.node_id, i.limit, i.value, i.observed) for i in issues] == [
+        ("policy_limit", "root", "review", "agents_alive", 2, 3)
     ]
     assert validate(raw) == []
 

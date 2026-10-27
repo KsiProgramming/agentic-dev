@@ -1,0 +1,35 @@
+{
+  "spec_version": "0",
+  "id": "parallel-with-gate",
+  "name": "Gate in a branch",
+  "root": {
+    "type": "parallel",
+    "id": "review",
+    "join": "all",
+    "branches": [
+      {
+        "type": "agent",
+        "id": "security",
+        "role": "Security reviewer",
+        "instructions": "Review the code in your input for security problems. List each finding with a severity."
+      },
+      {
+        "type": "sequence",
+        "id": "checked",
+        "steps": [
+          {
+            "type": "agent",
+            "id": "dependencies",
+            "role": "Dependency reviewer",
+            "instructions": "Review the dependencies named in your input for outdated or risky packages."
+          },
+          {
+            "type": "gate",
+            "id": "check",
+            "title": "OK?"
+          }
+        ]
+      }
+    ]
+  }
+}

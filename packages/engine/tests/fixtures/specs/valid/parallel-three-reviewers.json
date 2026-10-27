@@ -1,0 +1,43 @@
+{
+  "spec_version": "0",
+  "id": "parallel-three-reviewers",
+  "name": "Three reviewers, then a summary",
+  "description": "Three specialists review the same input at once; a lead merges their reviews.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "review",
+        "branches": [
+          {
+            "type": "agent",
+            "id": "security",
+            "role": "Security reviewer",
+            "instructions": "Review the code in your input for security problems. List each finding with a severity."
+          },
+          {
+            "type": "agent",
+            "id": "dependencies",
+            "role": "Dependency reviewer",
+            "instructions": "Review the dependencies named in your input for outdated or risky packages."
+          },
+          {
+            "type": "agent",
+            "id": "style",
+            "role": "Style reviewer",
+            "instructions": "Review the code in your input for readability and naming problems."
+          }
+        ],
+        "join": "all"
+      },
+      {
+        "type": "agent",
+        "id": "summary",
+        "role": "Lead reviewer",
+        "instructions": "Merge the three reviews in your input into one prioritised list."
+      }
+    ]
+  }
+}

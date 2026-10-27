@@ -2276,6 +2276,7 @@
           "invalid_expression",
           "not_allowed_in_loop",
           "not_allowed_in_map",
+          "not_allowed_in_parallel",
           "reference",
           "publish_not_tool_node",
           "publish_without_gate",
@@ -2340,6 +2341,9 @@
               },
               {
                 "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
               }
             ],
             "title": "Body",
@@ -2350,6 +2354,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
@@ -2427,6 +2432,9 @@
               },
               {
                 "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
               }
             ],
             "title": "Body",
@@ -2437,6 +2445,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
@@ -2667,6 +2676,98 @@
           "installation_gone",
           "personal_account"
         ]
+      },
+      "ParallelNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "parallel",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "branches": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AgentNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ToolNode"
+                },
+                {
+                  "$ref": "#/components/schemas/GateNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SequenceNode"
+                },
+                {
+                  "$ref": "#/components/schemas/LoopNode"
+                },
+                {
+                  "$ref": "#/components/schemas/MapNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ReduceNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ParallelNode"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "agent": "#/components/schemas/AgentNode",
+                  "gate": "#/components/schemas/GateNode",
+                  "loop": "#/components/schemas/LoopNode",
+                  "map": "#/components/schemas/MapNode",
+                  "parallel": "#/components/schemas/ParallelNode",
+                  "reduce": "#/components/schemas/ReduceNode",
+                  "sequence": "#/components/schemas/SequenceNode",
+                  "tool": "#/components/schemas/ToolNode"
+                }
+              }
+            },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 2,
+            "title": "Branches"
+          },
+          "join": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any",
+              "quorum"
+            ],
+            "title": "Join"
+          },
+          "quorum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quorum",
+            "description": "`quorum` only, and required: how many branches must complete."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "branches",
+          "join"
+        ],
+        "title": "ParallelNode",
+        "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. Its output is the completed branches'\noutputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the\nbranch, and it holds no gate, writer or publisher. Every agent in the branches counts toward\nthe run's `agents_spawned` limit when the parallel starts."
       },
       "PolicyLimit": {
         "type": "string",
@@ -3607,6 +3708,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ReduceNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ParallelNode"
                 }
               ],
               "discriminator": {
@@ -3616,6 +3720,7 @@
                   "gate": "#/components/schemas/GateNode",
                   "loop": "#/components/schemas/LoopNode",
                   "map": "#/components/schemas/MapNode",
+                  "parallel": "#/components/schemas/ParallelNode",
                   "reduce": "#/components/schemas/ReduceNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "tool": "#/components/schemas/ToolNode"
@@ -4040,6 +4145,9 @@
               },
               {
                 "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
               }
             ],
             "title": "Root",
@@ -4050,6 +4158,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"

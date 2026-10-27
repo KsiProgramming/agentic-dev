@@ -167,8 +167,42 @@ class ReduceNode(_Base):
         return self
 
 
+class ParallelNode(_Base):
+    """Runs its branches at the same time, each on the parallel's input, and joins them.
+
+    `join` says when the parallel is done: `all` once every branch completed, `any` once one
+    did, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on
+    the first branch that does not complete, the others once the join can no longer be met) and
+    the branches still running end `node_cancelled`. Its output is the completed branches'
+    outputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the
+    branch, and it holds no gate, writer or publisher. Every agent in the branches counts toward
+    the run's `agents_spawned` limit when the parallel starts."""
+
+    type: Literal["parallel"]
+    id: NodeId
+    branches: list["Node"] = Field(min_length=2, max_length=MAX_AGENTS_ALIVE)
+    join: Literal["all", "any", "quorum"]
+    quorum: int | None = Field(
+        default=None, description="`quorum` only, and required: how many branches must complete."
+    )
+
+    @model_validator(mode="after")
+    def _join_fields(self) -> Self:
+        if self.join != "quorum":
+            if self.quorum is not None:
+                raise ValueError("`quorum` is only used by the quorum join")
+            return self
+        if self.quorum is None:
+            raise ValueError("the quorum join needs `quorum`")
+        if not 1 <= self.quorum <= len(self.branches):
+            raise ValueError(
+                f"`quorum` {self.quorum} must be from 1 to the {len(self.branches)} branches"
+            )
+        return self
+
+
 Node = Annotated[
-    AgentNode | ToolNode | GateNode | SequenceNode | LoopNode | MapNode | ReduceNode,
+    AgentNode | ToolNode | GateNode | SequenceNode | LoopNode | MapNode | ReduceNode | ParallelNode,
     Field(discriminator="type"),
 ]
 
@@ -185,6 +219,9 @@ def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
                 yield from iter_nodes(step, f"{path}.steps[{i}]")
         case LoopNode() | MapNode():
             yield from iter_nodes(node.body, f"{path}.body")
+        case ParallelNode():
+            for i, branch in enumerate(node.branches):
+                yield from iter_nodes(branch, f"{path}.branches[{i}]")
         case _:
             pass
 
@@ -196,7 +233,7 @@ def node_tools(node: Node) -> list[str]:
             return list(node.tools)
         case ToolNode():
             return [node.tool]
-        case GateNode() | SequenceNode() | LoopNode() | MapNode() | ReduceNode():
+        case GateNode() | SequenceNode() | LoopNode() | MapNode() | ReduceNode() | ParallelNode():
             return []
 
 
@@ -224,6 +261,7 @@ type IssueCode = Literal[
     "invalid_expression",
     "not_allowed_in_loop",
     "not_allowed_in_map",
+    "not_allowed_in_parallel",
     "reference",
     "publish_not_tool_node",
     "publish_without_gate",
@@ -286,7 +324,7 @@ def publish_gate_issues(root: Node) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     seen: list[Node] = []
     for path, node in iter_nodes(root):
-        if isinstance(node, SequenceNode | LoopNode | MapNode):
+        if isinstance(node, SequenceNode | LoopNode | MapNode | ParallelNode):
             continue
         for tool in sorted(PUBLISH_TOOLS.intersection(node_tools(node))):
             if not isinstance(node, ToolNode):
@@ -399,7 +437,8 @@ def _uses_repo(node: Node) -> bool:
 def loop_issues(root: Node) -> list[ValidationIssue]:
     """Why the loops under `root` cannot run, in run order (depth first); empty if they can. A
     loop's `until` must be a valid condition, and its body must not hold a gate, a writer, a
-    publisher, another loop or a map: the issue is on that node, which is the one to move."""
+    publisher, another loop, a map or a parallel: the issue is on that node, which is the one to
+    move."""
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, LoopNode):
@@ -444,6 +483,8 @@ def _not_in_loop(node: Node) -> str | None:
             return "loop"
         case MapNode():
             return "map"
+        case ParallelNode():
+            return "parallel"
         case _ if tools & PUBLISH_TOOLS:
             return "publisher"
         case _ if tools & CREATE_TOOLS:
@@ -514,6 +555,32 @@ def _not_in_map(node: Node) -> str | None:
             return node.type
 
 
+def parallel_issues(root: Node) -> list[ValidationIssue]:
+    """Why the parallels under `root` cannot run, in run order (depth first); empty if they can.
+    A branch must hold only agent, tool and sequence nodes, none of them a writer or a publisher
+    (as a map's body): the issue is on that node, which is the one to move."""
+    issues: list[ValidationIssue] = []
+    for path, node in iter_nodes(root):
+        if not isinstance(node, ParallelNode):
+            continue
+        for i, branch in enumerate(node.branches):
+            for inner_path, inner in iter_nodes(branch, f"{path}.branches[{i}]"):
+                if reason := _not_in_map(inner):
+                    message = (
+                        f"parallel {node.id!r} at {path}: {reason} {inner.id!r} at {inner_path} "
+                        "cannot be inside a parallel yet"
+                    )
+                    issues.append(
+                        ValidationIssue(
+                            code="not_allowed_in_parallel",
+                            path=inner_path,
+                            node_id=inner.id,
+                            message=message,
+                        )
+                    )
+    return issues
+
+
 def tool_issues(root: Node, known_tools: Collection[str] = PLATFORM_TOOLS) -> list[ValidationIssue]:
     """Each tool a node under `root` names that is not one of `known_tools`, in run order."""
     issues: list[ValidationIssue] = []
@@ -534,9 +601,9 @@ def tool_issues(root: Node, known_tools: Collection[str] = PLATFORM_TOOLS) -> li
 def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
     """Why the spec under `root` cannot run under `policy`, in run order (depth first); empty if
     it can. A loop's `max_iterations` must be within `loop_iterations`, a map's
-    `max_concurrency` within `agents_alive`, and loops and maps must not nest deeper than
-    `max_depth`. Agents spawned and wall time are only known at runtime, where the engine checks
-    them."""
+    `max_concurrency` and a parallel's branches within `agents_alive`, and loops, maps and
+    parallels must not nest deeper than `max_depth`. Agents spawned and wall time are only known
+    at runtime, where the engine checks them."""
     issues: list[ValidationIssue] = []
 
     def over(
@@ -570,17 +637,27 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
                     f"{policy.agents_alive} agents alive"
                 )
                 over(node, path, "agents_alive", policy.agents_alive, node.max_concurrency, why)
+            case ParallelNode() if len(node.branches) > policy.agents_alive:
+                why = (
+                    f"{len(node.branches)} branches are above the workspace limit of "
+                    f"{policy.agents_alive} agents alive"
+                )
+                over(node, path, "agents_alive", policy.agents_alive, len(node.branches), why)
             case _:
                 pass
         match node:
-            case LoopNode() | MapNode():
+            case LoopNode() | MapNode() | ParallelNode():
                 if depth + 1 > policy.max_depth:
                     why = (
                         f"nesting depth {depth + 1} is above the workspace limit of "
                         f"{policy.max_depth}"
                     )
                     over(node, path, "max_depth", policy.max_depth, depth + 1, why)
-                visit(node.body, f"{path}.body", depth + 1)
+                if isinstance(node, ParallelNode):
+                    for i, branch in enumerate(node.branches):
+                        visit(branch, f"{path}.branches[{i}]", depth + 1)
+                else:
+                    visit(node.body, f"{path}.body", depth + 1)
             case SequenceNode():
                 for i, step in enumerate(node.steps):
                     visit(step, f"{path}.steps[{i}]", depth)
@@ -640,10 +717,11 @@ def budget_errors(
 
 
 def structure_issues(root: Node) -> list[ValidationIssue]:
-    """Why the spec under `root` cannot run anywhere, in run order: duplicate node ids, the loop
-    and map rules, references to other nodes, a gate before every publisher, and the rules for
-    creating the repo."""
+    """Why the spec under `root` cannot run anywhere, in run order: duplicate node ids, the loop,
+    map and parallel rules, references to other nodes, a gate before every publisher, and the
+    rules for creating the repo."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
+    issues += parallel_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root)
     return in_run_order(root, issues)
 

@@ -1,0 +1,39 @@
+{
+  "spec_version": "0",
+  "id": "parallel-any",
+  "name": "First answer wins",
+  "description": "Two ways to answer; the first to finish is used and the other is cancelled.",
+  "root": {
+    "type": "parallel",
+    "id": "race",
+    "join": "any",
+    "branches": [
+      {
+        "type": "agent",
+        "id": "fast",
+        "role": "Answerer",
+        "instructions": "Answer the question in your input in one sentence."
+      },
+      {
+        "type": "sequence",
+        "id": "careful",
+        "steps": [
+          {
+            "type": "tool",
+            "id": "files",
+            "tool": "repo.list_files",
+            "args": {
+              "path": "."
+            }
+          },
+          {
+            "type": "agent",
+            "id": "grounded",
+            "role": "Answerer",
+            "instructions": "Answer the question about the repository using the file list in your input."
+          }
+        ]
+      }
+    ]
+  }
+}
