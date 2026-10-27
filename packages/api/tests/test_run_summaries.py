@@ -66,11 +66,12 @@ async def add_run(
     template_id: str | None = None,
     input: str = "go",
     trigger: str = "api",
+    spec: WorkflowSpec | None = None,
 ) -> UUID:
     """A run of `workspace_id` with these events (type, payload) written through the sink."""
     run_id = await create_run(
         sessions,
-        two_step_spec(),
+        spec or two_step_spec(),
         input,
         repo,
         workspace_id,
@@ -185,6 +186,63 @@ async def test_filters_by_status_template_and_repo(
     assert ids(await list_runs(client, workspace, repo=API.url, status="failed")) == [str(failed)]
 
 
+async def test_q_finds_a_run_by_id_prefix_pr_number_or_workflow_name(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    """The command palette (11.7) finds a run from its short id, its PR or its workflow."""
+    with_pr: Events = (
+        ("run_started", {}),
+        ("pr_opened", {"url": "https://github.com/acme/docs/pull/42"}),
+        ("run_completed", {}),
+    )
+    pr = await add_run(sessions, workspace, *with_pr)
+    other_pr: Events = (("pr_opened", {"url": "https://github.com/acme/docs/pull/142"}),)
+    await add_run(sessions, workspace, *other_pr)
+    audit_spec = two_step_spec().model_copy(update={"name": "Audit 50%_off"})
+    audit = await add_run(sessions, workspace, *FAILED, spec=audit_spec)
+    plain = await add_run(sessions, workspace)
+
+    async def found(q: str, **params: Any) -> list[str]:
+        return ids(await list_runs(client, workspace, q=q, **params))
+
+    assert await found(str(plain)[:8]) == [str(plain)]
+    assert await found(str(plain).upper()) == [str(plain)]
+    assert await found("42") == [str(pr)]
+    assert await found("#42") == [str(pr)]
+    assert await found("audit") == [str(audit)]
+    assert await found("50%_") == [str(audit)]
+    # `%` and `_` are not wildcards: this name has no "5" followed by any one character and "%".
+    assert await found("5_%") == []
+    assert len(await found("draft and REVIEW")) == 3
+    assert await found("draft", status="failed") == []
+    assert await found("audit", status="failed") == [str(audit)]
+    assert await found("   ") == ids(await list_runs(client, workspace))
+
+
+async def test_q_pages_with_the_cursor(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    runs = [await add_run(sessions, workspace) for _ in range(3)]
+    await add_run(sessions, workspace, spec=two_step_spec().model_copy(update={"name": "Other"}))
+
+    first = await list_runs(client, workspace, q="draft", limit=2)
+    rest = await list_runs(client, workspace, q="draft", limit=2, cursor=first["next_cursor"])
+
+    assert ids(first) + ids(rest) == [str(r) for r in reversed(runs)]
+    assert rest["next_cursor"] is None
+
+
+async def test_q_never_finds_another_workspaces_run(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    other = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=other, name="other"))
+    elsewhere = await add_run(sessions, other, *COMPLETED)
+
+    assert ids(await list_runs(client, workspace, q=str(elsewhere))) == []
+
+
 async def test_runs_of_other_workspaces_are_not_listed(
     client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
 ) -> None:
@@ -206,6 +264,7 @@ async def test_runs_of_other_workspaces_are_not_listed(
         {"limit": 0},
         {"limit": 101},
         {"status": "done"},
+        {"q": "x" * 101},
     ],
 )
 async def test_bad_list_parameters_are_refused(

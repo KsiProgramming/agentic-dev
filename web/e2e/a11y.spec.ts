@@ -73,7 +73,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     test("settings has no serious a11y issues", async ({ page }) => {
-      await open(page, "/settings");
+      await open(page, "/settings/integrations");
       await expect(page.getByTestId("claude-status")).toBeVisible();
       await expect(page.getByTestId("github-status")).toBeVisible();
       await page.getByRole("button", { name: /repositories accessible/ }).click();
@@ -84,11 +84,39 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Escape");
     });
 
+    test("settings' models and limits sub-pages have no serious a11y issues", async ({ page }) => {
+      await open(page, "/settings/models");
+      await expect(page.getByRole("button", { name: "Add model" })).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await open(page, "/settings/limits");
+      await page.getByLabel("Loop iterations").fill("2");
+      await expect(page.getByTestId("limits-save-bar")).toBeVisible();
+      await expectNoSeriousIssues(page);
+    });
+
+    test("the command palette and the user menu have no serious a11y issues", async ({ page }) => {
+      await open(page, "/runs");
+      await page.keyboard.press("ControlOrMeta+k");
+      const palette = page.getByRole("dialog", { name: "Command palette" });
+      await expect(palette).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+      await expect(palette).toBeHidden();
+      if (page.viewportSize()!.width >= 1024) {
+        await page
+          .getByRole("complementary", { name: "Sidebar" })
+          .getByRole("button", { name: "Preferences" })
+          .click();
+        await expect(page.getByRole("menu")).toBeVisible();
+        await expectNoSeriousIssues(page);
+      }
+    });
+
     test("settings, not connected or needing attention, has no serious a11y issues", async ({
       page,
     }) => {
       await pretendConnections(page, "none");
-      await open(page, "/settings");
+      await open(page, "/settings/integrations");
       await page.getByRole("button", { name: "Save key" }).click();
       // In the page's content: Next's route announcer is an (empty) alert too.
       await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
@@ -280,9 +308,12 @@ test.describe("keyboard", () => {
     await expect(page).not.toHaveTitle(/^● Needs approval · Run /);
   });
 
-  test("the theme menu works from the keyboard", async ({ page }) => {
+  test("the theme is chosen in the user menu from the keyboard", async ({ page }) => {
     await page.goto("/runs");
-    await page.getByRole("button", { name: "Theme" }).focus();
+    if (page.viewportSize()!.width < 1024) {
+      await page.getByRole("button", { name: /^Open navigation/ }).click();
+    }
+    await page.getByRole("button", { name: "Preferences" }).filter({ visible: true }).focus();
     await page.keyboard.press("Enter");
     await page.getByRole("menuitemradio", { name: "Dark" }).focus();
     await page.keyboard.press("Enter");

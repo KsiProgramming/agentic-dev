@@ -65,7 +65,7 @@
           "runs"
         ],
         "summary": "List Runs",
-        "description": "The workspace's runs, newest first, one page at a time. Filters combine; `status` may be\ngiven several times. Status, timings, PR URL and the waiting gate come from each run's\nevents.",
+        "description": "The workspace's runs, newest first, one page at a time. Filters combine; `status` may be\ngiven several times; `q` finds a run as the command palette does. Status, timings, PR URL\nand the waiting gate come from each run's events.",
         "operationId": "listRuns",
         "parameters": [
           {
@@ -143,6 +143,25 @@
               "title": "Repo"
             },
             "description": "Only runs on this repo URL."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only runs whose id starts with this (4 characters or more), whose last pull request has this number (`42` or `#42`), or whose workflow name contains it, ignoring case.",
+              "title": "Q"
+            },
+            "description": "Only runs whose id starts with this (4 characters or more), whose last pull request has this number (`42` or `#42`), or whose workflow name contains it, ignoring case."
           },
           {
             "name": "cursor",
@@ -1363,7 +1382,7 @@
           "github"
         ],
         "summary": "Start Install",
-        "description": "An install URL for the GitHub App. Installing it links the installation to the workspace,\nthen sends the browser to `return_to` (the settings page by default).",
+        "description": "An install URL for the GitHub App. Installing it links the installation to the workspace,\nthen sends the browser to `return_to` (the Integrations settings page by default).",
         "operationId": "startGithubInstall",
         "parameters": [
           {
@@ -1430,7 +1449,7 @@
           "github"
         ],
         "summary": "Complete Install",
-        "description": "GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the\npage that started the install (the web app's settings page by default) with\n`github=connected`, or `github=error` and a `reason`.",
+        "description": "GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the\npage that started the install (the Integrations settings page by default) with\n`github=connected`, or `github=error` and a `reason`.",
         "operationId": "completeGithubInstall",
         "parameters": [
           {

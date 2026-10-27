@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
-import { PageHeader } from "@/components/page-header";
 import { LoadingState } from "@/components/states";
 import { ClaudeConnection } from "@/settings/claude-connection";
 import { GithubConnection } from "@/settings/github-connection";
-import { ModelPricingCard } from "@/settings/model-pricing";
-import { RunLimitsCard } from "@/settings/run-limits";
+import { SettingsSection } from "@/settings/settings-nav";
 
-export const metadata: Metadata = { title: "Settings" };
+export const metadata: Metadata = { title: "Integrations · Settings" };
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -17,24 +15,19 @@ function first(value: string | string[] | undefined): string | undefined {
 /** `github` and `reason` are set by the API when GitHub sends the browser back after an install. */
 async function GithubForSearchParams({
   searchParams,
-}: Pick<PageProps<"/settings">, "searchParams">) {
+}: Pick<PageProps<"/settings/integrations">, "searchParams">) {
   const query = await searchParams;
   return <GithubConnection result={first(query.github)} reason={first(query.reason)} />;
 }
 
-export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
+export default function IntegrationsPage({ searchParams }: PageProps<"/settings/integrations">) {
   return (
-    <div className="flex w-full flex-col gap-6">
-      <PageHeader
-        title="Settings"
-        description="Model access, the repositories this workspace can work on, what its runs cost and how far they may go."
-      />
+    <>
+      <SettingsSection href="/settings/integrations" />
       <ClaudeConnection />
       <Suspense fallback={<LoadingState rows={2} />}>
         <GithubForSearchParams searchParams={searchParams} />
       </Suspense>
-      <ModelPricingCard />
-      <RunLimitsCard />
-    </div>
+    </>
   );
 }

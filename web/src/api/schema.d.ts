@@ -54,8 +54,8 @@ export interface paths {
         /**
          * List Runs
          * @description The workspace's runs, newest first, one page at a time. Filters combine; `status` may be
-         *     given several times. Status, timings, PR URL and the waiting gate come from each run's
-         *     events.
+         *     given several times; `q` finds a run as the command palette does. Status, timings, PR URL
+         *     and the waiting gate come from each run's events.
          */
         get: operations["listRuns"];
         put?: never;
@@ -411,7 +411,7 @@ export interface paths {
         /**
          * Start Install
          * @description An install URL for the GitHub App. Installing it links the installation to the workspace,
-         *     then sends the browser to `return_to` (the settings page by default).
+         *     then sends the browser to `return_to` (the Integrations settings page by default).
          */
         post: operations["startGithubInstall"];
         delete?: never;
@@ -430,7 +430,7 @@ export interface paths {
         /**
          * Complete Install
          * @description GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the
-         *     page that started the install (the web app's settings page by default) with
+         *     page that started the install (the Integrations settings page by default) with
          *     `github=connected`, or `github=error` and a `reason`.
          */
         get: operations["completeGithubInstall"];
@@ -1999,6 +1999,8 @@ export interface operations {
                 template?: string | null;
                 /** @description Only runs on this repo URL. */
                 repo?: string | null;
+                /** @description Only runs whose id starts with this (4 characters or more), whose last pull request has this number (`42` or `#42`), or whose workflow name contains it, ignoring case. */
+                q?: string | null;
                 /** @description `next_cursor` of the previous page. */
                 cursor?: string | null;
                 limit?: number;

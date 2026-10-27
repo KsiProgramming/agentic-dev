@@ -76,6 +76,8 @@ export function RunsView({
 
   const [announcement, setAnnouncement] = useState("");
   const [newRun, setNewRun] = useState(false);
+  // `?new=1` (the command palette's "New run") opens the sheet; closing it drops the param.
+  const askedNewRun = searchParams.get("new") === "1";
   const [newRunTemplate, setNewRunTemplate] = useState<string | null>(null);
   useRunsStream({
     workspaceId,
@@ -109,8 +111,11 @@ export function RunsView({
         }
       />
       <NewRunSheet
-        open={newRun}
-        onOpenChange={setNewRun}
+        open={newRun || askedNewRun}
+        onOpenChange={(open) => {
+          setNewRun(open);
+          if (!open && askedNewRun) setQuery(query);
+        }}
         templateId={newRunTemplate}
         onTemplateChange={setNewRunTemplate}
         workspaceId={workspaceId}

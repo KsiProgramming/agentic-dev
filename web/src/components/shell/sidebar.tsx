@@ -13,6 +13,7 @@ import { useWorkspaceId } from "@/workspace";
 
 import { countLabel, useWaitingCount } from "./attention";
 import { isActive, NAV_ITEMS } from "./nav";
+import { UserMenu } from "./user-menu";
 
 type WorkspaceName = { state: "loading" } | { state: "ready"; name: string | null };
 
@@ -114,7 +115,7 @@ function NavLinks({ pathname, rail, onNavigate }: NavLinksProps & { pathname: st
 }
 
 /**
- * The product name, the workspace and the main nav.
+ * The product name, the workspace, the main nav and, at the bottom, the user menu.
  *
  * `rail` makes it responsive: an icon rail with tooltips from `lg` to `xl` (1024–1279 px) and the
  * full sidebar from `xl`. Without it (the mobile drawer) it is always full.
@@ -156,6 +157,9 @@ export function Sidebar({
           <CurrentNavLinks rail={rail} onNavigate={onNavigate} />
         </Suspense>
       </nav>
+      <div className="mt-auto px-2">
+        <UserMenu rail={rail} />
+      </div>
     </div>
   );
 }

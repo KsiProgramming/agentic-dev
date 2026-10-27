@@ -17,7 +17,10 @@ import { AppShell } from "./app-shell";
 
 const nav = vi.hoisted(() => ({ pathname: "/runs" }));
 
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => nav.pathname,
+  useRouter: () => ({ push: vi.fn() }),
+}));
 vi.mock("next-themes", () => ({ useTheme: () => ({ theme: "system", setTheme: vi.fn() }) }));
 
 const api = vi.hoisted(() => ({ waiting: [] as unknown[] }));
@@ -170,4 +173,12 @@ test("the workspace named by the browser's cookie is the one shown", async () =>
   } finally {
     document.cookie = `${WORKSPACE_COOKIE}=; max-age=0`;
   }
+});
+
+test("the theme and density live in the user menu, not the top bar", async () => {
+  render(<AppShell>page</AppShell>);
+
+  expect(screen.queryByRole("button", { name: "Theme" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Compact rows" })).toBeNull();
+  expect(sidebar().getByRole("button", { name: "Preferences" })).toBeDefined();
 });

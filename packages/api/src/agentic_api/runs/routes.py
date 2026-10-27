@@ -179,12 +179,21 @@ async def list_runs(
     ] = None,
     template: Annotated[str | None, Query(description="Only runs of this template id.")] = None,
     repo: Annotated[str | None, Query(description="Only runs on this repo URL.")] = None,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=100,
+            description="Only runs whose id starts with this (4 characters or more), whose last "
+            "pull request has this number (`42` or `#42`), or whose workflow name contains it, "
+            "ignoring case.",
+        ),
+    ] = None,
     cursor: Annotated[str | None, Query(description="`next_cursor` of the previous page.")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> RunSummaryPage:
     """The workspace's runs, newest first, one page at a time. Filters combine; `status` may be
-    given several times. Status, timings, PR URL and the waiting gate come from each run's
-    events."""
+    given several times; `q` finds a run as the command palette does. Status, timings, PR URL
+    and the waiting gate come from each run's events."""
     sessions = _sessions(request)
     workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
     if await get_workspace(sessions, workspace_id) is None:
@@ -196,6 +205,7 @@ async def list_runs(
             statuses=run_status or (),
             template_id=template,
             repo_url=repo,
+            search=q,
             cursor=cursor,
             limit=limit,
         )

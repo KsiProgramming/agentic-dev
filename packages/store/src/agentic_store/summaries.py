@@ -7,6 +7,7 @@ listing never scans `run_events`.
 import base64
 import binascii
 import json
+import re
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,7 +15,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, func, select, tuple_
+from sqlalchemy import ColumnElement, Select, String, cast, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_sandbox import RepoSource
@@ -187,13 +188,33 @@ def _filtered(
     workspace_id: UUID,
     template_id: str | None,
     repo_url: str | None,
+    search: str | None = None,
 ) -> Select[*tuple[Any, ...]]:
     query = query.where(Run.workspace_id == workspace_id)
     if template_id is not None:
         query = query.where(Run.template_id == template_id)
     if repo_url is not None:
         query = query.where(Run.repo_url == repo_url)
+    if search is not None and search.strip():
+        query = query.where(_matches(search.strip()))
     return query
+
+
+# Ids are shown as their first 8 characters; 4 is the shortest prefix worth matching.
+_ID_PREFIX = re.compile(r"[0-9a-fA-F-]{4,36}")
+_PR_NUMBER = re.compile(r"#?(\d+)")
+
+
+def _matches(search: str) -> ColumnElement[bool]:
+    """A run whose id starts with `search`, whose last PR is number `search` (`42` or `#42`), or
+    whose workflow name contains it, ignoring case. `%` and `_` match themselves."""
+    escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    conditions = [Run.spec["name"].astext.ilike(f"%{escaped}%", escape="\\")]
+    if _ID_PREFIX.fullmatch(search):
+        conditions.append(cast(Run.id, String).like(f"{search.lower()}%"))
+    if pr := _PR_NUMBER.fullmatch(search):
+        conditions.append(Run.pr_url.like(f"%/pull/{int(pr.group(1))}"))
+    return or_(*conditions)
 
 
 @dataclass(frozen=True)
@@ -248,13 +269,15 @@ async def list_run_summaries(
     statuses: Collection[str] = (),
     template_id: str | None = None,
     repo_url: str | None = None,
+    search: str | None = None,
     cursor: str | None = None,
     limit: int = 25,
 ) -> tuple[list[RunSummaryRow], str | None]:
     """One page of the workspace's runs, newest first, and the cursor of the next page (`None`
-    on the last one). Filters combine with AND; several `statuses` match any of them. Raises
-    `InvalidCursorError` for a cursor this function did not return."""
-    query = _filtered(_select(), workspace_id, template_id, repo_url)
+    on the last one). Filters combine with AND; several `statuses` match any of them; `search`
+    finds a run by id prefix, PR number or workflow name. Raises `InvalidCursorError` for a
+    cursor this function did not return."""
+    query = _filtered(_select(), workspace_id, template_id, repo_url, search)
     if statuses:
         query = query.where(Run.status.in_(statuses))
     if cursor is not None:

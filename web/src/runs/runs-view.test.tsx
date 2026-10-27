@@ -225,3 +225,14 @@ test("a streamed change updates the row and is announced", async () => {
   await waitFor(() => expect(within(all).getByText("Cancelled")).toBeTruthy());
   expect(screen.getByText("Run Generate docs is now Cancelled.")).toBeTruthy();
 });
+
+test("?new=1 (the command palette's New run) opens the sheet; closing it drops the param", async () => {
+  nav.search = "new=1";
+  api(() => json(page([done])));
+  show();
+
+  const sheet = await screen.findByRole("dialog", { name: "New run" });
+  fireEvent.keyDown(sheet, { key: "Escape" });
+
+  await waitFor(() => expect(nav.replace).toHaveBeenCalledWith("/runs", { scroll: false }));
+});

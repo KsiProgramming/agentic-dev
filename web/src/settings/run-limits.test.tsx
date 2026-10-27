@@ -97,6 +97,50 @@ test("saving sends the lowered limits, with wall time in seconds", async () => {
   expect(card().getByRole("button", { name: "Reset to defaults" })).toBeDefined();
 });
 
+test("the Save / Discard bar shows only once the form has changes", async () => {
+  storingApi();
+  show();
+  await card().findByLabelText("Agents at once");
+
+  expect(card().queryByTestId("limits-save-bar")).toBeNull();
+  expect(card().queryByRole("button", { name: "Save limits" })).toBeNull();
+
+  type("Loop iterations", "2");
+
+  const bar = within(card().getByTestId("limits-save-bar"));
+  expect(bar.getByRole("status").textContent).toBe("Unsaved changes");
+  expect(bar.getByRole("button", { name: "Save limits" })).toBeDefined();
+});
+
+test("Discard puts the saved values back and hides the bar", async () => {
+  const fetch = storingApi({ ...UNSET, loop_iterations: 3 });
+  show();
+  await waitFor(() =>
+    expect((card().getByLabelText("Loop iterations") as HTMLInputElement).value).toBe("3"),
+  );
+
+  type("Loop iterations", "1");
+  type("Budget (USD)", "5");
+  fireEvent.click(card().getByRole("button", { name: "Discard" }));
+
+  expect((card().getByLabelText("Loop iterations") as HTMLInputElement).value).toBe("3");
+  expect((card().getByLabelText("Budget (USD)") as HTMLInputElement).value).toBe("");
+  expect(card().queryByTestId("limits-save-bar")).toBeNull();
+  expect(fetch.mock.calls.some(([r]) => r.method === "PUT")).toBe(false);
+});
+
+test("saving hides the bar", async () => {
+  storingApi();
+  show();
+  await card().findByLabelText("Agents at once");
+
+  type("Agents at once", "4");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  await waitFor(() => expect(card().queryByTestId("limits-save-bar")).toBeNull());
+  expect((card().getByLabelText("Agents at once") as HTMLInputElement).value).toBe("4");
+});
+
 test("limits above the platform's are caught before calling the API", async () => {
   const fetch = storingApi();
   show();

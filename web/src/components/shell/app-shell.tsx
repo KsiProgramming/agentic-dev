@@ -9,9 +9,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AttentionProvider, countLabel, useWaitingCount } from "./attention";
 import { Breadcrumbs } from "./breadcrumbs";
-import { DensityToggle } from "./density-toggle";
+import { CommandPalette, PaletteButton, usePaletteShortcut } from "./command-palette";
 import { Sidebar } from "./sidebar";
-import { ThemeMenu } from "./theme-menu";
 
 /** The sidebar as a drawer, below `lg` (1024 px). Following a link closes it. */
 function MobileNav({ baseUrl }: { baseUrl?: string }) {
@@ -51,10 +50,12 @@ function MobileNav({ baseUrl }: { baseUrl?: string }) {
 
 /**
  * The frame around every page (tech-stack.md → UI design system → Layout): a sidebar with the
- * main sections and a top bar with breadcrumbs, the density toggle and the theme menu. The sidebar is full from
- * 1280 px, an icon rail from 1024 px and a drawer below that.
+ * main sections and the user menu, and a top bar with breadcrumbs and the command palette
+ * (`⌘K`). The sidebar is full from 1280 px, an icon rail from 1024 px and a drawer below that.
  */
 export function AppShell({ children, baseUrl }: { children: ReactNode; baseUrl?: string }) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  usePaletteShortcut(setPaletteOpen);
   return (
     <AttentionProvider baseUrl={baseUrl}>
       <TooltipProvider>
@@ -81,8 +82,7 @@ export function AppShell({ children, baseUrl }: { children: ReactNode; baseUrl?:
                 <Breadcrumbs className="flex-1" />
               </Suspense>
               <div className="ml-auto flex items-center gap-1">
-                <DensityToggle />
-                <ThemeMenu />
+                <PaletteButton onClick={() => setPaletteOpen(true)} />
               </div>
             </header>
             {/* `min-w-0` lets wide content (tables, JSON) scroll in its own box, not the page. Pages
@@ -96,6 +96,7 @@ export function AppShell({ children, baseUrl }: { children: ReactNode; baseUrl?:
             </main>
           </div>
         </div>
+        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} baseUrl={baseUrl} />
       </TooltipProvider>
     </AttentionProvider>
   );

@@ -28,6 +28,14 @@ describe("breadcrumbsFor", () => {
     ]);
   });
 
+  test("a settings sub-page is named, not shown as an id", () => {
+    expect(breadcrumbsFor("/settings/integrations")).toEqual([
+      { label: "Settings", href: "/settings" },
+      { label: "Integrations" },
+    ]);
+    expect(breadcrumbsFor("/settings/limits")[1]).toEqual({ label: "Limits and budgets" });
+  });
+
   test("a short segment is kept whole", () => {
     expect(breadcrumbsFor("/runs/abc")[1]).toEqual({ label: "abc", title: undefined, mono: true });
   });
