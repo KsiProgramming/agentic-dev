@@ -7,6 +7,9 @@ has the agent list, read and search the repo through the `repo` MCP server. Phas
 `write-file.json` has a writer agent commit NOTES.md on its branch `agent/<run>/writer`, then a
 tool node list the shared checkout.
 
+Runs go to the "Demo" workspace (made on first use), never the default one, so a demo never shows
+among real runs (roadmap 11.4).
+
 Stdlib only, so it runs anywhere Python 3.12 does (CI runs it against the compose stack):
 
     python scripts/sandbox_demo.py --api http://localhost:8000 --repo /samples/agentic-dev.git
@@ -29,13 +32,34 @@ SPEC = (
 )
 
 
-def start_run(api: str, spec: Path, repo: str) -> str:
-    body = json.dumps({"workflow": json.loads(spec.read_text("utf-8")), "repo": {"url": repo}})
+DEMO_WORKSPACE = "Demo"
+
+
+def post(api: str, path: str, body: dict[str, Any]) -> Any:
     request = urllib.request.Request(
-        f"{api}/runs", data=body.encode(), headers={"content-type": "application/json"}
+        f"{api}{path}", data=json.dumps(body).encode(), headers={"content-type": "application/json"}
     )
     with urllib.request.urlopen(request, timeout=10) as response:
-        return json.load(response)["run_id"]
+        return json.load(response)
+
+
+def demo_workspace(api: str) -> str:
+    """The id of the Demo workspace, made if it does not exist yet."""
+    with urllib.request.urlopen(f"{api}/workspaces", timeout=10) as response:
+        workspaces: list[dict[str, Any]] = json.load(response)
+    for workspace in workspaces:
+        if workspace["name"] == DEMO_WORKSPACE:
+            return workspace["id"]
+    return post(api, "/workspaces", {"name": DEMO_WORKSPACE})["id"]
+
+
+def start_run(api: str, spec: Path, repo: str) -> str:
+    body = {
+        "workflow": json.loads(spec.read_text("utf-8")),
+        "repo": {"url": repo},
+        "workspace_id": demo_workspace(api),
+    }
+    return post(api, "/runs", body)["run_id"]
 
 
 def stream_events(api: str, run_id: str, timeout_s: float) -> list[dict[str, Any]]:

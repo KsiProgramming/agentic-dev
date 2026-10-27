@@ -23,7 +23,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { ConfirmButton } from "./confirm-dialog";
 import { ConnectionCard } from "./connection-card";
@@ -108,7 +108,7 @@ function RepoList({ repos }: { repos: Repo[] }) {
  * `?github=connected|error` (`result`, `reason`). */
 export function GithubConnection({
   baseUrl,
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
   result,
   reason,
   navigate,
@@ -119,6 +119,7 @@ export function GithubConnection({
   reason?: string;
   navigate?: (url: string) => void;
 }) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const connections = useConnections({ workspaceId, baseUrl });
   const repos = useRepos({ workspaceId, baseUrl });
   const install = useStartGithubInstall({ workspaceId, baseUrl, navigate });

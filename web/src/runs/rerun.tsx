@@ -10,7 +10,7 @@ import { ApiError } from "@/api/errors";
 import { IdChip, shortId } from "@/components/display";
 import type { RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { runsKey } from "./use-run-summaries";
 
@@ -23,13 +23,14 @@ export function canRerun(status: RunStatus): boolean {
  * new run, with a toast naming the one it repeats. */
 export function useRerun({
   baseUrl = apiBaseUrl(),
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
   navigate,
 }: {
   baseUrl?: string;
   workspaceId?: string;
   navigate?: (url: string) => void;
 } = {}) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const router = useRouter();
   const queries = useQueryClient();
   return useMutation({

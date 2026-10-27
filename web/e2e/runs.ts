@@ -1,13 +1,14 @@
 import { expect, type APIRequestContext } from "@playwright/test";
 
-// The API the browser talks to (compose publishes it on the host).
-export const apiURL = process.env.E2E_API_URL ?? "http://localhost:8000";
+import { apiURL, e2eWorkspaceId } from "./workspace";
+
+export { apiURL };
 
 /** The fake GitHub App's repo (`AGENTIC_GITHUB=fake`), as a run names it. */
 export const DOCS_DEMO_URL = "https://github.com/e2e-org/docs-demo";
 
-/** Starts a run of `steps` in a sequence through the API and returns its id. With `repo`, the
- * run works on that repo in a sandbox. */
+/** Starts a run of `steps` in a sequence through the API, in the E2E workspace, and returns its
+ * id. With `repo`, the run works on that repo in a sandbox. */
 export async function startRun(
   request: APIRequestContext,
   steps: unknown[],
@@ -23,6 +24,7 @@ export async function startRun(
         root: { type: "sequence", id: "main", steps },
       },
       input: "hello",
+      workspace_id: e2eWorkspaceId(),
       ...(repo ? { repo: { url: repo } } : {}),
     },
   });

@@ -14,6 +14,7 @@ from agentic_api.workspaces.models import (
     ConnectionOut,
     LongContextPrice,
     ModelPricingOut,
+    NewWorkspace,
     Price,
     PutClaudeConnection,
     PutPricing,
@@ -30,6 +31,7 @@ from agentic_store import (
     AuditAction,
     InvalidCursorError,
     WorkspaceNotFoundError,
+    create_workspace,
     delete_connection,
     get_policy_overrides,
     get_workspace,
@@ -77,6 +79,13 @@ def _refused(status_code: int, code: str, message: str) -> HTTPException:
 @router.get("", operation_id="listWorkspaces")
 async def workspaces(request: Request) -> list[WorkspaceOut]:
     return [WorkspaceOut.of(w) for w in await list_workspaces(_sessions(request))]
+
+
+@router.post("", operation_id="createWorkspace", status_code=status.HTTP_201_CREATED)
+async def new_workspace(body: NewWorkspace, request: Request) -> WorkspaceOut:
+    """A new workspace, with no connections and the platform's run limits. The e2e tests and
+    demos run in their own, so their runs never mix with real ones."""
+    return WorkspaceOut.of(await create_workspace(_sessions(request), body.name))
 
 
 @router.get("/{workspace_id}/connections", operation_id="listConnections", responses=_NOT_FOUND)

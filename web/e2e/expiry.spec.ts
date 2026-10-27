@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 import { apiURL, endedRunEvents, EXPIRING_GATE, startRun, WRITER } from "./runs";
+import { e2eWorkspaceId } from "./workspace";
 
 /** Done when (11.3): a gate past its time to live cancels its run cleanly, drops out of every
  * waiting count and shows "Expired" with the reason. The e2e worker sweeps every second
@@ -47,12 +48,15 @@ test("a gate nobody decides expires: the run is cancelled and shows Expired", as
   const all = page.getByRole("table", { name: "All runs" });
   const row = all.locator(`[data-run-id="${runId}"]`);
   await expect(row).toContainText("Expired", { timeout: 15_000 });
-  await expect(
-    page
-      .getByRole("table", { name: "Runs that need approval" })
-      .locator(`[data-run-id="${runId}"]`),
-  ).toHaveCount(0);
-  const waiting = await request.get(`${apiURL}/runs`, { params: { status: "waiting" } });
+  await page
+    .getByRole("navigation", { name: "Views" })
+    .getByRole("link", { name: /^Needs approval/ })
+    .click();
+  await expect(page).toHaveURL(/view=waiting/);
+  await expect(page.locator(`[data-run-id="${runId}"]`)).toHaveCount(0);
+  const waiting = await request.get(`${apiURL}/runs`, {
+    params: { status: "waiting", workspace_id: e2eWorkspaceId() },
+  });
   const ids = ((await waiting.json()) as { items: { id: string }[] }).items.map((r) => r.id);
   expect(ids).not.toContain(runId);
 });

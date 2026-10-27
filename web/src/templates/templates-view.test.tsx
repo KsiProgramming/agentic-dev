@@ -161,6 +161,7 @@ test("starting sends the template, its options and the repo, then opens the run"
     input: "",
     repo: { url: "https://github.com/acme/web" },
     workspace_id: DEFAULT_WORKSPACE_ID,
+    trigger: "manual",
     budget_usd: null,
   });
   expect(window.localStorage.getItem(`agentic:last-repo:${DEFAULT_WORKSPACE_ID}`)).toBe(

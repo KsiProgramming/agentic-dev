@@ -42,11 +42,13 @@ async def create_run(
     template_id: str | None = None,
     template_parameters: dict[str, JsonValue] | None = None,
     budget_usd: Decimal | None = None,
+    trigger: str = "api",
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) if any; returns its id. The workspace must
-    exist. The run gets the workspace's policy with `budget_usd` in place of its budget, if given
-    (`run_policy`), which raises `PolicyViolationError` if the spec is above it."""
+    exist. `trigger` says who started it (`manual` or `api`). The run gets the workspace's policy
+    with `budget_usd` in place of its budget, if given (`run_policy`), which raises
+    `PolicyViolationError` if the spec is above it."""
     run_id = uuid4()
     async with sessions.begin() as session:
         policy = await run_policy(session, workspace_id, spec, budget_usd)
@@ -62,6 +64,8 @@ async def create_run(
                 repo_url=repo.url if repo else None,
                 template_id=template_id,
                 template_parameters=template_parameters,
+                trigger=trigger,
+                branch=repo.ref if repo else None,
             )
         )
         audit(

@@ -1,40 +1,54 @@
 import { expect, test } from "vitest";
 
 import {
-  filtersToQuery,
+  ALL_RUNS,
   isFiltered,
   matchesFilters,
   NO_FILTERS,
-  parseFilters,
-  type RunFilters,
+  parseRunsQuery,
+  runsQueryToString,
+  viewFilters,
+  type RunsQuery,
 } from "./filters";
 import { runSummary } from "./testing";
 
-test("filters round-trip through the URL query", () => {
-  const filters: RunFilters = {
-    status: ["waiting", "failed"],
+test("the view and filters round-trip through the URL query", () => {
+  const query: RunsQuery = {
+    view: "failed",
     template: "generate-docs",
     repo: "https://github.com/acme/docs",
   };
 
-  const query = filtersToQuery(filters);
+  const search = runsQueryToString(query);
 
-  expect(query).toBe(
-    "status=waiting&status=failed&template=generate-docs&repo=https%3A%2F%2Fgithub.com%2Facme%2Fdocs",
+  expect(search).toBe(
+    "view=failed&template=generate-docs&repo=https%3A%2F%2Fgithub.com%2Facme%2Fdocs",
   );
-  expect(parseFilters(new URLSearchParams(query))).toEqual(filters);
+  expect(parseRunsQuery(new URLSearchParams(search))).toEqual(query);
 });
 
-test("no filters is an empty query", () => {
-  expect(filtersToQuery(NO_FILTERS)).toBe("");
-  expect(parseFilters(new URLSearchParams(""))).toEqual(NO_FILTERS);
-  expect(isFiltered(NO_FILTERS)).toBe(false);
+test("All with no filter is an empty query; an unknown view is All", () => {
+  expect(runsQueryToString(ALL_RUNS)).toBe("");
+  expect(parseRunsQuery(new URLSearchParams(""))).toEqual(ALL_RUNS);
+  expect(parseRunsQuery(new URLSearchParams("view=done")).view).toBe("all");
+  expect(isFiltered(ALL_RUNS)).toBe(false);
+  // The view picks the status; it is not a filter to clear.
+  const failed: RunsQuery = { ...ALL_RUNS, view: "failed" };
+  expect(isFiltered(failed)).toBe(false);
 });
 
-test("unknown statuses are dropped and the order is fixed", () => {
-  const filters = parseFilters(new URLSearchParams("status=failed&status=done&status=waiting"));
+test("each view asks the API for its statuses", () => {
+  const statuses = (view: RunsQuery["view"]) => viewFilters({ ...ALL_RUNS, view }).status;
 
-  expect(filters.status).toEqual(["waiting", "failed"]);
+  expect(statuses("all")).toEqual([]);
+  expect(statuses("running")).toEqual(["running", "queued"]);
+  expect(statuses("waiting")).toEqual(["waiting"]);
+  expect(statuses("failed")).toEqual(["failed"]);
+  expect(viewFilters({ view: "all", template: "t", repo: "r" })).toEqual({
+    status: [],
+    template: "t",
+    repo: "r",
+  });
 });
 
 test("a run matches when every filter matches", () => {

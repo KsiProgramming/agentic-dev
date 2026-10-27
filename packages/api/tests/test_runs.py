@@ -192,6 +192,22 @@ async def test_post_run_queues_it(
     assert run is not None
     assert (run.status, run.input, run.spec.id) == ("queued", "go", "draft-and-review")
     assert str(run_id) in await queued_ids(redis_url)
+    assert (await stored_row(sessions, str(run_id))).trigger == "api"
+
+
+async def test_a_run_started_by_a_person_says_so(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workflow = spec_json("valid/two-step-sequence.json")
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json={"workflow": workflow, "trigger": "manual"})
+        refused = await client.post("/runs", json={"workflow": workflow, "trigger": "rerun"})
+    run_id = response.json()["run_id"]
+    await unqueue(redis_url, run_id)
+
+    assert (await stored_row(sessions, run_id)).trigger == "manual"
+    # Only `POST /runs/{id}/rerun` makes a rerun.
+    assert refused.status_code == 422
 
 
 async def test_post_run_rejects_an_invalid_spec(
@@ -947,6 +963,7 @@ async def test_an_ended_run_is_rerun_as_a_new_linked_run(
     assert {k: getattr(rerun, k) for k in copied} == {k: getattr(original, k) for k in copied}
     assert rerun.template_parameters == {"output_dir": "documentation"}
     assert (rerun.status, rerun.rerun_of, rerun.failure_reason) == ("queued", before.id, None)
+    assert (rerun.trigger, detail["trigger"]) == ("rerun", "rerun")
     # The original is not changed.
     assert (original.status, original.updated_at, original.rerun_of) == (
         status,

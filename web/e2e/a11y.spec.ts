@@ -30,7 +30,7 @@ for (const colorScheme of ["light", "dark"] as const) {
 
     test("runs has no serious a11y issues", async ({ page }) => {
       await open(page, "/runs");
-      await expect(page.getByRole("heading", { name: "All runs" })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Views" })).toBeVisible();
       await expect(page.getByRole("status")).toHaveCount(0); // the list has loaded
       await expect(page.getByTestId("workspace-name")).toBeAttached();
       await expectNoSeriousIssues(page);

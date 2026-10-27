@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS_DEMO } from "./connections";
 import { apiURL } from "./runs";
+import { e2eWorkspaceId } from "./workspace";
 
 /** Fail the test on any console error, CORS errors included. */
 function watchConsole(page: Page): string[] {
@@ -90,6 +91,7 @@ test("a docs run waits at its gate, is approved from the dock and opens a pull r
     data: {
       template: { id: "generate-docs", parameters: {} },
       repo: { url: `https://github.com/${DOCS_DEMO}` },
+      workspace_id: e2eWorkspaceId(),
     },
   });
   expect(response.status()).toBe(202);
@@ -97,7 +99,7 @@ test("a docs run waits at its gate, is approved from the dock and opens a pull r
 
   // Waiting runs are counted on Runs in the sidebar and in the title of every page.
   await page.goto("/runs");
-  await expect(page.getByRole("link", { name: /Review/ }).first()).toBeVisible({
+  await expect(page.getByRole("link", { name: /: review/ }).first()).toBeVisible({
     timeout: 60_000,
   });
   await expect(page).toHaveTitle(/^\(\d+\+?\) ● Needs approval · Runs/);
@@ -133,6 +135,7 @@ test("a run started with POST /runs shows its events within 1 s", async ({ page,
         root: { type: "agent", id: "writer", role: "Writer", instructions: "Say hello." },
       },
       input: "hello",
+      workspace_id: e2eWorkspaceId(),
     },
   });
   expect(response.status()).toBe(202);

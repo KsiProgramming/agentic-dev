@@ -39,7 +39,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { FieldMessage } from "@/forms/schema-form/schema-fields";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { ConfirmButton } from "./confirm-dialog";
 import { ConnectionCard } from "./connection-card";
@@ -91,11 +91,12 @@ function overridesWith(models: ModelPricing[], model: string, next: Price | null
 /** The "Model pricing" card: list prices, and the workspace's own prices on top. */
 export function ModelPricingCard({
   baseUrl,
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
 }: {
   baseUrl?: string;
   workspaceId?: string;
 }) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const pricing = usePricing({ workspaceId, baseUrl });
   const save = useSavePricing({ workspaceId, baseUrl });
   // The model being edited; "" for a new one.

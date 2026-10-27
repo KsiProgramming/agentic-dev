@@ -173,6 +173,7 @@ function NewRunForm({
           repo: needsRepo && !creating ? { url: values.repo } : null,
           ...(creating ? { new_repo: toNewRepo(values.newRepo) } : {}),
           workspace_id: workspaceId,
+          trigger: "manual",
           budget_usd: parseBudget(values.budget),
         },
       });

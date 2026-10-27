@@ -185,6 +185,10 @@ class Run(Base):
     # When that gate expires: the worker then cancels the run (`agentic_store.expiry`).
     gate_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rerun_of: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
+    # What started the run: `manual` (a person, from the web), `api` or `rerun`.
+    trigger: Mapped[str] = mapped_column(String(32), server_default="api")
+    # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
+    branch: Mapped[str | None] = mapped_column(Text)
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):
     # `active_ms` is null until the run starts. The open stretch, if any, began at
     # `active_since` or `waiting_since`.

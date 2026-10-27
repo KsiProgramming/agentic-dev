@@ -82,6 +82,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Counts
+         * @description How many runs each saved view of the runs list holds (All, Running, Needs approval,
+         *     Failed), with the same `template` and `repo` filters as `GET /runs`. A run waiting at a gate
+         *     past its expiry is not counted as waiting, even before a worker cancels it.
+         */
+        get: operations["countRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/stream": {
         parameters: {
             query?: never;
@@ -228,7 +250,12 @@ export interface paths {
         /** Workspaces */
         get: operations["listWorkspaces"];
         put?: never;
-        post?: never;
+        /**
+         * New Workspace
+         * @description A new workspace, with no connections and the platform's run limits. The e2e tests and
+         *     demos run in their own, so their runs never mix with real ones.
+         */
+        post: operations["createWorkspace"];
         delete?: never;
         options?: never;
         head?: never;
@@ -727,6 +754,13 @@ export interface components {
              */
             workspace_id?: string | null;
             /**
+             * Trigger
+             * @description Who starts the run: `manual` for a person in the web app, `api` for a script or another client.
+             * @default api
+             * @enum {string}
+             */
+            trigger: "manual" | "api";
+            /**
              * Budget Usd
              * @description USD the run may spend, a hard stop once reached. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget.
              */
@@ -976,6 +1010,11 @@ export interface components {
         };
         /** @enum {string} */
         NewRepoReason: "no_connection" | "installation_gone" | "personal_account";
+        /** NewWorkspace */
+        NewWorkspace: {
+            /** Name */
+            name: string;
+        };
         /**
          * ParallelNode
          * @description Runs its branches at the same time, each on the parallel's input, and joins them.
@@ -1168,6 +1207,26 @@ export interface components {
              */
             budget_usd?: number | null;
         };
+        /**
+         * RunCounts
+         * @description How many of the workspace's runs each saved view of the runs list holds.
+         */
+        RunCounts: {
+            /** All */
+            all: number;
+            /**
+             * Running
+             * @description Queued or running.
+             */
+            running: number;
+            /**
+             * Waiting
+             * @description Waiting at a gate that has not expired: the runs that need approval.
+             */
+            waiting: number;
+            /** Failed */
+            failed: number;
+        };
         /** RunDetail */
         RunDetail: {
             /**
@@ -1219,6 +1278,13 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            /** @description What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`). */
+            trigger: components["schemas"]["RunTrigger"];
+            /**
+             * Branch
+             * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
+             */
+            branch: string | null;
             usage: components["schemas"]["RunUsage"];
             /**
              * Active Ms
@@ -1392,6 +1458,13 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            /** @description What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`). */
+            trigger: components["schemas"]["RunTrigger"];
+            /**
+             * Branch
+             * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
+             */
+            branch: string | null;
             usage: components["schemas"]["RunUsage"];
             /**
              * Active Ms
@@ -1427,6 +1500,8 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** @enum {string} */
+        RunTrigger: "manual" | "api" | "rerun";
         /**
          * RunUsage
          * @description Totals of the run's usage events, priced when each was logged.
@@ -1909,6 +1984,49 @@ export interface operations {
             };
         };
     };
+    countRuns: {
+        parameters: {
+            query?: {
+                /** @description Only runs of this template id. */
+                template?: string | null;
+                /** @description Only runs on this repo URL. */
+                repo?: string | null;
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunCounts"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     streamRunSummaries: {
         parameters: {
             query?: {
@@ -2186,6 +2304,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceOut"][];
+                };
+            };
+        };
+    };
+    createWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewWorkspace"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

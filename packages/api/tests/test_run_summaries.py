@@ -65,10 +65,17 @@ async def add_run(
     repo: RepoSource | None = None,
     template_id: str | None = None,
     input: str = "go",
+    trigger: str = "api",
 ) -> UUID:
     """A run of `workspace_id` with these events (type, payload) written through the sink."""
     run_id = await create_run(
-        sessions, two_step_spec(), input, repo, workspace_id, template_id=template_id
+        sessions,
+        two_step_spec(),
+        input,
+        repo,
+        workspace_id,
+        template_id=template_id,
+        trigger=trigger,
     )
     log = RunEventLog(run_id, PostgresEventSink(sessions))
     for type, payload in events:
@@ -313,3 +320,61 @@ async def test_an_expired_run_is_cancelled_with_the_reason_and_no_longer_waits(
         "cancelled by user",
     )
     assert ids(waiting) == []
+
+
+async def counts(client: AsyncClient, workspace_id: UUID, **params: Any) -> dict[str, Any]:
+    response = await client.get(
+        "/runs/counts", params={"workspace_id": str(workspace_id), **params}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def test_runs_are_counted_per_saved_view(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    """The tabs of the runs list (11.4): All, Running, Needs approval and Failed."""
+    await add_run(sessions, workspace, *COMPLETED, repo=DOCS, template_id="generate-docs")
+    await add_run(sessions, workspace, *FAILED, repo=API)
+    await add_run(sessions, workspace, ("run_started", {}))
+    await add_run(sessions, workspace)  # queued
+    await add_run(sessions, workspace, *WAITING, repo=API)
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    # Past its expiry, though no worker has cancelled it yet: it no longer needs approval.
+    await add_run(sessions, workspace, ("run_started", {}), ("gate_waiting", {"expires_at": past}))
+
+    assert await counts(client, workspace) == {"all": 6, "running": 2, "waiting": 1, "failed": 1}
+    assert await counts(client, workspace, repo=API.url) == {
+        "all": 2,
+        "running": 0,
+        "waiting": 1,
+        "failed": 1,
+    }
+    assert (await counts(client, workspace, template="generate-docs"))["all"] == 1
+
+
+async def test_runs_of_an_unknown_workspace_are_not_counted(client: AsyncClient) -> None:
+    response = await client.get("/runs/counts", params={"workspace_id": str(uuid4())})
+
+    assert response.status_code == 404
+
+
+async def test_a_summary_says_what_started_the_run_and_its_branch(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    on_ref = RepoSource(url=DOCS.url, ref="release/1.2")
+    manual = await add_run(sessions, workspace, repo=on_ref, trigger="manual")
+    on_default = await add_run(sessions, workspace, repo=DOCS)
+    created = {"full_name": "acme/new", "url": "https://github.com/acme/new"}
+    new_repo = await add_run(
+        sessions, workspace, ("repo_created", {**created, "default_branch": "trunk"})
+    )
+
+    by_id = {item["id"]: item for item in (await list_runs(client, workspace))["items"]}
+
+    assert (by_id[str(manual)]["trigger"], by_id[str(manual)]["branch"]) == (
+        "manual",
+        "release/1.2",
+    )
+    assert (by_id[str(on_default)]["trigger"], by_id[str(on_default)]["branch"]) == ("api", None)
+    assert by_id[str(new_repo)]["branch"] == "trunk"

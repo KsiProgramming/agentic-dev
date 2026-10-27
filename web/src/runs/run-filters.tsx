@@ -1,24 +1,18 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { useId } from "react";
 
 import { apiBaseUrl, createApiClient } from "@/api/client";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
 import { useTemplates } from "@/api/queries";
 
-import { isFiltered, NO_FILTERS, TEMPLATE_OPTIONS, type RunFilters } from "./filters";
-import { API_RUN_STATUSES, repoLabel, statusLabel } from "./summaries";
+import { isFiltered, TEMPLATE_OPTIONS, type RunsQuery } from "./filters";
+import { repoLabel } from "./summaries";
 
 /** The repo URLs runs can be filtered by: the repos the GitHub App reaches, or `null` when
  * GitHub is not connected (the filter is then hidden). */
@@ -35,55 +29,15 @@ function useRepoOptions(workspaceId: string, baseUrl: string) {
   });
 }
 
-function StatusFilter({
-  value,
-  onChange,
-}: {
-  value: RunFilters["status"];
-  onChange: (status: RunFilters["status"]) => void;
-}) {
-  const summary =
-    value.length === 0
-      ? "Any status"
-      : value.length === 1
-        ? statusLabel(value[0]!)
-        : `${value.length} statuses`;
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" size="sm" aria-label={`Status: ${summary}`}>
-          {summary}
-          <ChevronDownIcon aria-hidden="true" data-icon="inline-end" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        {API_RUN_STATUSES.map((status) => (
-          <DropdownMenuCheckboxItem
-            key={status}
-            checked={value.includes(status)}
-            // Keep the menu open to pick several.
-            onSelect={(e) => e.preventDefault()}
-            onCheckedChange={(checked) =>
-              onChange(API_RUN_STATUSES.filter((s) => (s === status ? checked : value.includes(s))))
-            }
-          >
-            {statusLabel(status)}
-          </DropdownMenuCheckboxItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-/** Narrow the runs list by status, template and repo. */
+/** Narrow the runs list by template and repo (the view tabs pick the status). */
 export function RunFiltersBar({
   filters,
   onChange,
   workspaceId,
   baseUrl = apiBaseUrl(),
 }: {
-  filters: RunFilters;
-  onChange: (filters: RunFilters) => void;
+  filters: RunsQuery;
+  onChange: (filters: RunsQuery) => void;
   workspaceId: string;
   baseUrl?: string;
 }) {
@@ -101,10 +55,6 @@ export function RunFiltersBar({
 
   return (
     <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-2">
-      <StatusFilter
-        value={filters.status}
-        onChange={(status) => onChange({ ...filters, status })}
-      />
       <Label htmlFor={templateId} className="sr-only">
         Template
       </Label>
@@ -143,7 +93,12 @@ export function RunFiltersBar({
         </>
       ) : null}
       {isFiltered(filters) ? (
-        <Button type="button" variant="ghost" size="sm" onClick={() => onChange(NO_FILTERS)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onChange({ ...filters, template: null, repo: null })}
+        >
           <XIcon aria-hidden="true" data-icon="inline-start" />
           Clear filters
         </Button>
