@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 11.5 Inbox:
+- Phase 11.5 Inbox ([#134](https://github.com/KsiProgramming/agentic-dev/pull/134)):
   - **Inbox.** `/inbox` lists the gates waiting in the workspace, oldest first, with the workflow, repo, waiting time and time left before expiry. Selecting one (kept in the URL, `?run=`) shows its review beside the list from 1024 px, below it under that: what approving lets go on (each writer's branch into its base), the run's active time and cost so far, the changed files (opening the review sheet, editable) or the gate's summary, and Approve, Reject (with comment) and Open run, with `A` / `R`. After a decision the next gate is selected.
   - **Shell.** "Inbox" is the first sidebar entry and carries the waiting count, moved from "Runs".
   - **API.** `GET /runs/{id}/gate` returns the gate a run waits at (title, prompt, artifact, changed files, expiry) with its repo, base and writers' branches; `409` once it no longer waits. The OpenAPI spec and web client are regenerated.
