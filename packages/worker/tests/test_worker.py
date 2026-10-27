@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mappi
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
 import docker
@@ -34,7 +34,7 @@ from agentic_engine.spec import (
     WorkflowSpec,
     parse_spec,
 )
-from agentic_engine.templates import DocsParams, build_docs_spec
+from agentic_engine.templates import DocsParams, NewRepo, build_docs_spec, wrap_with_create_repo
 from agentic_engine.templates.docs import PAGE_SEPARATOR
 from agentic_runtime import (
     AgentRuntime,
@@ -59,6 +59,7 @@ from agentic_store import (
     enqueue_run,
     get_run,
     get_run_summary,
+    list_audit_events,
     list_run_events,
     put_connection,
     put_github_connection,
@@ -1180,6 +1181,99 @@ async def test_the_fake_github_app_clones_and_publishes_local_fixture_repos(
     (opened,) = [e for e in events if e.type == "pr_opened"]
     assert opened.payload["url"] == "https://github.com/e2e-org/docs-demo/pull/1"
     assert remote_branches(bare) == [f"agent/{run_id}/writer"]
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+async def test_done_when_a_docs_run_works_on_a_new_repo(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    decision: Literal["approve", "reject"],
+) -> None:
+    """Phase 1.12 on fakes: a docs run on a repo it creates waits at `approve_repo` with no
+    sandbox and nothing created. Approval creates the repo with its scaffold commit; the worker
+    then clones it in a new attempt, the docs flow runs on it, and after the second gate a pull
+    request is opened on it. Rejection creates nothing."""
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    full_name = "e2e-org/docs-new"
+    bare = fixtures / "e2e-org" / "docs-new.git"
+    workspace_id = await new_workspace(sessions)
+    await put_github_connection(sessions, workspace_id, 1, "e2e-org", "Organization")
+    spec = wrap_with_create_repo(
+        build_docs_spec(DocsParams()), NewRepo(name="docs-new", gitignore="Python"), "e2e-org"
+    )
+    sandboxes = FakeSandboxManager(local_root=fixtures)
+    runtimes: list[FakeRuntime] = []
+
+    def make_runtime(tools: ToolExecutor | None) -> AgentRuntime:
+        runtimes.append(FakeRuntime({"writer": docs_writer()}, default=docs_page, tools=tools))
+        return runtimes[-1]
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=make_runtime,
+        sandboxes=sandboxes,
+        agentic_github="fake",
+        sandbox_local_root=fixtures,
+    ):
+        run_id = await create_run(
+            sessions,
+            spec,
+            "",
+            RepoSource(url=f"https://github.com/{full_name}"),
+            workspace_id=workspace_id,
+        )
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+            await wait_for_event(sessions, run_id, "gate_waiting", "approve_repo")
+            assert not bare.exists()
+            assert not (fixtures / str(run_id)).exists()  # no sandbox yet
+
+            await record_approval(sessions, run_id, "approve_repo", GateDecision(decision=decision))
+            await enqueue_run(redis, run_id)
+            if decision == "reject":
+                await wait_for_status(sessions, run_id, "cancelled")
+            else:
+                await wait_for_event(sessions, run_id, "gate_waiting", "approve")
+                assert remote_branches(bare) == []
+                await record_approval(sessions, run_id, "approve", GateDecision(decision="approve"))
+                await enqueue_run(redis, run_id)
+                await wait_for_status(sessions, run_id, "completed")
+        finally:
+            await redis.aclose()
+
+    events = await list_run_events(sessions, run_id)
+    created = [e for e in events if e.type == "repo_created"]
+    audit, _ = await list_audit_events(sessions, workspace_id, actions=["repo.created"])
+    if decision == "reject":
+        assert created == []
+        assert not bare.exists()
+        assert audit == []
+        return
+    (repo_event,) = created
+    assert repo_event.payload["full_name"] == full_name
+    assert repo_event.payload["created"] is True
+    (row,) = audit
+    assert row.details == {"full_name": full_name, "private": True}
+    # The scaffold commit, then the docs on the writer's branch, pushed after the second gate.
+    branch = f"agent/{run_id}/writer"
+    assert remote_branches(bare) == [branch]
+    assert {".gitignore", "README.md"} <= set(remote_files(bare, "main"))
+    assert "docs/README.md" in remote_files(bare, branch)
+    (opened,) = [e for e in events if e.type == "pr_opened"]
+    assert opened.payload["url"] == f"https://github.com/{full_name}/pull/1"
+    # The scaffold has no module manifest, so the repo's root is its one module.
+    items = [
+        cast(dict[str, Any], e.payload["item"]) for e in events if e.type == "map_item_started"
+    ]
+    assert [item["path"] for item in items] == ["."]
+    # The attempt that created the repo had no sandbox; the next one cloned it.
+    resumed = [e for e in events if e.type == "run_resumed"]
+    assert len(resumed) >= 3
 
 
 def test_the_fake_github_app_is_refused_in_production(tmp_path: Path) -> None:

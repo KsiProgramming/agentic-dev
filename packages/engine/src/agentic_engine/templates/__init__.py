@@ -13,6 +13,14 @@ from pydantic import BaseModel, JsonValue
 
 from agentic_engine.spec import WorkflowSpec
 from agentic_engine.templates.docs import DocsParams, build_docs_spec
+from agentic_engine.templates.new_repo import (
+    APPROVE_NODE_ID,
+    CREATE_NODE_ID,
+    Gitignore,
+    License,
+    NewRepo,
+    wrap_with_create_repo,
+)
 
 type Requirement = Literal["claude", "github"]
 """A connection a workspace needs before it can run a template: `claude` for its agents,
@@ -55,10 +63,16 @@ def get_template(template_id: str) -> Template[Any] | None:
 
 
 __all__ = [
+    "APPROVE_NODE_ID",
+    "CREATE_NODE_ID",
     "TEMPLATES",
     "DocsParams",
+    "Gitignore",
+    "License",
+    "NewRepo",
     "Requirement",
     "Template",
     "build_docs_spec",
     "get_template",
+    "wrap_with_create_repo",
 ]

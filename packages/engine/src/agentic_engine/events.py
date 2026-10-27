@@ -42,6 +42,10 @@ hit it, if one did. A `node_failed` or `run_failed` naming the reason follows. F
 when that is why the budget could not be held."""
 PR_OPENED: Final = "pr_opened"
 """A publishing tool node opened a pull request: `url`, `number`, `head`, `base`, `commit`."""
+REPO_CREATED: Final = "repo_created"
+"""A tool node created the run's repo: `full_name`, `url`, `default_branch`, `private`, and
+`created` (false if an earlier attempt of the run created it). The run then stops its attempt
+and goes on in a new one, which clones the repo."""
 
 RUN_END_STATUS: Final[dict[str, RunStatus]] = {
     RUN_COMPLETED: "completed",

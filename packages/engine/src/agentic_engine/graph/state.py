@@ -95,13 +95,14 @@ def initial_state(input: str) -> RunState:
     )
 
 
-type WorkflowRunStatus = AgentNodeStatus | Literal["waiting"]
+type WorkflowRunStatus = AgentNodeStatus | Literal["waiting", "suspended"]
 
 
 class WorkflowRunResult(BaseModel):
     """The outcome of a run, or of one stretch of it. `stopped_at` names the node that did not
     complete, if any; a `waiting` run is paused at the gate `waiting_at` until it is continued
-    with a decision."""
+    with a decision. A `suspended` run stopped after creating its repo, at `waiting_at` (the
+    node `repo_ready_node_id` names), and goes on in a new attempt, with no decision."""
 
     model_config = ConfigDict(frozen=True)
 

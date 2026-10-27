@@ -27,12 +27,18 @@ an installation token (so private repos work); the token reaches git through its
 is redacted from logs meanwhile. If its spec uses `github.*` tools, it also gets the `github` MCP
 server: `github.openPR` bundles a writer's branch out of the sandbox, pushes it from this worker
 and opens a pull request. The sandbox never holds a credential and has no network.
+
+A run that creates its repo (`github.createRepo`, phase 1.12) has its repo's URL from the start,
+but no sandbox until the repo exists: its attempts get only the `github` server, without
+`openPR`. Once `github.createRepo` has run, the graph stops (`suspended`) and the worker starts a
+new attempt of the run at once, which clones the new repo and goes on.
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
 this host (no isolation).
 
 With `AGENTIC_GITHUB=fake` (local dev and end-to-end tests, never `AGENTIC_ENV=production`), the
-GitHub App is a stand-in: the fake repos (`agentic_github.FAKE_REPOS`) are cloned from, and
-pushed to, bare repos under `SANDBOX_LOCAL_ROOT`, and pull requests are only numbered.
+GitHub App is a stand-in: the fake repos (`agentic_github.FAKE_REPOS`, and those it creates)
+are cloned from, and pushed to, bare repos under `SANDBOX_LOCAL_ROOT`, and pull requests are only
+numbered.
 
 A user can cancel a run (`POST /runs/{id}/cancel`): the worker running it checks every
 `CANCEL_POLL_S`, cancels its graph and writes `run_cancelled`; a cancelled run that is claimed
@@ -78,9 +84,15 @@ from agentic_engine.graph import (
 )
 from agentic_engine.logging import configure_logging
 from agentic_engine.policy import PolicyLimitExceeded
-from agentic_engine.spec import WorkflowSpec, iter_nodes, node_tools, writer_node_ids
+from agentic_engine.spec import (
+    WorkflowSpec,
+    creates_repo,
+    iter_nodes,
+    node_tools,
+    writer_node_ids,
+)
 from agentic_github import (
-    FAKE_REPOS,
+    FAKE_ACCOUNT,
     FakeGithubApp,
     GithubApiError,
     GithubApp,
@@ -123,6 +135,7 @@ from agentic_store import (
     reclaim_expired_run,
     release_run,
     renew_lease,
+    repo_created,
     run_ended,
     waiting_run_ids,
     workspace_price_table,
@@ -300,7 +313,7 @@ def build_github(settings: WorkerSettings) -> GithubPlatform | None:
             raise ConfigError("AGENTIC_GITHUB=fake is not allowed with AGENTIC_ENV=production")
         if settings.sandbox_local_root is None:
             raise ConfigError("AGENTIC_GITHUB=fake needs SANDBOX_LOCAL_ROOT, where its repos are")
-        return FakeGithubApp(api_base_url="")
+        return FakeGithubApp(api_base_url="", fixtures_root=settings.sandbox_local_root)
     if settings.github_app_id is None or settings.github_app_slug is None:
         return None
     if settings.github_app_private_key_file is None:
@@ -314,23 +327,19 @@ def build_github(settings: WorkerSettings) -> GithubPlatform | None:
     return GithubApp(config)
 
 
-_FAKE_REPO_NAMES = frozenset(r.full_name for r in FAKE_REPOS)
-
-
 def fake_github_remote(fixtures: Path) -> Callable[[str], str]:
     """Pushes to the fake GitHub App's repos go to their bare repos under `fixtures`."""
     return lambda full_name: fixture_path(fixtures, full_name).as_uri()
 
 
 def fake_clone_source(fixtures: Path) -> Callable[[RepoSource], RepoSource]:
-    """The fake GitHub App's repos are cloned from their bare repos under `fixtures`; any other
-    repo from where it is."""
+    """The fake GitHub App's repos (those of its organisation) are cloned from their bare repos
+    under `fixtures`; any other repo from where it is."""
 
     def source(repo: RepoSource) -> RepoSource:
         full_name = repo_full_name(repo.url)
-        if full_name not in _FAKE_REPO_NAMES:
+        if full_name is None or full_name.split("/", 1)[0] != FAKE_ACCOUNT:
             return repo
-        assert full_name is not None
         return RepoSource(url=str(fixture_path(fixtures, full_name)), ref=repo.ref)
 
     return source
@@ -407,7 +416,7 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
         return
     used = await active_seconds(worker.sessions, run.id)
     began = time.monotonic()
-    attempt = asyncio.create_task(_attempt(worker, run, sink))
+    attempt = asyncio.create_task(_attempts(worker, run, sink))
     heartbeat = asyncio.create_task(_keep_lease(worker, run.id, lost))
     cancel = asyncio.create_task(_watch_cancel(worker, run.id))
     wall = asyncio.create_task(asyncio.sleep(max(0.0, run.policy.wall_time_s - used)))
@@ -520,9 +529,18 @@ async def _end_over_limit(
         await worker.sandboxes.discard(run.id)
 
 
+async def _attempts(worker: Worker, run: StoredRun, sink: EventSink) -> str:
+    """Run `run`'s attempts while it holds its lease: one, and another each time an attempt
+    ends `suspended` (it created its repo, which the next one clones). Returns its status."""
+    while (status := await _attempt(worker, run, sink)) == "suspended":
+        log.info("run %s created its repo; continuing in a new attempt", run.id)
+    return status
+
+
 async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
     """Start `run`, or resume it if an earlier attempt wrote events; returns its status. A run
-    with a repo runs inside a sandbox holding it; one that cannot be opened ends the run.
+    with a repo runs inside a sandbox holding it; one that cannot be opened ends the run. A run
+    whose repo it has yet to create has none, and only the `github` tools.
 
     A run continued after a gate decision opens the sandbox it kept when it paused, so its
     writers' commits are still there; a run that pauses at a gate keeps its sandbox."""
@@ -539,10 +557,16 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
         log.warning("run %s cannot start: %s", run.id, e)
         await _fail(run, sink, last_seq, str(e))
         return "failed"
+    to_create = creates_repo(run.spec.root) and not await repo_created(worker.sessions, run.id)
     async with contextlib.AsyncExitStack() as stack:
         tools: ToolExecutor | None = None
         review: SandboxGateReview | None = None
-        if run.repo is not None:
+        if to_create and target is not None:
+            assert worker.github is not None  # `_github_target` checked it
+            tools = await stack.enter_async_context(
+                open_github_tools(worker.github, target, None, run_id=run.id, writers=())
+            )
+        elif run.repo is not None:
             token = await _clone_token(worker, run.id, target)
             try:
                 with registered(token) if token is not None else contextlib.nullcontext():
@@ -579,7 +603,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             await _fail(run, sink, last_seq, str(e))
             return "failed"
         result = await _workflow(worker, run, sink, last_seq, runtime, tools, decision, review)
-        if result.status == "waiting" and run.repo is not None:
+        if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
         return result.status
 
@@ -614,6 +638,7 @@ async def _github_target(worker: Worker, run: StoredRun) -> GithubTarget | None:
         full_name=full_name,
         base=run.repo.ref,
         remote_url=worker.github_remote(full_name) if worker.github_remote else None,
+        run_created_at=run.created_at,
     )
 
 

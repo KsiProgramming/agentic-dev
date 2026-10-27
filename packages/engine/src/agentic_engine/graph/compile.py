@@ -9,11 +9,14 @@ node (its id) that evaluates `over` and sends each item to a worker (`<id>.item`
 items' results in item order. A node that does not complete ends the run.
 
 Each node writes `node_started`, its agent events (a tool node: one `tool_call` and its
-`tool_result`, and `pr_opened` if it published a branch) and `node_<status>` to the run's event
-log. A gate pauses the run (a LangGraph interrupt, so it needs a checkpointer); the runner writes
-its `node_started` when the run stops there, and the gate writes `gate_decided` and its end once
-it is continued. A loop writes `node_started` once, `loop_iteration_started` before and
-`loop_condition_evaluated` after each iteration, then `node_completed` (payload `stop_reason`,
+`tool_result`, `pr_opened` if it published a branch, `repo_created` if it created the run's
+repo) and `node_<status>` to the run's event log. A gate pauses the run (a LangGraph interrupt, so
+it needs a checkpointer); the runner writes its `node_started` when the run stops there, and the
+gate writes `gate_decided` and its end once it is continued. A node that creates the run's repo is
+followed by a `<id>.ready` node, which interrupts the run too, with no event: the run's attempt
+ends there (`suspended`), and the next one, which has the repo cloned, continues it. A loop
+writes `node_started` once, `loop_iteration_started` before and `loop_condition_evaluated` after
+each iteration, then `node_completed` (payload `stop_reason`,
 `iterations`) when it stops, or `node_failed` if its condition cannot be evaluated. A map writes
 `node_started` (payload `items`), `map_item_started` and `map_item_completed` around each item's
 body, whose events carry `item`, then its end; a reduce writes the events of an agent node.
@@ -31,11 +34,12 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, AgentNodeStatus, run_agent_node, sum_usage
@@ -51,6 +55,7 @@ from agentic_engine.events import (
     NODE_STARTED,
     POLICY_LIMIT_EXCEEDED,
     PR_OPENED,
+    REPO_CREATED,
     NullEventSink,
     RunEventLog,
 )
@@ -61,6 +66,7 @@ from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.graph.state import MapItem, RunState, RunUpdate
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.spec import (
+    CREATE_TOOLS,
     PUBLISH_TOOLS,
     AgentNode,
     GateNode,
@@ -130,6 +136,28 @@ def join_node_id(map: MapNode) -> str:
     return f"{map.id}.join"
 
 
+def repo_ready_node_id(node: ToolNode) -> str:
+    """The LangGraph node after `node`, which creates the run's repo, where the run stops for a
+    new attempt to clone the repo."""
+    return f"{node.id}.ready"
+
+
+REPO_READY_KIND = "repo_ready"
+"""The `kind` of the interrupt a `<id>.ready` node raises (a gate's has none)."""
+
+
+def is_repo_ready(request: object) -> bool:
+    """Whether an interrupt's value is the stop after a repo was created, not a gate."""
+    return (
+        isinstance(request, dict)
+        and cast(dict[str, object], request).get("kind") == REPO_READY_KIND
+    )
+
+
+def creates_repo(node: Node) -> bool:
+    return isinstance(node, ToolNode) and node.tool in CREATE_TOOLS
+
+
 def recursion_limit(spec: WorkflowSpec) -> int:
     """LangGraph's step limit for `spec`: one step per node run, with every loop run to its
     `max_iterations`, plus a margin. A map takes three steps whatever its item count: its workers
@@ -144,6 +172,8 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return node.max_iterations * (steps(node.body) + 2)
             case MapNode():
                 return 3
+            case ToolNode() if creates_repo(node):
+                return 2  # and its `<id>.ready` node
             case AgentNode() | ToolNode() | GateNode() | ReduceNode():
                 return 1
 
@@ -214,6 +244,13 @@ def compile_workflow(
                 builder.add_node(node.id, _reduce(node, runtime, tools, log, limits))
                 go_on(node.id, node.id, then)
                 return node.id
+            case ToolNode() if creates_repo(node):
+                ready = repo_ready_node_id(node)
+                builder.add_node(node.id, _step(node, runtime, tools, log, limits))
+                go_on(node.id, node.id, ready)
+                builder.add_node(ready, _repo_ready)
+                builder.add_edge(ready, then)
+                return node.id
             case AgentNode() | ToolNode() | GateNode():
                 builder.add_node(node.id, _step(node, runtime, tools, log, limits))
                 go_on(node.id, node.id, then)
@@ -231,6 +268,13 @@ def compile_workflow(
 
     builder.add_edge(START, add(spec.root, END))
     return builder.compile(checkpointer=checkpointer)
+
+
+async def _repo_ready(state: RunState) -> RunUpdate:
+    """Stop the run's attempt once its repo exists: the next attempt clones it and resumes here.
+    Changes nothing, so the next node gets the creating node's output."""
+    interrupt({"kind": REPO_READY_KIND})
+    return {}
 
 
 def _step(
@@ -332,6 +376,8 @@ async def _run_step(
         raise
     if (pull := _pull_request(node, result)) is not None:
         await log.emit(PR_OPENED, node_id=node.id, payload=pull, item=item)
+    if (repo := _created_repo(node, result)) is not None:
+        await log.emit(REPO_CREATED, node_id=node.id, payload=repo, item=item)
     payload: dict[str, JsonValue] = {"error": result.error} if result.error else {}
     await log.emit(NODE_END[result.status], node_id=node.id, payload=payload, item=item)
     return result
@@ -605,6 +651,18 @@ def _pull_request(node: StepNode, result: AgentNodeResult) -> dict[str, JsonValu
     if result.status != "completed" or not result.data or "url" not in result.data:
         return None
     return {k: result.data[k] for k in _PULL_REQUEST_FIELDS if k in result.data}
+
+
+_CREATED_REPO_FIELDS = ("full_name", "url", "default_branch", "private", "created")
+
+
+def _created_repo(node: StepNode, result: AgentNodeResult) -> dict[str, JsonValue] | None:
+    """The repo a completed tool node created, if its result names one."""
+    if not creates_repo(node):
+        return None
+    if result.status != "completed" or not result.data or "full_name" not in result.data:
+        return None
+    return {k: result.data[k] for k in _CREATED_REPO_FIELDS if k in result.data}
 
 
 def _continue_if_completed(node_id: str, next_id: str) -> Callable[[RunState], str]:

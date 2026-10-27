@@ -1,6 +1,7 @@
 """Creating and loading runs."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -29,6 +30,7 @@ class StoredRun:
     policy: Policy = PLATFORM_POLICY
     # USD the run's usage has cost so far, for its budget.
     spent: Decimal = Decimal(0)
+    created_at: datetime | None = None
 
 
 async def create_run(
@@ -93,4 +95,5 @@ def stored_run(run: Run) -> StoredRun:
         workspace_id=run.workspace_id,
         policy=Policy.model_validate(run.policy),
         spent=run.estimated_usd,
+        created_at=run.created_at,
     )
