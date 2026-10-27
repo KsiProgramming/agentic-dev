@@ -4,7 +4,7 @@ Roadmap phase: 2.2
 Branch: plan/2.2-app-shell
 
 ## Context
-2.1 gave us tokens, shadcn/ui primitives and shared status, empty, loading and error states. The three pages (`/`, `/runs/[id]`, `/settings`) still sit alone, each with a hand-made back link, and there is no theme switch in the UI. Every later Milestone 2 phase adds a page or a region of one: the runs list (2.4), run console v2 (2.5), approval dock (2.6) and start screen (2.8). They all need one shell to live in, so the shell comes first.
+2.1 gave us tokens, shadcn/ui primitives and shared status, empty, loading and error states. The three pages (`/`, `/runs/[id]`, `/settings`) still sit alone, each with a hand-made back link, and there is no theme switch in the UI. Every later Milestone 2 phase adds a page or a region of one: the runs list (2.4), run console v2 (2.5), approval dock and start screen (2.6). They all need one shell to live in, so the shell comes first.
 
 This phase does not depend on 1.12, which is still unplanned. It was skipped on purpose to start Milestone 2.
 
@@ -45,14 +45,14 @@ Principles and choices that apply:
 - **Runs list content and the `GET /runs` API:** 2.3 and 2.4.
 - **Run console layout changes** (timeline, tabs): 2.5. In this phase the monitor only moves into the shell.
 - **Approval dock and the "● Needs approval" title prefix:** 2.6.
-- **Start screen redesign** (template gallery, "New run" sheet): 2.8. In this phase `/templates` hosts today's content unchanged.
+- **Start screen redesign** (template gallery, "New run" sheet): 2.6. In this phase `/templates` hosts today's content unchanged.
 - **Pixel-diff visual regression baselines:** not chosen. Screenshots are uploaded for review only (see Decisions).
 
 ## Decisions
 | Decision | Choice | Rationale |
 |---|---|---|
 | Scope | Shell and route moves | User choice. Nav items must point at real routes, so the content moves now instead of shipping links that do nothing. |
-| Where the home content goes | `/templates` | It is template-launching content, and 2.8 redesigns it in place. |
+| Where the home content goes | `/templates` | It is template-launching content, and 2.6 redesigns it in place. |
 | What `/` does | Redirects to `/runs` | The roadmap makes Runs the home (2.4). Redirecting now means no link changes later. |
 | `/runs` before 2.4 | Empty state with a link to Templates | Mission 8: every view has a defined empty state. A temporary empty list is honest. |
 | Workspace in the top-left | Name only, from `GET /workspaces` | There is one workspace today. A switcher would be UI with no behaviour. |

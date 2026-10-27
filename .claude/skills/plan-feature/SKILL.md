@@ -17,7 +17,7 @@ Read these in full before doing anything else:
 
 ## 2. Find the next feature
 
-Phases are listed in order (0.1, 0.2, … 9.5). The next feature is the **first phase that has not been planned yet**. A phase counts as planned when an existing `specs/YYYY-MM-DD-*/requirements.md` names it in its `Roadmap phase:` line. Check those folders, and also glance at `git branch -a` for `plan/<phase>-*` branches in case planning started elsewhere.
+Milestones are listed in the order they are worked, which is not always their number (Milestone 11 sits after Milestone 4). If the roadmap has a "**Next up: Milestone N**" line, the next feature is the **first phase of milestone N that has not been planned yet**; once all of milestone N is planned, or with no such line, it is the **first phase in the file that has not been planned yet**. A phase counts as planned when an existing `specs/YYYY-MM-DD-*/requirements.md` names it in its `Roadmap phase:` line. Check those folders, and also glance at `git branch -a` for `plan/<phase>-*` branches in case planning started elsewhere.
 
 If an earlier phase is unplanned but a later one is planned, still pick the earliest one and mention the gap to the user. Note any phases the chosen one depends on that are not done yet, since that affects scope.
 

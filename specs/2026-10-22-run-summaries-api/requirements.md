@@ -4,7 +4,7 @@ Roadmap phase: 2.3
 Branch: plan/2.3-run-summaries-api
 
 ## Context
-Today a run can only be read as a raw event stream (`GET /runs/{id}/events`), and nothing lists past runs. The Runs page (2.4), run console header (2.5), approval dock badge (2.6) and rerun (2.7) all need a run *summary*: status, what ran, on which repo, how long it took, its PR or why it failed, and the gate it waits at. This phase adds that read API. It is backend only; 2.4 is the first UI to use it.
+Today a run can only be read as a raw event stream (`GET /runs/{id}/events`), and nothing lists past runs. The Runs page (2.4), run console header (2.5), approval dock badge and rerun (2.6) all need a run *summary*: status, what ran, on which repo, how long it took, its PR or why it failed, and the gate it waits at. This phase adds that read API. It is backend only; 2.4 is the first UI to use it.
 
 What exists: the `runs` row already keeps `status`, projected by `PostgresEventSink` in the same transaction as each event insert (`run_started`/`run_resumed` → `running`, `gate_waiting` → `waiting`, final events → end status). The other summary fields are only in `run_events` today, and the template id is not stored at all (it is turned into a spec at `POST /runs`).
 
@@ -25,7 +25,7 @@ Principles and choices that apply:
   - `pr_url` (text, null).
   - `failure_reason` (text, null).
   - `waiting_gate` (JSONB, null): `{node_id, title}` of the gate the run waits at.
-  - `rerun_of` (UUID, null, FK → `runs.id`): the column only; 2.7 sets it.
+  - `rerun_of` (UUID, null, FK → `runs.id`): the column only; 2.6 sets it.
   - Index `(workspace_id, created_at DESC, id DESC)` for listing.
 - **Backfill** in the same migration: fill the new columns of existing runs from their `run_events` (and `template_id` stays null for them, since it was never recorded).
 - **Projection in `PostgresEventSink`**, same transaction as the event insert:
@@ -43,7 +43,7 @@ Principles and choices that apply:
 
 ### Out of scope
 - Any UI: the Runs page is 2.4, the console header 2.5.
-- Setting `rerun_of` and `POST /runs/{id}/rerun`: 2.7.
+- Setting `rerun_of` and `POST /runs/{id}/rerun`: 2.6.
 - Live updates of the list (SSE on `/runs`): 2.4 decides between polling and a stream.
 - Cost per run in the summary: 3.1.
 - Auth / per-user visibility: runs are scoped by workspace only, as today.

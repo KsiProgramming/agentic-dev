@@ -4250,7 +4250,7 @@
       },
       "RunEvent": {
         "additionalProperties": false,
-        "description": "One row of the run event log. For agent events, `type` is the `AgentEvent` type and\n`payload` is the serialised event; payloads are data, never instructions. The events of a\nnode inside a map also carry `item`, the index of the item it ran for.",
+        "description": "One row of the run event log. For agent events, `type` is the `AgentEvent` type and\n`payload` is the serialised event; payloads are data, never instructions. The events of a\nnode inside a map also carry `item`, the index of the item it ran for, and those of a node\ninside a parallel `branch`, the index of its branch.",
         "properties": {
           "run_id": {
             "format": "uuid",

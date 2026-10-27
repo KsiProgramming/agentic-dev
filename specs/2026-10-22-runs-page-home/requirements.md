@@ -4,7 +4,7 @@ Roadmap phase: 2.4
 Branch: plan/2.4-runs-page-home
 
 ## Context
-`/` already redirects to `/runs`, but `/runs` is a placeholder empty state. The summaries API from 2.3 (`GET /runs`, `GET /runs/{id}`) is merged, so past runs can now be listed. This phase makes the Runs page real: the user finds any past run and sees at a glance whether it succeeded, failed or is waiting. The run console (2.5), approval dock badge (2.6) and Rerun button (2.7) build on this list.
+`/` already redirects to `/runs`, but `/runs` is a placeholder empty state. The summaries API from 2.3 (`GET /runs`, `GET /runs/{id}`) is merged, so past runs can now be listed. This phase makes the Runs page real: the user finds any past run and sees at a glance whether it succeeded, failed or is waiting. The run console (2.5), approval dock badge and Rerun button (2.6) build on this list.
 
 Depends on 2.1 (tokens, `StatusBadge`, states), 2.2 (shell, `PageHeader`) and 2.3 (summaries API). All three are done. It does not depend on 1.12, which is still unplanned.
 
@@ -38,7 +38,7 @@ Principles and choices that apply:
 
 ### Out of scope
 - Waiting badge in the sidebar and a "● Needs approval" browser tab title: 2.6.
-- Rerun button in the list: 2.7.
+- Rerun button in the list: 2.6.
 - Console redesign: 2.5. Rows link to the existing `/runs/{id}` page.
 - Cost column: 3.1.
 - Free-text search, sorting other than newest first, total count, and bulk actions.
@@ -52,12 +52,12 @@ Principles and choices that apply:
 | Change detection | Watermark on `runs.updated_at` (5 s lookback), not the notified run ids | It survives lost notifications and listener reconnects with no extra bookkeeping, and the sink already keeps `updated_at` to summary changes only. |
 | Reconnect | No replay. Refetch the lists on every `open` after the first | Summaries are state, not a log. A refetch is simpler and always correct. The first connection is covered by the stream's lookback. |
 | Cache update rule | Per list: patch if shown and still matching; refetch if the run joins or leaves it | The API stays the source of order and paging; no client-side re-sorting. |
-| Data fetching | TanStack Query (user choice), added now | It is the tech-stack choice. Infinite queries, cache patching and retry come with it, and 2.5 to 2.8 reuse it. |
+| Data fetching | TanStack Query (user choice), added now | It is the tech-stack choice. Infinite queries, cache patching and retry come with it, and 2.5 and 2.6 reuse it. |
 | "Needs approval first" | A separate query `status=waiting`, shown above the main list | Waiting runs are never paged away (mission 8). It was noted as a 2.4 concern in 2.3. |
 | Waiting runs in "All runs" | Still listed in their date position | The main list stays the complete, truthful history. The top section only highlights them. |
 | Filter state | URL search params | Links can be shared, and the view survives a reload or the back button. |
 | Pagination | "Load more" button, 25 per page | It matches the cursor API, it is keyboard friendly, and it needs no virtualisation yet. |
-| Template filter options | A static list of known template ids (`generate-docs`) | There is no templates API yet. It grows with 2.8. |
+| Template filter options | A static list of known template ids (`generate-docs`) | There is no templates API yet. It grows with 2.6. |
 
 ## Open questions
 - None.

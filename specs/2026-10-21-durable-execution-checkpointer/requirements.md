@@ -57,7 +57,7 @@ Principles and stack choices that apply:
 - Resuming inside a node (mid tool loop, partial agent output): a node that was cut off reruns in full. Its tokens are spent twice. That is acceptable until cost tracking (2.1) makes it visible.
 - User-initiated cancel (`POST /runs/{id}/cancel`): not on the roadmap yet. A graceful stop no longer cancels.
 - Keeping a writer's worktree or branch across a resume: 1.6 decides that once there are writes to keep.
-- Checkpoint retention and cleanup: later (with 2.7 audit or ops work).
+- Checkpoint retention and cleanup: later (with 3.7 audit or ops work).
 - Gates and `interrupt()`: 1.7. This phase only provides the checkpointer they need.
 - A Testcontainers kill-worker integration test: not chosen for this phase (see Open questions).
 

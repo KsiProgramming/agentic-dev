@@ -1,6 +1,6 @@
 # Plan: Start, approve and rerun
 
-Delivery is three stacked PRs. A and B are branched from `main`, do not touch this spec folder, and merge on their own. This branch (`plan/2.6-start-approve-rerun`) holds the spec folder and the roadmap merge of 2.6–2.8. It is opened as a draft PR for plan review, rebased after A and B merge, and finished as PR C, which marks 2.6 done.
+Delivery is three stacked PRs. A and B are branched from `main`, do not touch this spec folder, and merge on their own. This branch (`plan/2.6-start-approve-rerun`) holds the spec folder and the roadmap merge of the former approval dock, rerun and start screen phases into 2.6. It is opened as a draft PR for plan review, rebased after A and B merge, and finished as PR C, which marks 2.6 done.
 
 ---
 

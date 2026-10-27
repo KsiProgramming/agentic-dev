@@ -1,10 +1,12 @@
 # Roadmap
 
-High-level implementation order, in very small phases. Each phase is a thin vertical slice that can be demonstrated on its own. A phase is done when its "Done when" check passes. Phases are ordered, but within a milestone a later phase may start once its dependencies are done.
+High-level implementation order, in very small phases. Each phase is a thin vertical slice that can be demonstrated on its own. A phase is done when its "Done when" check passes. Phases are ordered, but within a milestone a later phase may start once its dependencies are done. Milestones are listed in the order we work them, which is not always their number: a milestone added later gets the next free number, so no phase is ever renumbered.
 
 Status: `—` not started, `✅ Done (#PR)` merged. The PR that implements a phase marks it done in this file; CI marks it automatically on the PR branch and checks it (see `scripts/check_roadmap.py`, or the `complete-phase` skill to do it locally).
 
-Strategy: **walking skeleton first**, then grow outward. The milestones follow the stakeholder plan: fixed flows first, then parallel, then dynamic, then the Architect. Milestone 2 sets the product UI foundation (design system, app shell, run history, run console) that every later screen builds on.
+Strategy: **walking skeleton first**, then grow outward. The milestones follow the stakeholder plan: fixed flows first, then parallel, then dynamic, then the Architect. Milestone 2 sets the product UI foundation (design system, app shell, run history, run console) that every later screen builds on. Milestone 11 (UI v2) reworks those screens once the engine has grown, before the canvas adds many more.
+
+**Next up: Milestone 11 (UI v2).** The `plan-feature` skill plans the first unplanned phase of this milestone before any other. Milestone 4 resumes at 4.2 after it. Change this line, in its own PR with a changelog entry, when the priority changes.
 
 ---
 
@@ -40,7 +42,7 @@ Strategy: **walking skeleton first**, then grow outward. The milestones follow t
 
 ## Milestone 2: Product UI foundation
 
-Milestone 1 proved the engine end to end, but the UI is a debug view. Every later milestone (cost, canvas, Architect) adds screens, so the design system, app shell and run console come first. The rules are in [tech-stack.md → UI design system](tech-stack.md#ui-design-system). This milestone does not depend on 1.12.
+Milestone 1 proved the engine end to end, but the UI is a debug view. Every later milestone (cost, canvas, Architect) adds screens, so the design system, app shell and run console come first. The rules are in [tech-stack.md → UI design system](tech-stack.md#ui-design-system). This milestone does not depend on 1.12. Its second round, UI v2, is [Milestone 11](#milestone-11-product-ui-v2).
 
 | # | Phase | Done when | Status |
 |---|---|---|---|
@@ -74,6 +76,23 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 | 4.5 | `reduce` strategies: dedupe, vote | Duplicate findings are merged with severity and confidence | — |
 | 4.6 | `router` primitive (rule + classifier agent) | A run branches on a condition | — |
 | 4.7 | "Audit codebase" template (read-only, report only) | Audit run produces findings.json + readable report | — |
+
+## Milestone 11: Product UI v2
+
+Listed here, after Milestone 4, because it is worked next (see "Next up" above).
+
+A review of the screens shipped in Milestones 2 and 3 found that they work but read as unfinished. Waiting time is counted as run time, stale approvals pile up above real work, test runs mix with real ones, the run console shows agent output as one long wall of text and raw JSON in table cells, and settings is one long page. UI v2 fixes the information design first and the look second. Its rules are in [tech-stack.md → UI v2](tech-stack.md#ui-v2-milestone-11). Each phase moves its part into the main design-system rules when it ships. 11.1 comes first; 11.2 and 11.3 change the API and can run beside it; the screens (11.4–11.8) build on all three. Everything it builds on (Milestones 2 and 3) is done.
+
+| # | Phase | Done when | Status |
+|---|---|---|---|
+| 11.1 | UI v2 foundations: brand accent decided; type scale and density tokens; shared display components (`RelativeTime`, `Duration`, `Money`, `TokenCount`, `IdChip`, `StatTile`); dates in the workspace's locale and time zone; pages use the full content width (no centred `max-w-*` column); a lint rule that rejects raw palette classes and hard-coded colours; the new components added to the rules in `CLAUDE.md` | Every page renders times, durations, costs and ids through the shared components; `pnpm lint` fails on `bg-red-100` or `#4f46e5` in a component; layout screenshots at 375, 768 and 1440 px pass | — |
+| 11.2 | Active and waiting time: the engine records how long a run waited at gates; `GET /runs` and `GET /runs/{id}` return `active_ms` and `waiting_ms`; every duration shown is active time, with waiting time as its own "waiting 12 h" chip and wall-clock time in the tooltip | A run that waits 1 h at a gate and works for 2 min shows "2m 00s · waited 1 h" in the runs list and the console header | — |
+| 11.3 | Approval expiry: a gate has a time to live (workspace default 72 h, overridable per gate in the spec); at expiry the run is cancelled with the reason "Approval expired" and shown as "Expired"; existing stale waiting runs are expired once by a migration | A gate past its time to live cancels its run cleanly, drops out of every waiting count and shows "Expired" with the reason | — |
+| 11.4 | Runs list v2: saved views as tabs with counts (All, Running, Needs approval, Failed) instead of a pinned "Needs approval" section; a Run column with the workflow, short id and trigger; branch under the repo; rows grouped by date; e2e and demo runs kept out of the default workspace | Real runs are the first rows on the page whatever is waiting; a waiting run is one click away; no test run appears in the default workspace | — |
+| 11.5 | Inbox: `/inbox` lists the gates waiting on the user with time left before expiry; selecting one opens its review (summary or diff, Approve, Reject, keyboard `A` / `R`) beside the list; the sidebar's waiting count moves from Runs to Inbox | A gate is approved from the Inbox without opening the run console; the console's approval dock keeps working | — |
+| 11.6 | Run console v3: a header with labelled stat tiles (active time, cost against budget, tokens, steps, output) and a banner for a failure or a waiting gate; a two-pane body with the step list (List or Graph) on the left and the selected step on the right (Output, Activity, Input, Usage, Events); long agent output capped with "Show full"; files a step wrote as cards; raw events as one-line rows that open the payload in a drawer | From the runs list, one click shows an agent's output; a failed run names its failing step and reason without scrolling; no JSON is shown inside a table cell | — |
+| 11.7 | Shell and settings v2: a command palette (`⌘K`: jump to a run by id or PR, New run, toggle theme), the theme in a user menu; settings split into sub-pages (Integrations, Models and pricing, Limits and budgets) with a secondary nav; the pricing table fits without horizontal scroll; the limits form saves from a sticky bar that appears when it changes | Every settings sub-page fits at 1440 px with no horizontal scroll and stacks at 375 px; `⌘K` opens a run from its id | — |
+| 11.8 | Agent activity, read like a chat with Claude: each agent turn is a collapsible **work block** (its tool calls, short notes and, when the provider streams it, reasoning) followed by the agent's answer, which always stays visible; while live the block's header says what the agent is doing with a running timer, once done a summary ("Listed 3 folders, read 11 files · 15 tool calls · 8s"); the platform's tools take an optional `description` the agent fills with why it makes the call, shown as the step's title | A finished docs run reads as one line of work and one visible answer per agent turn; opening the work shows why each call was made; a live run shows the current step and an elapsed time that ticks | — |
 
 ## Milestone 5: Builder canvas and versioning
 

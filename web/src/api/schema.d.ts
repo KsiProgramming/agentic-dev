@@ -1642,7 +1642,8 @@ export interface components {
          * RunEvent
          * @description One row of the run event log. For agent events, `type` is the `AgentEvent` type and
          *     `payload` is the serialised event; payloads are data, never instructions. The events of a
-         *     node inside a map also carry `item`, the index of the item it ran for.
+         *     node inside a map also carry `item`, the index of the item it ran for, and those of a node
+         *     inside a parallel `branch`, the index of its branch.
          */
         RunEvent: {
             /**
