@@ -1,0 +1,18 @@
+{
+  "spec_version": "0",
+  "id": "parallel-one-branch",
+  "name": "One branch",
+  "root": {
+    "type": "parallel",
+    "id": "review",
+    "join": "all",
+    "branches": [
+      {
+        "type": "agent",
+        "id": "security",
+        "role": "Security reviewer",
+        "instructions": "Review the code in your input for security problems. List each finding with a severity."
+      }
+    ]
+  }
+}

@@ -28,7 +28,12 @@ from agentic_engine.events import (
 )
 from agentic_engine.gate import FileChange, GateDecision, GateReview, GateReviewError
 from agentic_engine.graph.checkpoint import Checkpointer, thread_config
-from agentic_engine.graph.compile import CompiledWorkflow, compile_workflow, recursion_limit
+from agentic_engine.graph.compile import (
+    CompiledWorkflow,
+    compile_workflow,
+    is_repo_ready,
+    recursion_limit,
+)
 from agentic_engine.graph.state import (
     RunState,
     WorkflowRunResult,
@@ -68,6 +73,8 @@ async def run_workflow(
     `title`, `prompt`, `artifact`, `changes`) for the gate, and `resume_workflow` continues it
     with the decision. `changes` are the files the writers that ran before the gate changed, from
     `review` (none without one), and an approval's edits are committed through it.
+    A run that created its repo ends the attempt `suspended`, with no event: `resume_workflow`
+    continues it, in an attempt that has the repo cloned.
 
     Every step is written to `sink` in order: `run_started`, then per node `node_started`, its
     agent events and `node_<status>`, then `run_<status>`. An exception from the graph is logged
@@ -117,7 +124,8 @@ async def resume_workflow(
 
     A run paused at a gate continues with `decision`: the gate logs `gate_decided`, then approve
     goes on to the next node and reject ends the run `cancelled`. Without a decision the run
-    pauses at the gate again, and the pause is announced again.
+    pauses at the gate again, and the pause is announced again. A `suspended` run (it created its
+    repo) just goes on.
 
     `spent` is what the run's earlier attempts spent: a run that has already spent its budget
     stops before it runs another node.
@@ -136,8 +144,12 @@ async def resume_workflow(
         return await _finish(log, lambda: graph, initial_state(input), config, budget, review)
     if not snapshot.next:
         return await _report(log, RunState(**saved))
-    paused = any(task.interrupts for task in snapshot.tasks)
-    resume = decision.model_dump(mode="json") if paused and decision else None
+    asks = [i.value for task in snapshot.tasks for i in task.interrupts]
+    resume: JsonValue = None
+    if any(is_repo_ready(ask) for ask in asks):
+        resume = True
+    elif asks and decision:
+        resume = decision.model_dump(mode="json")
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
     return await _finish(log, lambda: graph, start, config, budget, review)
 
@@ -180,6 +192,9 @@ async def _finish(
         await log.emit(RUN_FAILED, payload={"error": f"{type(exc).__name__}: {exc}"})
         raise
     if paused is not None:
+        state, node_id, request = paused
+        if is_repo_ready(request):
+            return _result(log, state, "suspended", waiting_at=node_id)
         return await _wait(log, *paused, review)
     return await _report(log, final)
 
@@ -206,7 +221,8 @@ async def _stopped(
 async def _paused_gate(
     graph: CompiledWorkflow, config: RunnableConfig
 ) -> tuple[RunState, str, dict[str, JsonValue]] | None:
-    """If the run stopped at a gate: its state, the gate's id and what the gate asks."""
+    """If the run stopped at an interrupt (a gate, or after creating its repo): its state, the
+    node's id and what it asks."""
     if graph.checkpointer is None:
         return None
     snapshot = await graph.aget_state(config)
@@ -261,7 +277,9 @@ def _result(
     stopped_at: str | None = None,
     waiting_at: str | None = None,
 ) -> WorkflowRunResult:
+    # The run's path first, then the nodes off it (inside a parallel's branches).
     results = {node_id: state["results"][node_id] for node_id in state["order"]}
+    results.update(state["results"])
     return WorkflowRunResult(
         run_id=log.run_id,
         status=status,

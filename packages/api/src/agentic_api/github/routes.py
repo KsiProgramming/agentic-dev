@@ -1,4 +1,5 @@
-"""Linking a workspace to the platform's GitHub App, and listing the repos it can reach.
+"""Linking a workspace to the platform's GitHub App, listing the repos it can reach, and where
+it can create one (`new_repo_owner`).
 
 The install flow: the web app asks for an install URL, which carries a random single-use
 `state` kept in Redis for 10 minutes. GitHub sends the browser back to `/github/setup` (the App's
@@ -6,7 +7,7 @@ Setup URL) with that state and the installation id. We check the installation be
 before storing it, then send the browser back to the web app's settings page."""
 
 import secrets
-from typing import Annotated, Any
+from typing import Annotated, Any, cast, get_args
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -16,8 +17,16 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_api.github.models import GithubErrorDetail, InstallUrlOut, RepoOut, StartInstall
+from agentic_api.github.models import (
+    GithubErrorDetail,
+    InstallUrlOut,
+    NewRepoOptions,
+    NewRepoReason,
+    RepoOut,
+    StartInstall,
+)
 from agentic_api.settings import Settings
+from agentic_engine.templates import Gitignore, License
 from agentic_github import GithubApiError, GithubPlatform, InstallationNotFoundError
 from agentic_store import (
     GITHUB,
@@ -68,6 +77,11 @@ def _github(request: Request) -> GithubPlatform:
 
 def _not_found(workspace_id: UUID) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
+
+
+def github_app(request: Request) -> GithubPlatform:
+    """The platform's GitHub App, or a 503 if the API has none."""
+    return _github(request)
 
 
 def _conflict(code: str, message: str) -> HTTPException:
@@ -193,6 +207,79 @@ async def repos(
     except GithubApiError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
     return [RepoOut.of(r) for r in sorted(found, key=lambda r: r.full_name.lower())]
+
+
+class NewRepoRefused(Exception):
+    """The workspace cannot create a repo; `code` and `message` say why."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+    def http(self) -> HTTPException:
+        return _conflict(self.code, self.message)
+
+
+async def new_repo_owner(
+    sessions: async_sessionmaker[AsyncSession], github: GithubPlatform, workspace_id: UUID
+) -> tuple[int, str]:
+    """The installation and the organisation a new repo of the workspace is created in.
+    Raises `NewRepoRefused` if there is none (installation tokens cannot create repos on a
+    personal account), `WorkspaceNotFoundError` or `GithubApiError`."""
+    installation_id = await get_github_installation(sessions, workspace_id)
+    if installation_id is None:
+        raise NewRepoRefused("no_connection", "the workspace has no GitHub connection")
+    try:
+        installation = await github.get_installation(installation_id)
+    except InstallationNotFoundError:
+        raise NewRepoRefused(
+            "installation_gone",
+            "the GitHub App installation no longer exists or lost access; install it again",
+        ) from None
+    if installation.account_type != "Organization":
+        raise NewRepoRefused(
+            "personal_account",
+            f"the GitHub App is installed on the personal account {installation.account_login}; "
+            "new repos can only be created in an organisation",
+        )
+    return installation_id, installation.account_login
+
+
+@router.get(
+    "/workspaces/{workspace_id}/repos/new-repo-options",
+    operation_id="getNewRepoOptions",
+    responses={
+        **_NOT_FOUND,
+        502: {"description": "GitHub answered with an error or could not be reached"},
+        **_NOT_CONFIGURED,
+    },
+)
+async def new_repo_options(
+    workspace_id: UUID, request: Request, github: Annotated[GithubPlatform, Depends(_github)]
+) -> NewRepoOptions:
+    """Whether runs of the workspace can create their repo, in which organisation, and the
+    `.gitignore` templates and licenses its first commit may have."""
+    gitignores = list(get_args(Gitignore))
+    licenses = list(get_args(License))
+    try:
+        _, owner = await new_repo_owner(_sessions(request), github, workspace_id)
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+    except GithubApiError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
+    except NewRepoRefused as e:
+        return NewRepoOptions(
+            owner=None,
+            can_create=False,
+            reason=cast(NewRepoReason, e.code),
+            message=e.message,
+            gitignore_templates=gitignores,
+            licenses=licenses,
+        )
+    return NewRepoOptions(
+        owner=owner, can_create=True, gitignore_templates=gitignores, licenses=licenses
+    )
 
 
 @router.delete(

@@ -15,6 +15,20 @@ class GithubPlatform(Protocol):
 
     async def list_repos(self, installation_id: int) -> list[RepoInfo]: ...
 
+    async def get_repo(self, installation_id: int, full_name: str) -> RepoInfo | None: ...
+
+    async def create_org_repo(
+        self,
+        installation_id: int,
+        org: str,
+        name: str,
+        *,
+        private: bool,
+        description: str | None = None,
+        gitignore_template: str | None = None,
+        license_template: str | None = None,
+    ) -> RepoInfo: ...
+
     async def installation_token(self, installation_id: int) -> SecretStr: ...
 
     async def open_pull_request(

@@ -122,7 +122,7 @@ def _github_app(settings: Settings) -> GithubPlatform | None:
     """The GitHub App, if its id and slug are set (or the fake one). A missing or unreadable
     private key then fails here, at startup."""
     if settings.github == "fake":
-        return FakeGithubApp(settings.api_base_url)
+        return FakeGithubApp(settings.api_base_url, fixtures_root=settings.fake_github_root)
     if settings.github_app_id is None or settings.github_app_slug is None:
         return None
     if settings.github_app_private_key_file is None:

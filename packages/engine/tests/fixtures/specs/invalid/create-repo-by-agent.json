@@ -1,0 +1,25 @@
+{
+  "spec_version": "0",
+  "id": "create-repo-by-agent",
+  "name": "An agent creates the repo",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "gate",
+        "id": "approve_repo",
+        "title": "Create the repo?"
+      },
+      {
+        "type": "agent",
+        "id": "creator",
+        "role": "Admin",
+        "instructions": "Create a repo.",
+        "tools": [
+          "github.createRepo"
+        ]
+      }
+    ]
+  }
+}

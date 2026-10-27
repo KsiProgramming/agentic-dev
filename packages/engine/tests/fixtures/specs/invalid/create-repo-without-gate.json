@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "id": "create-repo-without-gate",
+  "name": "Creates a repo with no gate",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "tool",
+        "id": "create_repo",
+        "tool": "github.createRepo",
+        "args": {
+          "name": "docs-new",
+          "private": true
+        }
+      },
+      {
+        "type": "tool",
+        "id": "list",
+        "tool": "repo.list_files",
+        "args": {}
+      }
+    ]
+  }
+}

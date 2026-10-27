@@ -1,22 +1,33 @@
 """Compiles a workflow spec to a LangGraph graph.
 
-v0 supports `agent`, `tool`, `gate`, `sequence`, `loop`, `map` and `reduce`. Agent, tool, gate
+v0 supports `agent`, `tool`, `gate`, `sequence`, `loop`, `map`, `reduce` and `parallel`. Agent,
+tool, gate
 and reduce nodes become LangGraph nodes named by their spec node id; a sequence chains its steps;
 a loop becomes an entry node (its id), its body, and a check node (`<id>.check`, a name no spec
 node can have) that evaluates `until` and goes back to the entry or on. A map becomes an entry
 node (its id) that evaluates `over` and sends each item to a worker (`<id>.item`, one LangGraph
 `Send` per item) that runs the whole body for it, and a join node (`<id>.join`) that collects the
-items' results in item order. A node that does not complete ends the run.
+items' results in item order. A parallel becomes an entry node (its id) that sends each branch
+to a worker (`<id>.branch`, one `Send` per branch) that runs the branch, and a join node
+(`<id>.join`) that applies its join policy to the branches' outcomes. A node that does not
+complete ends the run.
 
 Each node writes `node_started`, its agent events (a tool node: one `tool_call` and its
-`tool_result`, and `pr_opened` if it published a branch) and `node_<status>` to the run's event
-log. A gate pauses the run (a LangGraph interrupt, so it needs a checkpointer); the runner writes
-its `node_started` when the run stops there, and the gate writes `gate_decided` and its end once
-it is continued. A loop writes `node_started` once, `loop_iteration_started` before and
-`loop_condition_evaluated` after each iteration, then `node_completed` (payload `stop_reason`,
+`tool_result`, `pr_opened` if it published a branch, `repo_created` if it created the run's
+repo) and `node_<status>` to the run's event log. A gate pauses the run (a LangGraph interrupt, so
+it needs a checkpointer); the runner writes its `node_started` when the run stops there, and the
+gate writes `gate_decided` and its end once it is continued. A node that creates the run's repo is
+followed by a `<id>.ready` node, which interrupts the run too, with no event: the run's attempt
+ends there (`suspended`), and the next one, which has the repo cloned, continues it. A loop
+writes `node_started` once, `loop_iteration_started` before and `loop_condition_evaluated` after
+each iteration, then `node_completed` (payload `stop_reason`,
 `iterations`) when it stops, or `node_failed` if its condition cannot be evaluated. A map writes
 `node_started` (payload `items`), `map_item_started` and `map_item_completed` around each item's
-body, whose events carry `item`, then its end; a reduce writes the events of an agent node.
+body, whose events carry `item`, then its end; a reduce writes the events of an agent node. A
+parallel writes `node_started` (payload `branches`, `join`, `quorum`),
+`parallel_branch_started` and `parallel_branch_completed` around each branch, whose events carry
+`branch`, then its end (payload `completed`, `failed`, `cancelled`: branch ids). Once its join is
+decided, the branches still running end `node_cancelled`.
 
 The run's `Policy` is enforced as it goes: at most `agents_alive` agents run at once across the
 whole run, and an agent node (or a map, for all its items' agents) that would take the run past
@@ -31,11 +42,12 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, AgentNodeStatus, run_agent_node, sum_usage
@@ -49,8 +61,11 @@ from agentic_engine.events import (
     NODE_COMPLETED,
     NODE_FAILED,
     NODE_STARTED,
+    PARALLEL_BRANCH_COMPLETED,
+    PARALLEL_BRANCH_STARTED,
     POLICY_LIMIT_EXCEEDED,
     PR_OPENED,
+    REPO_CREATED,
     NullEventSink,
     RunEventLog,
 )
@@ -58,15 +73,17 @@ from agentic_engine.expr import CompiledList, ExpressionError, compile_condition
 from agentic_engine.gate import GateReview, run_gate_node
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
-from agentic_engine.graph.state import MapItem, RunState, RunUpdate
+from agentic_engine.graph.state import MapItem, ParallelBranch, RunState, RunUpdate
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.spec import (
+    CREATE_TOOLS,
     PUBLISH_TOOLS,
     AgentNode,
     GateNode,
     LoopNode,
     MapNode,
     Node,
+    ParallelNode,
     ReduceNode,
     SequenceNode,
     ToolNode,
@@ -101,13 +118,13 @@ class _Limits:
 
 def step_nodes(root: Node) -> list[StepNode]:
     """The agent, tool and gate nodes under `root` in spec order (depth first; a loop's or a
-    map's body once)."""
+    map's body once, a parallel's branches in branch order)."""
     steps: list[StepNode] = []
     for path, node in iter_nodes(root):
         match node:
             case AgentNode() | ToolNode() | GateNode():
                 steps.append(node)
-            case SequenceNode() | LoopNode() | MapNode() | ReduceNode():
+            case SequenceNode() | LoopNode() | MapNode() | ReduceNode() | ParallelNode():
                 pass
             case _:
                 raise CompileError(f"node type {node.type!r} at {path} is not supported yet")
@@ -130,11 +147,44 @@ def join_node_id(map: MapNode) -> str:
     return f"{map.id}.join"
 
 
+def branch_node_id(parallel: ParallelNode) -> str:
+    """The LangGraph node that runs one of `parallel`'s branches."""
+    return f"{parallel.id}.branch"
+
+
+def parallel_join_node_id(parallel: ParallelNode) -> str:
+    """The LangGraph node that joins `parallel`'s branches."""
+    return f"{parallel.id}.join"
+
+
+def repo_ready_node_id(node: ToolNode) -> str:
+    """The LangGraph node after `node`, which creates the run's repo, where the run stops for a
+    new attempt to clone the repo."""
+    return f"{node.id}.ready"
+
+
+REPO_READY_KIND = "repo_ready"
+"""The `kind` of the interrupt a `<id>.ready` node raises (a gate's has none)."""
+
+
+def is_repo_ready(request: object) -> bool:
+    """Whether an interrupt's value is the stop after a repo was created, not a gate."""
+    return (
+        isinstance(request, dict)
+        and cast(dict[str, object], request).get("kind") == REPO_READY_KIND
+    )
+
+
+def creates_repo(node: Node) -> bool:
+    return isinstance(node, ToolNode) and node.tool in CREATE_TOOLS
+
+
 def recursion_limit(spec: WorkflowSpec) -> int:
     """LangGraph's step limit for `spec`: one step per node run, with every loop run to its
-    `max_iterations`, plus a margin. A map takes three steps whatever its item count: its workers
-    run in one step. A runtime backstop for the spec's own bounds: a run that takes more steps
-    fails (`GraphRecursionError`) instead of going on to LangGraph's default."""
+    `max_iterations`, plus a margin. A map takes three steps whatever its item count, and a
+    parallel whatever its branches: their workers run in one step. A runtime backstop for the
+    spec's own bounds: a run that takes more steps fails (`GraphRecursionError`) instead of going
+    on to LangGraph's default."""
 
     def steps(node: Node) -> int:
         match node:
@@ -142,8 +192,10 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return sum(steps(s) for s in node.steps)
             case LoopNode():
                 return node.max_iterations * (steps(node.body) + 2)
-            case MapNode():
+            case MapNode() | ParallelNode():
                 return 3
+            case ToolNode() if creates_repo(node):
+                return 2  # and its `<id>.ready` node
             case AgentNode() | ToolNode() | GateNode() | ReduceNode():
                 return 1
 
@@ -214,6 +266,26 @@ def compile_workflow(
                 builder.add_node(node.id, _reduce(node, runtime, tools, log, limits))
                 go_on(node.id, node.id, then)
                 return node.id
+            case ParallelNode():
+                worker, join = branch_node_id(node), parallel_join_node_id(node)
+                builder.add_node(node.id, _parallel_entry(node, log, limits))
+                builder.add_conditional_edges(node.id, _fan_out_branches(node), [worker, END])
+                builder.add_node(
+                    worker,
+                    _parallel_branch(node, runtime, tools, log, limits),
+                    input_schema=ParallelBranch,
+                )
+                builder.add_edge(worker, join)
+                builder.add_node(join, _parallel_join(node, log))
+                go_on(join, node.id, then)
+                return node.id
+            case ToolNode() if creates_repo(node):
+                ready = repo_ready_node_id(node)
+                builder.add_node(node.id, _step(node, runtime, tools, log, limits))
+                go_on(node.id, node.id, ready)
+                builder.add_node(ready, _repo_ready)
+                builder.add_edge(ready, then)
+                return node.id
             case AgentNode() | ToolNode() | GateNode():
                 builder.add_node(node.id, _step(node, runtime, tools, log, limits))
                 go_on(node.id, node.id, then)
@@ -231,6 +303,13 @@ def compile_workflow(
 
     builder.add_edge(START, add(spec.root, END))
     return builder.compile(checkpointer=checkpointer)
+
+
+async def _repo_ready(state: RunState) -> RunUpdate:
+    """Stop the run's attempt once its repo exists: the next attempt clones it and resumes here.
+    Changes nothing, so the next node gets the creating node's output."""
+    interrupt({"kind": REPO_READY_KIND})
+    return {}
 
 
 def _step(
@@ -294,14 +373,15 @@ async def _run_step(
     limits: _Limits,
     input: str,
     item: int | None = None,
+    branch: int | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
-    a map). An agent waits for one of the run's `agents_alive` slots before it starts, and its
-    usage is counted on the run's budget: once that is spent, the node ends `node_cancelled` and
-    `PolicyLimitExceeded` is raised."""
+    a map, `branch` inside a parallel). An agent waits for one of the run's `agents_alive` slots
+    before it starts, and its usage is counted on the run's budget: once that is spent, the node
+    ends `node_cancelled` and `PolicyLimitExceeded` is raised."""
 
     async def write(event: AgentEvent) -> None:
-        await log.agent_event(node.id, event, item)
+        await log.agent_event(node.id, event, item, branch)
         if isinstance(event, Usage) and limits.budget is not None:
             limits.budget.add(event, node.id)
 
@@ -321,19 +401,23 @@ async def _run_step(
 
     # A gate runs again from its start when the run continues; the runner logs its start.
     if not isinstance(node, GateNode):
-        await log.emit(NODE_STARTED, node_id=node.id, item=item)
+        await log.emit(NODE_STARTED, node_id=node.id, item=item, branch=branch)
     try:
         try:
             result = await run()
         finally:
             await buffer.close()
     except (asyncio.CancelledError, PolicyLimitExceeded):
-        await log.emit(NODE_CANCELLED, node_id=node.id, item=item)
+        await log.emit(NODE_CANCELLED, node_id=node.id, item=item, branch=branch)
         raise
     if (pull := _pull_request(node, result)) is not None:
-        await log.emit(PR_OPENED, node_id=node.id, payload=pull, item=item)
+        await log.emit(PR_OPENED, node_id=node.id, payload=pull, item=item, branch=branch)
+    if (repo := _created_repo(node, result)) is not None:
+        await log.emit(REPO_CREATED, node_id=node.id, payload=repo, item=item, branch=branch)
     payload: dict[str, JsonValue] = {"error": result.error} if result.error else {}
-    await log.emit(NODE_END[result.status], node_id=node.id, payload=payload, item=item)
+    await log.emit(
+        NODE_END[result.status], node_id=node.id, payload=payload, item=item, branch=branch
+    )
     return result
 
 
@@ -552,6 +636,206 @@ def ordered_items(state: RunState, map_id: str) -> list[AgentNodeResult]:
     return [by_index[k] for k in sorted(by_index, key=int)]
 
 
+def join_outcome(parallel: ParallelNode, completed: int, failed: int) -> AgentNodeStatus | None:
+    """How `parallel` ends once `completed` of its branches completed and `failed` did not:
+    `completed` once enough did for its join, `failed` once enough can no longer, else `None`
+    (not decided yet)."""
+    needed = _needed(parallel)
+    if completed >= needed:
+        return "completed"
+    if len(parallel.branches) - failed < needed:
+        return "failed"
+    return None
+
+
+def _needed(parallel: ParallelNode) -> int:
+    """How many branches must complete for `parallel` to complete."""
+    match parallel.join:
+        case "all":
+            return len(parallel.branches)
+        case "any":
+            return 1
+        case "quorum":
+            return parallel.quorum or len(parallel.branches)
+
+
+@dataclass
+class _BranchJoin:
+    """One attempt's view of a parallel's branches: those still running, and how many of those
+    that ended completed or failed. Once they decide the join, it cancels the others. This only
+    saves work: the join node decides from the checkpointed outcomes, so a resumed run, which
+    does not see the branches an earlier attempt finished, still joins correctly."""
+
+    parallel: ParallelNode
+    running: dict[int, "asyncio.Task[AgentNodeResult]"] = field(
+        default_factory=dict[int, "asyncio.Task[AgentNodeResult]"]
+    )
+    completed: int = 0
+    failed: int = 0
+    decided: bool = False
+
+    def end(self, index: int, status: AgentNodeStatus) -> None:
+        """Record how branch `index` ended; cancel the others if that decides the join."""
+        self.running.pop(index, None)
+        if status == "completed":
+            self.completed += 1
+        elif status == "failed":
+            self.failed += 1
+        if self.decided or join_outcome(self.parallel, self.completed, self.failed) is None:
+            return
+        self.decided = True
+        for task in self.running.values():
+            task.cancel()
+
+
+def _parallel_entry(
+    parallel: ParallelNode, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Starts the parallel, counting all its branches' agents as spawned, or fails it if they
+    would take the run past its `agents_spawned` limit; `_fan_out_branches` then sends them. The
+    branches run in one LangGraph step, so they cannot count themselves."""
+    agents = sum(
+        isinstance(n, AgentNode) for branch in parallel.branches for n in step_nodes(branch)
+    )
+    started: dict[str, JsonValue] = {"branches": len(parallel.branches), "join": parallel.join}
+    if parallel.quorum is not None:
+        started["quorum"] = parallel.quorum
+
+    async def enter(state: RunState) -> RunUpdate:
+        if refused := await _refuse_spawn(parallel.id, state, agents, limits, log, started):
+            return {"results": {parallel.id: refused}, "order": [parallel.id]}
+        await log.emit(NODE_STARTED, node_id=parallel.id, payload=started)
+        return {"spawned": agents}
+
+    return enter
+
+
+def _fan_out_branches(parallel: ParallelNode) -> Callable[[RunState], Sequence[Send] | str]:
+    """One `Send` to the worker per branch, each with the parallel's input; to `END` if the
+    parallel could not start."""
+
+    def route(state: RunState) -> Sequence[Send] | str:
+        if parallel.id in state["results"]:
+            return END
+        worker = branch_node_id(parallel)
+        return [
+            Send(worker, ParallelBranch(index=i, branch_input=state["last_text"]))
+            for i in range(len(parallel.branches))
+        ]
+
+    return route
+
+
+def _parallel_branch(
+    parallel: ParallelNode,
+    runtime: AgentRuntime,
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
+) -> Callable[[ParallelBranch], Awaitable[RunUpdate]]:
+    """Runs one of `parallel`'s branches, each step on the previous one's output, stopping at the
+    first step that does not complete; or ends it `cancelled` once the other branches decided
+    the join. Its nodes' results go into `results` (not `order`, the run's path, which a branch
+    that fails under a join that is met does not stop), its outcome into `parallel_results`."""
+    join = _BranchJoin(parallel)
+    steps = [step_nodes(branch) for branch in parallel.branches]
+
+    async def work(task: ParallelBranch) -> RunUpdate:
+        index, text = task["index"], task["branch_input"]
+        branch_id = parallel.branches[index].id
+        marker: dict[str, JsonValue] = {"index": index, "branch_id": branch_id}
+        await log.emit(PARALLEL_BRANCH_STARTED, node_id=parallel.id, payload=marker)
+        ran: dict[str, AgentNodeResult] = {}
+        error: str | None = None
+
+        async def run() -> AgentNodeResult:
+            nonlocal error
+            output = text
+            result = AgentNodeResult(status="completed", text=output, usage=None)
+            for step in steps[index]:
+                # Stays `cancelled` if the branch is cancelled while the step runs.
+                ran[step.id] = AgentNodeResult(status="cancelled", text=output, usage=None)
+                result = await _run_step(step, runtime, tools, log, limits, output, branch=index)
+                ran[step.id] = result
+                if result.status != "completed":
+                    error = f"{step.id} {result.status}: {result.error or 'no error given'}"
+                    break
+                output = result.text
+            return result
+
+        cancelled = AgentNodeResult(status="cancelled", text=text, usage=None)
+        if join.decided:
+            result = cancelled
+        else:
+            runner = asyncio.create_task(run())
+            join.running[index] = runner
+            try:
+                result = await runner
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if not runner.cancelled() or (current is not None and current.cancelling()):
+                    raise  # the run itself is being stopped
+                result = cancelled  # the step that was running logged its end
+            join.end(index, result.status)
+        if result.status == "cancelled":
+            error = "cancelled: the join was decided without it"
+        end: dict[str, JsonValue] = {**marker, "status": result.status}
+        if error:
+            end["error"] = error
+        await log.emit(PARALLEL_BRANCH_COMPLETED, node_id=parallel.id, payload=end)
+        usage = [r.usage for r in ran.values() if r.usage]
+        outcome = AgentNodeResult(
+            status=result.status,
+            text=result.text,
+            usage=sum_usage(usage),
+            error=error,
+            data={"index": index},
+        )
+        return {
+            "results": ran,
+            "usage": usage,
+            "parallel_results": {parallel.id: {branch_id: outcome}},
+        }
+
+    return work
+
+
+def _parallel_join(
+    parallel: ParallelNode, log: RunEventLog
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Ends the parallel by its join, from its branches' checkpointed outcomes. Its output is the
+    completed branches' outputs in branch order (`data`: `outputs` by branch id, and the ids of
+    the branches that `completed`, `failed` and were `cancelled`)."""
+
+    async def join(state: RunState) -> RunUpdate:
+        by_id = state.get("parallel_results", {}).get(parallel.id, {})
+        outcomes = [(b.id, by_id[b.id]) for b in parallel.branches if b.id in by_id]
+        ids: dict[str, JsonValue] = {
+            status: [i for i, o in outcomes if o.status == status]
+            for status in ("completed", "failed", "cancelled")
+        }
+        done = [(i, o) for i, o in outcomes if o.status == "completed"]
+        text = "\n\n".join(o.text for _, o in done)
+        outputs: dict[str, JsonValue] = {i: o.text for i, o in done}
+        data: dict[str, JsonValue] = {"outputs": outputs, **ids}
+        needed = _needed(parallel)
+        if len(done) >= needed:
+            await log.emit(NODE_COMPLETED, node_id=parallel.id, payload=ids)
+            completed = AgentNodeResult(status="completed", text=text, usage=None, data=data)
+            return _update(parallel.id, completed)
+        error = (
+            f"join {parallel.join}: {len(done)} of {len(parallel.branches)} branches completed, "
+            f"{needed} needed"
+        )
+        if failed := next(((i, o) for i, o in outcomes if o.status == "failed"), None):
+            error += f"; branch {failed[0]!r} {failed[1].error}"
+        await log.emit(NODE_FAILED, node_id=parallel.id, payload={"error": error, **ids})
+        stopped = AgentNodeResult(status="failed", text=text, usage=None, error=error, data=data)
+        return _update(parallel.id, stopped)
+
+    return join
+
+
 def _reduce(
     reduce: ReduceNode,
     runtime: AgentRuntime,
@@ -605,6 +889,18 @@ def _pull_request(node: StepNode, result: AgentNodeResult) -> dict[str, JsonValu
     if result.status != "completed" or not result.data or "url" not in result.data:
         return None
     return {k: result.data[k] for k in _PULL_REQUEST_FIELDS if k in result.data}
+
+
+_CREATED_REPO_FIELDS = ("full_name", "url", "default_branch", "private", "created")
+
+
+def _created_repo(node: StepNode, result: AgentNodeResult) -> dict[str, JsonValue] | None:
+    """The repo a completed tool node created, if its result names one."""
+    if not creates_repo(node):
+        return None
+    if result.status != "completed" or not result.data or "full_name" not in result.data:
+        return None
+    return {k: result.data[k] for k in _CREATED_REPO_FIELDS if k in result.data}
 
 
 def _continue_if_completed(node_id: str, next_id: str) -> Callable[[RunState], str]:

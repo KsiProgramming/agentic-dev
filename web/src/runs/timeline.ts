@@ -5,8 +5,8 @@ import type { RunEvent } from "./types";
 export type { TokenUsage } from "./cost";
 
 /**
- * The run as a story: one step per node in run order, map items and loop iterations nested
- * inside their node, and inside each step its turns. Streamed `text_delta` chunks are merged into
+ * The run as a story: one step per node in run order, map items, parallel branches and loop
+ * iterations nested inside their node, and inside each step its turns. Streamed `text_delta` chunks are merged into
  * one growing message per agent turn; a tool call and its result form one tool turn. Payloads are
  * data: nothing here is ever rendered as HTML.
  */
@@ -58,18 +58,27 @@ export interface Step {
   endedAt: string | null;
   error: string | null;
   turns: Turn[];
-  /** The node's own usage; `stepUsage` adds its map items and iterations. */
+  /** The node's own usage; `stepUsage` adds its map items, branches and iterations. */
   usage: TokenUsage | null;
   gate: GateInfo | null;
   prUrl: string | null;
+  /** The repo the node created for the run (`github.createRepo`). */
+  createdRepo: CreatedRepo | null;
   /** Set for a loop node: one entry per iteration, each with its own steps. */
   iterations: Iteration[] | null;
   /** Set for a map node: one entry per item, each with its own steps. */
   items: MapItem[] | null;
   /** How many items a map node has, once it started. */
   itemCount: number | null;
+  /** Set for a parallel node: one entry per branch, each with its own steps. */
+  branches: Branch[] | null;
   /** Why a loop stopped: `condition` or `max_iterations`. */
   stopReason: string | null;
+}
+
+export interface CreatedRepo {
+  fullName: string;
+  url: string;
 }
 
 export interface Iteration {
@@ -82,6 +91,18 @@ export interface Iteration {
 export interface MapItem {
   index: number;
   item: unknown;
+  status: StepStatus;
+  startedAt: string;
+  endedAt: string | null;
+  error: string | null;
+  steps: Step[];
+}
+
+export interface Branch {
+  index: number;
+  /** The id of the branch's node. */
+  id: string;
+  /** `cancelled` once the parallel's join was decided without it. */
   status: StepStatus;
   startedAt: string;
   endedAt: string | null;
@@ -127,27 +148,38 @@ function newStep(id: string, at: string): Step {
     usage: null,
     gate: null,
     prUrl: null,
+    createdRepo: null,
     iterations: null,
     items: null,
     itemCount: null,
+    branches: null,
     stopReason: null,
   };
 }
 
 /** A GitHub pull request URL; anything else (e.g. a `javascript:` URL) is not offered as a link. */
+/** The repo a `repo_created` event names, if it is a GitHub repo (events are data). */
+export function createdRepoOf(payload: Record<string, unknown>): CreatedRepo | null {
+  const fullName = str(payload.full_name);
+  const url = str(payload.url);
+  if (fullName === null || url !== `https://github.com/${fullName}`) return null;
+  return /^[^/\s]+\/[^/\s]+$/.test(fullName) ? { fullName, url } : null;
+}
+
 export function safePullRequestUrl(url: unknown): string | null {
   if (typeof url !== "string") return null;
   return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(url) ? url : null;
 }
 
-/** Where the events of one level go: the run's top level, a loop iteration or a map item. */
+/** Where the events of one level go: the run's top level, a loop iteration, a map item or a
+ * parallel branch. */
 interface Scope {
   steps: Step[];
 }
 
 class Builder {
   readonly timeline: Timeline = { steps: [], workflowName: null, startedAt: null, endedAt: null };
-  /** The loops and maps that have started and not ended yet, innermost last. */
+  /** The loops, maps and parallels that have started and not ended yet, innermost last. */
   private open: Step[] = [];
   private seen = new Set<number>();
 
@@ -173,8 +205,9 @@ class Builder {
     const nodeId = event.node_id;
     if (!nodeId) return;
     const item = num(payload.item);
+    const branch = num(payload.branch);
 
-    // Events a loop or map writes about itself.
+    // Events a loop, map or parallel writes about itself.
     switch (event.type) {
       case "loop_iteration_started": {
         const loop = this.container(nodeId, at);
@@ -225,9 +258,41 @@ class Builder {
         }
         return;
       }
+      case "parallel_branch_started": {
+        const parallel = this.container(nodeId, at);
+        parallel.branches ??= [];
+        const index = num(payload.index) ?? parallel.branches.length;
+        const existing = parallel.branches.find((b) => b.index === index);
+        if (existing) {
+          existing.status = "running";
+          existing.endedAt = null;
+        } else {
+          parallel.branches.push({
+            index,
+            id: str(payload.branch_id) ?? String(index),
+            status: "running",
+            startedAt: at,
+            endedAt: null,
+            error: null,
+            steps: [],
+          });
+          parallel.branches.sort((a, b) => a.index - b.index);
+        }
+        return;
+      }
+      case "parallel_branch_completed": {
+        const parallel = this.container(nodeId, at);
+        const entry = parallel.branches?.find((b) => b.index === num(payload.index));
+        if (entry) {
+          entry.status = (str(payload.status) as StepStatus | null) ?? "completed";
+          entry.endedAt = at;
+          entry.error = str(payload.error);
+        }
+        return;
+      }
     }
 
-    const scope = this.scopeFor(nodeId, item);
+    const scope = this.scopeFor(nodeId, item, branch);
     let step = scope.steps.find((s) => s.id === nodeId);
 
     if (event.type === "node_started") {
@@ -243,6 +308,7 @@ class Builder {
         step.items ??= [];
         step.itemCount = num(payload.items);
       }
+      if (payload.branches !== undefined) step.branches ??= [];
       return;
     }
 
@@ -284,6 +350,9 @@ class Builder {
         return;
       case "pr_opened":
         step.prUrl = safePullRequestUrl(payload.url);
+        return;
+      case "repo_created":
+        step.createdRepo = createdRepoOf(payload);
         return;
       case "text_delta": {
         const last = step.turns.at(-1);
@@ -344,7 +413,7 @@ class Builder {
   private container(nodeId: string, at: string): Step {
     const open = this.open.find((s) => s.id === nodeId);
     if (open) return open;
-    const scope = this.scopeFor(nodeId, null);
+    const scope = this.scopeFor(nodeId, null, null);
     let step = scope.steps.find((s) => s.id === nodeId);
     if (!step) {
       step = newStep(nodeId, at);
@@ -356,9 +425,10 @@ class Builder {
 
   /**
    * Where a node's events go. Events tagged with a map `item` go to that item of the innermost
-   * open map; others go to the current iteration of the innermost open loop, or the top level.
+   * open map, those tagged with a `branch` to that branch of the innermost open parallel; others
+   * go to the current iteration of the innermost open loop, or the top level.
    */
-  private scopeFor(nodeId: string, item: number | null): Scope {
+  private scopeFor(nodeId: string, item: number | null, branch: number | null): Scope {
     for (let i = this.open.length - 1; i >= 0; i--) {
       const container = this.open[i]!;
       if (container.id === nodeId) continue;
@@ -367,7 +437,12 @@ class Builder {
         if (entry) return entry;
         continue;
       }
-      if (item === null && container.iterations) {
+      if (branch !== null && container.branches) {
+        const entry = container.branches.find((e) => e.index === branch);
+        if (entry) return entry;
+        continue;
+      }
+      if (item === null && branch === null && container.iterations) {
         const iteration = container.iterations.at(-1);
         if (iteration) return iteration;
       }
@@ -384,7 +459,7 @@ class Builder {
           step.endedAt ??= at;
         }
         for (const iteration of step.iterations ?? []) visit(iteration.steps);
-        for (const entry of step.items ?? []) {
+        for (const entry of [...(step.items ?? []), ...(step.branches ?? [])]) {
           if (entry.status === "running") {
             entry.status = status;
             entry.endedAt ??= at;
@@ -443,10 +518,11 @@ export function foldDeltas<E extends RunEvent>(events: readonly E[]): RawRow<E>[
   return rows;
 }
 
-/** A step's usage with that of its map items and loop iterations: what the node cost. */
+/** A step's usage with that of its map items, branches and loop iterations: what the node cost. */
 export function stepUsage(step: Step): TokenUsage | null {
   let total = step.usage;
   for (const item of step.items ?? []) total = addUsage(total, stepsUsage(item.steps));
+  for (const branch of step.branches ?? []) total = addUsage(total, stepsUsage(branch.steps));
   for (const iteration of step.iterations ?? []) {
     total = addUsage(total, stepsUsage(iteration.steps));
   }

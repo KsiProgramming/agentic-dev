@@ -106,6 +106,7 @@ function lastPullRequest(steps: Step[]): string | null {
       url = step.prUrl ?? url;
       for (const iteration of step.iterations ?? []) visit(iteration.steps);
       for (const item of step.items ?? []) visit(item.steps);
+      for (const branch of step.branches ?? []) visit(branch.steps);
     }
   };
   visit(steps);

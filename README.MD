@@ -467,14 +467,15 @@ cd web && pnpm gen:api
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Workflow spec
-A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has seven node types:
+A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has eight node types:
 - `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`);
 - `tool`: one call of a platform tool with fixed arguments and no model, e.g. `{"type": "tool", "id": "list", "tool": "repo.list_files", "args": {"path": "."}}`;
 - `gate`: a pause until a human approves or rejects (`title`, optional `prompt`); see [Gates](#gates);
 - `sequence`: its `steps`, in order;
 - `loop`: its `body`, again and again until a CEL condition (`until`) is true, at most `max_iterations` times; see [Loops](#loops);
 - `map`: its `body` once per item of a CEL list (`over`), at most `max_concurrency` at a time; see [Map and reduce](#map-and-reduce);
-- `reduce`: the outputs of an earlier map (`from`), combined by `concat` or by an `agent`; see [Map and reduce](#map-and-reduce).
+- `reduce`: the outputs of an earlier map (`from`), combined by `concat` or by an `agent`; see [Map and reduce](#map-and-reduce);
+- `parallel`: its `branches` at the same time, joined when `all`, `any` or a `quorum` of them completed; see [Parallel](#parallel).
 
 Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
 
@@ -515,7 +516,7 @@ The runtime and engine test suites block all non-loopback network access (`agent
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
 
 ## Engine
-`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)), and a `map` adds an entry node, a worker that LangGraph's `Send` starts once per item, and a join node (see [Map and reduce](#map-and-reduce)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.
+`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)), and a `map` adds an entry node, a worker that LangGraph's `Send` starts once per item, and a join node (see [Map and reduce](#map-and-reduce)), and a `parallel` adds an entry node, a worker that `Send` starts once per branch, and a join node (see [Parallel](#parallel)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.
 
 A `tool` node calls the `ToolExecutor` passed as `run_workflow(..., tools=)` (the worker passes the same per-run tools its agents get). It writes one `tool_call` and one `tool_result` event, and its output text becomes the next node's input. An error result, an exception or a run without tools fails the node.
 
@@ -589,7 +590,7 @@ Create a dev App once, at <https://github.com/settings/apps/new> (or under an or
 1. **Name** it anything; its URL slug (`github.com/apps/<slug>`) is `GITHUB_APP_SLUG`. **Homepage URL**: `http://localhost:3000`.
 2. **Setup URL**: `http://localhost:8000/github/setup` (the API), and tick **Redirect on update**. Leave "Request user authorization (OAuth) during installation" off.
 3. **Webhook**: untick **Active** (webhooks come in phase 7.6).
-4. **Repository permissions**: Metadata read only is enough to list repos. Contents and Pull requests read and write are needed to clone private repos and to open pull requests (`github.openPR`, see "Pull requests").
+4. **Repository permissions**: Metadata read only is enough to list repos. Contents and Pull requests read and write are needed to clone private repos and to open pull requests (`github.openPR`, see "Pull requests"). Administration read and write is needed to create repos (`github.createRepo`, see "New repos").
 5. Create it, note its **App ID** (`GITHUB_APP_ID`), then **Generate a private key** and save the downloaded file as `.secrets/github-app.pem` (gitignored).
 6. Set `GITHUB_APP_ID` and `GITHUB_APP_SLUG` in `.env`, run `docker compose up --build api`, open <http://localhost:3000/settings> and click **Install GitHub App**. GitHub asks which repos to grant, then sends you back to Settings, which lists them.
 
@@ -724,6 +725,26 @@ A `map` node runs its `body` once per item of a list, several items at a time, a
 - **Events.** `node_started` for the map (`items`), then per item `map_item_started` (`index`, `item`), the body's usual events, each with `item` (the index) in its payload, and `map_item_completed` (`index`, `status`, `error`), and finally `node_completed` (`items`) or the map's failure (`error`). Items that run at once interleave their events; `seq` still orders them all. A reduce writes the events of an agent node.
 - **Durability.** LangGraph checkpoints each finished item, so a run cut off mid-map runs again only the items that had not finished. The map adds three LangGraph steps whatever its item count.
 
+## Parallel
+A `parallel` node runs different branches at the same time on the same input and joins them by a policy (phase 4.1). [parallel-three-reviewers.json](packages/engine/tests/fixtures/specs/valid/parallel-three-reviewers.json) has three specialists review the same input, then a lead merges their reviews:
+
+```json
+{ "type": "sequence", "id": "main", "steps": [
+  { "type": "parallel", "id": "review", "join": "all", "branches": [
+    { "type": "agent", "id": "security", "role": "Security reviewer", "instructions": "..." },
+    { "type": "agent", "id": "dependencies", "role": "Dependency reviewer", "instructions": "..." },
+    { "type": "agent", "id": "style", "role": "Style reviewer", "instructions": "..." } ] },
+  { "type": "agent", "id": "summary", "role": "Lead reviewer", "instructions": "..." } ] }
+```
+
+- **Branches.** From 2 to 8, each one `agent`, `tool` or `sequence` node, whose id names the branch. Every branch gets the parallel's input; a sequence runs its steps in order. Gates, writers, publishers, loops, maps, reduces and other parallels cannot be inside a branch yet (`not_allowed_in_parallel`), and a parallel cannot be inside a loop or a map. The run's agents-alive limit caps the branches (a `policy_limit` issue), and a parallel counts as one level of nesting.
+- **Join.** `all` completes once every branch completed, `any` once one did, and `quorum` (with `"quorum": k`, from 1 to the number of branches) once `k` did. The join is decided as soon as the outcome is known: `all` fails on the first branch that does not complete, `any` only once every branch failed, and `quorum` once `k` can no longer be reached. The branches still running then end `node_cancelled`, so no more tokens are spent on them.
+- **Output.** The completed branches' outputs, in branch order whatever order they finish in, joined by a blank line. `data` is `{"outputs": {<branch id>: text}, "completed": [...], "failed": [...], "cancelled": [...]}`. Nodes inside the branches are in `result.results`, so a later CEL condition can read `results.security.text`, but not in `result.order`: a branch can fail while its parallel completes. A parallel that fails (`join any: 0 of 3 branches completed, 1 needed; branch 'a' a failed: model refused`) stops the run.
+- **Limits.** Every agent in every branch counts against agents spawned when the parallel starts, so one that would pass the limit fails before any branch runs. The run's agents-alive slots and budget apply to branch agents as to any other; a budget stop ends the run, not just the branch.
+- **Events.** `node_started` for the parallel (`branches`, `join`, `quorum`), then per branch `parallel_branch_started` (`index`, `branch_id`), the branch's usual events, each with `branch` (the index) in its payload, and `parallel_branch_completed` (`index`, `branch_id`, `status`, `error`), and finally `node_completed` or `node_failed` with the `completed`, `failed` and `cancelled` branch ids.
+- **Durability.** LangGraph checkpoints each finished branch, so a run cut off mid-parallel runs again only the branches that had not finished. Early cancelling only sees the branches of the current attempt; the join itself decides from the checkpointed outcomes, so it is right either way.
+- **Console.** The timeline nests each branch under the parallel, like map items, with "Cancelled" on the branches the join left behind. The Graph tab draws the parallel as a box with its branches side by side, its header saying how far it got ("2 of 3 branches · any · 1 cancelled").
+
 ## Generate docs
 The "Generate docs" template documents each module of a repo and opens a pull request after you approve (phase 1.11, AC-1). A template is a named builder of an ordinary workflow spec (`agentic_engine.templates`): the API builds the spec from the template's options and runs it like any other.
 
@@ -756,6 +777,26 @@ Or with `curl`:
 ```bash
 curl -s localhost:8000/templates
 curl -s -X POST localhost:8000/runs -H 'content-type: application/json'   -d '{"template": {"id": "generate-docs", "parameters": {"include": ["packages/*"]}}, "repo": {"url": "https://github.com/<owner>/<test-repo>"}}'
+```
+
+## New repos
+A run can work on a repo it creates (phase 1.12): the "New run" sheet has an **Existing repo** / **New repo** switch, and `POST /runs` takes `new_repo` instead of `repo`.
+
+- **Where.** The repo is created in the organisation the workspace's GitHub App is installed on, through `POST /orgs/{org}/repos` with an installation token. GitHub does not take installation tokens for repos on a personal account, so a personal-account installation cannot create repos (that needs user sign-in). `GET /workspaces/{id}/repos/new-repo-options` says whether a workspace can (`can_create`, `owner`, else `reason`: `no_connection`, `installation_gone`, `personal_account`).
+- **The request.** `new_repo`: `name` (letters, digits, `.`, `-`, `_`; up to 100), `private` (default `true`), `description`, `gitignore` (`Python`, `Node`, `Go`, `Rust`, `Java`, `VisualStudio`) and `license` (`mit`, `apache-2.0`). A name already taken is refused with `409` `repo_exists` before anything is asked. The run's `repo` is the new repo's URL from the start.
+- **The flow.** The API puts two steps before the workflow's own (`wrap_with_create_repo`):
+  1. `approve_repo`: a gate naming the repo and what its first commit holds. Creating a repo is irreversible, so the spec rules require a gate before `github.createRepo`, as a step of the root sequence before anything uses the repo (`create_not_tool_node`, `create_without_gate`, `create_not_first`).
+  2. `create_repo`: `github.createRepo` creates the repo with one scaffold commit made by GitHub (`auto_init`: a README, plus the `.gitignore` and license asked for) and logs `repo_created`. The audit log gets `repo.created`.
+  3. The attempt then stops, and the worker starts the next one at once: it clones the new repo and the workflow runs on it as on any repo. The attempts before had no sandbox.
+- **Retries and rerun.** A worker that dies after GitHub created the repo resumes and takes the repo over, but only one created after the run was. A run that created its repo is not rerun (`409` `repo_exists`): start a run on the repo instead. Rejecting at `approve_repo` creates nothing.
+- **Fake GitHub.** With `AGENTIC_GITHUB=fake`, created repos are bare repos in the `fixtures` volume, seen by the worker (`SANDBOX_LOCAL_ROOT`) and the API (`FAKE_GITHUB_ROOT`).
+
+Demo (the phase 1.12 "Done when"). It needs a dev GitHub App with Administration read and write, installed on a test organisation, and a Claude key:
+
+```bash
+docker compose up -d --build     # with GITHUB_APP_ID, GITHUB_APP_SLUG, .secrets/github-app.pem and AGENTIC_RUNTIME=claude
+# http://localhost:3000/templates: Generate docs, New repo, name it, Start run
+# approve "Create the repo <org>/<name>?", then the docs gate: the run page links to the pull request
 ```
 
 ## Sandbox

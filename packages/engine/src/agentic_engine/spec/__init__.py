@@ -1,7 +1,8 @@
-"""Workflow spec models (v0: `agent`, `tool`, `gate`, `sequence`, `loop`, `map` and `reduce`),
-and `validate_workflow`, which reports every reason a spec cannot run."""
+"""Workflow spec models (v0: `agent`, `tool`, `gate`, `sequence`, `loop`, `map`, `reduce` and
+`parallel`), and `validate_workflow`, which reports every reason a spec cannot run."""
 
 from agentic_engine.spec.models import (
+    CREATE_TOOLS,
     MAX_AGENTS_ALIVE,
     MAX_AGENTS_SPAWNED,
     MAX_LOOP_ITERATIONS,
@@ -16,6 +17,7 @@ from agentic_engine.spec.models import (
     MapNode,
     Node,
     NodeId,
+    ParallelNode,
     ReduceAgent,
     ReduceNode,
     SequenceNode,
@@ -24,11 +26,14 @@ from agentic_engine.spec.models import (
     WorkflowSpec,
     budget_errors,
     budget_issues,
+    create_repo_issues,
+    creates_repo,
     iter_nodes,
     loop_errors,
     map_errors,
     messages,
     node_tools,
+    parallel_issues,
     policy_errors,
     policy_issues,
     publish_gate_errors,
@@ -38,6 +43,7 @@ from agentic_engine.spec.models import (
 from agentic_engine.spec.validate import validate_workflow
 
 __all__ = [
+    "CREATE_TOOLS",
     "MAX_AGENTS_ALIVE",
     "MAX_AGENTS_SPAWNED",
     "MAX_LOOP_ITERATIONS",
@@ -52,6 +58,7 @@ __all__ = [
     "MapNode",
     "Node",
     "NodeId",
+    "ParallelNode",
     "ReduceAgent",
     "ReduceNode",
     "SequenceNode",
@@ -60,11 +67,14 @@ __all__ = [
     "WorkflowSpec",
     "budget_errors",
     "budget_issues",
+    "create_repo_issues",
+    "creates_repo",
     "iter_nodes",
     "loop_errors",
     "map_errors",
     "messages",
     "node_tools",
+    "parallel_issues",
     "parse_spec",
     "policy_errors",
     "policy_issues",

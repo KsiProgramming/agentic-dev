@@ -22,7 +22,7 @@ from agentic_engine.spec import (
     node_tools,
     tool_issues,
 )
-from agentic_engine.templates import get_template
+from agentic_engine.templates import NewRepo, get_template
 from agentic_github import repo_full_name
 from agentic_sandbox import RepoSource
 
@@ -84,6 +84,12 @@ class CreateRunRequest(BaseModel):
         description="The repo the run works on, cloned into its sandbox. Needed by `repo.*` "
         "tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`).",
     )
+    new_repo: NewRepo | None = Field(
+        default=None,
+        description="A repo to create for the run, in the organisation the workspace's GitHub "
+        "App is installed on, instead of `repo`. The run first waits for approval to create it "
+        "(gate `approve_repo`), creates it (`create_repo`), then runs the workflow on it.",
+    )
     workspace_id: UUID | None = Field(
         default=None,
         description="The workspace the run belongs to; its connections are used. Default: the "
@@ -102,6 +108,12 @@ class CreateRunRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _one_repo(self) -> Self:
+        if self.repo is not None and self.new_repo is not None:
+            raise ValueError("give either `repo` or `new_repo`")
+        return self
+
+    @model_validator(mode="after")
     def _known_tools(self) -> Self:
         if issues := tool_issues(self.spec().root):
             raise ValueError("; ".join(messages(issues)))
@@ -112,7 +124,7 @@ class CreateRunRequest(BaseModel):
         for _, node in iter_nodes(self.spec().root):
             tools = node_tools(node)
             repo_tools = [t for t in tools if t.startswith(_REPO_TOOL_PREFIXES)]
-            if repo_tools and self.repo is None:
+            if repo_tools and self.repo is None and self.new_repo is None:
                 raise ValueError(
                     f"node {node.id!r} uses {', '.join(repo_tools)}, which need a `repo`"
                 )

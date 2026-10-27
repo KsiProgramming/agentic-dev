@@ -36,7 +36,7 @@ Strategy: **walking skeleton first**, then grow outward. The milestones follow t
 | 1.9 | `loop` primitive + CEL expressions | A reviewer loop stops on its condition or at max iterations | ✅ Done ([#18](https://github.com/KsiProgramming/agentic-dev/pull/18)) |
 | 1.10 | `map` + `reduce` (concat/agent) primitives | Map over 3 modules with max concurrency, then reduce | ✅ Done ([#19](https://github.com/KsiProgramming/agentic-dev/pull/19)) |
 | 1.11 | "Generate docs" template | AC-1: connect GitHub, pick a repo, docs run opens a PR | ✅ Done ([#20](https://github.com/KsiProgramming/agentic-dev/pull/20)) |
-| 1.12 | Create new repo (behind a gate) + scaffold commit | Docs run works on a newly created repo | — |
+| 1.12 | Create new repo (behind a gate) + scaffold commit | Docs run works on a newly created repo | ✅ Done ([#119](https://github.com/KsiProgramming/agentic-dev/pull/119)) |
 
 ## Milestone 2: Product UI foundation
 
@@ -77,7 +77,7 @@ Phases 2.7–2.14 are **UI v2**: a review of the shipped screens found that they
 
 | # | Phase | Done when | Status |
 |---|---|---|---|
-| 4.1 | `parallel` primitive with join policies (all/any/quorum) | Three branches run concurrently and join correctly | — |
+| 4.1 | `parallel` primitive with join policies (all/any/quorum) | Three branches run concurrently and join correctly | ✅ Done ([#120](https://github.com/KsiProgramming/agentic-dev/pull/120)) |
 | 4.2 | Typed ports: input/output JSON Schemas validated at each edge | A wrong-shaped output fails at the edge with a clear error | — |
 | 4.3 | Shared run context: named artifacts in the run workspace | Nodes exchange `findings.json` through artifacts | — |
 | 4.4 | Deterministic tool nodes: linter, dependency scanner, secret scanner | Tool outputs feed specialist agents | — |

@@ -199,7 +199,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workspace's default; with a budget, every\nagent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the\nsame way.",
+        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workspace's default; with a budget, every\nagent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the\nsame way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -226,10 +226,16 @@
             "description": "No workspace with this id"
           },
           "409": {
-            "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection"
+            "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`."
           },
           "422": {
             "description": "Invalid request, or the workflow is above the workspace's limits"
+          },
+          "502": {
+            "description": "With `new_repo`: GitHub could not be asked about the repo"
+          },
+          "503": {
+            "description": "With `new_repo`: the GitHub App is not configured on the API"
           }
         }
       }
@@ -365,7 +371,7 @@
           "runs"
         ],
         "summary": "Rerun",
-        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the\noriginal run's spend does not count.",
+        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the\noriginal run's spend does not count. A run that created its repo is not rerun: the repo\nexists now, so start a run on it instead.",
         "operationId": "rerunRun",
         "parameters": [
           {
@@ -411,7 +417,7 @@
             "description": "No run with this id"
           },
           "409": {
-            "description": "The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection"
+            "description": "The run has not ended yet, its workflow uses `github.*` tools and the workspace no longer has a GitHub connection, or it created its repo (`repo_exists`)"
           },
           "422": {
             "description": "The workflow is above the workspace's limits as they are now"
@@ -1040,6 +1046,7 @@
                       "run.rerun",
                       "run.cancel_requested",
                       "run.ended",
+                      "repo.created",
                       "gate.approved",
                       "gate.rejected",
                       "connection.added",
@@ -1356,6 +1363,59 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "GitHub answered with an error or could not be reached"
+          },
+          "503": {
+            "description": "The GitHub App is not configured on the API"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/repos/new-repo-options": {
+      "get": {
+        "tags": [
+          "github"
+        ],
+        "summary": "New Repo Options",
+        "description": "Whether runs of the workspace can create their repo, in which organisation, and the\n`.gitignore` templates and licenses its first commit may have.",
+        "operationId": "getNewRepoOptions",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewRepoOptions"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
           },
           "502": {
             "description": "GitHub answered with an error or could not be reached"
@@ -1693,6 +1753,7 @@
               "run.rerun",
               "run.cancel_requested",
               "run.ended",
+              "repo.created",
               "gate.approved",
               "gate.rejected",
               "connection.added",
@@ -1973,6 +2034,17 @@
             ],
             "description": "The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`)."
           },
+          "new_repo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewRepo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A repo to create for the run, in the organisation the workspace's GitHub App is installed on, instead of `repo`. The run first waits for approval to create it (gate `approve_repo`), creates it (`create_repo`), then runs the workflow on it."
+          },
           "workspace_id": {
             "anyOf": [
               {
@@ -2154,7 +2226,7 @@
           "message"
         ],
         "title": "GithubErrorDetail",
-        "description": "The `detail` of a 409 from the repos endpoint: `code` says what the user should do."
+        "description": "The `detail` of a 409 from a GitHub endpoint, or from a run on a new repo: `code` says\nwhat the user should do (`no_connection`, `installation_gone`, `personal_account`,\n`repo_exists`)."
       },
       "HTTPValidationError": {
         "properties": {
@@ -2204,9 +2276,13 @@
           "invalid_expression",
           "not_allowed_in_loop",
           "not_allowed_in_map",
+          "not_allowed_in_parallel",
           "reference",
           "publish_not_tool_node",
           "publish_without_gate",
+          "create_not_tool_node",
+          "create_without_gate",
+          "create_not_first",
           "unknown_tool",
           "policy_limit",
           "budget_unpriced_model"
@@ -2265,6 +2341,9 @@
               },
               {
                 "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
               }
             ],
             "title": "Body",
@@ -2275,6 +2354,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
@@ -2352,6 +2432,9 @@
               },
               {
                 "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
               }
             ],
             "title": "Body",
@@ -2362,6 +2445,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
@@ -2435,6 +2519,255 @@
           "override"
         ],
         "title": "ModelPricingOut"
+      },
+      "NewRepo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,100}$",
+            "title": "Name",
+            "description": "Letters, digits, `.`, `-` and `_`, up to 100 characters."
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private",
+            "description": "Only the organisation can see it.",
+            "default": true
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 350
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "gitignore": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "Python",
+                  "Node",
+                  "Go",
+                  "Rust",
+                  "Java",
+                  "VisualStudio"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": ".gitignore",
+            "description": "A template for the first commit."
+          },
+          "license": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "mit",
+                  "apache-2.0"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License",
+            "description": "A license for the first commit."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "NewRepo",
+        "description": "A repo to create in the organisation the workspace's GitHub App is installed on."
+      },
+      "NewRepoOptions": {
+        "properties": {
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner",
+            "description": "The organisation the repo is created in."
+          },
+          "can_create": {
+            "type": "boolean",
+            "title": "Can Create"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NewRepoReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why not: the code of the 409 a run on a new repo would get."
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Why not, for people."
+          },
+          "gitignore_templates": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "Python",
+                "Node",
+                "Go",
+                "Rust",
+                "Java",
+                "VisualStudio"
+              ]
+            },
+            "type": "array",
+            "title": "Gitignore Templates"
+          },
+          "licenses": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "mit",
+                "apache-2.0"
+              ]
+            },
+            "type": "array",
+            "title": "Licenses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner",
+          "can_create",
+          "gitignore_templates",
+          "licenses"
+        ],
+        "title": "NewRepoOptions",
+        "description": "Whether the workspace can start a run on a new repo (`new_repo` on `POST /runs`), where\nthe repo would be, and what its first commit may hold."
+      },
+      "NewRepoReason": {
+        "type": "string",
+        "enum": [
+          "no_connection",
+          "installation_gone",
+          "personal_account"
+        ]
+      },
+      "ParallelNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "parallel",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "branches": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AgentNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ToolNode"
+                },
+                {
+                  "$ref": "#/components/schemas/GateNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SequenceNode"
+                },
+                {
+                  "$ref": "#/components/schemas/LoopNode"
+                },
+                {
+                  "$ref": "#/components/schemas/MapNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ReduceNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ParallelNode"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "agent": "#/components/schemas/AgentNode",
+                  "gate": "#/components/schemas/GateNode",
+                  "loop": "#/components/schemas/LoopNode",
+                  "map": "#/components/schemas/MapNode",
+                  "parallel": "#/components/schemas/ParallelNode",
+                  "reduce": "#/components/schemas/ReduceNode",
+                  "sequence": "#/components/schemas/SequenceNode",
+                  "tool": "#/components/schemas/ToolNode"
+                }
+              }
+            },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 2,
+            "title": "Branches"
+          },
+          "join": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any",
+              "quorum"
+            ],
+            "title": "Join"
+          },
+          "quorum": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quorum",
+            "description": "`quorum` only, and required: how many branches must complete."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "branches",
+          "join"
+        ],
+        "title": "ParallelNode",
+        "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. Its output is the completed branches'\noutputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the\nbranch, and it holds no gate, writer or publisher. Every agent in the branches counts toward\nthe run's `agents_spawned` limit when the parallel starts."
       },
       "PolicyLimit": {
         "type": "string",
@@ -3375,6 +3708,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ReduceNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ParallelNode"
                 }
               ],
               "discriminator": {
@@ -3384,6 +3720,7 @@
                   "gate": "#/components/schemas/GateNode",
                   "loop": "#/components/schemas/LoopNode",
                   "map": "#/components/schemas/MapNode",
+                  "parallel": "#/components/schemas/ParallelNode",
                   "reduce": "#/components/schemas/ReduceNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "tool": "#/components/schemas/ToolNode"
@@ -3808,6 +4145,9 @@
               },
               {
                 "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
               }
             ],
             "title": "Root",
@@ -3818,6 +4158,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"

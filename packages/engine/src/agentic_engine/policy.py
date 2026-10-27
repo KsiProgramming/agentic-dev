@@ -29,7 +29,7 @@ class Policy(BaseModel):
 
     agents_alive: Limit = Field(description="Agents running at once.")
     agents_spawned: Limit = Field(description="Agents a run may start in all.")
-    max_depth: Limit = Field(description="How deep loops and maps may nest.")
+    max_depth: Limit = Field(description="How deep loops, maps and parallels may nest.")
     loop_iterations: Limit = Field(description="The highest `max_iterations` a loop may have.")
     wall_time_s: Limit = Field(
         description="Seconds a run may spend executing; time waiting at a gate does not count."

@@ -77,6 +77,7 @@ from agentic_store.sink import (
     PostgresEventSink,
     list_run_events,
     max_event_seq,
+    repo_created,
 )
 from agentic_store.summaries import (
     InvalidCursorError,
@@ -160,6 +161,7 @@ __all__ = [
     "renew_lease",
     "replace_policy_overrides",
     "replace_price_overrides",
+    "repo_created",
     "request_cancel",
     "run_ended",
     "waiting_run_ids",

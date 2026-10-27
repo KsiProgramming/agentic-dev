@@ -38,3 +38,6 @@ class Settings(BaseSettings):
     claude_key_check: Literal["anthropic", "fake"] = "anthropic"
     # `fake` stands in a local GitHub App for dev and e2e tests (env `AGENTIC_GITHUB`).
     github: Literal["app", "fake"] = Field(default="app", validation_alias="agentic_github")
+    # Where the fake GitHub App keeps its bare repos (the worker's `SANDBOX_LOCAL_ROOT`), so the
+    # API sees the repos it creates. Unset, it knows only its fixed repos.
+    fake_github_root: Path | None = None

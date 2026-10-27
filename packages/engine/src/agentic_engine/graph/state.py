@@ -25,8 +25,9 @@ def merge_counts(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
 def merge_map_results(
     left: dict[str, dict[str, AgentNodeResult]], right: dict[str, dict[str, AgentNodeResult]]
 ) -> dict[str, dict[str, AgentNodeResult]]:
-    """Reducer for `RunState.map_results`: an item's update adds its result by map id, then by
-    item index, so a map's items can finish in any order and at the same time."""
+    """Reducer for `RunState.map_results` and `RunState.parallel_results`: an item's (a
+    branch's) update adds its result by map (parallel) id, then by item index (branch id), so a
+    map's items and a parallel's branches can finish in any order and at the same time."""
     merged = dict(left)
     for map_id, items in right.items():
         merged[map_id] = {**merged.get(map_id, {}), **items}
@@ -50,6 +51,11 @@ class RunState(TypedDict):
     `map_results` holds, per map, the result of its body for each item, keyed by the item's index
     as a string (checkpoints keep string keys). The nodes inside a map body are not in `results`
     or `order`: their ids repeat for every item.
+
+    `parallel_results` holds, per parallel, the outcome of each branch, keyed by the branch's id.
+    The nodes inside a branch are in `results` too, as their ids do not repeat, but not in
+    `order`: a branch can fail while its parallel completes, and `order` is the run's path.
+    Checkpoints saved before phase 4.1 have none, which counts as empty.
     """
 
     input: str
@@ -60,6 +66,7 @@ class RunState(TypedDict):
     usage: Annotated[list[Usage], operator.add]
     map_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
     spawned: Annotated[int, operator.add]
+    parallel_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -72,6 +79,7 @@ class RunUpdate(TypedDict, total=False):
     usage: list[Usage]
     map_results: dict[str, dict[str, AgentNodeResult]]
     spawned: int
+    parallel_results: dict[str, dict[str, AgentNodeResult]]
 
 
 class MapItem(TypedDict):
@@ -80,6 +88,14 @@ class MapItem(TypedDict):
     index: int
     item: JsonValue
     item_input: str
+
+
+class ParallelBranch(TypedDict):
+    """What a parallel sends the worker that runs one of its branches: the branch's index and
+    the parallel's input (`input` would clash with `RunState.input`)."""
+
+    index: int
+    branch_input: str
 
 
 def initial_state(input: str) -> RunState:
@@ -92,16 +108,18 @@ def initial_state(input: str) -> RunState:
         usage=[],
         map_results={},
         spawned=0,
+        parallel_results={},
     )
 
 
-type WorkflowRunStatus = AgentNodeStatus | Literal["waiting"]
+type WorkflowRunStatus = AgentNodeStatus | Literal["waiting", "suspended"]
 
 
 class WorkflowRunResult(BaseModel):
     """The outcome of a run, or of one stretch of it. `stopped_at` names the node that did not
     complete, if any; a `waiting` run is paused at the gate `waiting_at` until it is continued
-    with a decision."""
+    with a decision. A `suspended` run stopped after creating its repo, at `waiting_at` (the
+    node `repo_ready_node_id` names), and goes on in a new attempt, with no decision."""
 
     model_config = ConfigDict(frozen=True)
 
