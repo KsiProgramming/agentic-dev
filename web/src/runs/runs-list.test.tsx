@@ -66,8 +66,8 @@ test("a rerun links back to the run it repeats", () => {
   show([runSummary({ id: NEW_ID, rerun_of: FAILED.id })]);
 
   const table = within(screen.getByRole("table", { name: "Runs" }));
-  expect(table.getByRole("link", { name: FAILED.id.slice(0, 8) }).getAttribute("href")).toBe(
-    `/runs/${FAILED.id}`,
-  );
+  expect(
+    table.getByRole("link", { name: `Run ${FAILED.id.slice(0, 8)}` }).getAttribute("href"),
+  ).toBe(`/runs/${FAILED.id}`);
   expect(table.getByText(/Rerun of/)).toBeDefined();
 });

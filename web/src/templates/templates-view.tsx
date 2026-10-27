@@ -39,7 +39,7 @@ export function TemplatesView({
   const close = () => router.replace(pathname, { scroll: false });
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader
         title="Start a run"
         description="Pick a template. Every change lands as a pull request you review."

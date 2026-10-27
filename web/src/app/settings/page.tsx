@@ -24,7 +24,7 @@ async function GithubForSearchParams({
 
 export default function SettingsPage({ searchParams }: PageProps<"/settings">) {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader
         title="Settings"
         description="Model access, the repositories this workspace can work on, what its runs cost and how far they may go."

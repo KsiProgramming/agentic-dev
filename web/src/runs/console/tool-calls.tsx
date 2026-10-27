@@ -2,10 +2,10 @@
 
 import { ChevronRightIcon, CircleXIcon, LoaderCircleIcon } from "lucide-react";
 
+import { Duration } from "@/components/display";
 import { JsonView, OutputView } from "@/components/json-view";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
-import { formatDuration } from "../summaries";
 import type { ToolTurn } from "../timeline";
 import { describeTool, summarizeTools, toolPreview } from "./tool-describe";
 
@@ -14,7 +14,7 @@ function took(turn: ToolTurn): number | null {
 }
 
 const TRIGGER =
-  "flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-[13px] text-muted-foreground outline-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50";
+  "flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-meta text-muted-foreground outline-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50";
 
 /** Class names are written out in full so Tailwind sees them. */
 const CHEVRON = {
@@ -90,9 +90,7 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
             <span className="shrink-0 text-status-failed">failed</span>
           ) : null}{" "}
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            {ms !== null ? (
-              <span className="text-xs tabular-nums">{formatDuration(ms)}</span>
-            ) : null}
+            {ms !== null ? <Duration ms={ms} className="text-xs" /> : null}
             <Chevron of="call" />
           </span>
         </CollapsibleTrigger>
@@ -105,7 +103,7 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
           <section className="flex flex-col gap-1">
             <h4 className="text-xs font-medium text-muted-foreground">Result</h4>
             {turn.output === null ? (
-              <p className="text-[13px] text-muted-foreground">Waiting for the result…</p>
+              <p className="text-meta text-muted-foreground">Waiting for the result…</p>
             ) : (
               <OutputView text={turn.output} label={`${turn.name} result`} />
             )}
@@ -165,7 +163,13 @@ export function ToolCallGroup({ turns }: { turns: ToolTurn[] }) {
         </span>{" "}
         {failed > 0 ? <span className="shrink-0 text-status-failed">· {failed} failed</span> : null}{" "}
         <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs tabular-nums">
-          {turns.length} tool calls{ms !== null ? ` · ${formatDuration(ms)}` : ""}
+          {turns.length} tool calls
+          {ms !== null ? (
+            <>
+              {" "}
+              · <Duration ms={ms} />
+            </>
+          ) : null}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>

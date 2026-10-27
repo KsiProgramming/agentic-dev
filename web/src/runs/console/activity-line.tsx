@@ -9,7 +9,7 @@ export function ActivityLine({ activity }: { activity: Activity }) {
   return (
     <div
       data-testid="activity"
-      className="relative flex min-h-5 min-w-0 items-center gap-1.5 pl-7 text-[13px] text-muted-foreground"
+      className="relative flex min-h-5 min-w-0 items-center gap-1.5 pl-7 text-meta text-muted-foreground"
     >
       <span className="absolute top-0 left-0 flex size-5 items-center justify-center">
         <LoaderCircleIcon

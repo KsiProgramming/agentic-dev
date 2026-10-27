@@ -1,5 +1,6 @@
 import type { components } from "@/api/schema";
 import type { RunStatus } from "@/components/status-badge";
+import { dateFormat } from "@/lib/locale";
 
 /** A run as `GET /runs` and `GET /runs/stream` describe it. */
 export type RunSummary = components["schemas"]["RunSummary"];
@@ -81,16 +82,17 @@ export function formatRelative(iso: string, now: number): string {
   if (h < 24) return `${h} h ago`;
   const d = Math.round(h / 24);
   if (d < 7) return `${d} d ago`;
-  return new Date(iso).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return dateFormat({ day: "numeric", month: "short", year: "numeric" }).format(Date.parse(iso));
 }
 
 /** The full date and time, for a tooltip. */
 export function formatAbsolute(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
+  return dateFormat({ dateStyle: "medium", timeStyle: "medium" }).format(Date.parse(iso));
+}
+
+/** The time of day to the second, for a log line. */
+export function formatClock(iso: string): string {
+  return dateFormat({ timeStyle: "medium" }).format(Date.parse(iso));
 }
 
 /** `https://github.com/acme/docs(.git)` → `acme/docs`; a local path → its last two segments. */

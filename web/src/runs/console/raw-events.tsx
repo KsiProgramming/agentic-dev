@@ -3,6 +3,7 @@
 import { ChevronRightIcon } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 
+import { RelativeTime } from "@/components/display";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
@@ -50,7 +51,7 @@ function FoldedRow({ row }: { row: Extract<RawRow<ReceivedRunEvent>, { kind: "te
       >
         <TableCell className="text-muted-foreground tabular-nums">{range}</TableCell>
         <TableCell className="text-muted-foreground tabular-nums">
-          {new Date(first.created_at).toLocaleTimeString()}
+          <RelativeTime iso={first.created_at} clock focusable={false} />
         </TableCell>
         <TableCell className="font-mono">
           <button
@@ -79,7 +80,7 @@ function FoldedRow({ row }: { row: Extract<RawRow<ReceivedRunEvent>, { kind: "te
             <TableRow key={event.seq} data-testid="chunk-row" className="bg-muted/40 align-top">
               <TableCell className="pl-6 text-muted-foreground tabular-nums">{event.seq}</TableCell>
               <TableCell className="text-muted-foreground tabular-nums">
-                {new Date(event.created_at).toLocaleTimeString()}
+                <RelativeTime iso={event.created_at} clock focusable={false} />
               </TableCell>
               <TableCell className="font-mono text-muted-foreground">chunk</TableCell>
               <TableCell />
@@ -139,7 +140,7 @@ export function RawEvents({ events }: { events: ReceivedRunEvent[] }) {
         </NativeSelect>
         <span className="text-xs text-muted-foreground tabular-nums">{events.length} events</span>
       </div>
-      <Table className="text-[13px]" scrollLabel="Run events">
+      <Table className="text-meta" scrollLabel="Run events">
         <TableHeader>
           <TableRow>
             <TableHead>#</TableHead>
@@ -166,7 +167,7 @@ export function RawEvents({ events }: { events: ReceivedRunEvent[] }) {
               >
                 <TableCell className="text-muted-foreground tabular-nums">{event.seq}</TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">
-                  {new Date(event.created_at).toLocaleTimeString()}
+                  <RelativeTime iso={event.created_at} clock focusable={false} />
                 </TableCell>
                 <TableCell className="font-mono">{event.type}</TableCell>
                 <TableCell className="font-mono text-muted-foreground">

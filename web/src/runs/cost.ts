@@ -1,4 +1,5 @@
 import type { components } from "@/api/schema";
+import { numberFormat } from "@/lib/locale";
 
 type RunUsage = components["schemas"]["RunUsage"];
 
@@ -64,26 +65,42 @@ export function addUsage(a: TokenUsage | null, b: TokenUsage | null): TokenUsage
   };
 }
 
-const dollars = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-const cents = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumSignificantDigits: 3,
-});
-const tokens = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
-const exact = new Intl.NumberFormat("en-US");
+// "$", not "US$": every amount here is USD.
+const dollars = () =>
+  numberFormat({
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+const cents = () =>
+  numberFormat({
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    maximumSignificantDigits: 3,
+  });
+const prices = () =>
+  numberFormat({
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
 
 /** USD for people: agent turns cost fractions of a cent, so small amounts keep 3 significant
  * digits ("$0.0423") and tiny ones say so ("<$0.001"). */
 export function formatUsd(usd: number): string {
-  if (usd === 0) return dollars.format(0);
-  if (usd < 0.001) return "<$0.001";
-  return usd < 1 ? cents.format(usd) : dollars.format(usd);
+  if (usd === 0) return dollars().format(0);
+  if (usd < 0.001) return `<${cents().format(0.001)}`;
+  return usd < 1 ? cents().format(usd) : dollars().format(usd);
+}
+
+/** A list price or a limit in USD, to the cent and up to 4 decimals ("$3.00", "$0.075"). */
+export function formatPrice(usd: number): string {
+  return prices().format(usd);
 }
 
 /** The cost to show: "—" when nothing was priced, "≥ $x" when only part of it was. */
@@ -103,15 +120,20 @@ export function costCaveat(usage: TokenUsage): string | null {
 
 /** A token count in a few characters ("12.3K"). */
 export function formatTokens(n: number): string {
-  return tokens.format(n);
+  return numberFormat({ notation: "compact", maximumFractionDigits: 1 }).format(n);
+}
+
+/** A count in full ("12,345"). */
+export function formatCount(n: number): string {
+  return numberFormat().format(n);
 }
 
 /** Every count in full, for a tooltip. */
 export function usageDetails(usage: TokenUsage): string {
   return [
-    `${exact.format(usage.inputTokens)} input`,
-    `${exact.format(usage.outputTokens)} output`,
-    `${exact.format(usage.cacheReadTokens)} cache read`,
-    `${exact.format(usage.cacheWriteTokens)} cache write tokens`,
+    `${formatCount(usage.inputTokens)} input`,
+    `${formatCount(usage.outputTokens)} output`,
+    `${formatCount(usage.cacheReadTokens)} cache read`,
+    `${formatCount(usage.cacheWriteTokens)} cache write tokens`,
   ].join(" · ");
 }

@@ -6,6 +6,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { shortId } from "@/components/display/short-id";
+
 export interface NavItem {
   href: string;
   label: string;
@@ -45,7 +47,7 @@ export function breadcrumbsFor(pathname: string): Crumb[] {
   const rest = pathname.slice(section.href.length + 1).split("/")[0];
   if (!rest) return [{ label: section.label }];
   const segment = decodeURIComponent(rest);
-  const short = segment.length > LONG_SEGMENT ? segment.slice(0, 8) : segment;
+  const short = segment.length > LONG_SEGMENT ? shortId(segment) : segment;
   return [
     { label: section.label, href: section.href },
     { label: short, title: short === segment ? undefined : segment, mono: true },

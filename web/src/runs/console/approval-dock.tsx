@@ -221,7 +221,7 @@ export function ApprovalDock({
       {/* The space the dock takes, so the end of the page scrolls clear of it. */}
       <div aria-hidden="true" data-testid="dock-spacer" style={{ height }} />
       <DockBar ref={setElement}>
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:px-6">
+        <div className="mx-auto flex w-full max-w-content flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:px-6">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <CirclePauseIcon
               aria-hidden="true"
@@ -268,7 +268,7 @@ export function ApprovalDock({
           )}
         </div>
         {error ? (
-          <div className="mx-auto w-full max-w-5xl px-4 pb-3 md:px-6">
+          <div className="mx-auto w-full max-w-content px-4 pb-3 md:px-6">
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>

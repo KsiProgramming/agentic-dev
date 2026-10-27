@@ -633,7 +633,7 @@ test("a rerun links back to the run it repeats", async () => {
   api(detail({ status: "running", rerun_of: ORIGINAL }));
   show();
 
-  const link = await screen.findByRole("link", { name: ORIGINAL.slice(0, 8) });
+  const link = await screen.findByRole("link", { name: `Run ${ORIGINAL.slice(0, 8)}` });
   expect(link.getAttribute("href")).toBe(`/runs/${ORIGINAL}`);
   expect(link.parentElement?.textContent).toBe(`Rerun of ${ORIGINAL.slice(0, 8)}`);
 });

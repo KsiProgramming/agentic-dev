@@ -24,7 +24,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
-  use: { baseURL, trace: "retain-on-failure" },
+  // One locale and time zone, so dates and numbers read the same on every machine.
+  use: { baseURL, trace: "retain-on-failure", locale: "en-US", timezoneId: "UTC" },
   projects: [
     {
       name: "chromium",

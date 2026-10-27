@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AttentionProvider, countLabel, useWaitingCount } from "./attention";
 import { Breadcrumbs } from "./breadcrumbs";
+import { DensityToggle } from "./density-toggle";
 import { Sidebar } from "./sidebar";
 import { ThemeMenu } from "./theme-menu";
 
@@ -50,7 +51,7 @@ function MobileNav({ baseUrl }: { baseUrl?: string }) {
 
 /**
  * The frame around every page (tech-stack.md → UI design system → Layout): a sidebar with the
- * main sections and a top bar with breadcrumbs and the theme menu. The sidebar is full from
+ * main sections and a top bar with breadcrumbs, the density toggle and the theme menu. The sidebar is full from
  * 1280 px, an icon rail from 1024 px and a drawer below that.
  */
 export function AppShell({ children, baseUrl }: { children: ReactNode; baseUrl?: string }) {
@@ -79,17 +80,19 @@ export function AppShell({ children, baseUrl }: { children: ReactNode; baseUrl?:
               <Suspense fallback={<div className="flex-1" />}>
                 <Breadcrumbs className="flex-1" />
               </Suspense>
-              <div className="ml-auto">
+              <div className="ml-auto flex items-center gap-1">
+                <DensityToggle />
                 <ThemeMenu />
               </div>
             </header>
-            {/* `min-w-0` lets wide content (tables, JSON) scroll in its own box, not the page. */}
+            {/* `min-w-0` lets wide content (tables, JSON) scroll in its own box, not the page. Pages
+                use the whole content width, up to 1600 px; they never centre themselves. */}
             <main
               id="content"
               tabIndex={-1}
               className="min-w-0 flex-1 px-4 py-6 outline-none md:px-6"
             >
-              {children}
+              <div className="mx-auto w-full max-w-content">{children}</div>
             </main>
           </div>
         </div>

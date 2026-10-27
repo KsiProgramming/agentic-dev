@@ -127,7 +127,7 @@ export function LeafNodeView({ data }: NodeProps<LeafNode>) {
       >
         <span className="flex min-w-0 items-center gap-2">
           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium">
+          <span className="min-w-0 flex-1 truncate font-mono text-meta font-medium">
             {data.nodeId}
           </span>
           <NodeStatusLine status={state.status} />
@@ -162,7 +162,7 @@ export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
       >
         <span className="flex min-w-0 items-center gap-2">
           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium">
+          <span className="min-w-0 flex-1 truncate font-mono text-meta font-medium">
             {data.nodeId}
           </span>
           <NodeStatusLine status={state.status} />

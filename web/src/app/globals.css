@@ -13,6 +13,28 @@
   --font-heading: var(--font-sans);
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 
+  /* Type scale (tech-stack.md → UI design system → Look): `text-caption` for captions and table
+   * headers, `text-meta` for tables and metadata, `text-body` for body text and agent output,
+   * `text-section` for section titles, `text-page` for page titles, `text-stat` for stat values. */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-meta: 0.8125rem;
+  --text-meta--line-height: 1.25rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.375rem;
+  --text-section: 1rem;
+  --text-section--line-height: 1.5rem;
+  --text-page: 1.25rem;
+  --text-page--line-height: 1.75rem;
+  --text-stat: 1.5rem;
+  --text-stat--line-height: 2rem;
+
+  /* Density: `h-row` is a table row, 40 px or 32 px in compact mode. */
+  --spacing-row: var(--row-height);
+  /* The widest a page's content gets, and the measure of reading text. */
+  --container-content: 1600px;
+  --container-prose: 72ch;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -61,6 +83,7 @@
 /* Light: zinc neutrals on white, indigo for primary actions and focus. */
 :root {
   --radius: 0.5rem;
+  --row-height: 2.5rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -96,6 +119,11 @@
   --status-failed-muted: oklch(0.971 0.013 17.38);
   --status-cancelled: oklch(0.442 0.017 285.786);
   --status-cancelled-muted: oklch(0.967 0.001 286.375);
+}
+
+/* Compact mode (the top bar's density toggle): denser table rows. */
+.compact {
+  --row-height: 2rem;
 }
 
 /* Dark: zinc neutrals on near-black. */

@@ -21,8 +21,8 @@ export function PageHeader({
       className={cn("flex flex-col gap-3 md:flex-row md:items-start md:justify-between", className)}
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description ? <p className="text-muted-foreground">{description}</p> : null}
+        <h1 className="text-page font-semibold tracking-tight">{title}</h1>
+        {description ? <p className="max-w-prose text-muted-foreground">{description}</p> : null}
       </div>
       {actions ? (
         <div className="flex flex-wrap items-center gap-2 md:shrink-0">{actions}</div>
