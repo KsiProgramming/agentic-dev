@@ -1,0 +1,66 @@
+{
+  "spec_version": "0",
+  "id": "parallel-too-many-branches",
+  "name": "Nine branches",
+  "root": {
+    "type": "parallel",
+    "id": "review",
+    "join": "all",
+    "branches": [
+      {
+        "type": "agent",
+        "id": "r0",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r1",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r2",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r3",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r4",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r5",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r6",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r7",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      },
+      {
+        "type": "agent",
+        "id": "r8",
+        "role": "Reviewer",
+        "instructions": "Review your input."
+      }
+    ]
+  }
+}

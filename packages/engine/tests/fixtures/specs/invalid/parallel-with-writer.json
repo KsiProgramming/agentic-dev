@@ -1,0 +1,28 @@
+{
+  "spec_version": "0",
+  "id": "parallel-with-writer",
+  "name": "Writer in a branch",
+  "root": {
+    "type": "parallel",
+    "id": "review",
+    "join": "all",
+    "branches": [
+      {
+        "type": "agent",
+        "id": "security",
+        "role": "Security reviewer",
+        "instructions": "Review the code in your input for security problems. List each finding with a severity."
+      },
+      {
+        "type": "agent",
+        "id": "writer",
+        "role": "Writer",
+        "instructions": "Write the review to REVIEW.md and commit it.",
+        "tools": [
+          "repo.write_file",
+          "repo.commit"
+        ]
+      }
+    ]
+  }
+}

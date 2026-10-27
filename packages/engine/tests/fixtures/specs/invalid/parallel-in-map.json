@@ -1,0 +1,30 @@
+{
+  "spec_version": "0",
+  "id": "parallel-in-map",
+  "name": "Parallel in a map",
+  "root": {
+    "type": "map",
+    "id": "each",
+    "over": "[\"packages/api\", \"web\"]",
+    "max_concurrency": 2,
+    "body": {
+      "type": "parallel",
+      "id": "review",
+      "join": "all",
+      "branches": [
+        {
+          "type": "agent",
+          "id": "security",
+          "role": "Security reviewer",
+          "instructions": "Review the code in your input for security problems. List each finding with a severity."
+        },
+        {
+          "type": "agent",
+          "id": "dependencies",
+          "role": "Dependency reviewer",
+          "instructions": "Review the dependencies named in your input for outdated or risky packages."
+        }
+      ]
+    }
+  }
+}

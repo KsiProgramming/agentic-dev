@@ -467,14 +467,15 @@ cd web && pnpm gen:api
 CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Workflow spec
-A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has seven node types:
+A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has eight node types:
 - `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`);
 - `tool`: one call of a platform tool with fixed arguments and no model, e.g. `{"type": "tool", "id": "list", "tool": "repo.list_files", "args": {"path": "."}}`;
 - `gate`: a pause until a human approves or rejects (`title`, optional `prompt`); see [Gates](#gates);
 - `sequence`: its `steps`, in order;
 - `loop`: its `body`, again and again until a CEL condition (`until`) is true, at most `max_iterations` times; see [Loops](#loops);
 - `map`: its `body` once per item of a CEL list (`over`), at most `max_concurrency` at a time; see [Map and reduce](#map-and-reduce);
-- `reduce`: the outputs of an earlier map (`from`), combined by `concat` or by an `agent`; see [Map and reduce](#map-and-reduce).
+- `reduce`: the outputs of an earlier map (`from`), combined by `concat` or by an `agent`; see [Map and reduce](#map-and-reduce);
+- `parallel`: its `branches` at the same time, joined when `all`, `any` or a `quorum` of them completed; see [Parallel](#parallel).
 
 Node ids are unique slugs (`^[a-z][a-z0-9_-]{0,62}$`) and unknown keys are rejected.
 
@@ -515,7 +516,7 @@ The runtime and engine test suites block all non-loopback network access (`agent
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
 
 ## Engine
-`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)), and a `map` adds an entry node, a worker that LangGraph's `Send` starts once per item, and a join node (see [Map and reduce](#map-and-reduce)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.
+`agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)), and a `map` adds an entry node, a worker that LangGraph's `Send` starts once per item, and a join node (see [Map and reduce](#map-and-reduce)), and a `parallel` adds an entry node, a worker that `Send` starts once per branch, and a join node (see [Parallel](#parallel)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.
 
 A `tool` node calls the `ToolExecutor` passed as `run_workflow(..., tools=)` (the worker passes the same per-run tools its agents get). It writes one `tool_call` and one `tool_result` event, and its output text becomes the next node's input. An error result, an exception or a run without tools fails the node.
 
@@ -723,6 +724,26 @@ A `map` node runs its `body` once per item of a list, several items at a time, a
 - **Reduce.** `{"type": "reduce", "id", "from": "<map id>", "strategy": ...}` must come after the map it names. `concat` joins the outputs with `separator` (default a blank line) and calls no model. `agent` takes `"agent": {"role", "instructions", "provider"?, "model"?}` and runs one agent turn whose input is the JSON array `[{"item": ..., "output": ...}]`, in item order (data, never instructions). [map-reduce-agent.json](packages/engine/tests/fixtures/specs/valid/map-reduce-agent.json) has a two-step body and an agent reduce.
 - **Events.** `node_started` for the map (`items`), then per item `map_item_started` (`index`, `item`), the body's usual events, each with `item` (the index) in its payload, and `map_item_completed` (`index`, `status`, `error`), and finally `node_completed` (`items`) or the map's failure (`error`). Items that run at once interleave their events; `seq` still orders them all. A reduce writes the events of an agent node.
 - **Durability.** LangGraph checkpoints each finished item, so a run cut off mid-map runs again only the items that had not finished. The map adds three LangGraph steps whatever its item count.
+
+## Parallel
+A `parallel` node runs different branches at the same time on the same input and joins them by a policy (phase 4.1). [parallel-three-reviewers.json](packages/engine/tests/fixtures/specs/valid/parallel-three-reviewers.json) has three specialists review the same input, then a lead merges their reviews:
+
+```json
+{ "type": "sequence", "id": "main", "steps": [
+  { "type": "parallel", "id": "review", "join": "all", "branches": [
+    { "type": "agent", "id": "security", "role": "Security reviewer", "instructions": "..." },
+    { "type": "agent", "id": "dependencies", "role": "Dependency reviewer", "instructions": "..." },
+    { "type": "agent", "id": "style", "role": "Style reviewer", "instructions": "..." } ] },
+  { "type": "agent", "id": "summary", "role": "Lead reviewer", "instructions": "..." } ] }
+```
+
+- **Branches.** From 2 to 8, each one `agent`, `tool` or `sequence` node, whose id names the branch. Every branch gets the parallel's input; a sequence runs its steps in order. Gates, writers, publishers, loops, maps, reduces and other parallels cannot be inside a branch yet (`not_allowed_in_parallel`), and a parallel cannot be inside a loop or a map. The run's agents-alive limit caps the branches (a `policy_limit` issue), and a parallel counts as one level of nesting.
+- **Join.** `all` completes once every branch completed, `any` once one did, and `quorum` (with `"quorum": k`, from 1 to the number of branches) once `k` did. The join is decided as soon as the outcome is known: `all` fails on the first branch that does not complete, `any` only once every branch failed, and `quorum` once `k` can no longer be reached. The branches still running then end `node_cancelled`, so no more tokens are spent on them.
+- **Output.** The completed branches' outputs, in branch order whatever order they finish in, joined by a blank line. `data` is `{"outputs": {<branch id>: text}, "completed": [...], "failed": [...], "cancelled": [...]}`. Nodes inside the branches are in `result.results`, so a later CEL condition can read `results.security.text`, but not in `result.order`: a branch can fail while its parallel completes. A parallel that fails (`join any: 0 of 3 branches completed, 1 needed; branch 'a' a failed: model refused`) stops the run.
+- **Limits.** Every agent in every branch counts against agents spawned when the parallel starts, so one that would pass the limit fails before any branch runs. The run's agents-alive slots and budget apply to branch agents as to any other; a budget stop ends the run, not just the branch.
+- **Events.** `node_started` for the parallel (`branches`, `join`, `quorum`), then per branch `parallel_branch_started` (`index`, `branch_id`), the branch's usual events, each with `branch` (the index) in its payload, and `parallel_branch_completed` (`index`, `branch_id`, `status`, `error`), and finally `node_completed` or `node_failed` with the `completed`, `failed` and `cancelled` branch ids.
+- **Durability.** LangGraph checkpoints each finished branch, so a run cut off mid-parallel runs again only the branches that had not finished. Early cancelling only sees the branches of the current attempt; the join itself decides from the checkpointed outcomes, so it is right either way.
+- **Console.** The timeline nests each branch under the parallel, like map items, with "Cancelled" on the branches the join left behind. The Graph tab draws the parallel as a box with its branches side by side, its header saying how far it got ("2 of 3 branches · any · 1 cancelled").
 
 ## Generate docs
 The "Generate docs" template documents each module of a repo and opens a pull request after you approve (phase 1.11, AC-1). A template is a named builder of an ordinary workflow spec (`agentic_engine.templates`): the API builds the spec from the template's options and runs it like any other.

@@ -160,3 +160,44 @@ describe("specToGraph on other shapes", () => {
     expect(edges).toEqual([]);
   });
 });
+
+describe("specToGraph on a parallel", () => {
+  const { nodes, edges } = specToGraph(
+    spec_({
+      type: "parallel",
+      id: "review",
+      join: "quorum",
+      quorum: 2,
+      branches: [
+        agent("a"),
+        { type: "sequence", id: "s", steps: [agent("b"), agent("c")] },
+        agent("d"),
+      ],
+    }),
+  );
+
+  it("draws a box holding its branches side by side, top aligned", () => {
+    const box = byId(nodes, "review");
+    expect(box.type).toBe("container");
+    expect(box.data.detail).toBe("2 of 3 branches");
+    expect(["a", "b", "c", "d"].map((id) => byId(nodes, id).parentId)).toEqual([
+      "review",
+      "review",
+      "review",
+      "review",
+    ]);
+    expect(byId(nodes, "a").position).toEqual({ x: PADDING, y: HEADER });
+    expect(byId(nodes, "b").position).toEqual({ x: PADDING + LEAF_WIDTH + GAP, y: HEADER });
+    expect(byId(nodes, "c").position).toEqual({
+      x: PADDING + LEAF_WIDTH + GAP,
+      y: HEADER + LEAF_HEIGHT + GAP,
+    });
+    expect(byId(nodes, "d").position).toEqual({ x: PADDING + 2 * (LEAF_WIDTH + GAP), y: HEADER });
+    expect(box.width).toBe(3 * LEAF_WIDTH + 2 * GAP + 2 * PADDING);
+    expect(box.height).toBe(HEADER + 2 * LEAF_HEIGHT + GAP + PADDING);
+  });
+
+  it("links only the steps inside a branch", () => {
+    expect(edges.map((e) => e.id)).toEqual(["b->c"]);
+  });
+});

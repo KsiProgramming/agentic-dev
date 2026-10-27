@@ -10,6 +10,7 @@ import { costCaveat, formatCost, formatTokens, usageDetails } from "../cost";
 import { formatDuration } from "../summaries";
 import {
   stepUsage,
+  type Branch,
   type Iteration,
   type MapItem,
   type MessageTurn,
@@ -195,6 +196,37 @@ function MapItemView({ item, options }: { item: MapItem; options: StepViewOption
   );
 }
 
+function BranchView({ branch, options }: { branch: Branch; options: StepViewOptions }) {
+  const [only] = branch.steps;
+  return (
+    <RailItem
+      data-testid="branch"
+      data-status={branch.status}
+      marker={<StatusMarker status={branch.status} small />}
+    >
+      <TitleLine
+        title={branch.id}
+        status={branch.status}
+        startedAt={branch.startedAt}
+        endedAt={branch.endedAt}
+        now={options.now}
+        level="item"
+      />
+      <div className="mt-3 flex min-w-0 flex-col gap-3">
+        {branch.error && branch.status !== "cancelled" ? <ErrorLine error={branch.error} /> : null}
+        {branch.steps.length === 1 && only!.id === branch.id ? (
+          // A branch that is one node: the branch's title is enough.
+          <div data-testid="step" data-node-id={only!.id} className="flex min-w-0 flex-col gap-3">
+            <StepBody step={only!} options={options} />
+          </div>
+        ) : (
+          <StepList steps={branch.steps} options={options} />
+        )}
+      </div>
+    </RailItem>
+  );
+}
+
 function ErrorLine({ error }: { error: string }) {
   return (
     <p className="flex items-start gap-1.5 text-[13px] break-words text-destructive">
@@ -204,14 +236,18 @@ function ErrorLine({ error }: { error: string }) {
   );
 }
 
-/** What a node did, in order, on its own rail: messages, tool calls, map items, iterations;
+/** What a node did, in order, on its own rail: messages, tool calls, map items, branches,
+ * iterations;
  * then its gate, pull request, error and token usage. */
 export function StepBody({ step, options }: { step: Step; options: StepViewOptions }) {
   const live = step.status === "running";
   const entries = segments(step.turns);
   const usage = stepUsage(step);
   const hasRail =
-    entries.length > 0 || (step.items?.length ?? 0) > 0 || (step.iterations?.length ?? 0) > 0;
+    entries.length > 0 ||
+    (step.items?.length ?? 0) > 0 ||
+    (step.branches?.length ?? 0) > 0 ||
+    (step.iterations?.length ?? 0) > 0;
   return (
     <>
       {hasRail ? (
@@ -235,6 +271,9 @@ export function StepBody({ step, options }: { step: Step; options: StepViewOptio
           )}
           {step.items?.map((item) => (
             <MapItemView key={item.index} item={item} options={options} />
+          ))}
+          {step.branches?.map((branch) => (
+            <BranchView key={branch.index} branch={branch} options={options} />
           ))}
           {step.iterations?.map((iteration) => (
             <IterationView key={iteration.index} iteration={iteration} options={options} />

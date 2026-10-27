@@ -240,3 +240,46 @@ describe("foldDeltas", () => {
     ]);
   });
 });
+
+describe("buildTimeline on a parallel", () => {
+  const timeline = buildTimeline([
+    event(1, "run_started", null),
+    event(2, "node_started", "review", { branches: 2, join: "any" }),
+    event(3, "parallel_branch_started", "review", { index: 0, branch_id: "fast" }),
+    event(4, "parallel_branch_started", "review", { index: 1, branch_id: "slow" }),
+    event(5, "node_started", "fast", { branch: 0 }),
+    event(6, "node_started", "slow", { branch: 1 }),
+    event(7, "message", "fast", { type: "message", text: "first", branch: 0 }),
+    event(8, "node_completed", "fast", { branch: 0 }),
+    event(9, "node_cancelled", "slow", { branch: 1 }),
+    event(10, "parallel_branch_completed", "review", {
+      index: 0,
+      branch_id: "fast",
+      status: "completed",
+    }),
+    event(11, "parallel_branch_completed", "review", {
+      index: 1,
+      branch_id: "slow",
+      status: "cancelled",
+      error: "cancelled: the join was decided without it",
+    }),
+    event(12, "node_completed", "review", { completed: ["fast"], cancelled: ["slow"] }),
+  ]);
+
+  it("nests each branch under the parallel, with its own steps and status", () => {
+    const [review] = timeline.steps;
+    expect(timeline.steps.map((s) => s.id)).toEqual(["review"]);
+    expect(review!.status).toBe("completed");
+    expect(review!.branches?.map((b) => [b.index, b.id, b.status])).toEqual([
+      [0, "fast", "completed"],
+      [1, "slow", "cancelled"],
+    ]);
+    expect(review!.branches?.[0]!.steps.map((s) => [s.id, s.status])).toEqual([
+      ["fast", "completed"],
+    ]);
+    expect(messages(review!.branches![0]!.steps[0]!).map((m) => m.text)).toEqual(["first"]);
+    expect(review!.branches?.[1]!.steps.map((s) => [s.id, s.status])).toEqual([
+      ["slow", "cancelled"],
+    ]);
+  });
+});

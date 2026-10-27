@@ -277,7 +277,9 @@ def _result(
     stopped_at: str | None = None,
     waiting_at: str | None = None,
 ) -> WorkflowRunResult:
+    # The run's path first, then the nodes off it (inside a parallel's branches).
     results = {node_id: state["results"][node_id] for node_id in state["order"]}
+    results.update(state["results"])
     return WorkflowRunResult(
         run_id=log.run_id,
         status=status,

@@ -9,7 +9,7 @@ export interface Activity {
   /** What: "Reading src/app.ts", "Writing", "Thinking". */
   doing: string;
   target: string;
-  /** How many steps run at once (a map's items run in parallel). */
+  /** How many steps run at once (a map's items and a parallel's branches run together). */
   running: number;
 }
 
@@ -26,9 +26,10 @@ function runningSteps(steps: Step[], where: (step: Step) => string, out: Running
         runningSteps(item.steps, () => label, out);
       }
     }
+    for (const branch of step.branches ?? []) runningSteps(branch.steps, where, out);
     for (const iteration of step.iterations ?? []) runningSteps(iteration.steps, where, out);
-    // A map or loop is running while its children are; only leaf steps do the work.
-    if (step.status === "running" && !step.items && !step.iterations) {
+    // A map, parallel or loop is running while its children are; only leaf steps do the work.
+    if (step.status === "running" && !step.items && !step.branches && !step.iterations) {
       out.push({ step, where: where(step) });
     }
   }

@@ -4,8 +4,9 @@ import type { components } from "@/api/schema";
 
 /**
  * The run's workflow as a graph to draw: one node per spec node, top to bottom in run order.
- * Sequences are not drawn, only their steps; a loop or a map is a box holding its body. The spec
- * is a tree, so the layout is placed by hand, and the same spec always gives the same positions.
+ * Sequences are not drawn, only their steps; a loop or a map is a box holding its body, and a
+ * parallel a box holding its branches side by side. The spec is a tree and no edge leaves a box,
+ * so the layout is placed by hand, and the same spec always gives the same positions.
  */
 
 export type WorkflowSpec = components["schemas"]["WorkflowSpec"];
@@ -32,7 +33,7 @@ export interface SpecGraph {
 
 export const LEAF_WIDTH = 240;
 export const LEAF_HEIGHT = 64;
-/** Between two steps of a sequence. */
+/** Between two steps of a sequence, and between two branches of a parallel. */
 export const GAP = 40;
 /** Around a container's body. */
 export const PADDING = 16;
@@ -64,6 +65,12 @@ function detail(node: SpecNode): string {
       return `Up to ${node.max_iterations} iterations`;
     case "map":
       return `Each item, ${node.max_concurrency} at a time`;
+    case "parallel": {
+      const n = node.branches.length;
+      if (node.join === "all") return `All ${n} branches`;
+      if (node.join === "any") return `Any of ${n} branches`;
+      return `${node.quorum ?? n} of ${n} branches`;
+    }
     case "sequence":
       return "";
   }
@@ -133,6 +140,30 @@ function layout(node: SpecNode, parentId: string | undefined): Block {
         exit: node.id,
       };
     }
+    case "parallel": {
+      const blocks = node.branches.map((branch) => layout(branch, node.id));
+      const nodes: GraphNode[] = [];
+      const edges: Edge[] = [];
+      let x = PADDING;
+      for (const block of blocks) {
+        shift(block.nodes, node.id, x, HEADER);
+        nodes.push(...block.nodes);
+        edges.push(...block.edges);
+        x += block.width + GAP;
+      }
+      const width = x - GAP + PADDING;
+      const height = HEADER + Math.max(...blocks.map((b) => b.height)) + PADDING;
+      const container: ContainerNode = {
+        id: node.id,
+        type: "container",
+        data,
+        position: { x: 0, y: 0 },
+        width,
+        height,
+        ...(parentId ? { parentId, extent: "parent" as const } : {}),
+      };
+      return { width, height, nodes: [container, ...nodes], edges, entry: node.id, exit: node.id };
+    }
     default: {
       const leaf: LeafNode = {
         id: node.id,
@@ -159,6 +190,7 @@ function* specNodes(node: SpecNode): Generator<SpecNode> {
   yield node;
   if (node.type === "sequence") for (const step of node.steps) yield* specNodes(step);
   if (node.type === "loop" || node.type === "map") yield* specNodes(node.body);
+  if (node.type === "parallel") for (const branch of node.branches) yield* specNodes(branch);
 }
 
 /** Every node of the spec, depth first in run order, sequences included. */

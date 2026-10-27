@@ -19,7 +19,14 @@ from agentic_engine.policy import (
     effective_policy,
     format_duration,
 )
-from agentic_engine.spec import LoopNode, MapNode, WorkflowSpec, parse_spec, policy_errors
+from agentic_engine.spec import (
+    LoopNode,
+    MapNode,
+    ParallelNode,
+    WorkflowSpec,
+    parse_spec,
+    policy_errors,
+)
 from agentic_engine.templates.docs import DocsParams, build_docs_spec
 from agentic_runtime import Message
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
@@ -163,6 +170,18 @@ def test_nesting_deeper_than_the_limit_is_rejected() -> None:
     assert policy_errors(outer, PLATFORM_POLICY) == []
     assert policy_errors(outer, policy(max_depth=1)) == [
         "map 'each' at root.body: nesting depth 2 is above the workspace limit of 1",
+    ]
+
+
+def test_a_parallel_counts_as_a_nesting_level() -> None:
+    # A parallel inside a map cannot be a spec yet (4.1), but the depth check does not rely on that.
+    branches = [agent("a"), agent("b")]
+    inner = ParallelNode(type="parallel", id="review", branches=branches, join="all")  # type: ignore[arg-type]
+    outer = MapNode(type="map", id="each", over="[]", body=inner, max_concurrency=1)
+
+    assert policy_errors(outer, PLATFORM_POLICY) == []
+    assert policy_errors(outer, policy(max_depth=1)) == [
+        "parallel 'review' at root.body: nesting depth 2 is above the workspace limit of 1",
     ]
 
 

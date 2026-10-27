@@ -92,6 +92,29 @@ INVALID: dict[str, Rejection] = {
     "reduce-agent-missing": Rejection(
         ("root", "sequence", "steps", 1, "reduce"), "value_error", "the agent strategy needs"
     ),
+    "parallel-one-branch": Rejection(("root", "parallel", "branches"), "too_short"),
+    "parallel-too-many-branches": Rejection(("root", "parallel", "branches"), "too_long"),
+    "parallel-quorum-too-high": Rejection(
+        ("root", "parallel"), "value_error", "`quorum` 4 must be from 1 to the 3 branches"
+    ),
+    "parallel-quorum-without-join": Rejection(
+        ("root", "parallel"), "value_error", "`quorum` is only used by the quorum join"
+    ),
+    "parallel-with-gate": Rejection(
+        (), "value_error", "gate 'check' at root.branches[1].steps[1] cannot be inside a parallel"
+    ),
+    "parallel-with-writer": Rejection(
+        (), "value_error", "writer 'writer' at root.branches[1] cannot be inside a parallel"
+    ),
+    "parallel-with-loop": Rejection(
+        (), "value_error", "loop 'revise' at root.branches[1] cannot be inside a parallel"
+    ),
+    "parallel-in-map": Rejection(
+        (), "value_error", "map 'each' at root: parallel 'review' at root.body cannot be inside"
+    ),
+    "parallel-in-loop": Rejection(
+        (), "value_error", "loop 'revise' at root: parallel 'review' at root.body cannot be inside"
+    ),
 }
 
 
@@ -138,6 +161,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "loop",
         "map",
         "reduce",
+        "parallel",
     }
     assert {ref["$ref"] for ref in root["oneOf"]} == {
         "#/$defs/AgentNode",
@@ -147,6 +171,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "#/$defs/LoopNode",
         "#/$defs/MapNode",
         "#/$defs/ReduceNode",
+        "#/$defs/ParallelNode",
     }
     loop = schema["$defs"]["LoopNode"]["properties"]["max_iterations"]
     assert (loop["minimum"], loop["maximum"]) == (1, 5)
@@ -155,3 +180,6 @@ def test_exported_schema_has_discriminated_node_union() -> None:
     reduce = schema["$defs"]["ReduceNode"]
     assert "from" in reduce["required"]
     assert reduce["properties"]["strategy"]["enum"] == ["concat", "agent"]
+    parallel = schema["$defs"]["ParallelNode"]["properties"]
+    assert (parallel["branches"]["minItems"], parallel["branches"]["maxItems"]) == (2, 8)
+    assert parallel["join"]["enum"] == ["all", "any", "quorum"]

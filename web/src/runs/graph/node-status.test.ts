@@ -136,3 +136,69 @@ describe("focusStep", () => {
     expect(focusStep(upTo(5), "approve")).toBeNull();
   });
 });
+
+describe("a parallel", () => {
+  const parallelSpec: WorkflowSpec = {
+    spec_version: "0",
+    id: "p",
+    name: "P",
+    root: {
+      type: "parallel",
+      id: "review",
+      join: "any",
+      branches: ["fast", "slow", "broken"].map((id) => ({
+        type: "agent" as const,
+        id,
+        role: "R",
+        instructions: "Go.",
+        tools: [],
+      })),
+    },
+  };
+  const steps = buildTimeline([
+    event(1, "node_started", "review", { branches: 3, join: "any" }),
+    event(2, "parallel_branch_started", "review", { index: 0, branch_id: "fast" }),
+    event(3, "parallel_branch_started", "review", { index: 1, branch_id: "slow" }),
+    event(4, "parallel_branch_started", "review", { index: 2, branch_id: "broken" }),
+    event(5, "node_started", "fast", { branch: 0 }),
+    event(6, "node_started", "slow", { branch: 1 }),
+    event(7, "node_started", "broken", { branch: 2 }),
+    event(8, "node_failed", "broken", { branch: 2, error: "model refused" }),
+    event(9, "parallel_branch_completed", "review", {
+      index: 2,
+      branch_id: "broken",
+      status: "failed",
+    }),
+    event(10, "node_completed", "fast", { branch: 0 }),
+    event(11, "node_cancelled", "slow", { branch: 1 }),
+    event(12, "parallel_branch_completed", "review", {
+      index: 0,
+      branch_id: "fast",
+      status: "completed",
+    }),
+    event(13, "parallel_branch_completed", "review", {
+      index: 1,
+      branch_id: "slow",
+      status: "cancelled",
+    }),
+    event(14, "node_completed", "review"),
+  ]).steps;
+
+  it("says how its branches went, and each branch node has its own status", () => {
+    const states = nodeStatuses(parallelSpec, steps);
+    expect(states.get("review")).toEqual({
+      status: "completed",
+      summary: "3 of 3 branches · any · 1 failed · 1 cancelled",
+    });
+    expect(states.get("fast")?.status).toBe("completed");
+    expect(states.get("slow")?.status).toBe("cancelled");
+    expect(states.get("broken")?.status).toBe("failed");
+  });
+
+  it("shows a branch node inside its parallel, with only that branch", () => {
+    const focused = focusStep(steps, "slow");
+    expect(focused?.id).toBe("review");
+    expect(focused?.branches?.map((b) => b.id)).toEqual(["slow"]);
+    expect(focused?.branches?.[0]!.steps.map((s) => s.id)).toEqual(["slow"]);
+  });
+});

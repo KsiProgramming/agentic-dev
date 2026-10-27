@@ -122,6 +122,7 @@
               "gate": "#/$defs/GateNode",
               "loop": "#/$defs/LoopNode",
               "map": "#/$defs/MapNode",
+              "parallel": "#/$defs/ParallelNode",
               "reduce": "#/$defs/ReduceNode",
               "sequence": "#/$defs/SequenceNode",
               "tool": "#/$defs/ToolNode"
@@ -149,6 +150,9 @@
             },
             {
               "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
             }
           ],
           "title": "Body"
@@ -200,6 +204,7 @@
               "gate": "#/$defs/GateNode",
               "loop": "#/$defs/LoopNode",
               "map": "#/$defs/MapNode",
+              "parallel": "#/$defs/ParallelNode",
               "reduce": "#/$defs/ReduceNode",
               "sequence": "#/$defs/SequenceNode",
               "tool": "#/$defs/ToolNode"
@@ -227,6 +232,9 @@
             },
             {
               "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
             }
           ],
           "title": "Body"
@@ -265,6 +273,99 @@
         "max_concurrency"
       ],
       "title": "MapNode",
+      "type": "object"
+    },
+    "ParallelNode": {
+      "additionalProperties": false,
+      "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. Its output is the completed branches'\noutputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the\nbranch, and it holds no gate, writer or publisher. Every agent in the branches counts toward\nthe run's `agents_spawned` limit when the parallel starts.",
+      "properties": {
+        "branches": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "agent": "#/$defs/AgentNode",
+                "gate": "#/$defs/GateNode",
+                "loop": "#/$defs/LoopNode",
+                "map": "#/$defs/MapNode",
+                "parallel": "#/$defs/ParallelNode",
+                "reduce": "#/$defs/ReduceNode",
+                "sequence": "#/$defs/SequenceNode",
+                "tool": "#/$defs/ToolNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AgentNode"
+              },
+              {
+                "$ref": "#/$defs/ToolNode"
+              },
+              {
+                "$ref": "#/$defs/GateNode"
+              },
+              {
+                "$ref": "#/$defs/SequenceNode"
+              },
+              {
+                "$ref": "#/$defs/LoopNode"
+              },
+              {
+                "$ref": "#/$defs/MapNode"
+              },
+              {
+                "$ref": "#/$defs/ReduceNode"
+              },
+              {
+                "$ref": "#/$defs/ParallelNode"
+              }
+            ]
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Branches",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "join": {
+          "enum": [
+            "all",
+            "any",
+            "quorum"
+          ],
+          "title": "Join",
+          "type": "string"
+        },
+        "quorum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`quorum` only, and required: how many branches must complete.",
+          "title": "Quorum"
+        },
+        "type": {
+          "const": "parallel",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "branches",
+        "join"
+      ],
+      "title": "ParallelNode",
       "type": "object"
     },
     "ReduceAgent": {
@@ -396,6 +497,7 @@
                 "gate": "#/$defs/GateNode",
                 "loop": "#/$defs/LoopNode",
                 "map": "#/$defs/MapNode",
+                "parallel": "#/$defs/ParallelNode",
                 "reduce": "#/$defs/ReduceNode",
                 "sequence": "#/$defs/SequenceNode",
                 "tool": "#/$defs/ToolNode"
@@ -423,6 +525,9 @@
               },
               {
                 "$ref": "#/$defs/ReduceNode"
+              },
+              {
+                "$ref": "#/$defs/ParallelNode"
               }
             ]
           },
@@ -516,6 +621,7 @@
           "gate": "#/$defs/GateNode",
           "loop": "#/$defs/LoopNode",
           "map": "#/$defs/MapNode",
+          "parallel": "#/$defs/ParallelNode",
           "reduce": "#/$defs/ReduceNode",
           "sequence": "#/$defs/SequenceNode",
           "tool": "#/$defs/ToolNode"
@@ -543,6 +649,9 @@
         },
         {
           "$ref": "#/$defs/ReduceNode"
+        },
+        {
+          "$ref": "#/$defs/ParallelNode"
         }
       ],
       "title": "Root"
