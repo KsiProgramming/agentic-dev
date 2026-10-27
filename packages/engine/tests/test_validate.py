@@ -51,6 +51,11 @@ def test_every_template_has_no_issues() -> None:
 
 INVALID: dict[str, tuple[str, str, str | None]] = {
     "bad-node-id": ("schema", "root.id", "Writer/One"),
+    "create-repo-after-repo-use": ("create_not_first", "root.steps[2]", "create_repo"),
+    "create-repo-by-agent": ("create_not_tool_node", "root.steps[1]", "creator"),
+    "create-repo-nested": ("create_not_first", "root.steps[1].steps[0]", "create_repo"),
+    "create-repo-twice": ("create_not_first", "root.steps[2]", "create_again"),
+    "create-repo-without-gate": ("create_without_gate", "root.steps[0]", "create_repo"),
     "duplicate-node-id": ("duplicate_node_id", "root.steps[1].steps[0]", "writer"),
     "empty-sequence": ("schema", "root.steps", "main"),
     "extra-key": ("schema", "root.temprature", "writer"),

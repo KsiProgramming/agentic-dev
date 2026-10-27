@@ -19,3 +19,12 @@ class PullRequestError(RuntimeError):
 
 class PushError(RuntimeError):
     """A branch could not be pushed. The message is git's reason, never a token or host path."""
+
+
+class RepoExistsError(RuntimeError):
+    """A repo with that name already exists on the account."""
+
+
+class RepoCreationNotAllowedError(RuntimeError):
+    """GitHub refused to create the repo: the App lacks the Administration (write) permission,
+    or the organisation does not let it create repos (or private ones)."""

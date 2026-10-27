@@ -10,6 +10,8 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_api.github.models import GithubErrorDetail
+from agentic_api.github.routes import NewRepoRefused, github_app, new_repo_owner
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.models import (
     ApprovalRequest,
@@ -32,7 +34,10 @@ from agentic_api.runs.models import (
 from agentic_api.workspaces.models import to_usd
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
-from agentic_engine.spec import WorkflowSpec
+from agentic_engine.spec import WorkflowSpec, creates_repo
+from agentic_engine.templates import wrap_with_create_repo
+from agentic_github import GithubApiError, github_remote
+from agentic_sandbox import RepoSource
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
@@ -43,6 +48,7 @@ from agentic_store import (
     RunNotEndedError,
     RunNotFoundError,
     RunSummaryRow,
+    WorkspaceNotFoundError,
     create_rerun,
     create_run,
     enqueue_run,
@@ -254,9 +260,13 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
         404: {"description": "No workspace with this id"},
         409: {
             "description": "The workflow uses `github.*` tools, but the workspace has no "
-            "GitHub connection"
+            "GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, "
+            "`installation_gone`, `personal_account` (repos are created in organisations only) "
+            "or `repo_exists`."
         },
         422: {"description": "Invalid request, or the workflow is above the workspace's limits"},
+        502: {"description": "With `new_repo`: GitHub could not be asked about the repo"},
+        503: {"description": "With `new_repo`: the GitHub App is not configured on the API"},
     },
 )
 async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
@@ -267,20 +277,28 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
     created with. Its budget is `budget_usd`, else the workspace's default; with a budget, every
     agent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the
-    same way."""
+    same way.
+
+    With `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub
+    App is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and
+    `github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the
+    start."""
     redis: Redis = request.app.state.redis
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
     if await get_workspace(sessions, workspace_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
-    if body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
+    spec, repo = body.spec(), body.repo
+    if body.new_repo is not None:
+        spec, repo = await _on_new_repo(request, workspace_id, body)
+    elif body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
         raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
     try:
         run_id = await create_run(
             sessions,
-            body.spec(),
+            spec,
             body.input,
-            body.repo,
+            repo,
             workspace_id,
             template_id=body.template.id if body.template else None,
             template_parameters=dict(body.template.parameters) if body.template else None,
@@ -292,6 +310,36 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
     )
+
+
+async def _on_new_repo(
+    request: Request, workspace_id: UUID, body: CreateRunRequest
+) -> tuple[WorkflowSpec, RepoSource]:
+    """The workflow wrapped with the steps that create `body.new_repo`, and the repo's URL. A
+    name already taken is refused before any approval is asked for."""
+    assert body.new_repo is not None
+    github = github_app(request)
+    try:
+        installation_id, owner = await new_repo_owner(_sessions(request), github, workspace_id)
+        full_name = f"{owner}/{body.new_repo.name}"
+        taken = await github.get_repo(installation_id, full_name) is not None
+    except NewRepoRefused as e:
+        raise e.http() from None
+    except WorkspaceNotFoundError:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found"
+        ) from None
+    except GithubApiError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
+    if taken:
+        raise _repo_exists(f"repo {full_name} already exists; pick another name")
+    spec = wrap_with_create_repo(body.spec(), body.new_repo, owner)
+    return spec, RepoSource(url=github_remote(full_name).removesuffix(".git"))
+
+
+def _repo_exists(message: str) -> HTTPException:
+    detail = GithubErrorDetail(code="repo_exists", message=message)
+    return HTTPException(status.HTTP_409_CONFLICT, detail.model_dump())
 
 
 def _over_policy(error: PolicyViolationError) -> HTTPException:
@@ -316,8 +364,9 @@ _NO_GITHUB = (
     responses={
         404: {"description": "No run with this id"},
         409: {
-            "description": "The run has not ended yet, or its workflow uses `github.*` tools and "
-            "the workspace no longer has a GitHub connection"
+            "description": "The run has not ended yet, its workflow uses `github.*` tools and "
+            "the workspace no longer has a GitHub connection, or it created its repo "
+            "(`repo_exists`)"
         },
         422: {"description": "The workflow is above the workspace's limits as they are now"},
     },
@@ -330,11 +379,15 @@ async def rerun(
     not changed. The spec is the one the original ran, even if its template has changed since;
     the limits are the workspace's as they are now, and a spec above them is refused with
     `422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the
-    original run's spend does not count."""
+    original run's spend does not count. A run that created its repo is not rerun: the repo
+    exists now, so start a run on it instead."""
     sessions = _sessions(request)
     original = await get_run(sessions, run_id)
     if original is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+    if creates_repo(original.spec.root):
+        repo = original.repo.url if original.repo else "its repo"
+        raise _repo_exists(f"this run created {repo}; start a new run on it instead")
     if uses_github(original.spec) and (
         await get_github_installation(sessions, original.workspace_id) is None
     ):

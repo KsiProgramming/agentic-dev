@@ -243,6 +243,20 @@ export function StepBody({ step, options }: { step: Step; options: StepViewOptio
       ) : null}
       {step.gate ? <GateDecision gate={step.gate} /> : null}
       {options.extra?.(step)}
+      {step.createdRepo ? (
+        <p className="text-sm text-muted-foreground">
+          Created{" "}
+          <a
+            href={step.createdRepo.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline"
+          >
+            {step.createdRepo.fullName}
+            <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
+          </a>
+        </p>
+      ) : null}
       {step.prUrl ? (
         <a
           href={step.prUrl}

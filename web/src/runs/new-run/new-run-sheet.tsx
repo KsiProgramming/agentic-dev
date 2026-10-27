@@ -5,18 +5,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import { LoaderCircleIcon, PlayIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
 import { createApiClient } from "@/api/client";
 import { ApiError, codeOf, detailOf, failure, messageOf, validationIssues } from "@/api/errors";
-import { usePolicy, useTemplates, type Template } from "@/api/queries";
+import { useNewRepoOptions, usePolicy, useTemplates, type Template } from "@/api/queries";
 import { ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
   SheetContent,
@@ -42,11 +43,23 @@ import { runsKey } from "@/runs/use-run-summaries";
 
 import { ConnectionChecklist } from "./connection-checklist";
 import { loadLastRepo, saveLastRepo } from "./last-repo";
+import {
+  EMPTY_NEW_REPO,
+  NewRepoFields,
+  newRepoNameError,
+  toNewRepo,
+  type NewRepoValues,
+} from "./new-repo-fields";
 import { isReady, useReadiness, type Readiness } from "./readiness";
 import { RepoCombobox } from "./repo-combobox";
 
+/** Whether the run works on a repo the GitHub App can reach, or on one it creates. */
+type RepoMode = "existing" | "new";
+
 interface Values {
+  repoMode: RepoMode;
   repo: string;
+  newRepo: NewRepoValues;
   params: FormValues;
   /** "" runs with the workspace's default budget. */
   budget: string;
@@ -73,6 +86,7 @@ function NewRunForm({
   baseUrl,
   formId,
   onPendingChange,
+  onBlockedChange,
   navigate,
 }: {
   template: Template;
@@ -82,6 +96,8 @@ function NewRunForm({
   baseUrl?: string;
   formId: string;
   onPendingChange: (pending: boolean) => void;
+  /** Whether the form can be sent as it is: not while a new repo cannot be created. */
+  onBlockedChange: (blocked: boolean) => void;
   navigate?: (url: string) => void;
 }) {
   const router = useRouter();
@@ -93,21 +109,51 @@ function NewRunForm({
   const needsRepo = template.requires.includes("github");
   const schema = useMemo(
     () =>
-      z.object({
-        repo: needsRepo ? z.string().min(1, "Pick a repository.") : z.string(),
-        params: toZod(fields),
-        budget: budgetSchema(),
-      }),
+      z
+        .object({
+          repoMode: z.enum(["existing", "new"]),
+          repo: z.string(),
+          newRepo: z.object({
+            name: z.string(),
+            private: z.boolean(),
+            description: z.string().max(350, "Keep it under 350 characters."),
+            gitignore: z.string(),
+            license: z.string(),
+          }),
+          params: toZod(fields),
+          budget: budgetSchema(),
+        })
+        .superRefine((values, ctx) => {
+          if (!needsRepo) return;
+          if (values.repoMode === "existing" && values.repo === "") {
+            ctx.addIssue({ code: "custom", path: ["repo"], message: "Pick a repository." });
+          }
+          const nameError = newRepoNameError(values.newRepo.name);
+          if (values.repoMode === "new" && nameError) {
+            ctx.addIssue({ code: "custom", path: ["newRepo", "name"], message: nameError });
+          }
+        }),
     [fields, needsRepo],
   );
   const form = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { repo: "", params: defaultValues(fields), budget: "" },
+    defaultValues: {
+      repoMode: "existing",
+      repo: "",
+      newRepo: EMPTY_NEW_REPO,
+      params: defaultValues(fields),
+      budget: "",
+    },
   });
   const { isSubmitting } = form.formState;
   const rootError = form.formState.errors.root?.message;
+  const repoMode = useWatch({ control: form.control, name: "repoMode" });
+  const creating = needsRepo && repoMode === "new";
+  const newRepoOptions = useNewRepoOptions({ workspaceId, baseUrl, enabled: creating });
+  const blocked = creating && newRepoOptions.data?.can_create !== true;
 
   useEffect(() => onPendingChange(isSubmitting), [isSubmitting, onPendingChange]);
+  useEffect(() => onBlockedChange(blocked), [blocked, onBlockedChange]);
 
   // Preselect the last used repo once the list is in, if it is still there.
   const repos = readiness.repos;
@@ -124,7 +170,8 @@ function NewRunForm({
         body: {
           template: { id: template.id, parameters: toParameters(fields, values.params) },
           input: "",
-          repo: needsRepo ? { url: values.repo } : null,
+          repo: needsRepo && !creating ? { url: values.repo } : null,
+          ...(creating ? { new_repo: toNewRepo(values.newRepo) } : {}),
           workspace_id: workspaceId,
           budget_usd: parseBudget(values.budget),
         },
@@ -152,12 +199,16 @@ function NewRunForm({
         }
         return;
       }
+      if (response.status === 409 && codeOf(error) === "repo_exists") {
+        form.setError("newRepo.name", { message: message ?? "This repository already exists." });
+        return;
+      }
       form.setError("root", {
         message: new ApiError(response.status, error, "Could not start the run").message,
       });
       return;
     }
-    if (needsRepo) saveLastRepo(workspaceId, values.repo);
+    if (needsRepo && !creating) saveLastRepo(workspaceId, values.repo);
     void queries.invalidateQueries({ queryKey: runsKey(workspaceId) });
     if (navigate) navigate(`/runs/${data.run_id}`);
     else router.push(`/runs/${data.run_id}`);
@@ -171,32 +222,70 @@ function NewRunForm({
       className="flex flex-col gap-5"
     >
       {needsRepo && readiness.state.github === "ready" ? (
-        <Controller
-          name="repo"
-          control={form.control}
-          render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.error ? true : undefined}>
-              <FieldLabel htmlFor={repoId}>Repository</FieldLabel>
-              <RepoCombobox
-                id={repoId}
-                repos={repos}
-                value={field.value}
-                onChange={field.onChange}
-                manageUrl={readiness.manageUrl}
-                invalid={fieldState.error !== undefined}
-                describedBy={fieldState.error ? `${repoId}-error` : `${repoId}-help`}
+        <Tabs
+          value={repoMode}
+          onValueChange={(mode) => form.setValue("repoMode", mode as RepoMode)}
+          className="gap-4"
+        >
+          <TabsList aria-label="Where the run works" className="w-full">
+            <TabsTrigger value="existing" disabled={isSubmitting}>
+              Existing repo
+            </TabsTrigger>
+            <TabsTrigger value="new" disabled={isSubmitting}>
+              New repo
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="existing">
+            <Controller
+              name="repo"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.error ? true : undefined}>
+                  <FieldLabel htmlFor={repoId}>Repository</FieldLabel>
+                  <RepoCombobox
+                    id={repoId}
+                    repos={repos}
+                    value={field.value}
+                    onChange={field.onChange}
+                    manageUrl={readiness.manageUrl}
+                    invalid={fieldState.error !== undefined}
+                    describedBy={fieldState.error ? `${repoId}-error` : `${repoId}-help`}
+                    disabled={isSubmitting}
+                  />
+                  {fieldState.error?.message ? (
+                    <FieldMessage id={`${repoId}-error`}>{fieldState.error.message}</FieldMessage>
+                  ) : (
+                    <FieldDescription id={`${repoId}-help`}>
+                      The run works on a copy and opens a pull request after you approve.
+                    </FieldDescription>
+                  )}
+                </Field>
+              )}
+            />
+          </TabsContent>
+          <TabsContent value="new">
+            {newRepoOptions.isPending ? (
+              <LoadingState rows={3} label="Checking where a repository can be created…" />
+            ) : newRepoOptions.isError ? (
+              <ErrorState
+                message={newRepoOptions.error.message}
+                onRetry={() => void newRepoOptions.refetch()}
+              />
+            ) : newRepoOptions.data.can_create ? (
+              <NewRepoFields
+                control={form.control}
+                options={newRepoOptions.data}
                 disabled={isSubmitting}
               />
-              {fieldState.error?.message ? (
-                <FieldMessage id={`${repoId}-error`}>{fieldState.error.message}</FieldMessage>
-              ) : (
-                <FieldDescription id={`${repoId}-help`}>
-                  The run works on a copy and opens a pull request after you approve.
-                </FieldDescription>
-              )}
-            </Field>
-          )}
-        />
+            ) : (
+              <Alert data-testid="new-repo-refused">
+                <AlertDescription>
+                  {newRepoOptions.data.message ?? "A new repository cannot be created here."}
+                </AlertDescription>
+              </Alert>
+            )}
+          </TabsContent>
+        </Tabs>
       ) : null}
       <SchemaFields
         fields={fields}
@@ -286,6 +375,7 @@ function SheetBody({
   const formId = useId();
   const pickerId = useId();
   const [pending, setPending] = useState(false);
+  const [blocked, setBlocked] = useState(false);
 
   const list = templates.data ?? [];
   // A single template needs no picking.
@@ -350,6 +440,7 @@ function SheetBody({
                 baseUrl={baseUrl}
                 formId={formId}
                 onPendingChange={setPending}
+                onBlockedChange={setBlocked}
                 navigate={navigate}
               />
             )}
@@ -359,7 +450,8 @@ function SheetBody({
     );
   }
 
-  const canStart = template !== null && parsed !== null && !("error" in parsed) && ready;
+  const canStart =
+    template !== null && parsed !== null && !("error" in parsed) && ready && !blocked;
 
   return (
     <>

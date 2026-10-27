@@ -20,6 +20,7 @@ AuditAction = Literal[
     "run.rerun",
     "run.cancel_requested",
     "run.ended",
+    "repo.created",
     "gate.approved",
     "gate.rejected",
     "connection.added",

@@ -12,6 +12,7 @@ from agentic_engine.events import (
     GATE_WAITING,
     NODE_FAILED,
     PR_OPENED,
+    REPO_CREATED,
     RUN_END_STATUS,
     RUN_FAILED,
     RUN_RESUMED,
@@ -21,7 +22,7 @@ from agentic_engine.events import (
 )
 from agentic_runtime import Usage
 from agentic_store.audit import audit, usd
-from agentic_store.models import Run, RunEventRow
+from agentic_store.models import AuditEvent, Run, RunEventRow
 
 USAGE: Final = "usage"
 
@@ -108,7 +109,7 @@ class PostgresEventSink:
     The run's row must exist (see `create_run`). In the same transaction each event updates the
     run's summary columns (see `summary_values`): `run_started` and `run_resumed` set it to
     `running`, `gate_waiting` to `waiting`, and the final run event sets its end status and adds
-    the run's `run.ended` audit entry."""
+    the run's `run.ended` audit entry. The run's first `repo_created` adds `repo.created`."""
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
@@ -133,6 +134,8 @@ class PostgresEventSink:
                 )
             if event.type in RUN_END_STATUS:
                 await _audit_end(session, event)
+            elif event.type == REPO_CREATED:
+                await _audit_repo_created(session, event)
             # Delivered on commit, so a listener that wakes up can already read the row.
             await session.execute(
                 select(func.pg_notify(RUN_EVENTS_CHANNEL, f"{event.run_id}:{event.seq}"))
@@ -159,6 +162,43 @@ async def _audit_end(session: AsyncSession, event: RunEvent) -> None:
             "cost_complete": run.cost_complete,
         },
     )
+
+
+async def _audit_repo_created(session: AsyncSession, event: RunEvent) -> None:
+    """The `repo.created` audit entry, once per run: a retried node that finds the repo its
+    run created logs `repo_created` again."""
+    run = await session.get(Run, event.run_id)
+    if run is None:
+        return
+    logged = await session.scalar(
+        select(AuditEvent.id).where(
+            AuditEvent.run_id == run.id, AuditEvent.action == "repo.created"
+        )
+    )
+    if logged is not None:
+        return
+    payload = event.payload
+    audit(
+        session,
+        run.workspace_id,
+        "repo.created",
+        actor_type="system",
+        run_id=run.id,
+        node_id=event.node_id,
+        at=event.created_at,
+        details={"full_name": payload.get("full_name"), "private": payload.get("private")},
+    )
+
+
+async def repo_created(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> bool:
+    """Whether the run has created its repo (logged `repo_created`), so it can be cloned."""
+    async with sessions() as session:
+        found = await session.scalar(
+            select(RunEventRow.seq)
+            .where(RunEventRow.run_id == run_id, RunEventRow.type == REPO_CREATED)
+            .limit(1)
+        )
+    return found is not None
 
 
 async def max_event_seq(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> int:

@@ -227,6 +227,124 @@ test("an option the server refuses is shown on its field", async () => {
   expect(sheet().getByLabelText("Output dir (optional)").getAttribute("aria-invalid")).toBe("true");
 });
 
+const NEW_REPO_OPTIONS_PATH = `${REPOS_PATH}/new-repo-options`;
+const NEW_REPO_OPTIONS = {
+  owner: "acme",
+  can_create: true,
+  reason: null,
+  message: null,
+  gitignore_templates: ["Python", "Node"],
+  licenses: ["mit", "apache-2.0"],
+};
+
+async function chooseNewRepo() {
+  const tab = await sheet().findByRole("tab", { name: "New repo" });
+  fireEvent.mouseDown(tab);
+  fireEvent.click(tab);
+}
+
+test("a new repo is asked for only once chosen, and sent instead of a repo", async () => {
+  const fetch = stubApi(
+    connected({
+      [`GET ${NEW_REPO_OPTIONS_PATH}`]: () => json(200, NEW_REPO_OPTIONS),
+      "POST /runs": () => json(201, { run_id: RUN_ID }),
+    }),
+  );
+  show("generate-docs");
+  await sheet().findByRole("combobox", { name: "Repository" });
+  expect(requested(fetch)).not.toContain(`GET ${NEW_REPO_OPTIONS_PATH}`);
+
+  await chooseNewRepo();
+  fireEvent.change(await sheet().findByLabelText("Repository name"), {
+    target: { value: "docs-new" },
+  });
+  fireEvent.change(sheet().getByLabelText(".gitignore"), { target: { value: "Python" } });
+  fireEvent.change(sheet().getByLabelText("License"), { target: { value: "mit" } });
+  expect(sheet().getByText("acme/")).toBeDefined();
+  fireEvent.click(sheet().getByRole("button", { name: "Start run" }));
+
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith(`/runs/${RUN_ID}`));
+  const post = fetch.mock.calls.find(([r]) => r.method === "POST")?.[0];
+  expect(await post?.json()).toMatchObject({
+    repo: null,
+    new_repo: {
+      name: "docs-new",
+      private: true,
+      description: null,
+      gitignore: "Python",
+      license: "mit",
+    },
+  });
+  // A new repo is not remembered as the last one used.
+  expect(window.localStorage.getItem(`agentic:last-repo:${DEFAULT_WORKSPACE_ID}`)).toBeNull();
+});
+
+test("a new repo's name is checked before calling the API", async () => {
+  const fetch = stubApi(
+    connected({ [`GET ${NEW_REPO_OPTIONS_PATH}`]: () => json(200, NEW_REPO_OPTIONS) }),
+  );
+  show("generate-docs");
+
+  await chooseNewRepo();
+  fireEvent.change(await sheet().findByLabelText("Repository name"), {
+    target: { value: "my repo" },
+  });
+  fireEvent.click(sheet().getByRole("button", { name: "Start run" }));
+
+  expect((await sheet().findByRole("alert")).textContent).toBe(
+    "Use letters, digits, ., - and _ only, up to 100 characters.",
+  );
+  expect(requested(fetch)).not.toContain("POST /runs");
+});
+
+test("a name that is taken is shown on the name field", async () => {
+  stubApi(
+    connected({
+      [`GET ${NEW_REPO_OPTIONS_PATH}`]: () => json(200, NEW_REPO_OPTIONS),
+      "POST /runs": () =>
+        json(409, {
+          detail: { code: "repo_exists", message: "repo acme/web already exists; pick another" },
+        }),
+    }),
+  );
+  show("generate-docs");
+
+  await chooseNewRepo();
+  fireEvent.change(await sheet().findByLabelText("Repository name"), {
+    target: { value: "web" },
+  });
+  fireEvent.click(sheet().getByRole("button", { name: "Start run" }));
+
+  expect((await sheet().findByRole("alert")).textContent).toBe(
+    "repo acme/web already exists; pick another",
+  );
+  expect(sheet().getByLabelText("Repository name").getAttribute("aria-invalid")).toBe("true");
+});
+
+test("a workspace that cannot create repos says why, and Start run stays disabled", async () => {
+  stubApi(
+    connected({
+      [`GET ${NEW_REPO_OPTIONS_PATH}`]: () =>
+        json(200, {
+          ...NEW_REPO_OPTIONS,
+          owner: null,
+          can_create: false,
+          reason: "personal_account",
+          message: "new repos can only be created in an organisation",
+        }),
+    }),
+  );
+  show("generate-docs");
+
+  await chooseNewRepo();
+
+  expect((await sheet().findByTestId("new-repo-refused")).textContent).toContain(
+    "only be created in an organisation",
+  );
+  expect(sheet().queryByLabelText("Repository name")).toBeNull();
+  expect(sheet().getByRole("button", { name: "Start run" })).toHaveProperty("disabled", true);
+});
+
 test("a template whose options cannot be shown says so instead of a partial form", async () => {
   stubApi(
     connected({

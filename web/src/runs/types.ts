@@ -38,6 +38,7 @@ export const EVENT_TYPES = [
   "map_item_started",
   "map_item_completed",
   "pr_opened",
+  "repo_created",
   "policy_limit_exceeded",
   "text_delta",
   "message",
