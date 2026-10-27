@@ -161,7 +161,7 @@ test("before any event, the header's times are the summary's", () => {
   expect(facts).toMatchObject({ activeMs: 30_000, waitingMs: 120_000, waitingLive: true });
 });
 
-test("a docs run shows one message block per agent turn, not one row per chunk", async () => {
+test("Done when (11.6): a finished run opens on its last agent's answer", async () => {
   api(detail({ status: "completed" }));
   const source = show();
 
@@ -171,10 +171,55 @@ test("a docs run shows one message block per agent turn, not one row per chunk",
 
   await screen.findByRole("heading", { name: "Generate docs" });
   expectStatus("succeeded", "Succeeded");
-  const messages = screen.getAllByTestId("agent-message");
-  expect(messages).toHaveLength(8);
-  expect(messages[0]?.textContent).toBe("I will look at the files of packages/api first.");
+  const panel = screen.getByTestId("step-panel");
+  expect(panel.dataset.key).toBe("revise#2/reviewer");
+  expect(within(panel).getByRole("tab", { name: "Output" }).getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  // The answer alone: earlier messages and tool calls are in Activity.
+  expect(within(panel).getAllByTestId("agent-message")).toHaveLength(1);
   expect(screen.queryAllByTestId("event-row")).toHaveLength(0);
+  // Every step is one row of the list, map items and iterations nested.
+  expect(screen.getAllByTestId("step-row")).toHaveLength(10);
+});
+
+test("selecting a step shows its output and puts it in the URL", async () => {
+  nav.search = "step=document%5B0%5D%2Fmodule-writer";
+  api(detail({ status: "completed" }));
+  const source = show();
+  act(() => {
+    for (const event of docsRun as RunEvent[]) source.emit(event);
+  });
+
+  const panel = screen.getByTestId("step-panel");
+  expect(panel.dataset.key).toBe("document[0]/module-writer");
+  expect(within(panel).getByRole("heading", { level: 2 }).textContent).toBe("packages/api");
+
+  fireEvent.click(screen.getAllByTestId("step-row").find((r) => r.dataset.key === "combine")!);
+  expect(nav.replace).toHaveBeenCalledWith(`/runs/${RUN_ID}?step=combine`, { scroll: false });
+});
+
+test("the header's tiles show active time, cost against the budget, tokens, steps and output", async () => {
+  api(
+    detail({
+      status: "completed",
+      usage: { ...runSummary().usage, budget_usd: 5 },
+      pr_url: "https://github.com/acme/api/pull/7",
+    }),
+  );
+  const source = show();
+  act(() => {
+    for (const event of docsRun as RunEvent[]) source.emit(event);
+  });
+
+  const figures = await screen.findByRole("region", { name: "Run figures" });
+  const tiles = within(figures)
+    .getAllByRole("term")
+    .map((t) => t.textContent);
+  expect(tiles).toEqual(["Active time", "Cost", "Tokens", "Steps", "Output"]);
+  expect((await within(figures).findByTestId("run-budget")).textContent).toBe("of $5.00 budget");
+  await waitFor(() => expect(within(figures).getByTestId("run-steps").textContent).toBe("7 of 7"));
+  expect(within(figures).getByRole("link", { name: "PR #7" })).toBeTruthy();
 });
 
 test("chunks stream into one growing message", async () => {
@@ -197,7 +242,7 @@ test("chunks stream into one growing message", async () => {
   expect(screen.getByTestId("agent-message").dataset.streaming).toBeUndefined();
 });
 
-test("Raw events folds a streamed message into one row, expandable to its chunks", async () => {
+test("Raw events folds a streamed message into one row that opens its chunks", async () => {
   nav.search = "tab=raw";
   api(detail());
   const source = show();
@@ -209,6 +254,12 @@ test("Raw events folds a streamed message into one row, expandable to its chunks
     source.emit(runEvent(4, "usage", { input_tokens: 1, output_tokens: 2 }));
   });
 
+  // The selected step's events first; the run's own events with "All steps".
+  expect(screen.getAllByTestId("event-row").map((r) => r.dataset.type)).toEqual([
+    "text_delta",
+    "usage",
+  ]);
+  fireEvent.change(screen.getByLabelText("Step"), { target: { value: "" } });
   const rows = screen.getAllByTestId("event-row");
   expect(rows.map((r) => r.dataset.type)).toEqual(["run_started", "text_delta", "usage"]);
   const folded = rows[1]!;
@@ -217,10 +268,42 @@ test("Raw events folds a streamed message into one row, expandable to its chunks
   expect(folded.querySelector("img")).toBeNull();
 
   fireEvent.click(within(folded).getByRole("button", { name: /text_delta × 2/ }));
-  expect(screen.getAllByTestId("chunk-row")).toHaveLength(2);
+  const drawer = await screen.findByTestId("event-drawer");
+  expect(within(drawer).getAllByTestId("chunk-row")).toHaveLength(2);
 });
 
-test("Raw events filters by type and node", async () => {
+test("Done when (11.6): no table cell holds JSON; a payload opens in the drawer", async () => {
+  nav.search = "tab=events";
+  api(detail());
+  const source = show();
+  act(() => {
+    source.emit({ ...runEvent(1, "node_started", { items: 2 }), node_id: "w" });
+    source.emit({
+      ...runEvent(2, "tool_call", {
+        call_id: "c",
+        name: "repo.read_file",
+        arguments: { path: "a.ts" },
+      }),
+      node_id: "w",
+    });
+    source.emit({
+      ...runEvent(3, "tool_result", { call_id: "c", output: '{"text": "x"}' }),
+      node_id: "w",
+    });
+  });
+
+  const cells = screen.getAllByRole("cell").map((c) => c.textContent ?? "");
+  for (const cell of cells) expect(cell.trim()).not.toMatch(/^[[{]/);
+  expect(cells).toContain("Read a.ts");
+
+  fireEvent.click(screen.getByRole("button", { name: /tool_result/ }));
+  const drawer = await screen.findByTestId("event-drawer");
+  expect(within(drawer).getByRole("group", { name: "Payload of event 3" }).textContent).toContain(
+    "call_id",
+  );
+});
+
+test("Raw events filters by type and step", async () => {
   nav.search = "tab=raw";
   api(detail());
   const source = show();
@@ -230,18 +313,23 @@ test("Raw events filters by type and node", async () => {
     source.emit({ ...runEvent(3, "node_started"), node_id: "b" });
   });
 
-  fireEvent.change(screen.getByLabelText("Node"), { target: { value: "b" } });
+  // The selected step (b, the one running) is the filter at first.
   expect(screen.getAllByTestId("event-row").map((r) => r.dataset.seq)).toEqual(["3"]);
-  fireEvent.change(screen.getByLabelText("Node"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Step"), { target: { value: "a" } });
+  expect(screen.getAllByTestId("event-row").map((r) => r.dataset.seq)).toEqual(["2"]);
+  fireEvent.change(screen.getByLabelText("Step"), { target: { value: "" } });
   fireEvent.change(screen.getByLabelText("Event type"), { target: { value: "run_started" } });
   expect(screen.getAllByTestId("event-row").map((r) => r.dataset.seq)).toEqual(["1"]);
 });
 
-test("switching tabs keeps the tab in the URL", async () => {
+test("switching the step's tab keeps it in the URL", async () => {
   api(detail());
-  show();
-  fireEvent.mouseDown(await screen.findByRole("tab", { name: "Raw events" }));
-  expect(nav.replace).toHaveBeenCalledWith(`/runs/${RUN_ID}?tab=raw`, { scroll: false });
+  const source = show();
+  act(() => {
+    source.emit({ ...runEvent(1, "node_started"), node_id: "w" });
+  });
+  fireEvent.mouseDown(await screen.findByRole("tab", { name: "Events" }), { button: 0 });
+  expect(nav.replace).toHaveBeenCalledWith(`/runs/${RUN_ID}?tab=events`, { scroll: false });
 });
 
 test("an unknown run says so", async () => {
@@ -325,8 +413,15 @@ test("a waiting gate is decided in the dock; its step points there", async () =>
   waitAtGate(source);
 
   expectStatus("waiting", "Needs approval");
-  const step = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "gate")!;
+  // The gate is selected; the banner and its output point to the dock.
+  const step = screen.getByTestId("step-panel");
+  expect(step.dataset.key).toBe("gate");
   expect(within(step).getByTestId("waiting-marker").textContent).toContain("Waiting for approval");
+  const banner = screen.getByTestId("run-banner");
+  expect(banner.dataset.kind).toBe("waiting");
+  expect(within(banner).getByRole("link", { name: "Open in Inbox" }).getAttribute("href")).toBe(
+    `/inbox?run=${RUN_ID}`,
+  );
   const dock = screen.getByRole("region", { name: "Approval needed" });
   expect(within(dock).getByRole("heading", { name: "Open a PR?" })).toBeDefined();
   // No prompt: the summary is the artifact's first line of text.
@@ -581,7 +676,7 @@ test("a gate approved with edits says so, and shows them read-only", async () =>
     }),
   );
 
-  const step = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "gate")!;
+  const step = screen.getByTestId("step-panel");
   expect(within(step).getByTestId("gate-decision").textContent).toBe(
     "· Approved with edits to 1 file",
   );
@@ -621,8 +716,38 @@ test("a failed run shows why", async () => {
     source.emit(runEvent(1, "run_started"));
     source.emit(runEvent(2, "run_failed", { error: "sandbox could not start" }));
   });
-  await screen.findByText("sandbox could not start");
+  const banner = await screen.findByTestId("run-banner");
+  expect(banner.textContent).toContain("The run failed");
+  expect(banner.textContent).toContain("sandbox could not start");
   expectStatus("failed", "Failed");
+});
+
+test("Done when (11.6): a failed run names its failing step and reason above the steps", async () => {
+  nav.search = "step=list";
+  api(detail({ status: "failed", failure_reason: "writer failed" }));
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({ ...runEvent(2, "node_started"), node_id: "list" });
+    source.emit({ ...runEvent(3, "node_completed"), node_id: "list" });
+    source.emit({ ...runEvent(4, "node_started"), node_id: "writer" });
+    source.emit({
+      ...runEvent(5, "node_failed", { error: "Rate limited by the provider" }),
+      node_id: "writer",
+    });
+    source.emit(runEvent(6, "run_failed", { error: "writer failed" }));
+  });
+
+  const banner = await screen.findByTestId("run-banner");
+  expect(banner.dataset.kind).toBe("failed");
+  expect(banner.textContent).toContain("Failed at writer");
+  expect(banner.textContent).toContain("Rate limited by the provider");
+  // The banner comes before the step list in the page.
+  const list = screen.getByRole("navigation", { name: "Steps" });
+  expect(banner.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  fireEvent.click(within(banner).getByRole("button", { name: "Go to step" }));
+  expect(nav.replace).toHaveBeenCalledWith(`/runs/${RUN_ID}?step=writer`, { scroll: false });
 });
 
 test("a lost stream can be retried", async () => {
@@ -745,7 +870,134 @@ test("switching to the graph puts it in the URL", async () => {
   // Radix tabs switch on mouse down.
   fireEvent.mouseDown(graph, { button: 0 });
 
-  expect(nav.replace).toHaveBeenCalledWith("/runs/00000000-0000-0000-0000-000000000001?tab=graph", {
+  expect(nav.replace).toHaveBeenCalledWith(
+    "/runs/00000000-0000-0000-0000-000000000001?view=graph",
+    {
+      scroll: false,
+    },
+  );
+});
+
+test("clicking a graph node selects its step", async () => {
+  nav.search = "view=graph";
+  api(detail({ status: "completed" }));
+  const source = show();
+  act(() => {
+    for (const event of docsRun as RunEvent[]) source.emit(event);
+  });
+
+  await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7));
+  fireEvent.click(screen.getAllByTestId("graph-node").find((n) => n.dataset.nodeId === "combine")!);
+  expect(nav.replace).toHaveBeenCalledWith(`/runs/${RUN_ID}?view=graph&step=combine`, {
     scroll: false,
   });
+});
+
+/** A finished run whose one agent wrote two files and gave a long answer. */
+function longAnswer(source: FakeEventSource) {
+  const answer = Array.from({ length: 30 }, (_, i) => `Line ${i + 1}`).join("\n");
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({ ...runEvent(2, "node_started"), node_id: "writer" });
+    for (const [seq, path] of [
+      [3, "docs/a.md"],
+      [5, "docs/b.md"],
+    ] as const) {
+      source.emit({
+        ...runEvent(seq, "tool_call", {
+          call_id: path,
+          name: "repo.write_file",
+          arguments: { path, content: `# ${path}` },
+        }),
+        node_id: "writer",
+      });
+      source.emit({
+        ...runEvent(seq + 1, "tool_result", { call_id: path, output: "ok" }),
+        node_id: "writer",
+      });
+    }
+    source.emit({ ...runEvent(7, "message", { text: answer }), node_id: "writer" });
+    source.emit({
+      ...runEvent(8, "usage", { input_tokens: 1200, output_tokens: 300, estimated_usd: 0.02 }),
+      node_id: "writer",
+    });
+    source.emit({ ...runEvent(9, "node_completed"), node_id: "writer" });
+    source.emit(runEvent(10, "run_completed"));
+  });
+}
+
+test("a long answer is capped with Show full output; written files open as text", async () => {
+  api(detail({ status: "completed" }));
+  longAnswer(show());
+
+  const answer = await screen.findByTestId("step-answer");
+  expect(answer.dataset.capped).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Show full output" }));
+  expect(answer.dataset.capped).toBeUndefined();
+  expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
+
+  const files = screen.getAllByTestId("written-file");
+  expect(files.map((f) => f.textContent)).toEqual(["docs/a.mdMarkdown", "docs/b.mdMarkdown"]);
+  fireEvent.click(files[1]!);
+  const sheet = await screen.findByTestId("written-file-sheet");
+  expect(within(sheet).getByText("# docs/b.md").tagName).toBe("PRE");
+});
+
+const WRITER_RUN = {
+  status: "completed",
+  input: "Document the API",
+  spec: {
+    ...docsSpec,
+    root: {
+      type: "agent",
+      id: "writer",
+      role: "Technical writer",
+      instructions: "Write the docs.",
+      tools: ["repo.write_file"],
+    },
+  },
+} as Partial<RunDetail>;
+
+test("a step's Activity shows its tool calls", async () => {
+  nav.search = "tab=activity";
+  api(detail(WRITER_RUN));
+  longAnswer(show());
+  expect((await screen.findAllByTestId("tool-group")).length).toBeGreaterThan(0);
+});
+
+test("a step's Input shows what the spec and the run gave it", async () => {
+  nav.search = "tab=input";
+  api(detail(WRITER_RUN));
+  longAnswer(show());
+  const panel = await screen.findByTestId("step-panel");
+  await within(panel).findByText("Technical writer");
+  expect(within(panel).getByText("Document the API")).toBeTruthy();
+  expect(within(panel).getByText("repo.write_file")).toBeTruthy();
+});
+
+test("a step's Usage shows its tokens and cost", async () => {
+  nav.search = "tab=usage";
+  api(detail(WRITER_RUN));
+  longAnswer(show());
+  expect((await screen.findByTestId("step-cost")).textContent).toBe("$0.02");
+});
+
+test("the ⋯ menu downloads the run's events", async () => {
+  api(detail({ status: "completed" }));
+  longAnswer(show());
+  const createObjectURL = vi.fn(() => "blob:events");
+  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Download events" }));
+
+  expect(createObjectURL).toHaveBeenCalledTimes(1);
+  expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe(
+    `run-${RUN_ID.slice(0, 8)}-events.json`,
+  );
+  click.mockRestore();
 });

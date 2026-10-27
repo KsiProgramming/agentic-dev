@@ -163,12 +163,12 @@ for (const colorScheme of ["light", "dark"] as const) {
       await request.post(`${apiURL}/runs/${runId}/cancel`);
     });
 
-    test("a run's graph and a node's detail have no serious a11y issues", async ({
+    test("a run's graph, a selected node and an event's payload have no serious a11y issues", async ({
       page,
       request,
     }) => {
       const runId = await startRun(request, [MAP, COMBINE, GATE]);
-      await open(page, `/runs/${runId}?tab=graph`);
+      await open(page, `/runs/${runId}?view=graph`);
       await expect(page.getByTestId("approval-dock").filter({ visible: true })).toBeVisible({
         timeout: 30_000,
       });
@@ -176,7 +176,12 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoSeriousIssues(page);
 
       await page.locator('[data-testid="graph-node"][data-node-id="worker"]').click();
-      await expect(page.getByTestId("node-detail")).toBeVisible();
+      await expect(page.getByTestId("step-panel")).toHaveAttribute("data-key", "each[1]/worker");
+      await expectNoSeriousIssues(page);
+
+      await page.getByRole("tab", { name: "Events" }).click();
+      await page.getByTestId("event-row").first().getByRole("button").click();
+      await expect(page.getByTestId("event-drawer")).toBeVisible();
       await expectNoSeriousIssues(page);
       await page.keyboard.press("Escape");
     });

@@ -9,7 +9,9 @@ import { buildTimeline, type ToolTurn } from "../timeline";
 import type { RunEvent } from "../types";
 import { currentActivity } from "./activity";
 import { AgentMessage } from "./agent-message";
-import { StepList } from "./step-view";
+import { StepList } from "./step-list";
+import { stepEntries } from "./step-entries";
+import { TurnsRail } from "./step-view";
 import { ToolCallGroup, ToolCallRow } from "./tool-calls";
 import { describeTool, summarizeTools } from "./tool-describe";
 
@@ -200,53 +202,74 @@ describe("ToolCallGroup", () => {
 
 describe("StepList on the recorded docs run", () => {
   const timeline = buildTimeline(docsRun as RunEvent[]);
+  const entries = stepEntries(timeline.steps);
 
-  it("shows one message block per agent turn, nested under the map items", () => {
-    render(<StepList steps={timeline.steps} options={{ now: NOW }} />);
-    const items = screen.getAllByTestId("map-item");
-    expect(items.map((i) => i.querySelector("h4")?.textContent)).toEqual([
-      "packages/api",
-      "packages/engine",
-      "web",
-    ]);
-    const first = within(items[0]!);
-    expect(first.getAllByTestId("agent-message")).toHaveLength(2);
-    expect(first.getAllByTestId("tool-group")).toHaveLength(1);
-    // A one-step item is not headed twice.
-    expect(first.queryByRole("heading", { name: "module-writer" })).toBeNull();
-    // 3 writers × 2 turns + 2 review turns.
-    expect(screen.getAllByTestId("agent-message")).toHaveLength(8);
-    // The page's Markdown heading renders inside the second message.
-    const page = within(first.getAllByTestId("agent-message")[1]!);
-    expect(page.getByRole("heading", { name: "packages/api" })).toBeTruthy();
-  });
-
-  it("shows loop iterations, usage and the gate decision", () => {
-    render(<StepList steps={timeline.steps} options={{ now: NOW }} />);
-    expect(
-      screen.getAllByTestId("iteration").map((i) => i.querySelector("p")?.textContent),
-    ).toEqual(["Iteration 1· condition not met", "Iteration 2· condition met"]);
-    expect(screen.getAllByTestId("usage")[0]?.textContent).toBe(
-      "1.2K in · 180 out · — (Some usage was logged before costs were tracked.)",
-    );
-    expect(screen.getByText("Open the docs PR?").parentElement?.textContent).toContain("Approved");
-  });
-
-  it("renders extra content for a step", () => {
+  function list(selected: string | null = null, onSelect = vi.fn()) {
     render(
       <StepList
-        steps={timeline.steps}
-        options={{ now: NOW, extra: (s) => (s.id === "approve" ? <p>gate panel</p> : null) }}
+        entries={entries}
+        selected={selected}
+        now={NOW}
+        kindOf={() => null}
+        onSelect={onSelect}
       />,
     );
-    const gate = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "approve")!;
-    expect(within(gate).getByText("gate panel")).toBeTruthy();
+    return onSelect;
+  }
+
+  it("lists each step once, map items and iterations nested under their node", () => {
+    list();
+    const rows = screen.getAllByTestId("step-row");
+    expect(rows.map((r) => r.dataset.key)).toEqual([
+      "list_modules",
+      "document",
+      "document[0]/module-writer",
+      "document[1]/module-writer",
+      "document[2]/module-writer",
+      "combine",
+      "revise",
+      "revise#1/reviewer",
+      "revise#2/reviewer",
+      "approve",
+    ]);
+    // A one-step item is named by the item, not by its node.
+    expect(rows[2]!.textContent).toContain("packages/api");
+    expect(rows[1]!.textContent).toContain("3 of 3 items");
+    // No message block in the list: the answer opens beside it.
+    expect(screen.queryAllByTestId("agent-message")).toHaveLength(0);
   });
 
-  it("shows a gate's time as time waited, not as a duration", () => {
-    render(<StepList steps={timeline.steps} options={{ now: NOW }} />);
-    const gate = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "approve")!;
-    expect(within(gate).getByTestId("gate-waited").textContent).toMatch(/^waited /);
+  it("says in one line what each step did, and shows a gate's time as time waited", () => {
+    list();
+    const gate = screen.getAllByTestId("step-row").find((r) => r.dataset.nodeId === "approve")!;
+    expect(within(gate).getByTestId("step-outline").textContent).toBe("Approved");
+    expect(gate.textContent).toMatch(/waited /);
+  });
+
+  it("marks the selected row and selects one on click", () => {
+    const onSelect = list("combine");
+    const rows = screen.getAllByTestId("step-row");
+    expect(rows.find((r) => r.dataset.key === "combine")!.getAttribute("aria-current")).toBe(
+      "true",
+    );
+    fireEvent.click(rows[0]!);
+    expect(onSelect).toHaveBeenCalledWith("list_modules");
+  });
+
+  it("marks each step's status with an icon and a label for screen readers", () => {
+    list();
+    const first = screen.getAllByTestId("step-row")[0]!;
+    expect(first.querySelector(".sr-only")?.textContent).toBe("Done");
+  });
+});
+
+describe("TurnsRail", () => {
+  it("shows one message block per agent turn of the step", () => {
+    const timeline = buildTimeline(docsRun as RunEvent[]);
+    const writer = timeline.steps.find((s) => s.id === "document")!.items![0]!.steps[0]!;
+    render(<TurnsRail step={writer} />);
+    expect(screen.getAllByTestId("agent-message")).toHaveLength(2);
+    expect(screen.getAllByTestId("tool-group")).toHaveLength(1);
   });
 });
 
@@ -307,17 +330,10 @@ describe("previews and the rail", () => {
       },
       { ...runEvent(9, "tool_result", { call_id: "w1", output: "ok" }), node_id: "w" },
     ]).steps;
-    render(<StepList steps={steps} options={{ now: NOW }} />);
+    render(<TurnsRail step={steps[0]!} />);
     const groups = screen.getAllByTestId("tool-group");
     expect(groups.map((g) => g.textContent?.includes("Read 2 files"))).toEqual([true, false]);
     expect(screen.getByTestId("tool-preview").textContent).toBe("hi");
-  });
-
-  it("marks each step's status with an icon and a label for screen readers", () => {
-    const timeline = buildTimeline(docsRun as RunEvent[]);
-    render(<StepList steps={timeline.steps} options={{ now: NOW }} />);
-    const first = screen.getAllByTestId("step")[0]!;
-    expect(first.querySelector(".sr-only")?.textContent).toBe("Done");
   });
 });
 
