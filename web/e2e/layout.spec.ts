@@ -1,7 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS_DEMO, pretendConnections } from "./connections";
-import { apiURL, COMBINE, FAILING, startReviewRun, startRun, GATE, MAP, WRITER } from "./runs";
+import {
+  apiURL,
+  COMBINE,
+  DOCS_DEMO_URL,
+  FAILING,
+  REPO_READER,
+  startReviewRun,
+  startRun,
+  GATE,
+  MAP,
+  WRITER,
+} from "./runs";
 
 /** Every page renders in the shell with no horizontal page scroll (roadmap 2.2), and the main
  * nav is reachable: full sidebar from 1280 px, icon rail from 1024 px, a drawer below that. */
@@ -195,6 +206,19 @@ test("a finished run", async ({ page, request }) => {
   );
   await expect(page.getByRole("button", { name: "Rerun" })).toBeVisible();
   await checkPage(page, "run-finished");
+});
+
+test("an agent's activity, its work open", async ({ page, request }) => {
+  const runId = await startRun(request, [REPO_READER], "E2E work layout", DOCS_DEMO_URL);
+  await page.goto(`/runs/${runId}?step=reader&tab=activity`);
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    "succeeded",
+    { timeout: 60_000 },
+  );
+  await page.getByTestId("work-block").getByRole("button").first().click();
+  await expect(page.getByTestId("tool-intent").first()).toBeVisible();
+  await checkPage(page, "run-activity");
 });
 
 test("a failed run", async ({ page, request }) => {

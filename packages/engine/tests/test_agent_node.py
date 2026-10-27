@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_engine.agent import run_agent_node, to_request
+from agentic_engine.agent import TOOL_INTENT_INSTRUCTION, run_agent_node, to_request
 from agentic_engine.spec import AgentNode, SequenceNode, parse_spec
 from agentic_runtime import (
     AgentEvent,
@@ -60,11 +60,17 @@ def test_request_maps_the_node() -> None:
     assert to_request(NODE, "data") == AgentRequest(
         node_id="writer",
         role="Technical writer",
-        instructions="Draft the overview.",
+        instructions=f"Draft the overview.\n\n{TOOL_INTENT_INSTRUCTION}",
         input="data",
         model="claude-sonnet-5-5",
         tools=["repo.read_file"],
     )
+
+
+def test_an_agent_without_tools_is_not_asked_for_intents() -> None:
+    node = NODE.model_copy(update={"tools": []})
+
+    assert to_request(node, "data").instructions == "Draft the overview."
 
 
 async def test_runs_a_step_of_a_sequence_spec() -> None:

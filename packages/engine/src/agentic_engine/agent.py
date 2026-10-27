@@ -39,11 +39,22 @@ class AgentNodeResult(BaseModel):
     data: dict[str, JsonValue] | None = None
 
 
+TOOL_INTENT_INSTRUCTION = (
+    "When you call a tool, fill its `description` with why you make the call, in under 10 words "
+    '(e.g. "Read the frontend config"). People following the run read it.'
+)
+"""Added to the instructions of an agent with tools, so the console can say why each call was
+made. Every platform tool takes the optional `description` (`agentic_tools.strict`)."""
+
+
 def to_request(node: AgentNode, input: str) -> AgentRequest:
+    instructions = node.instructions
+    if node.tools:
+        instructions = f"{instructions}\n\n{TOOL_INTENT_INSTRUCTION}"
     return AgentRequest(
         node_id=node.id,
         role=node.role,
-        instructions=node.instructions,
+        instructions=instructions,
         input=input,
         model=node.model,
         tools=list(node.tools),

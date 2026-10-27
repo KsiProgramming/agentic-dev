@@ -54,18 +54,38 @@ describe("buildTimeline on a recorded docs run", () => {
 
   it("shows one message block per agent turn, not one per chunk", () => {
     const writer = timeline.steps[1]!.items![0]!.steps[0]!;
-    // Turn 1: text, then a tool call; turn 2: text that the final `message` replaces.
-    expect(writer.turns.map((t) => t.kind)).toEqual(["message", "tool", "message"]);
+    // Reasoning, a note, three tool calls, then the text that the final `message` replaces.
+    expect(writer.turns.map((t) => t.kind)).toEqual([
+      "reasoning",
+      "message",
+      "tool",
+      "tool",
+      "tool",
+      "message",
+    ]);
+    expect(writer.turns[0]).toMatchObject({
+      kind: "reasoning",
+      text: "The input is a module path.\nI should see what `packages/api` holds before writing.",
+    });
+    expect(writer.turns.map((t) => (t.kind === "tool" ? t.intent : undefined))).toEqual([
+      undefined,
+      undefined,
+      "See what the module holds",
+      null,
+      null,
+      undefined,
+    ]);
     const [plan, page] = messages(writer);
     expect(plan).toMatchObject({
       text: "I will look at the files of `packages/api` first.",
       final: false,
-      chunks: 3,
+      // Streamed right after the reasoning was written, so its chunks went out as one.
+      chunks: 1,
     });
     expect(page).toMatchObject({
       text: "# packages/api\n\nThis module holds the **api** code.\n\n- Entry point\n- Tests\n",
       final: true,
-      chunks: 5,
+      chunks: 1,
     });
     const deltas = events.filter((e) => e.type === "text_delta").length;
     const blocks = [
@@ -75,9 +95,9 @@ describe("buildTimeline on a recorded docs run", () => {
         ...(s.iterations ?? []).flatMap((i) => i.steps.flatMap((x) => x.turns)),
       ]),
     ].filter((t) => t.kind === "message").length;
-    // 3 writers × 2 turns + 2 reviewer turns, from many more chunks.
+    // 3 writers × (a note and an answer) + 2 reviewer turns, from more chunks.
     expect(blocks).toBe(8);
-    expect(deltas).toBeGreaterThan(blocks * 2);
+    expect(deltas).toBeGreaterThan(blocks);
   });
 
   it("pairs each tool call with its result in one card", () => {
@@ -217,13 +237,25 @@ describe("foldDeltas", () => {
   it("folds consecutive chunks of one node and item into one row with the full text", () => {
     const rows = foldDeltas(events);
     const textRows = rows.filter((r) => r.kind === "text");
-    expect(textRows).toHaveLength(8);
-    expect(textRows[1]).toMatchObject({
+    // Per writer: its reasoning, its note and its page; then the two reviews.
+    expect(textRows.map((r) => r.type)).toEqual([
+      ...["reasoning_delta", "text_delta", "text_delta"],
+      ...["reasoning_delta", "text_delta", "text_delta"],
+      ...["reasoning_delta", "text_delta", "text_delta"],
+      ...["text_delta", "text_delta"],
+    ]);
+    expect(textRows[2]).toMatchObject({
       nodeId: "module-writer",
       item: 0,
       text: "# packages/api\n\nThis module holds the **api** code.\n\n- Entry point\n- Tests\n",
     });
-    expect(rows.some((r) => r.kind === "event" && r.event.type === "text_delta")).toBe(false);
+    expect(
+      rows.some(
+        (r) =>
+          r.kind === "event" &&
+          (r.event.type === "text_delta" || r.event.type === "reasoning_delta"),
+      ),
+    ).toBe(false);
     // Every event is still there, folded or not.
     const count = rows.reduce((n, r) => n + (r.kind === "text" ? r.events.length : 1), 0);
     expect(count).toBe(events.length);
@@ -237,13 +269,18 @@ describe("foldDeltas", () => {
       event(4, "text_delta", "b", { text: "item 1", item: 1 }),
       event(5, "usage", "b", {}),
       event(6, "text_delta", "b", { text: "after" }),
+      event(7, "reasoning_delta", "b", { text: "why" }),
+      event(8, "reasoning_delta", "b", { text: " so" }),
+      event(9, "text_delta", "b", { text: "then" }),
     ]);
-    expect(rows.map((r) => (r.kind === "text" ? r.text : r.event.type))).toEqual([
-      "one two",
-      "other node",
-      "item 1",
+    expect(rows.map((r) => (r.kind === "text" ? `${r.type}: ${r.text}` : r.event.type))).toEqual([
+      "text_delta: one two",
+      "text_delta: other node",
+      "text_delta: item 1",
       "usage",
-      "after",
+      "text_delta: after",
+      "reasoning_delta: why so",
+      "text_delta: then",
     ]);
   });
 });

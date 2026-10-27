@@ -2,7 +2,17 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import { DOCS_DEMO, pretendConnections } from "./connections";
-import { apiURL, COMBINE, GATE, MAP, startReviewRun, startRun, WRITER } from "./runs";
+import {
+  apiURL,
+  COMBINE,
+  DOCS_DEMO_URL,
+  GATE,
+  MAP,
+  REPO_READER,
+  startReviewRun,
+  startRun,
+  WRITER,
+} from "./runs";
 
 /** WCAG 2.2 AA, as the mission's UI quality target asks. */
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -138,6 +148,25 @@ for (const colorScheme of ["light", "dark"] as const) {
           timeout: 30_000,
         },
       );
+      await expectNoSeriousIssues(page);
+    });
+
+    test("an agent's work block, closed and open, has no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(request, [REPO_READER], "E2E work a11y", DOCS_DEMO_URL);
+      await open(page, `/runs/${runId}?step=reader&tab=activity`);
+      await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+        "data-status",
+        "succeeded",
+        { timeout: 60_000 },
+      );
+      const header = page.getByTestId("work-block").getByRole("button").first();
+      await expect(header).toHaveAttribute("aria-expanded", "false");
+      await expectNoSeriousIssues(page);
+      await header.click();
+      await expect(page.getByTestId("tool-intent").first()).toBeVisible();
       await expectNoSeriousIssues(page);
     });
 

@@ -17,6 +17,7 @@ from agentic_github import (
 from agentic_runtime import ToolOutput
 from agentic_tools.github import GithubTarget, open_github_tools
 from agentic_tools.mcp_bridge import McpToolExecutor
+from agentic_tools.strict import INTENT_HELP
 from agentic_tools.testing import FakeGithub
 
 RUN_CREATED = datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
@@ -151,3 +152,5 @@ async def test_without_a_sandbox_only_create_repo_is_offered() -> None:
         {"name": "docs-demo", "private": True, "gitignore": "Python", "license": "mit"}
     ]
     assert definition.input_schema["additionalProperties"] is False
+    # Its own `description` is the repo's, so it takes no intent.
+    assert INTENT_HELP not in str(definition.input_schema)

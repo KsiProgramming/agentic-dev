@@ -23,6 +23,14 @@ class TextDelta(_Event):
     text: str
 
 
+class ReasoningDelta(_Event):
+    """A streamed chunk of the model's reasoning (Claude's summarized thinking), when the
+    provider streams it. Shown apart from the answer; an adapter without it emits none."""
+
+    type: Literal["reasoning_delta"] = "reasoning_delta"
+    text: str
+
+
 class Message(_Event):
     """The assistant's final text for the run."""
 
@@ -89,7 +97,15 @@ class Cancelled(_Event):
 
 
 AgentEvent = Annotated[
-    TextDelta | Message | ToolCall | ToolResult | Usage | Completed | Failed | Cancelled,
+    TextDelta
+    | ReasoningDelta
+    | Message
+    | ToolCall
+    | ToolResult
+    | Usage
+    | Completed
+    | Failed
+    | Cancelled,
     Field(discriminator="type"),
 ]
 

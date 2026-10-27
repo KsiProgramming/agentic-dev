@@ -74,6 +74,16 @@ export const REPO_WRITER = {
   tools: ["repo.write_file", "repo.commit"],
 };
 
+/** A reader on the run's repo: the fake runtime reasons, then calls each tool once with its
+ * example arguments, intent included ("See how the repo is laid out"), then answers. */
+export const REPO_READER = {
+  type: "agent",
+  id: "reader",
+  role: "Reader",
+  instructions: "Look around the repository.",
+  tools: ["repo.list_files", "repo.read_file", "repo.search"],
+};
+
 /** A gate after `REPO_WRITER`: it shows the files the writer changed. */
 export const REVIEW_GATE = {
   type: "gate",

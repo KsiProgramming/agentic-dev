@@ -958,11 +958,14 @@ const WRITER_RUN = {
   },
 } as Partial<RunDetail>;
 
-test("a step's Activity shows its tool calls", async () => {
+test("a step's Activity folds its work into one line, opened to show the calls", async () => {
   nav.search = "tab=activity";
   api(detail(WRITER_RUN));
   longAnswer(show());
-  expect((await screen.findAllByTestId("tool-group")).length).toBeGreaterThan(0);
+  const block = await screen.findByTestId("work-block");
+  expect(screen.queryByTestId("tool-group")).toBeNull();
+  fireEvent.click(within(block).getAllByRole("button")[0]!);
+  expect(screen.getAllByTestId("tool-group").length).toBeGreaterThan(0);
 });
 
 test("a step's Input shows what the spec and the run gave it", async () => {

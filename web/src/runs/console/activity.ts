@@ -6,7 +6,8 @@ import { describeTool } from "./tool-describe";
 export interface Activity {
   /** Where: the node, or the map item it runs for. */
   where: string;
-  /** What: "Reading src/app.ts", "Writing", "Thinking". */
+  /** What: the call's intent ("Read the frontend config"), else "Reading src/app.ts",
+   * "Writing", "Thinking". */
   doing: string;
   target: string;
   /** How many steps run at once (a map's items and a parallel's branches run together). */
@@ -46,8 +47,8 @@ export function currentActivity(timeline: Timeline): Activity | null {
   let target = "";
   if (last?.kind === "tool" && last.status === "running") {
     const d = describeTool(last.name, last.arguments);
-    doing = d.doing;
-    target = d.target;
+    doing = last.intent ?? d.doing;
+    target = last.intent ? "" : d.target;
   } else if (last?.kind === "message" && !last.final) {
     doing = "Writing";
   }

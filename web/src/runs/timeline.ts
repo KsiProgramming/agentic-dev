@@ -7,8 +7,8 @@ export type { TokenUsage } from "./cost";
 /**
  * The run as a story: one step per node in run order, map items, parallel branches and loop
  * iterations nested inside their node, and inside each step its turns. Streamed `text_delta` chunks are merged into
- * one growing message per agent turn; a tool call and its result form one tool turn. Payloads are
- * data: nothing here is ever rendered as HTML.
+ * one growing message per agent turn, and `reasoning_delta` chunks into one reasoning turn; a tool
+ * call and its result form one tool turn. Payloads are data: nothing here is ever rendered as HTML.
  */
 
 export type StepStatus = "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -31,6 +31,8 @@ export interface ToolTurn {
   callId: string;
   name: string;
   arguments: unknown;
+  /** Why the agent made the call: the tool's optional `description` argument, as plain text. */
+  intent: string | null;
   /** The tool's output, once its result arrived. */
   output: string | null;
   status: "running" | "completed" | "failed";
@@ -38,7 +40,15 @@ export interface ToolTurn {
   endedAt: string | null;
 }
 
-export type Turn = MessageTurn | ToolTurn;
+/** The model's reasoning (Claude's summarized thinking), merged from `reasoning_delta` chunks. */
+export interface ReasoningTurn {
+  kind: "reasoning";
+  key: number;
+  text: string;
+  startedAt: string;
+}
+
+export type Turn = MessageTurn | ToolTurn | ReasoningTurn;
 
 export interface GateInfo {
   title: string;
@@ -417,6 +427,13 @@ class Builder {
         }
         return;
       }
+      case "reasoning_delta": {
+        const last = step.turns.at(-1);
+        const text = str(payload.text) ?? "";
+        if (last?.kind === "reasoning") last.text += text;
+        else step.turns.push({ kind: "reasoning", key: event.seq, text, startedAt: at });
+        return;
+      }
       case "message": {
         const last = step.turns.at(-1);
         const text = str(payload.text) ?? "";
@@ -435,6 +452,7 @@ class Builder {
           callId: str(payload.call_id) ?? String(event.seq),
           name: str(payload.name) ?? "tool",
           arguments: payload.arguments ?? {},
+          intent: intentOf(payload.arguments),
           output: null,
           status: "running",
           startedAt: at,
@@ -552,6 +570,15 @@ class Builder {
 }
 
 /** The timeline of a run's events, given in `seq` order. Duplicate `seq`s are ignored. */
+/** The call's `description` argument, trimmed to one line; `null` when there is none. */
+function intentOf(args: unknown): string | null {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return null;
+  const description = (args as Record<string, unknown>).description;
+  if (typeof description !== "string") return null;
+  const line = description.replace(/\s+/g, " ").trim();
+  return line || null;
+}
+
 export function buildTimeline(events: readonly RunEvent[]): Timeline {
   const builder = new Builder();
   for (const event of events) builder.add(event);
@@ -563,6 +590,8 @@ export type RawRow<E extends RunEvent = RunEvent> =
   | { kind: "event"; event: E }
   | {
       kind: "text";
+      /** What was streamed: the answer's text or the model's reasoning. */
+      type: DeltaType;
       /** The chunks, in order. */
       events: [E, ...E[]];
       /** The chunks joined: the message as it was streamed. */
@@ -571,26 +600,37 @@ export type RawRow<E extends RunEvent = RunEvent> =
       item: number | null;
     };
 
+type DeltaType = "text_delta" | "reasoning_delta";
+
+const isDelta = (type: string): type is DeltaType =>
+  type === "text_delta" || type === "reasoning_delta";
+
 /**
- * Fold consecutive `text_delta` events of the same node and map item into one row, so a
- * streamed message reads as one paragraph rather than one row per chunk. Any other event, or a
- * chunk of another node or item, ends the fold.
+ * Fold consecutive `text_delta` (or `reasoning_delta`) events of the same node and map item into
+ * one row, so a streamed message reads as one paragraph rather than one row per chunk. Any other
+ * event, a chunk of the other kind, or a chunk of another node or item, ends the fold.
  */
 export function foldDeltas<E extends RunEvent>(events: readonly E[]): RawRow<E>[] {
   const rows: RawRow<E>[] = [];
   for (const event of events) {
     const last = rows.at(-1);
-    if (event.type !== "text_delta") {
+    const type = event.type;
+    if (!isDelta(type)) {
       rows.push({ kind: "event", event });
       continue;
     }
     const item = num(event.payload?.item);
     const text = str(event.payload?.text) ?? "";
-    if (last?.kind === "text" && last.nodeId === (event.node_id ?? null) && last.item === item) {
+    if (
+      last?.kind === "text" &&
+      last.type === type &&
+      last.nodeId === (event.node_id ?? null) &&
+      last.item === item
+    ) {
       last.events.push(event);
       last.text += text;
     } else {
-      rows.push({ kind: "text", events: [event], text, nodeId: event.node_id ?? null, item });
+      rows.push({ kind: "text", type, events: [event], text, nodeId: event.node_id ?? null, item });
     }
   }
   return rows;

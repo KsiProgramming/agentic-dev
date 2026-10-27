@@ -220,8 +220,26 @@ async def test_with_tools_an_unscripted_node_calls_its_requested_tools_first() -
 
     events = await collect_and_check(FakeRuntime(tools=tools), asking)
 
-    assert [e.type for e in events] == ["tool_call", "tool_result", "message", "usage", "completed"]
+    assert [e.type for e in events] == [
+        "reasoning_delta",
+        "tool_call",
+        "tool_result",
+        "message",
+        "usage",
+        "completed",
+    ]
     assert tools.calls == [("repo.list_files", {})]
+
+
+async def test_an_unscripted_node_can_wait_before_each_call() -> None:
+    tools = ScriptedToolExecutor({"repo.list_files": "README.md", "repo.read_file": "x"})
+    asking = request().model_copy(update={"tools": ["repo.list_files", "repo.read_file"]})
+
+    start = time.monotonic()
+    await collect_and_check(FakeRuntime(tools=tools, call_delay_s=0.05), asking)
+
+    assert time.monotonic() - start >= 0.1
+    assert [name for name, _ in tools.calls] == ["repo.list_files", "repo.read_file"]
 
 
 async def test_an_unscripted_node_calls_tools_with_their_schema_example() -> None:

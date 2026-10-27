@@ -27,7 +27,9 @@ async def test_offers_the_repo_tools_with_their_schemas(sandbox: Sandbox) -> Non
     assert read.description.startswith("Read a text file from the repository.")
     assert read.input_schema["required"] == ["path"]
     assert read.input_schema["additionalProperties"] is False
-    assert read.input_schema["examples"] == [{"path": "pyproject.toml", "end_line": 60}]
+    assert read.input_schema["examples"] == [
+        {"path": "pyproject.toml", "end_line": 60, "description": "Read the project settings"}
+    ]
 
 
 async def test_calls_go_through_the_server(sandbox: Sandbox) -> None:

@@ -21,6 +21,9 @@ function event(
 }
 
 /** The docs run up to (and including) event `seq`. */
+/** Where the recorded run pauses at its gate. */
+const GATE_WAITING = events.find((e) => e.type === "gate_waiting")!.seq;
+
 function upTo(seq: number) {
   return buildTimeline(events.filter((e) => e.seq <= seq)).steps;
 }
@@ -41,7 +44,7 @@ describe("nodeStatuses", () => {
   });
 
   it("follows the run: done, running, waiting", () => {
-    const states = nodeStatuses(spec, upTo(84));
+    const states = nodeStatuses(spec, upTo(GATE_WAITING));
     expect(states.get("list_modules")?.status).toBe("completed");
     expect(states.get("document")).toEqual({ status: "completed", summary: "3 of 3 items" });
     expect(states.get("module-writer")?.status).toBe("completed");

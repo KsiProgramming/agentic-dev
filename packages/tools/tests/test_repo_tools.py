@@ -41,7 +41,9 @@ async def test_a_run_with_writers_also_offers_the_write_tools(
         definitions = {d.name: d for d in tools.definitions()}
 
     assert sorted(definitions) == sorted([*READS, *WRITE_TOOL_NAMES])
-    assert definitions["repo.commit"].input_schema["examples"] == [{"message": "Add NOTES.md"}]
+    assert definitions["repo.commit"].input_schema["examples"] == [
+        {"message": "Add NOTES.md", "description": "Commit the notes page"}
+    ]
 
 
 async def test_a_writer_reads_its_own_writes_and_nobody_else_sees_them(

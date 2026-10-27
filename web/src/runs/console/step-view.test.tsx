@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { JsonView } from "@/components/json-view";
@@ -87,6 +87,7 @@ function tool(overrides: Partial<ToolTurn> = {}): ToolTurn {
     callId: "c1",
     name: "repo.read_file",
     arguments: { path: "src/app.ts" },
+    intent: null,
     output: '{"text": "x"}',
     status: "completed",
     startedAt: "2026-10-22T12:00:00Z",
@@ -263,13 +264,147 @@ describe("StepList on the recorded docs run", () => {
   });
 });
 
-describe("TurnsRail", () => {
-  it("shows one message block per agent turn of the step", () => {
-    const timeline = buildTimeline(docsRun as RunEvent[]);
-    const writer = timeline.steps.find((s) => s.id === "document")!.items![0]!.steps[0]!;
-    render(<TurnsRail step={writer} />);
-    expect(screen.getAllByTestId("agent-message")).toHaveLength(2);
-    expect(screen.getAllByTestId("tool-group")).toHaveLength(1);
+/** Events of one agent step `w`, one second apart. */
+type Ev = [type: string, payload?: RunEvent["payload"]];
+
+function agentStep(events: Ev[], end = true) {
+  const all: Ev[] = [["node_started"], ...events, ...(end ? [["node_completed"] as Ev] : [])];
+  return buildTimeline(
+    all.map(([type, payload], i) => ({ ...runEvent(i + 1, type, payload), node_id: "w" })),
+  ).steps[0]!;
+}
+
+const call = (id: string, name: string, args: Record<string, unknown>) =>
+  ["tool_call", { call_id: id, name, arguments: args }] as [string, RunEvent["payload"]];
+const result = (id: string, output = "ok", isError = false) =>
+  ["tool_result", { call_id: id, output, is_error: isError }] as [string, RunEvent["payload"]];
+
+describe("TurnsRail: work blocks", () => {
+  const writer = () =>
+    buildTimeline(docsRun as RunEvent[]).steps.find((s) => s.id === "document")!.items![0]!
+      .steps[0]!;
+
+  it("reads a finished turn as one closed line of work and its answer", () => {
+    render(<TurnsRail step={writer()} />);
+    const [block] = screen.getAllByTestId("work-block");
+    const header = within(block!).getAllByRole("button")[0]!;
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(header.textContent).toContain("Listed 1 folder, read 2 files");
+    expect(header.textContent).toContain("3 tool calls");
+    // Only the answer is open: the note sits inside the closed block.
+    expect(screen.getAllByTestId("agent-message").map((m) => m.textContent)).toEqual([
+      expect.stringContaining("This module holds the api code."),
+    ]);
+    expect(screen.queryByTestId("tool-group")).toBeNull();
+  });
+
+  it("opens on the reasoning, the note and each call titled with its intent", () => {
+    render(<TurnsRail step={writer()} />);
+    fireEvent.click(within(screen.getByTestId("work-block")).getAllByRole("button")[0]!);
+    const reasoning = screen.getByTestId("reasoning");
+    expect(reasoning.textContent).toBe("The input is a module path.");
+    expect(within(reasoning).getByRole("button").getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByTestId("tool-intent").textContent).toBe("See what the module holds");
+    // The two reads with no intent fold into one row.
+    expect(screen.getAllByTestId("tool-group").map((g) => g.textContent)).toEqual([
+      expect.stringContaining("See what the module holds"),
+      expect.stringContaining("Read 2 files"),
+    ]);
+    expect(screen.getAllByTestId("agent-message")[0]!.textContent).toBe(
+      "I will look at the files of packages/api first.",
+    );
+  });
+
+  it("shows the rest of the reasoning on expand, as plain text", () => {
+    const step = agentStep([
+      ["reasoning_delta", { text: "First <b>line</b>\nSecond " }],
+      ["reasoning_delta", { text: "**line**" }],
+      call("c", "repo.read_file", { path: "a" }),
+      result("c"),
+      ["message", { text: "Done." }],
+    ]);
+    render(<TurnsRail step={step} />);
+    fireEvent.click(within(screen.getByTestId("work-block")).getAllByRole("button")[0]!);
+    const reasoning = screen.getByTestId("reasoning");
+    fireEvent.click(within(reasoning).getByRole("button"));
+    expect(reasoning.textContent).toBe("First <b>line</b>Second **line**");
+    expect(reasoning.querySelector("b, strong")).toBeNull();
+  });
+
+  it("shows an intent as text, never as HTML", () => {
+    const step = agentStep([
+      call("c", "repo.read_file", { path: "a", description: "Read <img src=x> **it**" }),
+      result("c"),
+      ["message", { text: "Done." }],
+    ]);
+    render(<TurnsRail step={step} />);
+    fireEvent.click(within(screen.getByTestId("work-block")).getAllByRole("button")[0]!);
+    const intent = screen.getByTestId("tool-intent");
+    expect(intent.textContent).toBe("Read <img src=x> **it**");
+    expect(intent.querySelector("img, strong")).toBeNull();
+  });
+
+  it("opens a block with a failed call and counts the failure", () => {
+    const step = agentStep([
+      call("c", "repo.read_file", { path: "a" }),
+      result("c", "no such file", true),
+      ["message", { text: "I could not read it." }],
+    ]);
+    render(<TurnsRail step={step} />);
+    const header = within(screen.getByTestId("work-block")).getAllByRole("button")[0]!;
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(header.textContent).toContain("1 failed");
+    expect(screen.getByTestId("tool-preview").textContent).toBe("no such file");
+  });
+
+  it("is just the answer when the agent did no work", () => {
+    render(<TurnsRail step={agentStep([["message", { text: "Hello." }]])} />);
+    expect(screen.queryByTestId("work-block")).toBeNull();
+    expect(screen.getByTestId("agent-message").textContent).toBe("Hello.");
+  });
+
+  it("says what a live block is doing, with a timer that ticks", () => {
+    vi.useFakeTimers({ now: Date.parse("2026-10-21T12:00:04Z") });
+    try {
+      const step = agentStep(
+        [
+          call("c1", "repo.list_files", { path: "." }),
+          result("c1"),
+          call("c2", "repo.read_file", {
+            path: "web/package.json",
+            description: "Read the config",
+          }),
+        ],
+        false,
+      );
+      render(<TurnsRail step={step} />);
+      const block = screen.getByTestId("work-block");
+      const header = within(block).getAllByRole("button")[0]!;
+      expect(header.getAttribute("aria-expanded")).toBe("true");
+      expect(screen.getByTestId("work-title").textContent).toBe("Read the config…");
+      const elapsed = screen.getByTestId("work-elapsed");
+      expect(elapsed.getAttribute("aria-hidden")).toBe("true");
+      // The step started at second 1.
+      expect(elapsed.textContent).toBe("3s");
+      act(() => vi.advanceTimersByTime(2000));
+      expect(elapsed.textContent).toBe("5s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes a live block once the answer starts, unless the user opened it", () => {
+    const step = agentStep([call("c", "repo.read_file", { path: "a" }), result("c")], false);
+    const { rerender } = render(<TurnsRail step={step} />);
+    const header = () => within(screen.getByTestId("work-block")).getAllByRole("button")[0]!;
+    expect(header().getAttribute("aria-expanded")).toBe("true");
+    const answered = agentStep(
+      [call("c", "repo.read_file", { path: "a" }), result("c"), ["text_delta", { text: "So" }]],
+      false,
+    );
+    rerender(<TurnsRail step={answered} />);
+    expect(header().getAttribute("aria-expanded")).toBe("false");
+    expect(header().textContent).toContain("Read 1 file");
   });
 });
 
