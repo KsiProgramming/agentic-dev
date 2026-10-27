@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 11.1 UI v2 foundations:
+  - **Display components.** `RelativeTime`, `Duration`, `Money`, `TokenCount`, `IdChip` and `StatTile` (`@/components/display`) show every time, duration, cost, token count and id in the app; ids copy on click or link to their run.
+  - **Locale.** Dates and numbers follow the browser's locale and time zone (24-hour where the locale is) through one module, `@/lib/locale`, instead of hard-coded `en-US` or the default `toLocaleString()`; unit tests and Playwright pin `en-US` and UTC.
+  - **Tokens.** A type scale (`text-caption` … `text-stat`), a row-height token with a compact mode (32 px rows) toggled from the top bar and kept per browser, and `--shadow-dock`.
+  - **Lint.** `agentic-ui/no-raw-colors` makes `pnpm lint` fail on palette classes, arbitrary colours and hex/`rgb()`/`oklch()` literals in `web/src`.
 - UI v2 planned as roadmap Milestone 11, phases 11.1–11.8 (foundations, active and waiting time, approval expiry, runs list v2, Inbox, run console v3, shell and settings v2, agent activity), listed after Milestone 4 and marked "Next up"; its rules are in `specs/tech-stack.md` → UI v2 with how they are enforced, and `specs/mission.md` adds truthful durations and expiring approvals to principle 8 and UI v2 success measures. Mission principle 10 makes the specs the repo's constitution: every phase, decision, rule and priority change is written in them in the same PR. `CLAUDE.md` gives coding agents that rule and the non-optional UI rules before every task, and the `plan-feature` skill follows the roadmap's "Next up" line ([#118](https://github.com/KsiProgramming/agentic-dev/pull/118)).
 - Phase 4.1 `parallel` primitive with join policies ([#120](https://github.com/KsiProgramming/agentic-dev/pull/120)):
   - **Spec.** `{"type": "parallel", "id", "branches": [...], "join": "all" | "any" | "quorum", "quorum"?}`: 2 to 8 branches, each an `agent`, `tool` or `sequence` node, run at the same time on the parallel's input. A new validation code, `not_allowed_in_parallel`, refuses gates, writers, publishers and containers in a branch; a parallel cannot be inside a loop or a map, its branches are capped by the workspace's agents alive, and it counts as one level of nesting. The JSON Schema, OpenAPI spec and web client are regenerated.
@@ -187,6 +192,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- Pages use the full content width up to 1600 px instead of centred columns, and agent output is capped at 72 characters a line. The brand accent stays indigo. The dialog overlay uses the `--overlay` token. `CLAUDE.md` and `specs/tech-stack.md` (Look, Layout, a new Display values section, decisions log) carry the new rules, and the UI v2 Foundations section moved into them (phase 11.1).
 - The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)).
 - Phase 2.5 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
   - The engine writes at most one `text_delta` per node (and map item) every 250 ms (`agentic_engine.graph.deltas.DeltaBuffer`). The first chunk of a burst is written at once and the rest are joined. Any other event of the node, its end and cancellation write the pending text first, so order and the joined text are unchanged.
