@@ -9,6 +9,7 @@ import type { components } from "./schema";
 export type Template = components["schemas"]["TemplateOut"];
 export type Connection = components["schemas"]["ConnectionOut"];
 export type Repo = components["schemas"]["RepoOut"];
+export type NewRepoOptions = components["schemas"]["NewRepoOptions"];
 export type Requirement = Template["requires"][number];
 export type WorkspacePricing = components["schemas"]["WorkspacePricing"];
 export type ModelPricing = WorkspacePricing["models"][number];
@@ -42,6 +43,10 @@ export function policyKey(workspaceId: string) {
 
 export function reposKey(workspaceId: string) {
   return ["workspace", workspaceId, "repos"] as const;
+}
+
+export function newRepoOptionsKey(workspaceId: string) {
+  return ["workspace", workspaceId, "repos", "new-repo-options"] as const;
 }
 
 /** Fetch errors become "Could not reach the API." instead of the browser's TypeError. */
@@ -114,6 +119,34 @@ export function useRepos({
       if (refused.code === "no_connection") return { state: "not-connected" };
       if (refused.code === "installation_gone") return { state: "gone" };
       throw refused;
+    },
+  });
+}
+
+/** Whether runs of the workspace can create their repo, and where. Only asked once a user wants
+ * a new repo (`enabled`). */
+export function useNewRepoOptions({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+  enabled = true,
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+  enabled?: boolean;
+}) {
+  return useQuery({
+    queryKey: newRepoOptionsKey(workspaceId),
+    enabled,
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/repos/new-repo-options", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) {
+        throw new ApiError(response.status, error, "Could not check where a repo can be created");
+      }
+      return data;
     },
   });
 }

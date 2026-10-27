@@ -191,6 +191,19 @@ describe("buildTimeline turn rules", () => {
     expect(ok.steps[0]!.prUrl).toBe("https://github.com/acme/docs/pull/7");
     expect(bad.steps[0]!.prUrl).toBeNull();
   });
+
+  it("names the repo a node created, only if it is the GitHub repo it says", () => {
+    const repo = { full_name: "acme/docs-new", url: "https://github.com/acme/docs-new" };
+    const ok = buildTimeline([event(1, "repo_created", "create_repo", repo)]);
+    const bad = buildTimeline([
+      event(1, "repo_created", "create_repo", { ...repo, url: "https://evil.test/acme/docs-new" }),
+    ]);
+    expect(ok.steps[0]!.createdRepo).toEqual({
+      fullName: "acme/docs-new",
+      url: "https://github.com/acme/docs-new",
+    });
+    expect(bad.steps[0]!.createdRepo).toBeNull();
+  });
 });
 
 describe("foldDeltas", () => {

@@ -4,6 +4,7 @@ import {
   CircleXIcon,
   CoinsIcon,
   FlagIcon,
+  FolderPlusIcon,
   GaugeIcon,
   PlayIcon,
   PlugIcon,
@@ -34,6 +35,7 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "run.rerun": { label: "Run rerun", icon: RotateCcwIcon, category: "runs" },
   "run.cancel_requested": { label: "Cancel requested", icon: BanIcon, category: "runs" },
   "run.ended": { label: "Run ended", icon: FlagIcon, category: "runs" },
+  "repo.created": { label: "Repo created", icon: FolderPlusIcon, category: "runs" },
   "gate.approved": { label: "Gate approved", icon: CircleCheckIcon, category: "approvals" },
   "gate.rejected": { label: "Gate rejected", icon: CircleXIcon, category: "approvals" },
   "connection.added": { label: "Connection added", icon: PlugIcon, category: "settings" },
@@ -158,6 +160,11 @@ export function describe(event: AuditEvent): string {
         cost && cost !== "$0" && `${d.cost_complete === false ? "≥ " : ""}${cost}`,
         text(d, "pr_url"),
       );
+    }
+    case "repo.created": {
+      const name = text(d, "full_name");
+      const visibility = d.private === true ? "private " : d.private === false ? "public " : "";
+      return `Created the ${visibility}repo ${name ?? "of the run"}`;
     }
     case "gate.approved":
     case "gate.rejected": {

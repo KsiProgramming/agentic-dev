@@ -49,6 +49,15 @@ describe("describe", () => {
       "Succeeded",
     ],
     [
+      "a repo a run created",
+      {
+        action: "repo.created",
+        actor: { type: "system", id: null },
+        details: { full_name: "acme/docs-new", private: true },
+      },
+      "Created the private repo acme/docs-new",
+    ],
+    [
       "an approval with edits and a comment",
       {
         action: "gate.approved",
@@ -136,6 +145,7 @@ test("each category has its actions", () => {
     "run.rerun",
     "run.cancel_requested",
     "run.ended",
+    "repo.created",
   ]);
   expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected"]);
   expect(actionsOf("settings")).toEqual([

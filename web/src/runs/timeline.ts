@@ -62,6 +62,8 @@ export interface Step {
   usage: TokenUsage | null;
   gate: GateInfo | null;
   prUrl: string | null;
+  /** The repo the node created for the run (`github.createRepo`). */
+  createdRepo: CreatedRepo | null;
   /** Set for a loop node: one entry per iteration, each with its own steps. */
   iterations: Iteration[] | null;
   /** Set for a map node: one entry per item, each with its own steps. */
@@ -70,6 +72,11 @@ export interface Step {
   itemCount: number | null;
   /** Why a loop stopped: `condition` or `max_iterations`. */
   stopReason: string | null;
+}
+
+export interface CreatedRepo {
+  fullName: string;
+  url: string;
 }
 
 export interface Iteration {
@@ -127,6 +134,7 @@ function newStep(id: string, at: string): Step {
     usage: null,
     gate: null,
     prUrl: null,
+    createdRepo: null,
     iterations: null,
     items: null,
     itemCount: null,
@@ -135,6 +143,14 @@ function newStep(id: string, at: string): Step {
 }
 
 /** A GitHub pull request URL; anything else (e.g. a `javascript:` URL) is not offered as a link. */
+/** The repo a `repo_created` event names, if it is a GitHub repo (events are data). */
+export function createdRepoOf(payload: Record<string, unknown>): CreatedRepo | null {
+  const fullName = str(payload.full_name);
+  const url = str(payload.url);
+  if (fullName === null || url !== `https://github.com/${fullName}`) return null;
+  return /^[^/\s]+\/[^/\s]+$/.test(fullName) ? { fullName, url } : null;
+}
+
 export function safePullRequestUrl(url: unknown): string | null {
   if (typeof url !== "string") return null;
   return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(url) ? url : null;
@@ -284,6 +300,9 @@ class Builder {
         return;
       case "pr_opened":
         step.prUrl = safePullRequestUrl(payload.url);
+        return;
+      case "repo_created":
+        step.createdRepo = createdRepoOf(payload);
         return;
       case "text_delta": {
         const last = step.turns.at(-1);

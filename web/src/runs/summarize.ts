@@ -70,6 +70,8 @@ export function summarizePayload(event: RunEvent): string {
       );
     case "pr_opened":
       return truncate(str(payload.url));
+    case "repo_created":
+      return truncate(str(payload.full_name));
     case "policy_limit_exceeded":
       return policyLimit(payload);
     default:
