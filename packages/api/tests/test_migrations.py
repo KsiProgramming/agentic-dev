@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from alembic import command
@@ -39,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0021_approval_expiry"
+    assert version == "0022_runs_trigger_branch"
     assert {
         "runs",
         "run_events",
@@ -534,3 +535,57 @@ async def test_the_approval_expiry_revision_gives_waiting_gates_72_hours(
     assert expires_at == rows[fresh].gate_expires_at
     assert rows[cancelled].cancel_reason == "cancelled by user"
     assert "approval_ttl_s" in await policy_columns(postgres_url)
+
+
+async def test_the_runs_list_revision_backfills_trigger_and_branch(postgres_url: str) -> None:
+    """Runs from before phase 11.4: one from the API on a ref, a template run (only the web sends
+    templates) on the default branch, and a rerun of it on a repo it created."""
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.downgrade, config, "0021_approval_expiry")
+    assert {"trigger", "branch"}.isdisjoint(await run_columns(postgres_url))
+
+    engine = create_async_engine(postgres_url)
+    insert = (
+        "INSERT INTO runs (id, workspace_id, status, spec, policy, repo, template_id, rerun_of) "
+        "VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'completed', '{}', "
+        "'{}', CAST(:repo AS jsonb), :template, :rerun_of) RETURNING id"
+    )
+    on_ref = '{"url": "https://github.com/acme/docs", "ref": "dev"}'
+    on_default = '{"url": "https://github.com/acme/docs"}'
+    async with engine.begin() as conn:
+
+        async def add(repo: str | None, template: str | None, rerun_of: UUID | None) -> UUID:
+            params = {"repo": repo, "template": template, "rerun_of": rerun_of}
+            return (await conn.execute(text(insert), params)).scalar_one()
+
+        api_run = await add(on_ref, None, None)
+        manual = await add(on_default, "generate-docs", None)
+        rerun = await add(None, "generate-docs", manual)
+        await conn.execute(
+            text(
+                "INSERT INTO run_events (run_id, seq, type, payload, created_at) VALUES "
+                "(:id, 1, 'repo_created', CAST(:payload AS jsonb), now())"
+            ),
+            {"id": rerun, "payload": '{"default_branch": "main"}'},
+        )
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.connect() as conn:
+        rows = {
+            row.id: (row.trigger, row.branch)
+            for row in await conn.execute(
+                text("SELECT id, trigger, branch FROM runs WHERE id IN (:a, :b, :c)"),
+                {"a": api_run, "b": manual, "c": rerun},
+            )
+        }
+    # Gone again, so no later test lists them.
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM run_events WHERE run_id = :c"), {"c": rerun})
+        await conn.execute(text("DELETE FROM runs WHERE id = :c"), {"c": rerun})
+        await conn.execute(
+            text("DELETE FROM runs WHERE id IN (:a, :b)"), {"a": api_run, "b": manual}
+        )
+    await engine.dispose()
+
+    assert rows == {api_run: ("api", "dev"), manual: ("manual", None), rerun: ("rerun", "main")}

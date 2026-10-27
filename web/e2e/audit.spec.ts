@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-import { WORKSPACE_ID } from "./connections";
+import { e2eWorkspaceId } from "./workspace";
 import { apiURL, endedRunEvents, GATE, startRun, WRITER } from "./runs";
 
 /** Roadmap 3.7: every run and approval is listed per workspace on the audit log. */
@@ -44,7 +44,7 @@ test("a run, its approval, a cancelled rerun and a limits change are all listed"
   await endedRunEvents(request, rerunId);
 
   // Saving the platform's own limit changes the workspace's settings, not what runs may do.
-  const policyURL = `${apiURL}/workspaces/${WORKSPACE_ID}/policy`;
+  const policyURL = `${apiURL}/workspaces/${e2eWorkspaceId()}/policy`;
   const before = ((await (await request.get(policyURL)).json()) as { overrides: object }).overrides;
   expect((await request.put(policyURL, { data: { ...before, agents_alive: 8 } })).status()).toBe(
     200,

@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, select, tuple_
+from sqlalchemy import ColumnElement, Select, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_sandbox import RepoSource
@@ -41,6 +41,10 @@ class RunSummaryRow:
     # `{node_id, title, expires_at}` of the gate the run is paused at.
     waiting_gate: dict[str, Any] | None
     rerun_of: UUID | None
+    # What started the run: `manual`, `api` or `rerun`.
+    trigger: str
+    # The branch the run works on, if known.
+    branch: str | None
     input: str
     failure_reason: str | None
     # Why a cancelled run was cancelled: by its user, or its approval expired.
@@ -120,6 +124,8 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.pr_url,
         Run.waiting_gate,
         Run.rerun_of,
+        Run.trigger,
+        Run.branch,
         Run.input,
         Run.failure_reason,
         Run.cancel_reason,
@@ -152,6 +158,8 @@ def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
         pr_url=row.pr_url,
         waiting_gate=row.waiting_gate,
         rerun_of=row.rerun_of,
+        trigger=row.trigger,
+        branch=row.branch,
         input=row.input,
         failure_reason=row.failure_reason,
         cancel_reason=row.cancel_reason,
@@ -174,6 +182,65 @@ def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
     )
 
 
+def _filtered(
+    query: Select[*tuple[Any, ...]],
+    workspace_id: UUID,
+    template_id: str | None,
+    repo_url: str | None,
+) -> Select[*tuple[Any, ...]]:
+    query = query.where(Run.workspace_id == workspace_id)
+    if template_id is not None:
+        query = query.where(Run.template_id == template_id)
+    if repo_url is not None:
+        query = query.where(Run.repo_url == repo_url)
+    return query
+
+
+@dataclass(frozen=True)
+class RunCountsRow:
+    """How many runs each saved view of the runs list holds."""
+
+    all: int
+    # Queued or running.
+    running: int
+    # Waiting at a gate that has not expired.
+    waiting: int
+    failed: int
+
+
+async def count_runs(
+    sessions: async_sessionmaker[AsyncSession],
+    workspace_id: UUID,
+    *,
+    template_id: str | None = None,
+    repo_url: str | None = None,
+) -> RunCountsRow:
+    """The workspace's runs counted per saved view, with the same filters as
+    `list_run_summaries`. A run waiting at a gate past its expiry no longer needs approval, so it
+    is not counted as waiting even before a worker cancels it."""
+
+    def count(condition: ColumnElement[bool]) -> Any:
+        return func.count().filter(condition)
+
+    waiting = (Run.status == "waiting") & (
+        Run.gate_expires_at.is_(None) | (Run.gate_expires_at > func.now())
+    )
+    query = _filtered(
+        select(
+            func.count().label("all"),
+            count(Run.status.in_(("queued", "running"))).label("running"),
+            count(waiting).label("waiting"),
+            count(Run.status == "failed").label("failed"),
+        ),
+        workspace_id,
+        template_id,
+        repo_url,
+    )
+    async with sessions() as session:
+        row = (await session.execute(query)).one()
+    return RunCountsRow(all=row.all, running=row.running, waiting=row.waiting, failed=row.failed)
+
+
 async def list_run_summaries(
     sessions: async_sessionmaker[AsyncSession],
     workspace_id: UUID,
@@ -187,13 +254,9 @@ async def list_run_summaries(
     """One page of the workspace's runs, newest first, and the cursor of the next page (`None`
     on the last one). Filters combine with AND; several `statuses` match any of them. Raises
     `InvalidCursorError` for a cursor this function did not return."""
-    query = _select().where(Run.workspace_id == workspace_id)
+    query = _filtered(_select(), workspace_id, template_id, repo_url)
     if statuses:
         query = query.where(Run.status.in_(statuses))
-    if template_id is not None:
-        query = query.where(Run.template_id == template_id)
-    if repo_url is not None:
-        query = query.where(Run.repo_url == repo_url)
     if cursor is not None:
         query = query.where(tuple_(Run.created_at, Run.id) < tuple_(*decode_cursor(cursor)))
     # One more than a page tells whether there is a next one.

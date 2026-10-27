@@ -1,56 +1,78 @@
 "use client";
 
-import { FilterXIcon, HistoryIcon, LayoutTemplateIcon, PlusIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  CircleCheckIcon,
+  FilterXIcon,
+  HistoryIcon,
+  InboxIcon,
+  LayoutTemplateIcon,
+  PlusIcon,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { apiBaseUrl } from "@/api/client";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Button } from "@/components/ui/button";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { NewRunSheet } from "./new-run/new-run-sheet";
-import { filtersToQuery, isFiltered, NO_FILTERS, parseFilters, type RunFilters } from "./filters";
+import {
+  isFiltered,
+  parseRunsQuery,
+  RUN_VIEWS,
+  runsQueryToString,
+  viewFilters,
+  type RunsQuery,
+  type RunViewId,
+} from "./filters";
 import { RunFiltersBar } from "./run-filters";
+import { RunViewTabs } from "./run-views";
 import { RunsList } from "./runs-list";
 import { gateExpired, isLive, runStatusLabel } from "./summaries";
 import { useNow } from "./use-now";
+import { useRunCounts } from "./use-run-counts";
 import { useRunList } from "./use-run-summaries";
 import { useRunsStream } from "./use-runs-stream";
 
+/** What an empty view says, beyond All with no runs at all. */
+const EMPTY_VIEW: Record<Exclude<RunViewId, "all">, { icon: LucideIcon; message: string }> = {
+  running: { icon: ActivityIcon, message: "No run is running right now." },
+  waiting: { icon: InboxIcon, message: "Nothing needs approval." },
+  failed: { icon: CircleCheckIcon, message: "No run has failed." },
+};
+
 /**
- * The runs page (the home page): the runs that need approval first, then every run of the
- * workspace, newest first, kept live from `GET /runs/stream`. Filters live in the URL.
+ * The runs page (the home page): saved views as tabs with their counts (All, Running, Needs
+ * approval, Failed), then the view's runs, newest first under date headers, kept live from
+ * `GET /runs/stream`. Nothing is pinned above the list. The view and filters live in the URL.
  */
 export function RunsView({
   baseUrl = apiBaseUrl(),
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
 }: {
   baseUrl?: string;
   workspaceId?: string;
 }) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const filters = useMemo(
-    () => parseFilters(new URLSearchParams(searchParams.toString())),
+  const query = useMemo(
+    () => parseRunsQuery(new URLSearchParams(searchParams.toString())),
     [searchParams],
   );
-  const setFilters = (next: RunFilters) => {
-    const query = filtersToQuery(next);
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  const setQuery = (next: RunsQuery) => {
+    const search = runsQueryToString(next);
+    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
   };
 
-  // A status filter already says which runs to show, so the "Needs approval" section is only
-  // shown on top of an unfiltered (or template/repo filtered) list.
-  const showWaiting = filters.status.length === 0;
-  const all = useRunList(filters, { workspaceId, baseUrl });
-  const waiting = useRunList(
-    { ...filters, status: ["waiting"] },
-    { workspaceId, baseUrl, limit: 100, enabled: showWaiting },
-  );
+  const list = useRunList(viewFilters(query), { workspaceId, baseUrl });
+  const counts = useRunCounts(query, { workspaceId, baseUrl });
 
   const [announcement, setAnnouncement] = useState("");
   const [newRun, setNewRun] = useState(false);
@@ -65,16 +87,14 @@ export function RunsView({
     },
   });
 
-  const runs = all.data?.pages.flatMap((page) => page.items) ?? [];
-  const waitingPages = showWaiting ? (waiting.data?.pages.flatMap((page) => page.items) ?? []) : [];
+  const loaded = list.data?.pages.flatMap((page) => page.items) ?? [];
   const now = useNow(
     1000,
-    [...runs, ...waitingPages].some((run) => isLive(run.status)),
+    loaded.some((run) => isLive(run.status)),
   );
   // A gate past its time to live no longer needs approval, even before its run is cancelled.
-  const waitingRuns = waitingPages.filter((run) => !gateExpired(run, now));
-  const waitingHeading = useId();
-  const allHeading = useId();
+  const runs = query.view === "waiting" ? loaded.filter((run) => !gateExpired(run, now)) : loaded;
+  const viewLabel = RUN_VIEWS.find((v) => v.id === query.view)?.label ?? "All";
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -96,88 +116,100 @@ export function RunsView({
         workspaceId={workspaceId}
         baseUrl={baseUrl}
       />
-      <RunFiltersBar
-        filters={filters}
-        onChange={setFilters}
-        workspaceId={workspaceId}
-        baseUrl={baseUrl}
-      />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <RunViewTabs query={query} counts={counts.data} pathname={pathname} />
+        <RunFiltersBar
+          filters={query}
+          onChange={setQuery}
+          workspaceId={workspaceId}
+          baseUrl={baseUrl}
+        />
+      </div>
       <div aria-live="polite" className="sr-only">
         {announcement}
       </div>
 
-      {waitingRuns.length > 0 ? (
-        <section aria-labelledby={waitingHeading} className="flex flex-col gap-3">
-          <h2 id={waitingHeading} className="text-section font-semibold">
-            Needs approval{" "}
-            <span className="text-muted-foreground tabular-nums">({waitingRuns.length})</span>
-          </h2>
-          <RunsList
-            runs={waitingRuns}
-            now={now}
-            label="Runs that need approval"
-            baseUrl={baseUrl}
-          />
-        </section>
-      ) : null}
-
-      <section aria-labelledby={allHeading} className="flex flex-col gap-3">
-        <h2 id={allHeading} className="text-section font-semibold">
-          All runs
-        </h2>
-        {all.isPending ? (
+      <section aria-label={`${viewLabel} runs`} className="flex flex-col gap-3">
+        {list.isPending ? (
           <LoadingState rows={5} label="Loading runs…" />
-        ) : !all.data ? (
+        ) : !list.data ? (
           <ErrorState
-            message={all.error?.message ?? "Could not load runs."}
-            onRetry={() => void all.refetch()}
+            message={list.error?.message ?? "Could not load runs."}
+            onRetry={() => void list.refetch()}
           />
         ) : runs.length === 0 ? (
-          isFiltered(filters) ? (
-            <EmptyState
-              icon={FilterXIcon}
-              message="No runs match these filters."
-              action={
-                <Button type="button" variant="outline" onClick={() => setFilters(NO_FILTERS)}>
-                  Clear filters
-                </Button>
-              }
-            />
-          ) : (
-            <EmptyState
-              icon={HistoryIcon}
-              message="No runs yet. Start one from a template and it shows up here."
-              action={
-                <Button asChild>
-                  <Link href="/templates">
-                    <LayoutTemplateIcon aria-hidden="true" data-icon="inline-start" />
-                    Browse templates
-                  </Link>
-                </Button>
-              }
-            />
-          )
+          <EmptyView
+            query={query}
+            onClear={() => setQuery({ ...query, template: null, repo: null })}
+          />
         ) : (
           <>
-            <RunsList runs={runs} now={now} label="All runs" baseUrl={baseUrl} />
+            <RunsList runs={runs} now={now} label={`${viewLabel} runs`} baseUrl={baseUrl} />
             {/* A failed later page keeps the runs already shown. */}
-            {all.isFetchNextPageError ? (
-              <ErrorState message={all.error.message} onRetry={() => void all.fetchNextPage()} />
+            {list.isFetchNextPageError ? (
+              <ErrorState message={list.error.message} onRetry={() => void list.fetchNextPage()} />
             ) : null}
-            {all.hasNextPage ? (
+            {list.hasNextPage ? (
               <Button
                 type="button"
                 variant="outline"
                 className="self-center"
-                disabled={all.isFetchingNextPage}
-                onClick={() => void all.fetchNextPage()}
+                disabled={list.isFetchingNextPage}
+                onClick={() => void list.fetchNextPage()}
               >
-                {all.isFetchingNextPage ? "Loading…" : "Load more"}
+                {list.isFetchingNextPage ? "Loading…" : "Load more"}
               </Button>
             ) : null}
           </>
         )}
       </section>
     </div>
+  );
+}
+
+/** The empty state of a view: filters to clear, a view with nothing in it, or no runs at all. */
+function EmptyView({ query, onClear }: { query: RunsQuery; onClear: () => void }) {
+  if (isFiltered(query)) {
+    return (
+      <EmptyState
+        icon={FilterXIcon}
+        message="No runs match these filters."
+        action={
+          <Button type="button" variant="outline" onClick={onClear}>
+            Clear filters
+          </Button>
+        }
+      />
+    );
+  }
+  if (query.view !== "all") {
+    const { icon, message } = EMPTY_VIEW[query.view];
+    return (
+      <EmptyState
+        icon={icon}
+        message={message}
+        action={
+          <Button asChild variant="outline">
+            <Link href="/runs" scroll={false}>
+              Show all runs
+            </Link>
+          </Button>
+        }
+      />
+    );
+  }
+  return (
+    <EmptyState
+      icon={HistoryIcon}
+      message="No runs yet. Start one from a template and it shows up here."
+      action={
+        <Button asChild>
+          <Link href="/templates">
+            <LayoutTemplateIcon aria-hidden="true" data-icon="inline-start" />
+            Browse templates
+          </Link>
+        </Button>
+      }
+    />
   );
 }

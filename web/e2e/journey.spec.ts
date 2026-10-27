@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { DOCS_DEMO, TEST_KEY, WORKSPACE_ID } from "./connections";
+import { connectionsURL, DOCS_DEMO, TEST_KEY } from "./connections";
 import { apiURL } from "./runs";
 
 /**
@@ -13,8 +13,6 @@ import { apiURL } from "./runs";
  * workspace first, which the other tests rely on.
  */
 test.describe.configure({ mode: "serial" });
-
-const CONNECTIONS = `${apiURL}/workspaces/${WORKSPACE_ID}/connections`;
 
 function runIdOf(page: Page): string {
   const id = new URL(page.url()).pathname.split("/").at(-1);
@@ -40,8 +38,8 @@ test("connect, start a docs run, reject, rerun and approve, rerun from the list"
   request,
 }) => {
   test.setTimeout(240_000);
-  await request.delete(`${CONNECTIONS}/claude`);
-  await request.delete(`${CONNECTIONS}/github`);
+  await request.delete(`${connectionsURL()}/claude`);
+  await request.delete(`${connectionsURL()}/github`);
 
   // 1. Connect Claude and GitHub from Settings.
   await page.goto("/settings");

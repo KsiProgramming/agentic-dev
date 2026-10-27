@@ -1,10 +1,11 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
-import { apiURL } from "./runs";
+import { apiURL, e2eWorkspaceId } from "./workspace";
 
-/** The workspace every run belongs to until there are users (the API's default). */
-export const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-const CONNECTIONS = `${apiURL}/workspaces/${WORKSPACE_ID}/connections`;
+/** The workspace's connections endpoint. */
+export function connectionsURL(workspaceId = e2eWorkspaceId()): string {
+  return `${apiURL}/workspaces/${workspaceId}/connections`;
+}
 
 /** Accepted by the API's fake key check (`CLAUDE_KEY_CHECK=fake`). */
 export const TEST_KEY = "sk-ant-test-e2e-0001";
@@ -17,8 +18,10 @@ const FAKES_NEEDED =
   "(see .env.example).";
 
 /** Stores the test Claude key in the workspace. */
-export async function connectClaude(request: APIRequestContext) {
-  const response = await request.put(`${CONNECTIONS}/claude`, { data: { api_key: TEST_KEY } });
+export async function connectClaude(request: APIRequestContext, workspaceId = e2eWorkspaceId()) {
+  const response = await request.put(`${connectionsURL(workspaceId)}/claude`, {
+    data: { api_key: TEST_KEY },
+  });
   expect(response.status(), `${FAKES_NEEDED} PUT …/claude said: ${await response.text()}`).toBe(
     200,
   );
@@ -26,8 +29,8 @@ export async function connectClaude(request: APIRequestContext) {
 
 /** Links the workspace to the fake GitHub App: its install URL leads straight to the API's
  * setup endpoint, which stores the installation. */
-export async function connectGithub(request: APIRequestContext) {
-  const started = await request.post(`${CONNECTIONS}/github/install`);
+export async function connectGithub(request: APIRequestContext, workspaceId = e2eWorkspaceId()) {
+  const started = await request.post(`${connectionsURL(workspaceId)}/github/install`);
   expect(started.status(), FAKES_NEEDED).toBe(200);
   const { install_url } = (await started.json()) as { install_url: string };
   expect(install_url, FAKES_NEEDED).toContain("/github/setup?");
@@ -38,7 +41,7 @@ export async function connectGithub(request: APIRequestContext) {
 /** Makes the browser see the workspace with no connection, or with its GitHub App gone,
  * without changing the stack that other tests share. */
 export async function pretendConnections(page: Page, state: "none" | "github-gone") {
-  await page.route(`**/workspaces/${WORKSPACE_ID}/connections`, (route) =>
+  await page.route(`**/workspaces/${e2eWorkspaceId()}/connections`, (route) =>
     route.fulfill({
       json:
         state === "none"
@@ -56,7 +59,7 @@ export async function pretendConnections(page: Page, state: "none" | "github-gon
             ],
     }),
   );
-  await page.route(`**/workspaces/${WORKSPACE_ID}/repos`, (route) =>
+  await page.route(`**/workspaces/${e2eWorkspaceId()}/repos`, (route) =>
     route.fulfill({
       status: 409,
       json: {

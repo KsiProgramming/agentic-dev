@@ -13,6 +13,12 @@ from agentic_store import AuditAction, AuditEventRow, ConnectionInfo, WorkspaceI
 Provider = Literal["claude", "github"]
 
 
+class NewWorkspace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=128)]
+
+
 class WorkspaceOut(BaseModel):
     id: UUID
     name: str

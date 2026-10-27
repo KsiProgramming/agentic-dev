@@ -52,6 +52,8 @@ async def create_rerun(
                 template_id=original.template_id,
                 template_parameters=original.template_parameters,
                 rerun_of=original.id,
+                trigger="rerun",
+                branch=original.repo.get("ref") if original.repo else None,
             )
         )
         audit(

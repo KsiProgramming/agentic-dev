@@ -25,8 +25,9 @@ function replace(data: Pages, run: RunSummary): Pages {
  * Bring every cached runs list of the workspace up to date with `run`'s new summary. A list
  * that shows the run gets it in place; a list it joins (a new run, or one that now matches its
  * filters) or leaves (a run that no longer matches, such as an approved one leaving "Needs
- * approval") is fetched again, so its order and pages stay the API's. Returns the summary the
- * cache had before, if any.
+ * approval") is fetched again, so its order and pages stay the API's. The views' counts are
+ * fetched again when the run joins or leaves one. Returns the summary the cache had before, if
+ * any.
  */
 export function applySummary(
   client: QueryClient,
@@ -34,7 +35,8 @@ export function applySummary(
   run: RunSummary,
 ): RunSummary | undefined {
   let previous: RunSummary | undefined;
-  for (const query of client.getQueryCache().findAll({ queryKey: runsKey(workspaceId) })) {
+  const lists = client.getQueryCache().findAll({ queryKey: [...runsKey(workspaceId), "list"] });
+  for (const query of lists) {
     const key = query.queryKey as RunListKey;
     const data = query.state.data as Pages | undefined;
     if (!data) continue;
@@ -47,6 +49,13 @@ export function applySummary(
     } else if (matches) {
       void client.invalidateQueries({ queryKey: key, exact: true });
     }
+  }
+  // A new run, or one whose status or gate changed, moves between the views' counts.
+  if (
+    previous?.status !== run.status ||
+    previous.waiting_gate?.node_id !== run.waiting_gate?.node_id
+  ) {
+    void client.invalidateQueries({ queryKey: [...runsKey(workspaceId), "counts"] });
   }
   return previous;
 }

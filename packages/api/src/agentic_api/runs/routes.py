@@ -22,6 +22,7 @@ from agentic_api.runs.models import (
     EditErrorDetail,
     PolicyErrorDetail,
     RerunRequest,
+    RunCounts,
     RunDetail,
     RunStatus,
     RunSummary,
@@ -50,6 +51,7 @@ from agentic_store import (
     RunNotFoundError,
     RunSummaryRow,
     WorkspaceNotFoundError,
+    count_runs,
     create_rerun,
     create_run,
     enqueue_run,
@@ -146,6 +148,8 @@ def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
         "cancel_reason": cancel_reason,
         "expired": cancel_reason == APPROVAL_EXPIRED_REASON,
         "rerun_of": row.rerun_of,
+        "trigger": row.trigger,
+        "branch": row.branch,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
         "active_ms": active_ms,
         "waiting_ms": waiting_ms,
@@ -197,6 +201,24 @@ async def list_runs(
     return RunSummaryPage(
         items=[RunSummary(**_summary_fields(row)) for row in rows], next_cursor=next_cursor
     )
+
+
+@router.get(
+    "/counts",
+    operation_id="countRuns",
+    responses={404: {"description": "No workspace with this id"}},
+)
+async def counts(
+    request: Request,
+    workspace_id: Annotated[UUID, Depends(existing_workspace)],
+    template: Annotated[str | None, Query(description="Only runs of this template id.")] = None,
+    repo: Annotated[str | None, Query(description="Only runs on this repo URL.")] = None,
+) -> RunCounts:
+    """How many runs each saved view of the runs list holds (All, Running, Needs approval,
+    Failed), with the same `template` and `repo` filters as `GET /runs`. A run waiting at a gate
+    past its expiry is not counted as waiting, even before a worker cancels it."""
+    row = await count_runs(_sessions(request), workspace_id, template_id=template, repo_url=repo)
+    return RunCounts(all=row.all, running=row.running, waiting=row.waiting, failed=row.failed)
 
 
 @router.get(
@@ -317,6 +339,7 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
             template_id=body.template.id if body.template else None,
             template_parameters=dict(body.template.parameters) if body.template else None,
             budget_usd=to_usd(body.budget_usd),
+            trigger=body.trigger,
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e

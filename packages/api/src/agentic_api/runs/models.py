@@ -95,6 +95,11 @@ class CreateRunRequest(BaseModel):
         description="The workspace the run belongs to; its connections are used. Default: the "
         "default workspace.",
     )
+    trigger: Literal["manual", "api"] = Field(
+        default="api",
+        description="Who starts the run: `manual` for a person in the web app, `api` for a "
+        "script or another client.",
+    )
     budget_usd: float | None = budget_field(
         "USD the run may spend, a hard stop once reached. Unset: the workspace's default budget."
     )
@@ -213,6 +218,8 @@ class CancelResponse(BaseModel):
 
 type RunStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled"]
 
+type RunTrigger = Literal["manual", "api", "rerun"]
+
 
 class WorkflowRef(BaseModel):
     id: str
@@ -269,6 +276,14 @@ class RunSummary(BaseModel):
         description='True for a run cancelled because its gate expired: shown as "Expired".'
     )
     rerun_of: UUID | None = Field(description="The run this one repeats.")
+    trigger: RunTrigger = Field(
+        description="What started the run: a person in the web app (`manual`), another client "
+        "(`api`), or a rerun of `rerun_of` (`rerun`)."
+    )
+    branch: str | None = Field(
+        description="The branch the run works on: the repo's `ref`, else the default branch of a "
+        "repo the run created; `null` when it is the repo's default branch, not known yet."
+    )
     usage: RunUsage
     active_ms: int | None = Field(
         description="Time spent executing: the run's duration. Time paused at a gate is not "
@@ -299,6 +314,17 @@ class RunDetail(RunSummary):
     input: str
     failure_reason: str | None = Field(description="Why the run failed, if it did.")
     spec: WorkflowSpec = Field(description="The workflow spec the run was created with.")
+
+
+class RunCounts(BaseModel):
+    """How many of the workspace's runs each saved view of the runs list holds."""
+
+    all: int
+    running: int = Field(description="Queued or running.")
+    waiting: int = Field(
+        description="Waiting at a gate that has not expired: the runs that need approval."
+    )
+    failed: int
 
 
 class RunSummaryPage(BaseModel):

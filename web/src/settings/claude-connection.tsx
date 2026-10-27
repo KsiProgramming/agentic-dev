@@ -9,7 +9,7 @@ import { RelativeTime } from "@/components/display";
 import { ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { ClaudeKeyForm } from "./claude-key-form";
 import { ConfirmButton } from "./confirm-dialog";
@@ -21,11 +21,12 @@ const PURPOSE = "Agents run on Claude with this workspace's API key.";
  * write only: once saved, only its last 4 characters are shown. */
 export function ClaudeConnection({
   baseUrl,
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
 }: {
   baseUrl?: string;
   workspaceId?: string;
 }) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const connections = useConnections({ workspaceId, baseUrl });
   const remove = useRemoveClaudeKey({ workspaceId, baseUrl });
   const [replacing, setReplacing] = useState(false);

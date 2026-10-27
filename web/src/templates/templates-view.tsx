@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { NewRunSheet } from "@/runs/new-run/new-run-sheet";
 import { useReadiness } from "@/runs/new-run/readiness";
 import { installResult } from "@/settings/github-connection";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { TemplateGallery } from "./template-gallery";
 
@@ -19,11 +19,12 @@ import { TemplateGallery } from "./template-gallery";
  */
 export function TemplatesView({
   baseUrl,
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
 }: {
   baseUrl?: string;
   workspaceId?: string;
 }) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();

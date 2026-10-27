@@ -9,22 +9,24 @@ import { createApiClient } from "@/api/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useWorkspaceId } from "@/workspace";
 
 import { countLabel, useWaitingCount } from "./attention";
 import { isActive, NAV_ITEMS } from "./nav";
 
 type WorkspaceName = { state: "loading" } | { state: "ready"; name: string | null };
 
-/** The current workspace's name. There is one workspace until there are users, so this is the
- * first one listed; on failure the name is simply left out. */
+/** The current workspace's name (`useWorkspaceId`); on failure the name is simply left out. */
 function useWorkspaceName(baseUrl?: string): WorkspaceName {
+  const workspaceId = useWorkspaceId();
   const [loaded, setLoaded] = useState<WorkspaceName>({ state: "loading" });
   useEffect(() => {
     let live = true;
     createApiClient(baseUrl)
       .GET("/workspaces")
       .then(({ data }) => {
-        if (live) setLoaded({ state: "ready", name: data?.[0]?.name ?? null });
+        const name = data?.find((w) => w.id === workspaceId)?.name ?? null;
+        if (live) setLoaded({ state: "ready", name });
       })
       .catch(() => {
         if (live) setLoaded({ state: "ready", name: null });
@@ -32,7 +34,7 @@ function useWorkspaceName(baseUrl?: string): WorkspaceName {
     return () => {
       live = false;
     };
-  }, [baseUrl]);
+  }, [baseUrl, workspaceId]);
   return loaded;
 }
 

@@ -21,15 +21,76 @@ function show(runs = [FAILED]) {
   );
 }
 
-test("a waiting run offers Review, which opens its console; others do not", () => {
+test("a waiting run's status badge opens its review; there is no Review button", () => {
   show([runSummary({ id: "r-wait", status: "waiting" }), runSummary({ id: "r-done" })]);
 
   const table = within(screen.getByRole("table", { name: "Runs" }));
-  const reviews = table.getAllByRole("link", { name: /^Review/ });
+  const reviews = table.getAllByRole("link", { name: /: review/ });
   expect(reviews).toHaveLength(1);
   expect(reviews[0]!.getAttribute("href")).toBe("/runs/r-wait");
-  const cards = within(screen.getByRole("list", { name: "Runs" }));
-  expect(cards.getAllByRole("link", { name: /^Review/ })).toHaveLength(1);
+  expect(reviews[0]!.textContent).toMatch(/^Waiting/);
+  expect(table.queryByRole("link", { name: /^Review/ })).toBeNull();
+  const cards = within(screen.getByRole("list", { name: /^Runs/ }));
+  expect(cards.getAllByRole("link", { name: /: review/ })).toHaveLength(1);
+});
+
+test("the Run column shows the workflow, the short id and what started the run", () => {
+  show([
+    runSummary({ id: "0123456789abcdef", trigger: "manual" }),
+    runSummary({ id: "fedcba9876543210", trigger: "api" }),
+  ]);
+
+  const rows = within(screen.getByRole("table", { name: "Runs" })).getAllByRole("row");
+  const manual = within(rows.find((r) => r.dataset.runId === "0123456789abcdef")!);
+  expect(manual.getByRole("link", { name: "Generate docs" }).getAttribute("href")).toBe(
+    "/runs/0123456789abcdef",
+  );
+  expect(manual.getByText("01234567")).toBeTruthy();
+  expect(manual.getByText("Manual")).toBeTruthy();
+  // The id is a value in a list row: it adds no tab stop.
+  expect(manual.queryByRole("button", { name: /^Copy/ })).toBeNull();
+  const api = within(rows.find((r) => r.dataset.runId === "fedcba9876543210")!);
+  expect(api.getByText("API")).toBeTruthy();
+});
+
+test("the branch sits under the repo when the run is on one", () => {
+  show([
+    runSummary({ id: "on-branch", branch: "release/1.2" }),
+    runSummary({ id: "on-default", branch: null }),
+  ]);
+
+  const rows = within(screen.getByRole("table", { name: "Runs" })).getAllByRole("row");
+  const onBranch = rows.find((r) => r.dataset.runId === "on-branch")!;
+  expect(onBranch.textContent).toContain("acme/docs");
+  expect(within(onBranch).getByText("release/1.2")).toBeTruthy();
+  expect(rows.find((r) => r.dataset.runId === "on-default")!.textContent).not.toContain("Branch");
+});
+
+test("rows are grouped under date headers, newest first", () => {
+  const now = Date.parse("2026-10-27T15:00:00Z");
+  renderWithQueries(
+    <RunsList
+      runs={[
+        runSummary({ id: "today", created_at: "2026-10-27T09:00:00Z" }),
+        runSummary({ id: "today-2", created_at: "2026-10-27T00:10:00Z" }),
+        runSummary({ id: "yesterday", created_at: "2026-10-26T23:00:00Z" }),
+        runSummary({ id: "week", created_at: "2026-10-22T12:00:00Z" }),
+        runSummary({ id: "earlier", created_at: "2026-10-01T12:00:00Z" }),
+      ]}
+      now={now}
+      label="Runs"
+      baseUrl="http://api.test"
+    />,
+  );
+
+  const table = screen.getByRole("table", { name: "Runs" });
+  const headers = within(table).getAllByRole("rowheader");
+  expect(headers.map((h) => h.textContent)).toEqual(["Today", "Yesterday", "This week", "Earlier"]);
+  const today = table.querySelector('[data-date-group="Today"]')!;
+  expect(
+    [...today.querySelectorAll("[data-run-id]")].map((r) => r.getAttribute("data-run-id")),
+  ).toEqual(["today", "today-2"]);
+  expect(screen.getByRole("list", { name: "Runs, Earlier" })).toBeTruthy();
 });
 
 test.each([
@@ -84,7 +145,7 @@ test("Done when (11.2): a run that waited 1 h and worked 2 min shows both apart"
 
   const table = within(screen.getByRole("table", { name: "Runs" }));
   expect(table.getByTestId("run-time").textContent).toBe("2m 00s · waited 1h 00m");
-  const cards = within(screen.getByRole("list", { name: "Runs" }));
+  const cards = within(screen.getByRole("list", { name: /^Runs/ }));
   expect(cards.getByTestId("run-time").textContent).toBe("2m 00s · waited 1h 00m");
 });
 
@@ -129,5 +190,5 @@ test("a run whose approval expired shows Expired, in Cancelled's grey", () => {
   const table = within(screen.getByRole("table", { name: "Runs" }));
   const badge = table.getByText("Expired");
   expect(badge.closest("[data-status]")?.getAttribute("data-status")).toBe("cancelled");
-  expect(table.queryByRole("link", { name: /^Review/ })).toBeNull();
+  expect(table.queryByRole("link", { name: /: review/ })).toBeNull();
 });

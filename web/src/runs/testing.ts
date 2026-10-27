@@ -93,6 +93,8 @@ export function runSummary(overrides: Partial<RunSummary> = {}): RunSummary {
     cancel_reason: null,
     expired: false,
     rerun_of: null,
+    trigger: "manual",
+    branch: null,
     usage: {
       input_tokens: 12_000,
       output_tokens: 3_400,

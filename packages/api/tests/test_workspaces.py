@@ -80,6 +80,17 @@ async def test_the_default_workspace_is_listed(client: AsyncClient) -> None:
     ].items()
 
 
+async def test_a_workspace_is_created(client: AsyncClient) -> None:
+    response = await client.post("/workspaces", json={"name": "E2E"})
+
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["name"] == "E2E"
+    assert created in (await client.get("/workspaces")).json()
+    assert (await client.get(f"/workspaces/{created['id']}/connections")).json() == []
+    assert (await client.post("/workspaces", json={"name": ""})).status_code == 422
+
+
 async def test_a_stored_key_is_shown_by_its_hint_only(client: AsyncClient) -> None:
     key = f"sk-ant-api-test-{uuid4().hex}"
 

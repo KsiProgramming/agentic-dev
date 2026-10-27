@@ -15,17 +15,20 @@ const CHIP =
 /**
  * An id in short (mono, 8 characters) with the full id in a tooltip. With `href` it links to what
  * it names ("Run 1a2b3c4d" with `label="run"`); otherwise a click copies the full id ("Copy run id
- * 1a2b3c4d" with `label="run id"`).
+ * 1a2b3c4d" with `label="run id"`). In a list row, `focusable={false}` shows it as plain text, the
+ * full id still in its tooltip on hover, so it adds no tab stop.
  */
 export function IdChip({
   id,
   label = "id",
   href,
+  focusable = true,
   className,
 }: {
   id: string;
   label?: string;
   href?: string;
+  focusable?: boolean;
   className?: string;
 }) {
   const short = shortId(id);
@@ -40,6 +43,13 @@ export function IdChip({
         >
           {short}
         </Link>
+      </ValueTooltip>
+    );
+  }
+  if (!focusable) {
+    return (
+      <ValueTooltip content={id}>
+        <span className={cn(CHIP, className)}>{short}</span>
       </ValueTooltip>
     );
   }

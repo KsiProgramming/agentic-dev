@@ -35,11 +35,15 @@ function page(items: RunSummary[], next_cursor: string | null = null): RunSummar
   return { items, next_cursor };
 }
 
-/** Answers `GET /runs` with `lists(query)`; GitHub is not connected. */
+const COUNTS = { all: 3, running: 0, waiting: 1, failed: 1 };
+
+/** Answers `GET /runs` with `lists(query)` and `GET /runs/counts` with `COUNTS`; GitHub is not
+ * connected. */
 function api(lists: (query: URLSearchParams) => Response) {
   const fetch = vi.fn<(r: Request) => Promise<Response>>(async (request) => {
     const url = new URL(request.url);
     if (url.pathname === "/runs") return lists(url.searchParams);
+    if (url.pathname === "/runs/counts") return json(COUNTS);
     if (url.pathname.endsWith("/repos")) return json({ detail: "not connected" }, 409);
     throw new Error(`unexpected ${request.method} ${request.url}`);
   });
@@ -67,19 +71,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("runs that need approval come first, then every run with its status", async () => {
-  api((q) =>
-    json(page(q.getAll("status").includes("waiting") ? [paused] : [paused, failed, done])),
-  );
+test("Done when (11.4): every run is listed newest first, nothing is pinned above", async () => {
+  api((q) => json(page(q.getAll("status").length ? [] : [paused, failed, done])));
   show();
 
-  const waiting = await screen.findByRole("table", { name: "Runs that need approval" });
-  expect(within(waiting).getAllByRole("row")).toHaveLength(2);
-  expect(within(waiting).getByText("Waiting")).toBeTruthy();
-  expect(screen.getByRole("heading", { name: /Needs approval/ }).textContent).toContain("(1)");
-
-  const all = screen.getByRole("table", { name: "All runs" });
-  const rows = within(all).getAllByRole("row").slice(1);
+  const all = await screen.findByRole("table", { name: "All runs" });
+  // Only one list: the waiting run is a row like the others.
+  expect(screen.getAllByRole("table")).toHaveLength(1);
+  const rows = within(all)
+    .getAllByRole("row")
+    .filter((row) => row.dataset.runId);
   expect(
     rows.map((row) => within(row).getAllByText(/^(Waiting|Failed|Succeeded)$/)[0]?.textContent),
   ).toEqual(["Waiting", "Failed", "Succeeded"]);
@@ -92,12 +93,51 @@ test("runs that need approval come first, then every run with its status", async
   );
 });
 
-test("with no waiting runs there is no Needs approval section", async () => {
-  api((q) => json(page(q.getAll("status").length ? [] : [done])));
+test("the views are tabs with their counts; the current one is marked", async () => {
+  api(() => json(page([done])));
+  show();
+  await screen.findByRole("table", { name: "All runs" });
+
+  const views = within(screen.getByRole("navigation", { name: "Views" }));
+  await waitFor(() => expect(screen.getByTestId("view-count-waiting").textContent).toBe(", 1"));
+  const tabs = views.getAllByRole("link");
+  expect(tabs.map((t) => t.textContent)).toEqual([
+    "All, 3",
+    "Running, 0",
+    "Needs approval, 1",
+    "Failed, 1",
+  ]);
+  expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
+  // A waiting run is one click away.
+  expect(views.getByRole("link", { name: /^Needs approval/ }).getAttribute("href")).toBe(
+    "/runs?view=waiting",
+  );
+});
+
+test("a view comes from the URL and asks the API for its statuses", async () => {
+  nav.search = "view=running";
+  const fetch = api(() => json(page([])));
   show();
 
-  await screen.findByRole("table", { name: "All runs" });
-  expect(screen.queryByRole("heading", { name: /Needs approval/ })).toBeNull();
+  expect(await screen.findByText("No run is running right now.")).toBeTruthy();
+  const runs = fetch.mock.calls.map(([r]) => new URL(r.url)).find((u) => u.pathname === "/runs");
+  expect(runs!.searchParams.getAll("status")).toEqual(["running", "queued"]);
+  const views = within(screen.getByRole("navigation", { name: "Views" }));
+  expect(views.getByRole("link", { name: /^Running/ }).getAttribute("aria-current")).toBe("page");
+  expect(screen.getByRole("link", { name: "Show all runs" }).getAttribute("href")).toBe("/runs");
+});
+
+test("Needs approval leaves out a gate past its time to live", async () => {
+  nav.search = "view=waiting";
+  const stale = {
+    ...paused,
+    id: "r4",
+    waiting_gate: { node_id: "gate", title: "Old", expires_at: "2020-01-01T00:00:00Z" },
+  };
+  api(() => json(page([stale])));
+  show();
+
+  expect(await screen.findByText("Nothing needs approval.")).toBeTruthy();
 });
 
 test("no runs at all points at the templates", async () => {
@@ -111,20 +151,22 @@ test("no runs at all points at the templates", async () => {
 });
 
 test("filters come from the URL and are sent to the API", async () => {
-  nav.search = "status=failed&template=generate-docs";
+  nav.search = "view=failed&template=generate-docs";
   const fetch = api(() => json(page([])));
   show();
 
   expect(await screen.findByText("No runs match these filters.")).toBeTruthy();
-  const runs = fetch.mock.calls.map(([r]) => new URL(r.url)).find((u) => u.pathname === "/runs");
-  const query = runs!.searchParams;
-  expect(query.getAll("status")).toEqual(["failed"]);
-  expect(query.get("template")).toBe("generate-docs");
-  // A status filter replaces the Needs approval section.
-  expect(fetch.mock.calls.every(([r]) => !r.url.includes("status=waiting"))).toBe(true);
+  const urls = fetch.mock.calls.map(([r]) => new URL(r.url));
+  const runs = urls.find((u) => u.pathname === "/runs")!.searchParams;
+  expect(runs.getAll("status")).toEqual(["failed"]);
+  expect(runs.get("template")).toBe("generate-docs");
+  // The counts are for the same filters.
+  const counts = urls.find((u) => u.pathname === "/runs/counts")!.searchParams;
+  expect(counts.get("template")).toBe("generate-docs");
 
+  // Clearing the filters keeps the view.
   fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[0]!);
-  expect(nav.replace).toHaveBeenCalledWith("/runs", { scroll: false });
+  expect(nav.replace).toHaveBeenCalledWith("/runs?view=failed", { scroll: false });
 });
 
 test("choosing a template puts it in the URL", async () => {
@@ -162,7 +204,13 @@ test("Load more appends the next page", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Load more" }));
 
   const all = screen.getByRole("table", { name: "All runs" });
-  await waitFor(() => expect(within(all).getAllByRole("row")).toHaveLength(3));
+  await waitFor(() =>
+    expect(
+      within(all)
+        .getAllByRole("row")
+        .filter((row) => row.dataset.runId),
+    ).toHaveLength(2),
+  );
   expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   expect(fetch.mock.calls.some(([r]) => r.url.includes("cursor=c1"))).toBe(true);
 });

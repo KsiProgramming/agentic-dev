@@ -11,6 +11,7 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { FakeEventSource, runSummary } from "@/runs/testing";
+import { DEFAULT_WORKSPACE_ID, WORKSPACE_COOKIE } from "@/workspace";
 
 import { AppShell } from "./app-shell";
 
@@ -31,7 +32,7 @@ beforeEach(() => {
     vi.fn(async (request: Request) =>
       new URL(request.url).pathname === "/runs"
         ? Response.json({ items: api.waiting, next_cursor: null })
-        : Response.json([{ id: "w1", name: "Default", created_at: "" }]),
+        : Response.json([{ id: DEFAULT_WORKSPACE_ID, name: "Default", created_at: "" }]),
     ),
   );
 });
@@ -147,4 +148,25 @@ test("with nothing waiting, Runs has no badge and the title is left alone", asyn
   await sidebar().findByTestId("workspace-name");
   expect(sidebar().queryByTestId("runs-waiting-badge")).toBeNull();
   expect(document.title).toBe("Runs · Agentic Dev");
+});
+
+test("the workspace named by the browser's cookie is the one shown", async () => {
+  const other = "00000000-0000-0000-0000-0000000000e2";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json([
+        { id: DEFAULT_WORKSPACE_ID, name: "Default", created_at: "" },
+        { id: other, name: "E2E", created_at: "" },
+      ]),
+    ),
+  );
+  document.cookie = `${WORKSPACE_COOKIE}=${other}`;
+  try {
+    render(<AppShell>page</AppShell>);
+
+    expect((await sidebar().findByTestId("workspace-name")).textContent).toBe("E2E");
+  } finally {
+    document.cookie = `${WORKSPACE_COOKIE}=; max-age=0`;
+  }
 });

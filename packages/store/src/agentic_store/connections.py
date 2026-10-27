@@ -67,6 +67,16 @@ async def list_workspaces(sessions: async_sessionmaker[AsyncSession]) -> list[Wo
         return [_workspace_info(w) for w in rows]
 
 
+async def create_workspace(sessions: async_sessionmaker[AsyncSession], name: str) -> WorkspaceInfo:
+    """A new workspace named `name`, with no connections and the platform's limits."""
+    async with sessions.begin() as session:
+        workspace = Workspace(id=uuid4(), name=name)
+        session.add(workspace)
+        await session.flush()
+        await session.refresh(workspace)
+        return _workspace_info(workspace)
+
+
 async def get_workspace(
     sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
 ) -> WorkspaceInfo | None:

@@ -62,6 +62,7 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     |   | `gate_expires_at` (from `expires_at`) |
     | `gate_decided` | `waiting_gate=null`, `gate_expires_at=null` |
     | `pr_opened` | `pr_url` (the last one wins) |
+    | `repo_created` | `branch` (its `default_branch`), unless the run asked for a ref |
     | `node_failed` with an `error` | `failure_reason="node <id>: <error>"` |
     | `run_completed`, `run_cancelled` | end status, `finished_at`; clears the gate and reason |
     | `run_cancelled` with a `reason` | `cancel_reason` |
@@ -93,6 +94,8 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
         values["gate_expires_at"] = expires_at
     elif event.type == PR_OPENED and isinstance(url := payload.get("url"), str):
         values["pr_url"] = url
+    elif event.type == REPO_CREATED and isinstance(branch := payload.get("default_branch"), str):
+        values["branch"] = func.coalesce(Run.branch, branch)
     elif (
         event.type == NODE_FAILED
         and event.node_id is not None

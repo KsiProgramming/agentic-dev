@@ -240,6 +240,98 @@
         }
       }
     },
+    "/runs/counts": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Counts",
+        "description": "How many runs each saved view of the runs list holds (All, Running, Needs approval,\nFailed), with the same `template` and `repo` filters as `GET /runs`. A run waiting at a gate\npast its expiry is not counted as waiting, even before a worker cancels it.",
+        "operationId": "countRuns",
+        "parameters": [
+          {
+            "name": "template",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only runs of this template id.",
+              "title": "Template"
+            },
+            "description": "Only runs of this template id."
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only runs on this repo URL.",
+              "title": "Repo"
+            },
+            "description": "Only runs on this repo URL."
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCounts"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/stream": {
       "get": {
         "tags": [
@@ -658,6 +750,46 @@
                   },
                   "type": "array",
                   "title": "Response Listworkspaces"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "New Workspace",
+        "description": "A new workspace, with no connections and the platform's run limits. The e2e tests and\ndemos run in their own, so their runs never mix with real ones.",
+        "operationId": "createWorkspace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewWorkspace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2060,6 +2192,16 @@
             "title": "Workspace Id",
             "description": "The workspace the run belongs to; its connections are used. Default: the default workspace."
           },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "api"
+            ],
+            "title": "Trigger",
+            "description": "Who starts the run: `manual` for a person in the web app, `api` for a script or another client.",
+            "default": "api"
+          },
           "budget_usd": {
             "anyOf": [
               {
@@ -2692,6 +2834,22 @@
           "personal_account"
         ]
       },
+      "NewWorkspace": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "NewWorkspace"
+      },
       "ParallelNode": {
         "properties": {
           "type": {
@@ -3146,6 +3304,37 @@
         "type": "object",
         "title": "RerunRequest"
       },
+      "RunCounts": {
+        "properties": {
+          "all": {
+            "type": "integer",
+            "title": "All"
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running",
+            "description": "Queued or running."
+          },
+          "waiting": {
+            "type": "integer",
+            "title": "Waiting",
+            "description": "Waiting at a gate that has not expired: the runs that need approval."
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "all",
+          "running",
+          "waiting",
+          "failed"
+        ],
+        "title": "RunCounts",
+        "description": "How many of the workspace's runs each saved view of the runs list holds."
+      },
       "RunDetail": {
         "properties": {
           "id": {
@@ -3268,6 +3457,22 @@
             "title": "Rerun Of",
             "description": "The run this one repeats."
           },
+          "trigger": {
+            "$ref": "#/components/schemas/RunTrigger",
+            "description": "What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`)."
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch",
+            "description": "The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet."
+          },
           "usage": {
             "$ref": "#/components/schemas/RunUsage"
           },
@@ -3345,6 +3550,8 @@
           "cancel_reason",
           "expired",
           "rerun_of",
+          "trigger",
+          "branch",
           "usage",
           "active_ms",
           "waiting_ms",
@@ -3652,6 +3859,22 @@
             "title": "Rerun Of",
             "description": "The run this one repeats."
           },
+          "trigger": {
+            "$ref": "#/components/schemas/RunTrigger",
+            "description": "What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`)."
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch",
+            "description": "The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet."
+          },
           "usage": {
             "$ref": "#/components/schemas/RunUsage"
           },
@@ -3709,6 +3932,8 @@
           "cancel_reason",
           "expired",
           "rerun_of",
+          "trigger",
+          "branch",
           "usage",
           "active_ms",
           "waiting_ms",
@@ -3746,6 +3971,14 @@
           "next_cursor"
         ],
         "title": "RunSummaryPage"
+      },
+      "RunTrigger": {
+        "type": "string",
+        "enum": [
+          "manual",
+          "api",
+          "rerun"
+        ]
       },
       "RunUsage": {
         "properties": {

@@ -1,9 +1,10 @@
 "use client";
 
-import { EllipsisIcon, ExternalLinkIcon, RotateCcwIcon } from "lucide-react";
+import { EllipsisIcon, ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import Link from "next/link";
+import { Fragment } from "react";
 
-import { Duration, Money, RelativeTime, shortId, WaitingTime } from "@/components/display";
+import { Duration, IdChip, Money, RelativeTime, shortId, WaitingTime } from "@/components/display";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { usageOfRun } from "./cost";
+import { groupRuns } from "./date-groups";
 import { canRerun, RerunOf, useRerun } from "./rerun";
 import {
   badgeStatus,
@@ -56,16 +58,44 @@ function PrLink({ url }: { url: string }) {
   );
 }
 
-/** A waiting run's way to its decision: the console, where the gate is reviewed. */
-function ReviewLink({ run }: { run: RunSummary }) {
-  if (run.status !== "waiting") return null;
+/** The run's status. A waiting run's badge links to its review on the console. */
+function RunStatusBadge({ run }: { run: RunSummary }) {
+  const badge = <StatusBadge status={badgeStatus(run.status)} label={expiredLabel(run)} />;
+  if (run.status !== "waiting") return badge;
   return (
-    <Button asChild size="xs" variant="outline" className="relative z-10">
-      <Link href={`/runs/${run.id}`}>
-        Review
-        <span className="sr-only"> {run.workflow.name}</span>
+    <Link
+      href={`/runs/${run.id}`}
+      className="relative z-10 w-fit rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      {badge}
+      <span className="sr-only">
+        : review {run.workflow.name} {shortId(run.id)}
+      </span>
+    </Link>
+  );
+}
+
+/** What started the run: "Manual", "API" or "Rerun of <id>". */
+function Trigger({ run }: { run: RunSummary }) {
+  if (run.rerun_of) return <RerunOf runId={run.rerun_of} />;
+  return (
+    <span>{run.trigger === "manual" ? "Manual" : run.trigger === "api" ? "API" : "Rerun"}</span>
+  );
+}
+
+/** The workflow's name, opening the run; under it the run's short id and what started it. */
+function RunName({ run, className }: { run: RunSummary; className?: string }) {
+  return (
+    <div className={cn("flex min-w-0 flex-col", className)}>
+      <Link href={`/runs/${run.id}`} className={cn(STRETCHED, "truncate")}>
+        {run.workflow.name}
       </Link>
-    </Button>
+      <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
+        <IdChip id={run.id} label="run id" focusable={false} className={IN_ROW} />
+        <span aria-hidden="true">·</span>
+        <Trigger run={run} />
+      </span>
+    </div>
   );
 }
 
@@ -144,16 +174,31 @@ function Cost({ run }: { run: RunSummary }) {
   return <Money data-testid="run-cost" usage={usage} focusable={false} className={IN_ROW} />;
 }
 
+/** The repo (mono), with the branch the run works on under it when it is not the default. */
 function Repo({ run }: { run: RunSummary }) {
   if (!run.repo) return <span className="text-muted-foreground">—</span>;
   return (
-    <span title={run.repo.url} className="block max-w-64 truncate font-mono text-xs">
-      {repoLabel(run.repo.url)}
-    </span>
+    <div className="flex max-w-64 min-w-0 flex-col">
+      <span title={run.repo.url} className="truncate font-mono text-xs">
+        {repoLabel(run.repo.url)}
+      </span>
+      {run.branch ? (
+        <span className="flex min-w-0 items-center gap-1 text-caption text-muted-foreground">
+          <GitBranchIcon aria-hidden="true" className="size-3 shrink-0" />
+          <span className="sr-only">Branch </span>
+          <span className="truncate font-mono">{run.branch}</span>
+        </span>
+      ) : null}
+    </div>
   );
 }
 
-/** Runs as a table, from `md` (768 px). A row opens the run. */
+/** A date header sticks under the top bar (`h-14`) while its rows scroll by. */
+const DATE_HEADER =
+  "sticky top-14 z-20 bg-background text-caption font-medium text-muted-foreground";
+
+/** Runs as a table, from `md` (768 px), under their date headers. A row opens the run. From
+ * `lg` the table fits the page, so it drops its scroll box and the headers stick. */
 export function RunsTable({
   runs,
   now,
@@ -166,12 +211,12 @@ export function RunsTable({
   baseUrl?: string;
 }) {
   return (
-    <Table aria-label={label} className="text-meta">
+    <Table aria-label={label} className="text-meta" containerClassName="lg:overflow-x-visible">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead>Status</TableHead>
-          <TableHead>Workflow</TableHead>
-          <TableHead>Repo</TableHead>
+          <TableHead>Run</TableHead>
+          <TableHead>Repository</TableHead>
           <TableHead>Started</TableHead>
           <TableHead>Duration</TableHead>
           <TableHead className="text-right">Cost</TableHead>
@@ -181,48 +226,47 @@ export function RunsTable({
           </TableHead>
         </TableRow>
       </TableHeader>
-      <TableBody>
-        {runs.map((run) => (
-          <TableRow key={run.id} data-run-id={run.id} className="relative">
-            <TableCell>
-              <div className="flex items-center gap-2">
-                <StatusBadge status={badgeStatus(run.status)} label={expiredLabel(run)} />
-                <ReviewLink run={run} />
-              </div>
-            </TableCell>
-            <TableCell className="max-w-72 truncate">
-              <Link href={`/runs/${run.id}`} className={STRETCHED}>
-                {run.workflow.name}
-              </Link>
-              {run.rerun_of ? (
-                <RerunOf runId={run.rerun_of} className="block text-xs text-muted-foreground" />
-              ) : null}
-            </TableCell>
-            <TableCell>
-              <Repo run={run} />
-            </TableCell>
-            <TableCell>
-              <Started run={run} now={now} />
-            </TableCell>
-            <TableCell>
-              <RunTime run={run} now={now} />
-            </TableCell>
-            <TableCell className="text-right">
-              <Cost run={run} />
-            </TableCell>
-            <TableCell>
-              {run.pr_url ? (
-                <PrLink url={run.pr_url} />
-              ) : (
-                <span className="text-muted-foreground">—</span>
-              )}
-            </TableCell>
-            <TableCell className="text-right">
-              <RunMenu run={run} baseUrl={baseUrl} />
-            </TableCell>
+      {groupRuns(runs, now).map(({ group, runs: grouped }) => (
+        <TableBody key={group} data-date-group={group}>
+          <TableRow className="hover:bg-transparent">
+            <TableHead colSpan={8} scope="rowgroup" className={cn(DATE_HEADER, "h-8")}>
+              {group}
+            </TableHead>
           </TableRow>
-        ))}
-      </TableBody>
+          {grouped.map((run) => (
+            <TableRow key={run.id} data-run-id={run.id} className="relative">
+              <TableCell>
+                <RunStatusBadge run={run} />
+              </TableCell>
+              <TableCell className="max-w-72">
+                <RunName run={run} />
+              </TableCell>
+              <TableCell>
+                <Repo run={run} />
+              </TableCell>
+              <TableCell>
+                <Started run={run} now={now} />
+              </TableCell>
+              <TableCell>
+                <RunTime run={run} now={now} />
+              </TableCell>
+              <TableCell className="text-right">
+                <Cost run={run} />
+              </TableCell>
+              <TableCell>
+                {run.pr_url ? (
+                  <PrLink url={run.pr_url} />
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </TableCell>
+              <TableCell className="text-right">
+                <RunMenu run={run} baseUrl={baseUrl} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      ))}
     </Table>
   );
 }
@@ -232,17 +276,12 @@ export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; b
   return (
     <Card size="sm" data-run-id={run.id} className="relative px-3 hover:bg-muted/50">
       <div className="flex items-start justify-between gap-2">
-        <Link href={`/runs/${run.id}`} className={cn(STRETCHED, "min-w-0 truncate")}>
-          {run.workflow.name}
-        </Link>
+        <RunName run={run} />
         <div className="flex shrink-0 items-center gap-1">
-          <StatusBadge status={badgeStatus(run.status)} label={expiredLabel(run)} />
+          <RunStatusBadge run={run} />
           <RunMenu run={run} baseUrl={baseUrl} />
         </div>
       </div>
-      {run.rerun_of ? (
-        <RerunOf runId={run.rerun_of} className="text-xs text-muted-foreground" />
-      ) : null}
       <Repo run={run} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <Started run={run} now={now} />
@@ -255,15 +294,12 @@ export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; b
           <Cost run={run} />
         </span>
         {run.pr_url ? <PrLink url={run.pr_url} /> : null}
-        <span className="ml-auto">
-          <ReviewLink run={run} />
-        </span>
       </div>
     </Card>
   );
 }
 
-/** Runs as a table from `md` and as cards below. */
+/** Runs as a table from `md` and as cards below, grouped under date headers. */
 export function RunsList({
   runs,
   now,
@@ -280,13 +316,22 @@ export function RunsList({
       <div className="hidden md:block">
         <RunsTable runs={runs} now={now} label={label} baseUrl={baseUrl} />
       </div>
-      <ul aria-label={label} className="flex flex-col gap-2 md:hidden">
-        {runs.map((run) => (
-          <li key={run.id}>
-            <RunCard run={run} now={now} baseUrl={baseUrl} />
-          </li>
+      <div className="flex flex-col gap-2 md:hidden">
+        {groupRuns(runs, now).map(({ group, runs: grouped }) => (
+          <Fragment key={group}>
+            <h3 data-date-group={group} className={cn(DATE_HEADER, "py-1")}>
+              {group}
+            </h3>
+            <ul aria-label={`${label}, ${group}`} className="flex flex-col gap-2">
+              {grouped.map((run) => (
+                <li key={run.id}>
+                  <RunCard run={run} now={now} baseUrl={baseUrl} />
+                </li>
+              ))}
+            </ul>
+          </Fragment>
         ))}
-      </ul>
+      </div>
     </>
   );
 }

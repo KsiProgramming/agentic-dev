@@ -22,7 +22,7 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { FieldMessage } from "@/forms/schema-form/schema-fields";
 import { budgetSchema, parseBudget } from "@/runs/budget";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { ConfirmButton } from "./confirm-dialog";
 import { ConnectionCard } from "./connection-card";
@@ -139,11 +139,12 @@ function overridesOf(values: Values): RunLimitOverrides {
 /** The "Run limits" card: the platform's limits, and the workspace's lower ones. */
 export function RunLimitsCard({
   baseUrl,
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
 }: {
   baseUrl?: string;
   workspaceId?: string;
 }) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const policy = usePolicy({ workspaceId, baseUrl });
 
   const card = (children: ReactNode) => (

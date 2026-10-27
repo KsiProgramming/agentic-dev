@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import { useNow } from "@/runs/use-now";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 import { AuditFiltersBar } from "./audit-filters";
 import { AuditList } from "./audit-list";
@@ -28,11 +28,12 @@ import { useAuditLog } from "./use-audit-log";
  */
 export function AuditView({
   baseUrl = apiBaseUrl(),
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
 }: {
   baseUrl?: string;
   workspaceId?: string;
 }) {
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();

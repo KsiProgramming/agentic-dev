@@ -7,7 +7,7 @@ import { NO_FILTERS } from "@/runs/filters";
 import { gateExpired } from "@/runs/summaries";
 import { useRunList } from "@/runs/use-run-summaries";
 import { useRunsStream } from "@/runs/use-runs-stream";
-import { DEFAULT_WORKSPACE_ID } from "@/workspace";
+import { useWorkspaceId } from "@/workspace";
 
 /** Runs listed for the count; more shows as "99+". */
 const WAITING_LIMIT = 100;
@@ -60,13 +60,14 @@ function useAttentionTitle(waiting: number, consoleWaiting: boolean) {
 export function AttentionProvider({
   children,
   baseUrl = apiBaseUrl(),
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId: givenWorkspaceId,
 }: {
   children: ReactNode;
   baseUrl?: string;
   workspaceId?: string;
 }) {
-  // The same query as the runs page's "Needs approval" section, so they share one cache.
+  const workspaceId = useWorkspaceId(givenWorkspaceId);
+  // Kept live by the runs stream below, like the runs page's lists.
   const waitingRuns = useRunList(
     { ...NO_FILTERS, status: ["waiting"] },
     { workspaceId, baseUrl, limit: WAITING_LIMIT },
