@@ -52,6 +52,12 @@ export function NodeDetailSheet({
           side={wide ? "right" : "bottom"}
           className="data-[side=bottom]:max-h-[85svh] data-[side=right]:w-full! data-[side=right]:sm:max-w-[480px]!"
           data-testid="node-detail"
+          // Focus the sheet, not its first control: that may be a value whose tooltip opens on
+          // focus, and the open tooltip would take the first Escape.
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            (event.currentTarget as HTMLElement).focus();
+          }}
         >
           <SheetHeader className="border-b pr-12">
             <SheetTitle className="font-mono break-all">{node.id}</SheetTitle>

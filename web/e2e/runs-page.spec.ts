@@ -111,7 +111,8 @@ test("a run that waited 1 h and worked 2 min reads 2m 00s · waited 1h 00m", asy
     },
   };
   await page.route(
-    (url) => url.pathname === "/runs",
+    // Only the API's /runs: the page itself is also at /runs.
+    (url) => url.origin === new URL(apiURL).origin && url.pathname === "/runs",
     (route) => route.fulfill({ json: { items: [run], next_cursor: null } }),
   );
 

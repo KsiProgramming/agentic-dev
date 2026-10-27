@@ -52,8 +52,10 @@ describe("RunGraph", () => {
     await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7));
     expect(node("list_modules").dataset.status).toBe("completed");
     expect(node("approve").dataset.status).toBe("waiting");
-    expect(node("approve").getAttribute("aria-label")).toBe("approve, gate, Needs approval");
-    expect(node("document").getAttribute("aria-label")).toBe("document, map, Done, 3 of 3 items");
+    expect(node("approve").getAttribute("aria-label")).toBe(
+      "approve, Needs approval, Open the docs PR?, gate",
+    );
+    expect(node("document").getAttribute("aria-label")).toBe("document, Done, 3 of 3 items, map");
     expect(within(node("revise")).getByText("Iteration 2 of 3")).toBeTruthy();
   });
 
@@ -113,6 +115,8 @@ describe("RunGraph", () => {
 
     fireEvent.click(writer);
     const sheet = await screen.findByTestId("node-detail");
+    // The sheet takes focus, not a value in it whose tooltip would take the first Escape.
+    await waitFor(() => expect(document.activeElement).toBe(sheet));
     fireEvent.keyDown(sheet, { key: "Escape" });
 
     await waitFor(() => expect(screen.queryByTestId("node-detail")).toBeNull());

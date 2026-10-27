@@ -96,9 +96,14 @@ function Handles() {
   );
 }
 
-function accessibleName(nodeId: string, kind: NodeKind, state: NodeState): string {
-  const parts = [nodeId, kindLabel(kind), statusLabel(state.status)];
-  if (state.summary) parts.push(state.summary);
+/** The node's visible text in the order it is shown (id, status, second line), then what only
+ * the icons say: the name must contain the visible label (WCAG 2.5.3, axe
+ * label-content-name-mismatch). */
+function accessibleName(nodeId: string, kind: NodeKind, state: NodeState, line: string): string {
+  const parts = [nodeId, statusLabel(state.status)];
+  if (line) parts.push(line);
+  if (state.summary && state.summary !== line) parts.push(state.summary);
+  parts.push(kindLabel(kind));
   return parts.join(", ");
 }
 
@@ -115,7 +120,7 @@ export function LeafNodeView({ data }: NodeProps<LeafNode>) {
       <button
         type="button"
         onClick={open}
-        aria-label={accessibleName(data.nodeId, data.kind, state)}
+        aria-label={accessibleName(data.nodeId, data.kind, state, data.detail)}
         data-testid="graph-node"
         data-node-id={data.nodeId}
         data-status={state.status}
@@ -143,6 +148,7 @@ export function LeafNodeView({ data }: NodeProps<LeafNode>) {
 export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
   const { state, open } = useNodeState(data.nodeId);
   const Icon = KIND[data.kind].icon;
+  const line = state.summary ?? data.detail;
   return (
     <div
       className={cn(
@@ -154,7 +160,7 @@ export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
       <button
         type="button"
         onClick={open}
-        aria-label={accessibleName(data.nodeId, data.kind, state)}
+        aria-label={accessibleName(data.nodeId, data.kind, state, line)}
         data-testid="graph-node"
         data-node-id={data.nodeId}
         data-status={state.status}
@@ -167,9 +173,7 @@ export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
           </span>
           <NodeStatusLine status={state.status} />
         </span>
-        <span className="truncate text-xs text-muted-foreground tabular-nums">
-          {state.summary ?? data.detail}
-        </span>
+        <span className="truncate text-xs text-muted-foreground tabular-nums">{line}</span>
       </button>
     </div>
   );

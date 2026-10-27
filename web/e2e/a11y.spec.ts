@@ -141,6 +141,9 @@ for (const colorScheme of ["light", "dark"] as const) {
       await dock.getByRole("button", { name: "Review details" }).click();
       const review = page.getByTestId("gate-review");
       await expect(review.locator(".monaco-diff-editor")).toBeVisible({ timeout: 30_000 });
+      // Scan once both editors are set up with their names, not while Monaco is still mounting.
+      await expect(review.getByRole("textbox", { name: /, before$/ })).toBeAttached();
+      await expect(review.getByRole("textbox", { name: /, after/ })).toBeAttached();
       await expectNoSeriousIssues(page);
       await page.keyboard.press("Escape");
       await request.post(`${apiURL}/runs/${runId}/cancel`);

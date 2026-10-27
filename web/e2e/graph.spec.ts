@@ -24,8 +24,10 @@ test("clicking a node in the graph shows what the agent did", async ({ page, req
 
   // Every node of the spec is drawn, with its status in words.
   await expect(page.getByTestId("graph-node")).toHaveCount(4);
-  await expect(graphNode(page, "each")).toHaveAccessibleName("each, map, Done, 2 of 2 items");
-  await expect(graphNode(page, "approve")).toHaveAccessibleName("approve, gate, Needs approval");
+  await expect(graphNode(page, "each")).toHaveAccessibleName("each, Done, 2 of 2 items, map");
+  await expect(graphNode(page, "approve")).toHaveAccessibleName(
+    "approve, Needs approval, Approve the greeting, gate",
+  );
 
   await graphNode(page, "worker").click();
   const sheet = page.getByTestId("node-detail");

@@ -69,7 +69,8 @@ def test_long_titles_are_cut() -> None:
 def test_real_roadmap_parses() -> None:
     roadmap = Path(__file__).parent.parent / "specs" / "roadmap.md"
     milestones = parse_roadmap(roadmap.read_text(encoding="utf-8"))
-    assert [m.number for m in milestones] == list(range(11))
+    # Milestones are listed in the order they are worked, not by number.
+    assert sorted(m.number for m in milestones) == list(range(len(milestones)))
     assert all(m.phases for m in milestones)
     phases = [p.number for m in milestones for p in m.phases]
     assert len(phases) == len(set(phases))
