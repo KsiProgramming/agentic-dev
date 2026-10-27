@@ -115,6 +115,39 @@ export interface Timeline {
   workflowName: string | null;
   startedAt: string | null;
   endedAt: string | null;
+  clock: RunClock;
+}
+
+/**
+ * The run's active and waiting time, added up from its events the way the API does
+ * (`agentic_store.sink.time_values`): active from `run_started` or `run_resumed` to
+ * `gate_waiting` or the end, waiting from `gate_waiting` to `run_resumed` or the end. An
+ * attempt that was cut off counts until its last event. The open stretch began at
+ * `activeSince` or `waitingSince`; `clockAt` counts it up to now.
+ */
+export interface RunClock {
+  /** `null` until the run started. */
+  activeMs: number | null;
+  waitingMs: number;
+  activeSince: string | null;
+  waitingSince: string | null;
+}
+
+const between = (from: string, to: string) => Math.max(0, Date.parse(to) - Date.parse(from));
+
+/** The clock's totals with the open stretch counted up to `now`. */
+export function clockAt(
+  clock: RunClock,
+  now: number,
+): { activeMs: number | null; waitingMs: number } {
+  const open = (since: string | null) => (since ? Math.max(0, now - Date.parse(since)) : 0);
+  return {
+    activeMs:
+      clock.activeMs === null && !clock.activeSince
+        ? null
+        : (clock.activeMs ?? 0) + open(clock.activeSince),
+    waitingMs: clock.waitingMs + open(clock.waitingSince),
+  };
 }
 
 const END_STATUS: Record<string, StepStatus> = {
@@ -178,7 +211,15 @@ interface Scope {
 }
 
 class Builder {
-  readonly timeline: Timeline = { steps: [], workflowName: null, startedAt: null, endedAt: null };
+  readonly timeline: Timeline = {
+    steps: [],
+    workflowName: null,
+    startedAt: null,
+    endedAt: null,
+    clock: { activeMs: null, waitingMs: 0, activeSince: null, waitingSince: null },
+  };
+  /** When the event before the current one was written. */
+  private lastAt: string | null = null;
   /** The loops, maps and parallels that have started and not ended yet, innermost last. */
   private open: Step[] = [];
   private seen = new Set<number>();
@@ -188,6 +229,8 @@ class Builder {
     this.seen.add(event.seq);
     const payload = event.payload ?? {};
     const at = event.created_at;
+    this.tick(event.type, at, this.lastAt);
+    this.lastAt = at;
 
     switch (event.type) {
       case "run_started":
@@ -448,6 +491,32 @@ class Builder {
       }
     }
     return this.timeline;
+  }
+
+  /** Moves the run's clock (see `RunClock`). `before` is the time of the previous event. */
+  private tick(type: string, at: string, before: string | null) {
+    const clock = this.timeline.clock;
+    const closeActive = (end: string | null) => {
+      if (clock.activeSince && end)
+        clock.activeMs = (clock.activeMs ?? 0) + between(clock.activeSince, end);
+      clock.activeSince = null;
+    };
+    const closeWaiting = () => {
+      if (clock.waitingSince) clock.waitingMs += between(clock.waitingSince, at);
+      clock.waitingSince = null;
+    };
+    if (type === "run_started" || type === "run_resumed") {
+      closeActive(before);
+      closeWaiting();
+      clock.activeMs ??= 0;
+      clock.activeSince = at;
+    } else if (type === "gate_waiting") {
+      closeActive(at);
+      clock.waitingSince ??= at;
+    } else if (type in RUN_END) {
+      closeActive(at);
+      closeWaiting();
+    }
   }
 
   /** The run ended: steps cut off without their own end take its status. */

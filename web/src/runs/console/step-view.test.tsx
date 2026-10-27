@@ -242,6 +242,12 @@ describe("StepList on the recorded docs run", () => {
     const gate = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "approve")!;
     expect(within(gate).getByText("gate panel")).toBeTruthy();
   });
+
+  it("shows a gate's time as time waited, not as a duration", () => {
+    render(<StepList steps={timeline.steps} options={{ now: NOW }} />);
+    const gate = screen.getAllByTestId("step").find((s) => s.dataset.nodeId === "approve")!;
+    expect(within(gate).getByTestId("gate-waited").textContent).toMatch(/^waited /);
+  });
 });
 
 describe("previews and the rail", () => {

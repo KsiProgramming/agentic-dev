@@ -259,11 +259,26 @@ class RunSummary(BaseModel):
     waiting_gate: WaitingGate | None = Field(description="Set while the run waits at a gate.")
     rerun_of: UUID | None = Field(description="The run this one repeats.")
     usage: RunUsage
+    active_ms: int | None = Field(
+        description="Time spent executing: the run's duration. Time paused at a gate is not "
+        "counted. Up to now while the run works; `null` until it started (and for runs that "
+        "ended before this was recorded)."
+    )
+    waiting_ms: int = Field(
+        description="Time paused at gates, up to the resume (or the end, if it was cancelled "
+        "while waiting). Up to now while the run waits."
+    )
+    measured_at: datetime = Field(
+        description="When `active_ms` and `waiting_ms` were measured: a client keeps a running "
+        "run's active time, or a waiting run's waiting time, growing from here."
+    )
 
-    @computed_field  # type: ignore[prop-decorator]
+    # Marked deprecated in the schema only: `deprecated=` would warn on every serialisation.
+    @computed_field(json_schema_extra={"deprecated": True})  # type: ignore[prop-decorator]
     @property
     def duration_ms(self) -> int | None:
-        """From start to end; `null` until the run has ended."""
+        """Wall clock, from start to end, waiting at gates included; `null` until the run has
+        ended. Deprecated: a run's duration is `active_ms`."""
         if self.started_at is None or self.finished_at is None:
             return None
         return round((self.finished_at - self.started_at).total_seconds() * 1000)

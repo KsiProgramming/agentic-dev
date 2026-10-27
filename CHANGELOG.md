@@ -9,6 +9,10 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 11.2 active and waiting time ([#130](https://github.com/KsiProgramming/agentic-dev/pull/130)):
+  - **Recorded.** The event sink keeps each run's time executing and time paused at gates on its `runs` row (`active_ms`, `waiting_ms`, and when the open stretch began), so listing still never scans the log. Alembic `0020_active_waiting_time` fills runs that are live when it ships from their events; runs that ended before keep no active time and show "—". The wall-time limit reads the same columns instead of scanning the log.
+  - **API.** `GET /runs`, `GET /runs/{id}` and the summaries stream return `active_ms`, `waiting_ms` and `measured_at`; `duration_ms` (wall clock) is deprecated.
+  - **UI.** Every duration shown is active time, with the wait apart: "2m 00s · waited 1h 00m" in the runs list and the console header ("waiting …" ticking while the run waits), the wall clock only in the start time's tooltip, and a gate step shows the time it waited instead of a duration. A new `WaitingTime` display component.
 - Phase 11.1 UI v2 foundations ([#129](https://github.com/KsiProgramming/agentic-dev/pull/129)):
   - **Display components.** `RelativeTime`, `Duration`, `Money`, `TokenCount`, `IdChip` and `StatTile` (`@/components/display`) show every time, duration, cost, token count and id in the app; ids copy on click or link to their run.
   - **Locale.** Dates and numbers follow the browser's locale and time zone (24-hour where the locale is) through one module, `@/lib/locale`, instead of hard-coded `en-US` or the default `toLocaleString()`; unit tests and Playwright pin `en-US` and UTC.

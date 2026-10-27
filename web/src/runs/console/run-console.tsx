@@ -24,9 +24,9 @@ import { pendingGate, type PendingGate } from "../gates";
 import { NodeDetailSheet } from "../graph/node-detail-sheet";
 import { RunGraph } from "../graph/run-graph";
 import { displayStatus } from "../status";
-import { badgeStatus, statusLabel } from "../summaries";
+import { badgeStatus, runTimes, statusLabel, wallClockLine } from "../summaries";
 import { usageOfRun } from "../cost";
-import { buildTimeline, stepsUsage, type Step } from "../timeline";
+import { buildTimeline, clockAt, stepsUsage, type Step, type Timeline } from "../timeline";
 import type { ReceivedRunEvent, StreamStatus } from "../types";
 import { useFollowScroll } from "../use-follow-scroll";
 import { useNow } from "../use-now";
@@ -64,12 +64,7 @@ export function headerFacts(
   events: ReceivedRunEvent[],
   gate: PendingGate | null,
   run: RunDetail | null | undefined,
-  timeline: {
-    steps: Step[];
-    workflowName: string | null;
-    startedAt: string | null;
-    endedAt: string | null;
-  },
+  timeline: Timeline,
   prUrl: string | null,
   now: number,
 ): HeaderFacts {
@@ -79,7 +74,16 @@ export function headerFacts(
       : displayStatus(stream, gate !== null);
   const startedAt = timeline.startedAt ?? run?.started_at ?? null;
   const endedAt = timeline.endedAt ?? run?.finished_at ?? null;
-  const durationMs =
+  // Active and waiting time from the events once the run's start is among them, the summary's
+  // before; the wall clock only for the start time's tooltip.
+  const times =
+    timeline.startedAt !== null
+      ? clockAt(timeline.clock, now)
+      : run
+        ? runTimes(run, now)
+        : { activeMs: null, waitingMs: 0 };
+  const live = endedAt === null && startedAt !== null;
+  const wallMs =
     startedAt === null
       ? null
       : Math.max(0, (endedAt ? Date.parse(endedAt) : now) - Date.parse(startedAt));
@@ -87,7 +91,10 @@ export function headerFacts(
     status,
     workflowName: run?.workflow.name ?? timeline.workflowName,
     startedAt,
-    durationMs,
+    activeMs: times.activeMs,
+    waitingMs: times.waitingMs,
+    waitingLive: events.length > 0 ? gate !== null : run?.status === "waiting",
+    wallClock: wallClockLine(wallMs, live),
     prUrl: prUrl ?? run?.pr_url ?? null,
     // Added up live from the events; the summary's totals until they arrive.
     usage: stepsUsage(timeline.steps) ?? (run?.usage.input_tokens ? usageOfRun(run.usage) : null),

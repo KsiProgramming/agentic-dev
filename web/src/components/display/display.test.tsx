@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TokenUsage } from "@/runs/cost";
 
-import { Duration, IdChip, Money, RelativeTime, StatTile, TokenCount } from ".";
+import { Duration, IdChip, Money, RelativeTime, StatTile, TokenCount, WaitingTime } from ".";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
@@ -53,6 +53,14 @@ describe("RelativeTime", () => {
     const time = screen.getByText("11:55:07 AM");
     expect(time.hasAttribute("tabindex")).toBe(false);
   });
+
+  it("adds a detail line to its tooltip", async () => {
+    render(<RelativeTime iso="2026-10-22T11:55:00Z" now={NOW} detail="1h 02m start to end" />);
+
+    const tip = await tooltipOf(screen.getByText("5 min ago"));
+    expect(tip).toContain("Oct 22, 2026, 11:55:00 AM");
+    expect(tip).toContain("1h 02m start to end");
+  });
 });
 
 describe("Duration", () => {
@@ -67,6 +75,22 @@ describe("Duration", () => {
     expect(screen.getByTestId("took").textContent).toBe("2m 05s");
     expect(screen.getByTestId("took").className).toContain("tabular-nums");
     expect(screen.getByTestId("none").textContent).toBe("—");
+  });
+});
+
+describe("WaitingTime", () => {
+  it("says waiting while live, waited after, and nothing when the run never waited", () => {
+    render(
+      <>
+        <WaitingTime ms={725_000} live data-testid="live" />
+        <WaitingTime ms={3_600_000} data-testid="after" />
+        <WaitingTime ms={0} data-testid="never" />
+      </>,
+    );
+
+    expect(screen.getByTestId("live").textContent).toBe("waiting 12m 05s");
+    expect(screen.getByTestId("after").textContent).toBe("waited 1h 00m");
+    expect(screen.queryByTestId("never")).toBeNull();
   });
 });
 

@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -312,3 +312,121 @@ async def test_an_unknown_run_has_no_summary(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     assert await get_run_summary(sessions, UUID(int=0)) is None
+
+
+T0 = datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
+
+
+async def emit_at(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID, *events: tuple[str, float]
+) -> None:
+    """Writes `(type, seconds after T0)` events in order, as the sink receives them."""
+    sink = PostgresEventSink(sessions)
+    seq = await max_event_seq(sessions, run_id)
+    for type, seconds in events:
+        seq += 1
+        await sink.emit(
+            RunEvent(
+                run_id=run_id,
+                seq=seq,
+                type=type,
+                node_id="gate" if type == "gate_waiting" else None,
+                created_at=T0 + timedelta(seconds=seconds),
+            )
+        )
+
+
+async def test_a_run_that_waited_an_hour_and_worked_two_minutes(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Done when (11.2): active and waiting time are kept apart."""
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    await emit_at(
+        sessions,
+        run_id,
+        ("run_started", 0),
+        ("node_started", 30),
+        ("gate_waiting", 60),
+        ("run_resumed", 3660),
+        ("gate_decided", 3661),
+        ("run_completed", 3720),
+    )
+
+    times = (await summary(sessions, run_id)).times
+    assert (times.active_ms, times.waiting_ms) == (120_000, 3_600_000)
+    assert (times.active_since, times.waiting_since) == (None, None)
+
+
+async def test_the_open_stretch_counts_up_to_now(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    await emit_at(sessions, run_id, ("run_started", 0), ("gate_waiting", 60))
+
+    times = (await summary(sessions, run_id)).times
+    assert (times.active_ms, times.waiting_ms, times.waiting_since) == (
+        60_000,
+        0,
+        T0 + timedelta(seconds=60),
+    )
+    assert times.at(T0 + timedelta(minutes=31)) == (60_000, 1_800_000)
+
+    await emit_at(sessions, run_id, ("run_resumed", 120))
+    times = (await summary(sessions, run_id)).times
+    assert times.at(T0 + timedelta(seconds=130)) == (70_000, 60_000)
+
+
+async def test_a_cut_off_attempt_counts_until_its_last_event(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """The gap before the next attempt is neither active nor waiting."""
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    await emit_at(
+        sessions,
+        run_id,
+        ("run_started", 0),
+        ("node_started", 10),  # the worker dies here
+        ("run_resumed", 600),
+        ("run_completed", 605),
+    )
+
+    times = (await summary(sessions, run_id)).times
+    assert (times.active_ms, times.waiting_ms) == (15_000, 0)
+
+
+async def test_a_run_cancelled_while_waiting_closes_its_wait(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    await emit_at(sessions, run_id, ("run_started", 0), ("gate_waiting", 5), ("run_cancelled", 65))
+
+    times = (await summary(sessions, run_id)).times
+    assert (times.active_ms, times.waiting_ms) == (5_000, 60_000)
+
+
+async def test_two_gates_add_up(sessions: async_sessionmaker[AsyncSession]) -> None:
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    await emit_at(
+        sessions,
+        run_id,
+        ("run_started", 0),
+        ("gate_waiting", 10),
+        ("run_resumed", 70),
+        ("gate_waiting", 80),
+        ("run_resumed", 200),
+        ("run_completed", 210),
+    )
+
+    times = (await summary(sessions, run_id)).times
+    assert (times.active_ms, times.waiting_ms) == (30_000, 180_000)
+
+
+async def test_a_run_cancelled_before_it_started_has_no_active_time(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await create_run(sessions, spec("two-step-sequence.json"), "go")
+    await emit_at(sessions, run_id, ("run_cancelled", 0))
+
+    times = (await summary(sessions, run_id)).times
+    assert (times.active_ms, times.waiting_ms) == (None, 0)
+    assert times.at(T0) == (None, 0)

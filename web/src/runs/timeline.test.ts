@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import docsRun from "./fixtures/docs-run.json";
 import { runEvent } from "./testing";
-import { buildTimeline, foldDeltas, type MessageTurn, type Step, type ToolTurn } from "./timeline";
+import {
+  buildTimeline,
+  clockAt,
+  foldDeltas,
+  type MessageTurn,
+  type Step,
+  type ToolTurn,
+} from "./timeline";
 import type { RunEvent } from "./types";
 
 const events = docsRun as RunEvent[];
@@ -281,5 +288,53 @@ describe("buildTimeline on a parallel", () => {
     expect(review!.branches?.[1]!.steps.map((s) => [s.id, s.status])).toEqual([
       ["slow", "cancelled"],
     ]);
+  });
+});
+
+describe("the run's clock", () => {
+  const T0 = Date.UTC(2026, 9, 27, 9, 0, 0);
+  /** `[type, seconds after T0]` as events in order; a gate event is the gate node's. */
+  function timed(...rows: [string, number][]): RunEvent[] {
+    return rows.map(([type, seconds], i) => ({
+      ...event(i + 1, type, type.startsWith("run_") ? null : "gate"),
+      created_at: new Date(T0 + seconds * 1000).toISOString(),
+    }));
+  }
+
+  it("keeps a run's active and waiting time apart (Done when, 11.2)", () => {
+    const timeline = buildTimeline(
+      timed(
+        ["run_started", 0],
+        ["node_started", 30],
+        ["gate_waiting", 60],
+        ["run_resumed", 3660],
+        ["gate_decided", 3661],
+        ["run_completed", 3720],
+      ),
+    );
+
+    expect(clockAt(timeline.clock, T0 + 99_999_000)).toEqual({
+      activeMs: 120_000,
+      waitingMs: 3_600_000,
+    });
+  });
+
+  it("counts the open stretch up to now", () => {
+    const working = buildTimeline(timed(["run_started", 0], ["node_started", 5]));
+    expect(clockAt(working.clock, T0 + 9_000)).toEqual({ activeMs: 9_000, waitingMs: 0 });
+
+    const waiting = buildTimeline(timed(["run_started", 0], ["gate_waiting", 60]));
+    expect(clockAt(waiting.clock, T0 + 360_000)).toEqual({ activeMs: 60_000, waitingMs: 300_000 });
+  });
+
+  it("counts a cut-off attempt until its last event, not the gap before the next", () => {
+    const timeline = buildTimeline(
+      timed(["run_started", 0], ["node_started", 10], ["run_resumed", 600], ["run_completed", 605]),
+    );
+    expect(clockAt(timeline.clock, T0)).toEqual({ activeMs: 15_000, waitingMs: 0 });
+  });
+
+  it("has no active time before the run starts", () => {
+    expect(clockAt(buildTimeline([]).clock, T0)).toEqual({ activeMs: null, waitingMs: 0 });
   });
 });

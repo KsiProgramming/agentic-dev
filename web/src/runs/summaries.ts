@@ -51,12 +51,31 @@ export function isLive(status: ApiRunStatus): boolean {
   return status === "queued" || status === "running" || status === "waiting";
 }
 
-/** How long the run took, or has taken so far if it is still going; `null` before it started. */
-export function runDurationMs(run: RunSummary, now: number): number | null {
-  if (run.duration_ms != null) return run.duration_ms;
-  if (!run.started_at) return null;
+/** A run's time, kept apart (tech-stack → Display values → Time): `activeMs` is its duration,
+ * the time it worked (`null` before it started, or for runs that ended before it was recorded);
+ * `waitingMs` the time it was paused at gates; `wallMs` start to end, for a tooltip only. */
+export interface RunTimes {
+  activeMs: number | null;
+  waitingMs: number;
+  wallMs: number | null;
+}
+
+/** The run's times at `now`: a running run's active time and a waiting run's waiting time keep
+ * growing from when the API measured them. */
+export function runTimes(run: RunSummary, now: number): RunTimes {
+  const since = Math.max(0, now - Date.parse(run.measured_at));
   const end = run.finished_at ? Date.parse(run.finished_at) : now;
-  return Math.max(0, end - Date.parse(run.started_at));
+  return {
+    activeMs: run.active_ms == null ? null : run.active_ms + (run.status === "running" ? since : 0),
+    waitingMs: run.waiting_ms + (run.status === "waiting" ? since : 0),
+    wallMs: run.started_at ? Math.max(0, end - Date.parse(run.started_at)) : null,
+  };
+}
+
+/** The wall clock as a tooltip line: "2h 03m start to end" (so far, while live). */
+export function wallClockLine(wallMs: number | null, live: boolean): string | undefined {
+  if (wallMs === null) return undefined;
+  return `${formatDuration(wallMs)} start to end${live ? " so far" : ""}`;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");

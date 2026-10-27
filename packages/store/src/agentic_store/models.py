@@ -131,12 +131,13 @@ class Run(Base):
     while alive. A `queued` or `running` run whose lease has expired was abandoned: another worker
     may claim it and resume it from its checkpoint. `attempt` counts claims (0 = never claimed).
 
-    The summary columns (`started_at`, `finished_at`, `pr_url`, `failure_reason`, `waiting_gate`)
-    are a projection of the run's events, written by `PostgresEventSink` with each event, so
-    listing runs never scans the log. `template_id` and `repo_url` are set at creation, and
-    `rerun_of` links a rerun to the run it repeats. `cancel_requested_at` is set when a user asks
-    to cancel the run; the worker then ends it `cancelled`. `policy` holds the limits the run got
-    when it was created (`agentic_engine.policy.Policy`); they never change, resumes included."""
+    The summary columns (`started_at`, `finished_at`, `pr_url`, `failure_reason`, `waiting_gate`,
+    the time columns) are a projection of the run's events, written by `PostgresEventSink` with
+    each event, so listing runs never scans the log. `template_id` and `repo_url` are set at
+    creation, and `rerun_of` links a rerun to the run it repeats. `cancel_requested_at` is set
+    when a user asks to cancel the run; the worker then ends it `cancelled`. `policy` holds the
+    limits the run got when it was created (`agentic_engine.policy.Policy`); they never change,
+    resumes included."""
 
     __tablename__ = "runs"
     __table_args__ = (
@@ -174,6 +175,13 @@ class Run(Base):
     # `{node_id, title}` of the gate the run is paused at.
     waiting_gate: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     rerun_of: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
+    # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):
+    # `active_ms` is null until the run starts. The open stretch, if any, began at
+    # `active_since` or `waiting_since`.
+    active_ms: Mapped[int | None] = mapped_column(BigInteger)
+    waiting_ms: Mapped[int] = mapped_column(BigInteger, server_default="0")
+    active_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    waiting_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When a user asked to cancel the run (`agentic_store.cancel`).
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Totals of the run's `usage` events.

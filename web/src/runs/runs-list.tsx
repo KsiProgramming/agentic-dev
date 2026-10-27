@@ -3,7 +3,7 @@
 import { EllipsisIcon, ExternalLinkIcon, RotateCcwIcon } from "lucide-react";
 import Link from "next/link";
 
-import { Duration, Money, RelativeTime, shortId } from "@/components/display";
+import { Duration, Money, RelativeTime, shortId, WaitingTime } from "@/components/display";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,7 +25,14 @@ import { cn } from "@/lib/utils";
 
 import { usageOfRun } from "./cost";
 import { canRerun, RerunOf, useRerun } from "./rerun";
-import { badgeStatus, repoLabel, runDurationMs, type RunSummary } from "./summaries";
+import {
+  badgeStatus,
+  isLive,
+  repoLabel,
+  runTimes,
+  wallClockLine,
+  type RunSummary,
+} from "./summaries";
 
 /** A link over its whole row or card; other links in it sit above it (`relative z-10`). */
 const STRETCHED =
@@ -96,14 +103,34 @@ function RunMenu({ run, baseUrl }: { run: RunSummary; baseUrl?: string }) {
  * focus: the row's link and actions are its tab stops. */
 const IN_ROW = "relative z-10";
 
+/** When the run started; the wall clock (start to end) is only in its tooltip. */
 function Started({ run, now }: { run: RunSummary; now: number }) {
   return (
     <RelativeTime
       iso={run.started_at ?? run.created_at}
       now={now}
+      detail={wallClockLine(runTimes(run, now).wallMs, isLive(run.status))}
       focusable={false}
       className={IN_ROW}
     />
+  );
+}
+
+/** The run's duration, the time it worked, then the time it waited at gates on its own:
+ * "2m 00s · waited 1h 00m". */
+function RunTime({ run, now }: { run: RunSummary; now: number }) {
+  const { activeMs, waitingMs } = runTimes(run, now);
+  const waiting = run.status === "waiting";
+  return (
+    <span data-testid="run-time" className="tabular-nums">
+      <Duration ms={activeMs} />
+      {waitingMs > 0 || waiting ? (
+        <span className="text-muted-foreground">
+          {" · "}
+          <WaitingTime ms={waitingMs} live={waiting} />
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -177,7 +204,7 @@ export function RunsTable({
               <Started run={run} now={now} />
             </TableCell>
             <TableCell>
-              <Duration ms={runDurationMs(run, now)} />
+              <RunTime run={run} now={now} />
             </TableCell>
             <TableCell className="text-right">
               <Cost run={run} />
@@ -220,7 +247,7 @@ export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; b
         <Started run={run} now={now} />
         <span>
           <span className="sr-only">Duration </span>
-          <Duration ms={runDurationMs(run, now)} />
+          <RunTime run={run} now={now} />
         </span>
         <span>
           <span className="sr-only">Cost </span>

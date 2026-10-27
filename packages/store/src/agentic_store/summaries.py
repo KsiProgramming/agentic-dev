@@ -44,6 +44,7 @@ class RunSummaryRow:
     input: str
     failure_reason: str | None
     usage: "RunUsageRow"
+    times: "RunTimesRow"
     # The workflow spec the run was created with; read only for one run's detail.
     spec: dict[str, Any] | None = None
 
@@ -61,6 +62,31 @@ class RunUsageRow:
     cost_complete: bool
     # The run's budget, frozen in its policy; `None` is no budget.
     budget_usd: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class RunTimesRow:
+    """Time spent executing (`active_ms`, `None` until the run started) and paused at gates
+    (`waiting_ms`), in closed stretches; the open one began at `active_since` or
+    `waiting_since`."""
+
+    active_ms: int | None
+    waiting_ms: int
+    active_since: datetime | None
+    waiting_since: datetime | None
+
+    def at(self, now: datetime) -> tuple[int | None, int]:
+        """`(active_ms, waiting_ms)` with the open stretch counted up to `now`."""
+        active, waiting = self.active_ms, self.waiting_ms
+        if self.active_since is not None:
+            active = (active or 0) + _ms(self.active_since, now)
+        if self.waiting_since is not None:
+            waiting += _ms(self.waiting_since, now)
+        return active, waiting
+
+
+def _ms(start: datetime, end: datetime) -> int:
+    return max(0, round((end - start).total_seconds() * 1000))
 
 
 def encode_cursor(created_at: datetime, run_id: UUID) -> str:
@@ -101,6 +127,10 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.estimated_usd,
         Run.cost_complete,
         Run.policy["budget_usd"].astext.label("budget_usd"),
+        Run.active_ms,
+        Run.waiting_ms,
+        Run.active_since,
+        Run.waiting_since,
     )
 
 
@@ -129,6 +159,12 @@ def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
             estimated_usd=row.estimated_usd,
             cost_complete=row.cost_complete,
             budget_usd=Decimal(row.budget_usd) if row.budget_usd is not None else None,
+        ),
+        times=RunTimesRow(
+            active_ms=row.active_ms,
+            waiting_ms=row.waiting_ms,
+            active_since=row.active_since,
+            waiting_since=row.waiting_since,
         ),
         spec=spec,
     )

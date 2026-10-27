@@ -71,3 +71,47 @@ test("a rerun links back to the run it repeats", () => {
   ).toBe(`/runs/${FAILED.id}`);
   expect(table.getByText(/Rerun of/)).toBeDefined();
 });
+
+test("Done when (11.2): a run that waited 1 h and worked 2 min shows both apart", () => {
+  const run = runSummary({
+    started_at: "2026-10-22T10:00:00Z",
+    finished_at: "2026-10-22T11:02:00Z",
+    duration_ms: 3_720_000,
+    active_ms: 120_000,
+    waiting_ms: 3_600_000,
+  });
+  show([run]);
+
+  const table = within(screen.getByRole("table", { name: "Runs" }));
+  expect(table.getByTestId("run-time").textContent).toBe("2m 00s · waited 1h 00m");
+  const cards = within(screen.getByRole("list", { name: "Runs" }));
+  expect(cards.getByTestId("run-time").textContent).toBe("2m 00s · waited 1h 00m");
+});
+
+test("a waiting run's wait is live; a run that never waited shows its duration alone", () => {
+  const now = Date.parse("2026-10-22T10:10:00Z");
+  renderWithQueries(
+    <RunsList
+      runs={[
+        runSummary({
+          id: "r-wait",
+          status: "waiting",
+          finished_at: null,
+          active_ms: 90_000,
+          waiting_ms: 0,
+          measured_at: "2026-10-22T10:05:00Z",
+        }),
+        runSummary({ id: "r-done" }),
+      ]}
+      now={now}
+      label="Runs"
+      baseUrl="http://api.test"
+    />,
+  );
+
+  const table = within(screen.getByRole("table", { name: "Runs" }));
+  expect(table.getAllByTestId("run-time").map((cell) => cell.textContent)).toEqual([
+    "1m 30s · waiting 5m 00s",
+    "2m 05s",
+  ]);
+});

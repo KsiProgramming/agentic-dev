@@ -6,3 +6,4 @@ export { RelativeTime } from "./relative-time";
 export { shortId } from "./short-id";
 export { StatTile } from "./stat-tile";
 export { TokenCount } from "./token-count";
+export { WaitingTime } from "./waiting-time";

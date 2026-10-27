@@ -3,7 +3,7 @@
 import { CircleAlertIcon, ExternalLinkIcon, RepeatIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { Duration, Money, TokenCount } from "@/components/display";
+import { Duration, Money, TokenCount, WaitingTime } from "@/components/display";
 import { StatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 
@@ -49,7 +49,8 @@ const STATUS_TEXT: Record<StepStatus, string> = {
   cancelled: "text-status-cancelled",
 };
 
-/** A step's or map item's title line: its name, what needs attention, and how long it took. */
+/** A step's or map item's title line: its name, what needs attention, and how long it took. A
+ * gate's time is time waited for a person, never a duration ("waited 1h 00m"). */
 function TitleLine({
   title,
   status,
@@ -57,6 +58,7 @@ function TitleLine({
   endedAt,
   now,
   level,
+  gate = false,
 }: {
   title: ReactNode;
   status: StepStatus;
@@ -64,7 +66,9 @@ function TitleLine({
   endedAt: string | null;
   now: number;
   level: "step" | "item";
+  gate?: boolean;
 }) {
+  const ms = elapsedMs(startedAt, endedAt, now);
   const Heading = level === "step" ? "h3" : "h4";
   return (
     <div className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -83,10 +87,16 @@ function TitleLine({
           {stepBadge(status).label}
         </span>
       ) : null}
-      <Duration
-        ms={elapsedMs(startedAt, endedAt, now)}
-        className="ml-auto shrink-0 text-xs text-muted-foreground"
-      />
+      {gate ? (
+        <WaitingTime
+          data-testid="gate-waited"
+          ms={ms}
+          live={status === "waiting"}
+          className="ml-auto shrink-0 text-xs text-muted-foreground"
+        />
+      ) : (
+        <Duration ms={ms} className="ml-auto shrink-0 text-xs text-muted-foreground" />
+      )}
     </div>
   );
 }
@@ -323,6 +333,7 @@ export function StepView({ step, options }: { step: Step; options: StepViewOptio
         endedAt={step.endedAt}
         now={options.now}
         level="step"
+        gate={step.gate !== null}
       />
       <div className="mt-3 flex min-w-0 flex-col gap-3">
         <StepBody step={step} options={options} />

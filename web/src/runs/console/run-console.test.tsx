@@ -11,7 +11,8 @@ import { FakeEventSource, runEvent, runSummary } from "../testing";
 import type { RunEvent } from "../types";
 import type { RunDetail } from "../use-run-detail";
 import type { DiffViewProps } from "./diff-view";
-import { RunConsole } from "./run-console";
+import { buildTimeline } from "../timeline";
+import { headerFacts, RunConsole } from "./run-console";
 
 const RUN_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -118,6 +119,46 @@ test("the header shows the workflow, repo and status from the summary before any
   expect(screen.getByText("acme/docs")).toBeTruthy();
   expect(screen.getByText("main")).toBeTruthy();
   expect(screen.getByText("Waiting for the run to start…")).toBeTruthy();
+});
+
+test("Done when (11.2): the header shows active time and the wait apart", () => {
+  const t0 = Date.UTC(2026, 9, 27, 9, 0, 0);
+  const events = (
+    [
+      ["run_started", 0],
+      ["gate_waiting", 60],
+      ["run_resumed", 3660],
+      ["run_completed", 3720],
+    ] as const
+  ).map(([type, seconds], i) => ({
+    ...runEvent(i + 1, type),
+    created_at: new Date(t0 + seconds * 1000).toISOString(),
+    receivedAt: 0,
+  }));
+  const run = detail({ status: "completed" });
+
+  const facts = headerFacts("completed", events, null, run, buildTimeline(events), null, t0 + 1e8);
+
+  expect(facts).toMatchObject({
+    activeMs: 120_000,
+    waitingMs: 3_600_000,
+    waitingLive: false,
+    wallClock: "1h 02m start to end",
+  });
+});
+
+test("before any event, the header's times are the summary's", () => {
+  const run = detail({
+    status: "waiting",
+    active_ms: 30_000,
+    waiting_ms: 0,
+    measured_at: "2026-10-22T10:01:00Z",
+  });
+  const now = Date.parse("2026-10-22T10:03:00Z");
+
+  const facts = headerFacts("live", [], null, run, buildTimeline([]), null, now);
+
+  expect(facts).toMatchObject({ activeMs: 30_000, waitingMs: 120_000, waitingLive: true });
 });
 
 test("a docs run shows one message block per agent turn, not one row per chunk", async () => {

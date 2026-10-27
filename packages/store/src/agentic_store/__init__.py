@@ -82,6 +82,7 @@ from agentic_store.sink import (
 from agentic_store.summaries import (
     InvalidCursorError,
     RunSummaryRow,
+    RunTimesRow,
     RunUsageRow,
     get_run_summary,
     list_changed_run_summaries,
@@ -117,6 +118,7 @@ __all__ = [
     "RunNotFoundError",
     "RunNotWaitingError",
     "RunSummaryRow",
+    "RunTimesRow",
     "RunUsageRow",
     "StoredRun",
     "Workspace",

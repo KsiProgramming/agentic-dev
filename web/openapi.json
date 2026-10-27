@@ -3238,6 +3238,29 @@
           "usage": {
             "$ref": "#/components/schemas/RunUsage"
           },
+          "active_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Ms",
+            "description": "Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded)."
+          },
+          "waiting_ms": {
+            "type": "integer",
+            "title": "Waiting Ms",
+            "description": "Time paused at gates, up to the resume (or the end, if it was cancelled while waiting). Up to now while the run waits."
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At",
+            "description": "When `active_ms` and `waiting_ms` were measured: a client keeps a running run's active time, or a waiting run's waiting time, growing from here."
+          },
           "input": {
             "type": "string",
             "title": "Input"
@@ -3268,7 +3291,8 @@
               }
             ],
             "title": "Duration Ms",
-            "description": "From start to end; `null` until the run has ended.",
+            "description": "Wall clock, from start to end, waiting at gates included; `null` until the run has\nended. Deprecated: a run's duration is `active_ms`.",
+            "deprecated": true,
             "readOnly": true
           }
         },
@@ -3287,6 +3311,9 @@
           "waiting_gate",
           "rerun_of",
           "usage",
+          "active_ms",
+          "waiting_ms",
+          "measured_at",
           "input",
           "failure_reason",
           "spec",
@@ -3556,6 +3583,29 @@
           "usage": {
             "$ref": "#/components/schemas/RunUsage"
           },
+          "active_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Ms",
+            "description": "Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded)."
+          },
+          "waiting_ms": {
+            "type": "integer",
+            "title": "Waiting Ms",
+            "description": "Time paused at gates, up to the resume (or the end, if it was cancelled while waiting). Up to now while the run waits."
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At",
+            "description": "When `active_ms` and `waiting_ms` were measured: a client keeps a running run's active time, or a waiting run's waiting time, growing from here."
+          },
           "duration_ms": {
             "anyOf": [
               {
@@ -3566,7 +3616,8 @@
               }
             ],
             "title": "Duration Ms",
-            "description": "From start to end; `null` until the run has ended.",
+            "description": "Wall clock, from start to end, waiting at gates included; `null` until the run has\nended. Deprecated: a run's duration is `active_ms`.",
+            "deprecated": true,
             "readOnly": true
           }
         },
@@ -3585,6 +3636,9 @@
           "waiting_gate",
           "rerun_of",
           "usage",
+          "active_ms",
+          "waiting_ms",
+          "measured_at",
           "duration_ms"
         ],
         "title": "RunSummary",

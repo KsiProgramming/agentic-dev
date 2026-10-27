@@ -28,7 +28,8 @@ Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design sy
    | Value | Use |
    |---|---|
    | Times | `RelativeTime` (`clock` for a log line) |
-   | Durations | `Duration` |
+   | Durations | `Duration` (a run's `active_ms`) |
+   | Time waited at gates | `WaitingTime`, beside the duration |
    | Cost and prices | `Money` (`usage={…}`, or `usd={…}` with `kind="price"` for a list price or limit) |
    | Tokens | `TokenCount` |
    | Ids | `IdChip` (copies, or links with `href`) |
@@ -37,7 +38,7 @@ Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design sy
    | JSON | `JsonView` (`@/components/json-view`), never in a table cell |
 
    Dates and numbers follow the display locale (`@/lib/locale`): never `toLocaleString()` or a hand-made `Intl` format in a component. The formatters behind the components (`@/runs/summaries`, `@/runs/cost`) are for values that must be strings (placeholders, toasts, titles). In a list row, pass `focusable={false}` so values do not add tab stops.
-4. **A duration shown to the user is active time.** Time waiting at a gate is never added to it (tech-stack → UI v2 → Time). Until 11.2 ships, do not add new places that show start-to-end time as "Duration".
+4. **A duration shown to the user is active time.** Time waiting at a gate is never added to it; it is shown apart with `WaitingTime`, and start-to-end time only in the start time's tooltip (tech-stack → UI design system → Display values → Time). Never read the API's deprecated `duration_ms`.
 5. **Every data view has three states** from `@/components/states`: `LoadingState` (skeleton), `EmptyState` (icon, one sentence, one action) and `ErrorState` (message and Retry).
 6. **Pages start with `PageHeader`** (`@/components/page-header`): title, one-line description, actions on the right. Breadcrumbs come from the shell; do not add your own. Pages use the full content width the shell gives them: never `mx-auto max-w-*` on a page. Sizes come from the type scale (`text-caption`, `text-meta`, `text-body`, `text-section`, `text-page`, `text-stat`), not `text-[13px]`.
 7. **Fonts:** Inter for UI text; JetBrains Mono (`font-mono`) only for ids, paths, branches, code and JSON.
