@@ -162,7 +162,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
   - It stores nothing and needs no connection. Until 5.1 stores workflows, `{id}` must equal the spec's `id` (`id_mismatch` otherwise).
 - One validator, `agentic_engine.spec.validate_workflow`, serves the endpoint, the spec model and `POST /runs`.
   - Each issue has a stable `code`, the spec `path` (`root.steps[1].body`), the `node_id` to fix and a `message`. Policy issues also have `limit`, `value` and `observed`.
-  - Codes: `schema`, `id_mismatch`, `duplicate_node_id`, `invalid_expression`, `not_allowed_in_loop`, `not_allowed_in_map`, `reference`, `publish_not_tool_node`, `publish_without_gate`, `unknown_tool`, `policy_limit`, `budget_unpriced_model`.
+  - Codes: `schema`, `id_mismatch`, `duplicate_node_id`, `invalid_expression`, `not_allowed_in_loop`, `not_allowed_in_map`, `reference`, `publish_not_tool_node`, `publish_without_gate`, `create_not_tool_node`, `create_without_gate`, `create_not_first`, `unknown_tool`, `policy_limit`, `budget_unpriced_model`.
   - A spec off the schema gets only `schema` issues. Otherwise every issue is listed, in run order.
 - Tool names must be platform tools (`PLATFORM_TOOLS`); the tool servers register exactly these, and a test keeps them in sync. `POST /runs` refuses an unknown one with `422`.
 - `POST /runs` and rerun put the same issues in their `policy_limits` detail (`issues`), next to `errors`.
@@ -183,6 +183,17 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
   - It is idempotent: a gate that runs again after a crash finds the files already edited and makes no second commit.
   - Edits that cannot be committed fail the gate node, and so the run. A run is never approved without its edits.
 
+## New repos (API contract)
+
+- `POST /runs` (not rerun) takes `new_repo` instead of `repo`: `name`, `private` (default `true`), `description`, `gitignore`, `license`.
+  - The repo is created in the organisation of the workspace's GitHub App installation. Installation tokens cannot create repos on a personal account, so those get `409` `personal_account` (and `no_connection`, `installation_gone` as for repos). A name already taken gets `409` `repo_exists` before the run exists.
+  - The API puts a gate (`approve_repo`) and a `github.createRepo` tool node (`create_repo`) before the workflow's steps (`agentic_engine.templates.wrap_with_create_repo`), and sets the run's `repo` to the new repo's URL.
+- Spec rules: `github.createRepo` is called by a tool node only, at most once, as a step of the root sequence, after a gate, and before any node that uses `repo.*` or `github.*`.
+- `github.createRepo` creates the repo with GitHub's `auto_init` (one commit: a README, and the `.gitignore` and license asked for) and logs `repo_created` (`full_name`, `url`, `default_branch`, `private`, `created`). On a retry it takes over an existing repo of that name only if it was created after the run.
+- After it, a `<id>.ready` step interrupts the graph with no event: the attempt ends `suspended`, and the worker starts the next one at once, which clones the repo. Until `repo_created`, a run's attempts have no sandbox and only the `github` server (without `openPR`).
+- A run that created its repo is not rerun (`409` `repo_exists`).
+- `GET /workspaces/{id}/repos/new-repo-options`: `{owner, can_create, reason, message, gitignore_templates, licenses}`.
+
 ## Audit log (API contract)
 
 - `audit_events` is append-only: a trigger refuses `UPDATE` and `DELETE`. Columns: `id`, `workspace_id`, `at`, `action`, `actor_type` (`user` | `system`), `actor_id` (`NULL` until users exist), `run_id`, `node_id`, `details` (JSON).
@@ -194,6 +205,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
   | `run.rerun` | `create_rerun` | `rerun_of`, `budget_usd` |
   | `run.cancel_requested` | `request_cancel`, first request only | `status` (before) |
   | `run.ended` | the event sink, on the run's end event; actor `system` | `status`, `failure_reason`, `pr_url`, `estimated_usd` |
+  | `repo.created` | the event sink, on the run's first `repo_created`; actor `system` | `full_name`, `private` |
   | `gate.approved`, `gate.rejected` | `record_approval` | `comment`, `edited_files`, `edited_paths` |
   | `connection.added`, `connection.removed` | the connection writers | `provider`, `key_hint` or `account_login` |
   | `policy.updated` | `replace_policy_overrides` | `before`, `after` (the workspace's overrides) |
@@ -258,4 +270,5 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | Run graph | Drawn from the run's stored spec with a hand-written tree layout; nodes are buttons | One spec, many views: nodes that have not run yet are shown, and graph and timeline read the same status. The spec is a tree, so no layout library is needed yet; ELK (`elkjs`) replaces the layout when branches arrive (4.1 / 4.6), as Dagre mislays sub-flows linked to outside nodes. A button per node gives one tab stop and native Enter/Space, which React Flow's own node focus (select on Enter) does not; nodes keep `pointer-events: all`, which React Flow turns off on unselectable nodes. |
 | Validation | `200` with structured issues from one engine validator | The canvas and the Architect read issues as data, not as failures. One validator means they never disagree with what a run accepts. |
 | Gate edits | The writers' changed files in `gate_waiting`, edits committed by the gate node | The PR is pushed from the writers' branches, so editing them is what changes it. The log records what the approver saw and changed. Committing inside the gate node checkpoints it with the gate, and the next node (`openPR`) needs no change. |
+| New repos | Organisation repos only, created by a gated `github.createRepo` node with GitHub's `auto_init`; the attempt then ends `suspended` and the next one clones the repo | Installation tokens can create organisation repos but not personal ones, and there are no user tokens yet. A scaffold made by GitHub needs no push from the sandbox. Continuing in a new attempt reuses the clone-at-start path, so the sandbox, the tools and gate review do not change. |
 | Audit log | An append-only `audit_events` table written in each change's transaction | It records settings changes no other table keeps, and its rows never change, unlike `runs`. Writing it with the change means no row is missing or invented. Who acted is a nullable `actor_id` until users exist. |

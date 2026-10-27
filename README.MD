@@ -589,7 +589,7 @@ Create a dev App once, at <https://github.com/settings/apps/new> (or under an or
 1. **Name** it anything; its URL slug (`github.com/apps/<slug>`) is `GITHUB_APP_SLUG`. **Homepage URL**: `http://localhost:3000`.
 2. **Setup URL**: `http://localhost:8000/github/setup` (the API), and tick **Redirect on update**. Leave "Request user authorization (OAuth) during installation" off.
 3. **Webhook**: untick **Active** (webhooks come in phase 7.6).
-4. **Repository permissions**: Metadata read only is enough to list repos. Contents and Pull requests read and write are needed to clone private repos and to open pull requests (`github.openPR`, see "Pull requests").
+4. **Repository permissions**: Metadata read only is enough to list repos. Contents and Pull requests read and write are needed to clone private repos and to open pull requests (`github.openPR`, see "Pull requests"). Administration read and write is needed to create repos (`github.createRepo`, see "New repos").
 5. Create it, note its **App ID** (`GITHUB_APP_ID`), then **Generate a private key** and save the downloaded file as `.secrets/github-app.pem` (gitignored).
 6. Set `GITHUB_APP_ID` and `GITHUB_APP_SLUG` in `.env`, run `docker compose up --build api`, open <http://localhost:3000/settings> and click **Install GitHub App**. GitHub asks which repos to grant, then sends you back to Settings, which lists them.
 
@@ -756,6 +756,26 @@ Or with `curl`:
 ```bash
 curl -s localhost:8000/templates
 curl -s -X POST localhost:8000/runs -H 'content-type: application/json'   -d '{"template": {"id": "generate-docs", "parameters": {"include": ["packages/*"]}}, "repo": {"url": "https://github.com/<owner>/<test-repo>"}}'
+```
+
+## New repos
+A run can work on a repo it creates (phase 1.12): the "New run" sheet has an **Existing repo** / **New repo** switch, and `POST /runs` takes `new_repo` instead of `repo`.
+
+- **Where.** The repo is created in the organisation the workspace's GitHub App is installed on, through `POST /orgs/{org}/repos` with an installation token. GitHub does not take installation tokens for repos on a personal account, so a personal-account installation cannot create repos (that needs user sign-in). `GET /workspaces/{id}/repos/new-repo-options` says whether a workspace can (`can_create`, `owner`, else `reason`: `no_connection`, `installation_gone`, `personal_account`).
+- **The request.** `new_repo`: `name` (letters, digits, `.`, `-`, `_`; up to 100), `private` (default `true`), `description`, `gitignore` (`Python`, `Node`, `Go`, `Rust`, `Java`, `VisualStudio`) and `license` (`mit`, `apache-2.0`). A name already taken is refused with `409` `repo_exists` before anything is asked. The run's `repo` is the new repo's URL from the start.
+- **The flow.** The API puts two steps before the workflow's own (`wrap_with_create_repo`):
+  1. `approve_repo`: a gate naming the repo and what its first commit holds. Creating a repo is irreversible, so the spec rules require a gate before `github.createRepo`, as a step of the root sequence before anything uses the repo (`create_not_tool_node`, `create_without_gate`, `create_not_first`).
+  2. `create_repo`: `github.createRepo` creates the repo with one scaffold commit made by GitHub (`auto_init`: a README, plus the `.gitignore` and license asked for) and logs `repo_created`. The audit log gets `repo.created`.
+  3. The attempt then stops, and the worker starts the next one at once: it clones the new repo and the workflow runs on it as on any repo. The attempts before had no sandbox.
+- **Retries and rerun.** A worker that dies after GitHub created the repo resumes and takes the repo over, but only one created after the run was. A run that created its repo is not rerun (`409` `repo_exists`): start a run on the repo instead. Rejecting at `approve_repo` creates nothing.
+- **Fake GitHub.** With `AGENTIC_GITHUB=fake`, created repos are bare repos in the `fixtures` volume, seen by the worker (`SANDBOX_LOCAL_ROOT`) and the API (`FAKE_GITHUB_ROOT`).
+
+Demo (the phase 1.12 "Done when"). It needs a dev GitHub App with Administration read and write, installed on a test organisation, and a Claude key:
+
+```bash
+docker compose up -d --build     # with GITHUB_APP_ID, GITHUB_APP_SLUG, .secrets/github-app.pem and AGENTIC_RUNTIME=claude
+# http://localhost:3000/templates: Generate docs, New repo, name it, Start run
+# approve "Create the repo <org>/<name>?", then the docs gate: the run page links to the pull request
 ```
 
 ## Sandbox

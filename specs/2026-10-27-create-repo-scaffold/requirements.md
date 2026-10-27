@@ -38,10 +38,10 @@ Principles and stack choices that apply:
 - **Spec and validator:**
   - `CREATE_TOOLS = {"github.createRepo"}`, added to `PLATFORM_TOOLS`.
   - New issue codes: `create_not_tool_node`, `create_without_gate`, `create_not_first`. The create node must be a tool node, directly in the top-level sequence, after a gate, at most one per spec. No node before it may name a `repo.*` or `github.*` tool other than itself, since nothing is cloned yet.
-- **Engine:** after a `github.createRepo` tool node completes, the run emits `repo_created` (`node_id`, `full_name`, `url`, `default_branch`) and stops the attempt at a **`repo_ready`** interrupt. This is not a gate: it needs no decision and the run is never `waiting`.
+- **Engine:** after a `github.createRepo` tool node completes, the run emits `repo_created` (`node_id`, `full_name`, `url`, `default_branch`, `private`, `created`) and stops the attempt at a **`repo_ready`** interrupt (a `<id>.ready` step). This is not a gate: it needs no decision, writes no event, and the run is never `waiting`; the attempt ends `suspended`.
 - **Worker:**
   - A run whose spec has a create node and no `repo_created` event yet opens **no sandbox**. Its tools are only the `github` server without a sandbox.
-  - On `repo_ready` it requeues the run at once (the same path as after a gate decision).
+  - On `suspended` it starts the run's next attempt at once, while it still holds the lease (changed during implementation; see Decisions).
   - The next attempt sees `repo_created` and clones the new repo with an installation token, then resumes from the checkpoint into the docs flow.
 - **Run request and store:**
   - `CreateRunRequest.new_repo: {name, private=true, description?, gitignore?, license?}`, exclusive with `repo`.
@@ -49,6 +49,7 @@ Principles and stack choices that apply:
   - It sets `run.repo` to `https://github.com/<org>/<name>` (so lists and summaries show it from the start).
   - It wraps the template's or workflow's root in `sequence[gate create_repo, tool create_repo_tool, <root>]`. The gate prompt reads "Create private repo `acme/docs-demo` with a Python .gitignore and MIT license?", and the artifact holds the settings.
   - The repo-tools check in `_repo_for_repo_tools` accepts a `new_repo` run.
+  - `run.created`'s audit details are unchanged: `repo_url` already names the new repo, and `repo.created` follows.
   - Rerun of a run that created its repo is refused with `409 repo_exists`; the message says to start a run on the existing repo.
 - **Audit:** `repo.created` (actor `system`, written by the event sink on `repo_created`; `details`: `full_name`, `private`, `node_id`).
 - **API surface:**
@@ -60,7 +61,7 @@ Principles and stack choices that apply:
   - Private (default on), description, .gitignore and license selects.
   - When `can_create` is false, the option is disabled with its reason. A `409 repo_exists` shows on the name field.
   - The audit formatter learns `repo.created`.
-- **Docs template:** works on a scaffold with **zero modules**: `map` over an empty list completes and the writer still writes `docs/README.md`. A test proves it.
+- **Docs template:** works on the scaffold. Found during implementation: a scaffold has no manifest and no source directory, so `repo.list_modules` falls back to the repo root (`.`) as its one module, and the docs flow documents it. No change was needed; the worker e2e test asserts it.
 - **Docs:**
   - README "Create a new repo" section: App permission Administration (write); install on the organisation; personal accounts are not supported.
   - tech-stack.md: gains the create rule, `repo_ready` and the `repo.created` audit action.
@@ -80,7 +81,8 @@ Principles and stack choices that apply:
 |---|---|---|
 | Who can own the repo | The installation's organisation only | User choice. GitHub accepts installation tokens on `POST /orgs/{org}/repos` but not on `POST /user/repos`. There are no user tokens yet. |
 | Scaffold | GitHub `auto_init` with an optional `.gitignore` and license template: one commit | User choice. It is deterministic, made by GitHub (nothing pushed from the sandbox), and the commit exists before the clone. |
-| Run shape | One run: gate → `createRepo` → `repo_ready` requeue → clone → docs flow | User choice. The next attempt clones like any other, so the sandbox, repo tools and gate review are unchanged. |
+| Run shape | One run: gate → `createRepo` → `repo_ready` stop → new attempt clones → docs flow | User choice. The next attempt clones like any other, so the sandbox, repo tools and gate review are unchanged. |
+| How the next attempt starts | The worker loops over attempts while it holds the lease, instead of going back through the Redis queue | Changed during implementation. Same result with less machinery: no lease release and claim, and wall time and cancel watchers cover both attempts. |
 | Where the create steps come from | The API wraps any spec when the request has `new_repo` | This works for every template and raw workflow, and the template schemas stay unchanged. The stored spec shows the steps (Principle 1). |
 | Repo known at creation | `run.repo` is set to the target URL when the run is created | Lists, summaries, `_github_target` and the audit have the repo from the start. The worker skips the clone until `repo_created` exists. |
 | Gate rule | A validator rule with three new issue codes, like `publish_without_gate` | Safe by construction (Principle 2) for every client: API, canvas, Architect. |
