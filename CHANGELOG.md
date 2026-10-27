@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 11.8 agent activity, read like a chat with Claude:
+- Phase 11.8 agent activity, read like a chat with Claude ([#137](https://github.com/KsiProgramming/agentic-dev/pull/137)):
   - **Work blocks.** In a step's Activity and Output, each agent turn's work (its reasoning, notes and tool calls) folds into one line: "Listed 1 folder, read 2 files · 3 tool calls · 8s". The answer stays open below it. A block opens on a failed call. While the agent works, the line says what it is doing, with a timer that ticks.
   - **Why each call was made.** The platform's tools take an optional `description`, which the agent fills with its intent ("Read the frontend config"). It is the call's title in the console and in the live line, shown as plain text. Reads with no intent still fold into one row.
   - **Reasoning.** Claude 5 models stream their summarized thinking as `reasoning_delta` events, shown as collapsed rows in muted italic. They already thought and were billed for it, so cost does not change, and older models are left as they were.
