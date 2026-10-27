@@ -36,7 +36,7 @@ Strategy: **walking skeleton first**, then grow outward. The milestones follow t
 | 1.9 | `loop` primitive + CEL expressions | A reviewer loop stops on its condition or at max iterations | ✅ Done ([#18](https://github.com/KsiProgramming/agentic-dev/pull/18)) |
 | 1.10 | `map` + `reduce` (concat/agent) primitives | Map over 3 modules with max concurrency, then reduce | ✅ Done ([#19](https://github.com/KsiProgramming/agentic-dev/pull/19)) |
 | 1.11 | "Generate docs" template | AC-1: connect GitHub, pick a repo, docs run opens a PR | ✅ Done ([#20](https://github.com/KsiProgramming/agentic-dev/pull/20)) |
-| 1.12 | Create new repo (behind a gate) + scaffold commit | Docs run works on a newly created repo | — |
+| 1.12 | Create new repo (behind a gate) + scaffold commit | Docs run works on a newly created repo | ✅ Done ([#119](https://github.com/KsiProgramming/agentic-dev/pull/119)) |
 
 ## Milestone 2: Product UI foundation
 
