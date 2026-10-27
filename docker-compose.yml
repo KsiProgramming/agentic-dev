@@ -12,8 +12,8 @@ x-master-key: &master-key
 
 # Fakes for local dev and the e2e tests (CI turns them on), refused with AGENTIC_ENV=production.
 # AGENTIC_GITHUB=fake stands in a GitHub App with repos e2e-org/docs-demo and e2e-org/private-lib,
-# kept as bare repos in the `fixtures` volume; CLAUDE_KEY_CHECK=fake accepts keys starting
-# `sk-ant-test-` without calling Anthropic.
+# kept as bare repos in the `fixtures` volume, where the repos runs create go too;
+# CLAUDE_KEY_CHECK=fake accepts keys starting `sk-ant-test-` without calling Anthropic.
 x-fakes: &fakes
   AGENTIC_ENV: ${AGENTIC_ENV:-development}
   AGENTIC_GITHUB: ${AGENTIC_GITHUB:-app}
@@ -87,11 +87,15 @@ services:
       GITHUB_APP_PRIVATE_KEY_FILE: /github/github-app.pem
       # GitHub's install redirect comes back to the API, which sends the browser on to the web app.
       WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
+      # With AGENTIC_GITHUB=fake, the fake App's bare repos (shared with the worker), so the API
+      # sees the repos runs create.
+      FAKE_GITHUB_ROOT: /samples
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
       - secrets:/secrets:ro
       - ./.secrets:/github:ro
+      - fixtures:/samples/e2e-org:ro
     depends_on:
       keygen:
         condition: service_completed_successfully

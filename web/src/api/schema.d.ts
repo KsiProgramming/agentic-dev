@@ -69,6 +69,11 @@ export interface paths {
          *     created with. Its budget is `budget_usd`, else the workspace's default; with a budget, every
          *     agent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the
          *     same way.
+         *
+         *     With `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub
+         *     App is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and
+         *     `github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the
+         *     start.
          */
         post: operations["createRun"];
         delete?: never;
@@ -136,7 +141,8 @@ export interface paths {
          *     not changed. The spec is the one the original ran, even if its template has changed since;
          *     the limits are the workspace's as they are now, and a spec above them is refused with
          *     `422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the
-         *     original run's spend does not count.
+         *     original run's spend does not count. A run that created its repo is not rerun: the repo
+         *     exists now, so start a run on it instead.
          */
         post: operations["rerunRun"];
         delete?: never;
@@ -407,6 +413,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/repos/new-repo-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * New Repo Options
+         * @description Whether runs of the workspace can create their repo, in which organisation, and the
+         *     `.gitignore` templates and licenses its first commit may have.
+         */
+        get: operations["getNewRepoOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/connections/github": {
         parameters: {
             query?: never;
@@ -582,7 +609,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -692,6 +719,8 @@ export interface components {
             input: string;
             /** @description The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`). */
             repo?: components["schemas"]["RepoSource"] | null;
+            /** @description A repo to create for the run, in the organisation the workspace's GitHub App is installed on, instead of `repo`. The run first waits for approval to create it (gate `approve_repo`), creates it (`create_repo`), then runs the workflow on it. */
+            new_repo?: components["schemas"]["NewRepo"] | null;
             /**
              * Workspace Id
              * @description The workspace the run belongs to; its connections are used. Default: the default workspace.
@@ -771,7 +800,9 @@ export interface components {
         };
         /**
          * GithubErrorDetail
-         * @description The `detail` of a 409 from the repos endpoint: `code` says what the user should do.
+         * @description The `detail` of a 409 from a GitHub endpoint, or from a run on a new repo: `code` says
+         *     what the user should do (`no_connection`, `installation_gone`, `personal_account`,
+         *     `repo_exists`).
          */
         GithubErrorDetail: {
             /** Code */
@@ -802,7 +833,7 @@ export interface components {
             install_url: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "unknown_tool" | "policy_limit" | "budget_unpriced_model";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -884,6 +915,62 @@ export interface components {
             /** @description The workspace's price. It replaces the list price, long prompts included. */
             override: components["schemas"]["Price"] | null;
         };
+        /**
+         * NewRepo
+         * @description A repo to create in the organisation the workspace's GitHub App is installed on.
+         */
+        NewRepo: {
+            /**
+             * Name
+             * @description Letters, digits, `.`, `-` and `_`, up to 100 characters.
+             */
+            name: string;
+            /**
+             * Private
+             * @description Only the organisation can see it.
+             * @default true
+             */
+            private: boolean;
+            /** Description */
+            description?: string | null;
+            /**
+             * .gitignore
+             * @description A template for the first commit.
+             */
+            gitignore?: ("Python" | "Node" | "Go" | "Rust" | "Java" | "VisualStudio") | null;
+            /**
+             * License
+             * @description A license for the first commit.
+             */
+            license?: ("mit" | "apache-2.0") | null;
+        };
+        /**
+         * NewRepoOptions
+         * @description Whether the workspace can start a run on a new repo (`new_repo` on `POST /runs`), where
+         *     the repo would be, and what its first commit may hold.
+         */
+        NewRepoOptions: {
+            /**
+             * Owner
+             * @description The organisation the repo is created in.
+             */
+            owner: string | null;
+            /** Can Create */
+            can_create: boolean;
+            /** @description Why not: the code of the 409 a run on a new repo would get. */
+            reason?: components["schemas"]["NewRepoReason"] | null;
+            /**
+             * Message
+             * @description Why not, for people.
+             */
+            message?: string | null;
+            /** Gitignore Templates */
+            gitignore_templates: ("Python" | "Node" | "Go" | "Rust" | "Java" | "VisualStudio")[];
+            /** Licenses */
+            licenses: ("mit" | "apache-2.0")[];
+        };
+        /** @enum {string} */
+        NewRepoReason: "no_connection" | "installation_gone" | "personal_account";
         /** @enum {string} */
         PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "budget_usd";
         /**
@@ -1682,7 +1769,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The workflow uses `github.*` tools, but the workspace has no GitHub connection */
+            /** @description The workflow uses `github.*` tools, but the workspace has no GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1691,6 +1778,20 @@ export interface operations {
             };
             /** @description Invalid request, or the workflow is above the workspace's limits */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description With `new_repo`: GitHub could not be asked about the repo */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description With `new_repo`: the GitHub App is not configured on the API */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1806,7 +1907,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The run has not ended yet, or its workflow uses `github.*` tools and the workspace no longer has a GitHub connection */
+            /** @description The run has not ended yet, its workflow uses `github.*` tools and the workspace no longer has a GitHub connection, or it created its repo (`repo_exists`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2271,7 +2372,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -2430,6 +2531,58 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GithubErrorDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description GitHub answered with an error or could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The GitHub App is not configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getNewRepoOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewRepoOptions"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

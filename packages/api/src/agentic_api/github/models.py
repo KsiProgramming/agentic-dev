@@ -1,7 +1,8 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentic_engine.templates import Gitignore, License
 from agentic_github import RepoInfo
 
 
@@ -51,7 +52,26 @@ class RepoOut(BaseModel):
 
 
 class GithubErrorDetail(BaseModel):
-    """The `detail` of a 409 from the repos endpoint: `code` says what the user should do."""
+    """The `detail` of a 409 from a GitHub endpoint, or from a run on a new repo: `code` says
+    what the user should do (`no_connection`, `installation_gone`, `personal_account`,
+    `repo_exists`)."""
 
     code: str
     message: str
+
+
+type NewRepoReason = Literal["no_connection", "installation_gone", "personal_account"]
+
+
+class NewRepoOptions(BaseModel):
+    """Whether the workspace can start a run on a new repo (`new_repo` on `POST /runs`), where
+    the repo would be, and what its first commit may hold."""
+
+    owner: str | None = Field(description="The organisation the repo is created in.")
+    can_create: bool
+    reason: NewRepoReason | None = Field(
+        default=None, description="Why not: the code of the 409 a run on a new repo would get."
+    )
+    message: str | None = Field(default=None, description="Why not, for people.")
+    gitignore_templates: list[Gitignore]
+    licenses: list[License]
