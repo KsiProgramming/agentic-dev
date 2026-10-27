@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 1.12 create a new repo behind a gate:
+- Phase 1.12 create a new repo behind a gate ([#119](https://github.com/KsiProgramming/agentic-dev/pull/119)):
   - **New repo.** A run can work on a repo it creates: the "New run" sheet has an Existing repo / New repo switch (name, private, description, `.gitignore` and license), and `POST /runs` takes `new_repo` instead of `repo`. The repo is created in the organisation of the workspace's GitHub App installation (Administration read and write); a personal-account installation cannot create repos and the sheet says why. A taken name is refused with `409` `repo_exists` before anything runs, and `GET /workspaces/{id}/repos/new-repo-options` says whether and where a repo can be created.
   - **Behind a gate.** The run first waits at `approve_repo`, then `github.createRepo` creates the repo with one scaffold commit made by GitHub (a README, and the `.gitignore` and license asked for) and logs `repo_created`; the run then continues in a new attempt that clones the repo, so the docs flow works on it unchanged. New spec rules (`create_not_tool_node`, `create_without_gate`, `create_not_first`) keep the creation gated and first. Rejecting creates nothing; a retried attempt takes over only a repo created after its run; a run that created its repo is not rerun.
   - **Visible.** The console links the created repo, and the audit log records `repo.created`.
