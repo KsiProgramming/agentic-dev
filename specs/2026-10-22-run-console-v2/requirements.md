@@ -6,7 +6,7 @@ Branch: plan/2.5-run-console-v2
 ## Context
 `/runs/{id}` was still the 0.8 debug view: one table row per event, so a docs run showed hundreds of `text_delta` rows and the tool calls were raw payloads. The Runs page (2.4) links every run here, so this is the page users land on. This phase turns it into the run console described in [tech-stack.md → Run console](../tech-stack.md#run-console): a header, a timeline that reads as a story, and the raw log one tab away.
 
-Depends on 2.1 (tokens, `StatusBadge`, states), 2.2 (shell, `PageHeader`), 2.3 (`GET /runs/{id}` summary) and 2.4 (TanStack Query). All are done. It does not depend on 1.12, which is still unplanned. It unblocks 2.6 (approval dock sits on this page), 2.7 (Rerun action in this header), 3.1 (cost per node in the usage footer) and 3.5 (Graph tab opens the node detail from here).
+Depends on 2.1 (tokens, `StatusBadge`, states), 2.2 (shell, `PageHeader`), 2.3 (`GET /runs/{id}` summary) and 2.4 (TanStack Query). All are done. It does not depend on 1.12, which is still unplanned. It unblocks 2.6 (approval dock sits on this page, Rerun action in this header), 3.1 (cost per node in the usage footer) and 3.5 (Graph tab opens the node detail from here).
 
 Principles and choices that apply:
 - **Mission 8, Enterprise-grade, calm UI:** runs read as a story (nodes, messages, tool calls); the raw event log is one click away, not the default.
@@ -51,13 +51,13 @@ Principles and choices that apply:
 
 ### Out of scope
 - Sticky approval dock, waiting badge in the sidebar and tab title: 2.6.
-- Rerun action: 2.7.
+- Rerun action: 2.6.
 - Cost in USD per node and run: 3.1.
 - Graph tab: 3.5.
 - Editable artifacts / diffs at a gate: 3.6.
 - A one-line intent per tool call written by the agent (needs a `description` argument on the platform tools): logged in `TODO.md`, not part of 2.5.
 - Virtualised timeline for very long runs (revisit with 10.4 performance targets).
-- Resume a cancelled run from its checkpoint (rerun is 2.7; resume is a later option).
+- Resume a cancelled run from its checkpoint (rerun is 2.6; resume is a later option).
 
 ## Decisions
 | Decision | Choice | Rationale |

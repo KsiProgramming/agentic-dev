@@ -16,7 +16,7 @@ It unblocks:
 - 1.8: `github.openPR` behind a gate. It pushes the branch that a writer committed before the gate, so that branch must still exist after approval.
 - 1.11/1.12: the docs template and repo creation, both gated.
 - 2.6: approval cards in the monitor, built on this endpoint and the `approvals` table.
-- 2.7: the audit log, which reads `approvals`.
+- 3.7: the audit log, which reads `approvals`.
 - 8.7: Autonomous mode, which still stops at write gates.
 
 Principles that apply:
@@ -73,7 +73,7 @@ Tech-stack choices that apply: LangGraph `interrupt()` for `gate`, with `Command
 ## Decisions
 | Decision | Choice | Rationale |
 |---|---|---|
-| Scope | Approve + reject, with an `approvals` table | User choice. Reject is the other half of a human decision, and the table is what 2.6/2.7 build on. |
+| Scope | Approve + reject, with an `approvals` table | User choice. Reject is the other half of a human decision, and the table is what 2.6 and 3.7 build on. |
 | Reject outcome | Run ends `cancelled`, `stopped_at=<gate>`, gate gets `node_cancelled` | It reuses the existing run end statuses and `stopped_at`. A rejection is a stop, not an error. |
 | Worker during the pause | Release the lease; a re-enqueued run is claimed by any worker | User choice. An open gate can wait hours, and it must not tie up a worker slot. It reuses the claim and resume path from 1.3. |
 | Sandbox during the pause | Keep it, reattach on resume, recreate only if gone | User choice. 1.8 must push the branch committed before the gate. Recreating the sandbox would lose it. |

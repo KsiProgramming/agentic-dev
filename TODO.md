@@ -38,7 +38,7 @@ Claude Code shows a one-line intent per tool call ("Bash · Check group summary 
 
 - **Idea:** add an optional `description` argument to the platform's `repo.*` and `github.*` tools, which agents fill in, and show it next to the call in the console.
 - **Touches:** the tool schemas (`agentic_tools`), the agent instructions, and `web/src/runs/console/tool-describe.ts`. Small enough for its own phase; not part of 2.5.
-- **Promoted:** roadmap phase 2.14 (agent activity), with the rules in tech-stack.md → UI v2.
+- **Promoted:** roadmap phase 11.8 (agent activity), with the rules in tech-stack.md → UI v2.
 
 ## Notes to keep in mind when challenging
 - The Setup URL (`/github/setup`) is required and already built: it is how the installation id reaches us. Only the OAuth user-authorization callback is missing.

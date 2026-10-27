@@ -33,8 +33,9 @@ Teams need AI agents that work on their real codebases: writing docs, auditing c
 5. **Repo, Jira and web content are data, never instructions.** We defend against prompt injection by default.
 6. **Transparency.** Every agent action, tool call, artifact and cost is visible live and kept in an append-only log.
 7. **Small, verifiable steps.** We ship in thin vertical slices. Each one is usable and passes its acceptance criteria.
-8. **Enterprise-grade, calm UI.** The product looks and behaves like a professional tool, not a debug page. That means one design system, a quiet neutral palette with colour kept for status, and a layout that works from a phone to a wide monitor. Every screen has a defined empty, loading and error state. What needs the user, such as a waiting approval or a failed run, is always visible and never below the fold. Runs are readable as a story (nodes, messages, tool calls), and the raw event log is one click away, not the default view.
+8. **Enterprise-grade, calm UI.** The product looks and behaves like a professional tool, not a debug page. That means one design system, a quiet neutral palette with colour kept for status, and a layout that works from a phone to a wide monitor. Every screen has a defined empty, loading and error state. What needs the user, such as a waiting approval or a failed run, is always visible and never below the fold. Runs are readable as a story (nodes, messages, tool calls), and the raw event log is one click away, not the default view. Numbers are truthful: a run's duration is the time it worked, never the time it waited for a human, and an approval nobody gives expires instead of waiting forever.
 9. **Nothing is lost.** Every run is listed in a history with its outcome, and any run can be opened later. A failed or cancelled run can be rerun in one click.
+10. **The specs govern the work.** This file, `roadmap.md` and `tech-stack.md` are the constitution of the spec-driven workflow we build with. Every phase, decision, rule and change of priority is written in them first, in the same pull request as the work, and `CHANGELOG.md` records it. Anything else, `CLAUDE.md` included, points to them and never replaces them.
 
 ## v1 decisions
 
@@ -57,6 +58,7 @@ Teams need AI agents that work on their real codebases: writing docs, auditing c
 - Performance: canvas usable with 200 nodes, monitor events shown within 1 s, Architect first draft within 60 s for a profiled repo.
 - Reliability: a worker restart mid-run loses no completed nodes.
 - UI quality: every page works at 375, 768 and 1440 px with no horizontal scroll; WCAG 2.2 AA (axe finds no serious issues); a waiting gate is visible without scrolling; a user starts a docs run without help text.
+- UI v2 (roadmap Milestone 11): every duration shown is active time; an approver clears every waiting gate from one Inbox; one click from the runs list shows what an agent produced; no test run appears in a real workspace.
 
 ## Open questions (not decided here)
 

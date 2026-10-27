@@ -9,7 +9,7 @@ Milestone 2 gave the product a design system (2.1), an app shell (2.2), a run hi
 - **Approve:** the gate panel sits inline in the waiting step, so it can be below the fold.
 - **Recover:** a failed run cannot be rerun.
 
-This phase used to be three phases (2.6 approval dock, 2.7 rerun, 2.8 start screen and settings). It now covers the whole user journey: connect → start → approve → rerun.
+This phase used to be three phases (approval dock, rerun, and start screen and settings). It now covers the whole user journey: connect → start → approve → rerun.
 
 Principles that drive it:
 - **Mission 8 (calm, enterprise UI):** what needs the user, such as a waiting approval, is never below the fold. A user starts a docs run without help text.

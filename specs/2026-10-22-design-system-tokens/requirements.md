@@ -22,7 +22,7 @@ Depends on nothing open; Milestone 2 does not depend on 1.12. It unblocks 2.2 (a
 ### Out of scope
 - Sidebar, top bar, theme toggle, breadcrumbs, responsive drawer → **2.2**.
 - Multi-viewport Playwright screenshots → **2.2**.
-- Dialog, Sheet, DropdownMenu, Tabs, Tooltip, Combobox → added by the phase that first needs them (2.5, 2.6, 2.8).
+- Dialog, Sheet, DropdownMenu, Tabs, Tooltip, Combobox → added by the phase that first needs them (2.5, 2.6).
 - Run console redesign (merged messages, tool-call cards, Markdown) → **2.5**. In 2.1 the monitor keeps its event table, restyled.
 - Collapsible JSON viewer and `react-markdown` → **2.5**.
 - A lint or CI guard against raw palette classes (not chosen for now; see Open questions).

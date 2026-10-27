@@ -6,7 +6,7 @@ Branch: plan/0.5-run-events-log
 ## Context
 Phase 0.4 runs a `sequence` of `agent` nodes end to end on the fake runtime, but everything a run does lives only in memory (`AgentNodeResult.events`). The mission's **Transparency** principle says every agent action, tool call and cost is kept in an append-only log, and the tech stack makes the `run_events` table in Postgres the single source for the monitor, cost view and audit.
 
-This phase adds that log. It depends on 0.1 (Postgres, Alembic, Testcontainers), 0.3 (`AgentEvent`) and 0.4 (`run_workflow`), all done. It unblocks 0.6 (SSE streams these rows), 0.8 (monitor page), 2.1 (cost from usage events) and 2.7 (audit log).
+This phase adds that log. It depends on 0.1 (Postgres, Alembic, Testcontainers), 0.3 (`AgentEvent`) and 0.4 (`run_workflow`), all done. It unblocks 0.6 (SSE streams these rows), 0.8 (monitor page), 2.1 (cost from usage events) and 3.7 (audit log).
 
 Principle **Small, verifiable steps**: we keep this to the table, the writer and one proof that a run lands ordered rows in Postgres.
 
@@ -25,7 +25,7 @@ Principle **Small, verifiable steps**: we keep this to the table, the writer and
 ### Out of scope
 - `POST /runs`, `GET /runs/{id}/events` and SSE (0.6).
 - `LISTEN/NOTIFY` fan-out (0.6).
-- Enforcing append-only in the database (trigger / revoked `UPDATE`/`DELETE`). Append-only is a convention of the store API for now; revisit with the audit log (2.7).
+- Enforcing append-only in the database (trigger / revoked `UPDATE`/`DELETE`). Append-only is a convention of the store API for now; revisit with the audit log (3.7).
 - Dropping or batching `text_delta` rows. Revisit if the log grows too large.
 - Worker / queue wiring of runs (comes with 0.6 and later).
 - Checkpointer and resume (1.3).

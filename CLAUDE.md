@@ -4,14 +4,21 @@ Read this before every task. It is short on purpose: the details live in `specs/
 
 ## Specs are the source of truth
 
-- `specs/mission.md` (principles, non-goals), `specs/roadmap.md` (phases and their "Done when"), `specs/tech-stack.md` (libraries, API contracts and the UI design system).
-- Work happens one roadmap phase at a time: plan it with the `plan-feature` skill (`specs/YYYY-MM-DD-<slug>/` with requirements, plan, validation), build it, open it with the `open-pr` skill.
-- A new pattern, library or API shape goes into `specs/tech-stack.md` first, in the same PR, never only in code.
-- Every PR adds an entry under `## [Unreleased]` in `CHANGELOG.md`.
+`specs/mission.md` (principles, non-goals), `specs/roadmap.md` (milestones, phases and their "Done when", and which milestone is next) and `specs/tech-stack.md` (libraries, API contracts, the UI design system and the decisions log) are the constitution of this repo. They govern the spec-driven workflow, and they win over this file, over code and over anything said in a chat.
+
+**Everything is tracked in them.** Nothing is decided only in code, in a chat or here:
+
+- A new milestone or phase, a change of order or priority, or a phase dropped goes into `roadmap.md`. A new milestone takes the next free number and is listed where it is worked; existing phase numbers never change. The "Next up" line says which milestone is planned next.
+- A new pattern, library, API shape or UI rule goes into `tech-stack.md`, with a row in its decisions log when a choice was made between options.
+- A new principle, non-goal or success measure goes into `mission.md`.
+- The spec change lands in the same PR as the work, never after it, and every PR adds an entry under `## [Unreleased]` in `CHANGELOG.md`.
+- A rule added to this file is written in the specs first; this file only points to it. If code and the specs disagree, fix one of them in the PR and say which.
+
+Work happens one roadmap phase at a time: plan it with the `plan-feature` skill (`specs/YYYY-MM-DD-<slug>/` with requirements, plan, validation), build it, open it with the `open-pr` skill.
 
 ## Frontend (`web/`)
 
-Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design system", including "UI v2" for what is planned. Next.js here is newer than your training data: read `web/AGENTS.md` and the docs it points to before writing Next.js code.
+Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design system", including "UI v2" for what is planned (roadmap Milestone 11). Next.js here is newer than your training data: read `web/AGENTS.md` and the docs it points to before writing Next.js code.
 
 ### Rules that are not optional
 
@@ -26,8 +33,8 @@ Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design sy
    | Repos | `repoLabel` in the mono font |
    | JSON | `JsonView` (`@/components/json-view`), never in a table cell |
 
-   Numbers use `tabular-nums`. Never `toLocaleString()` with no options. From phase 2.7 these become components (`RelativeTime`, `Duration`, `Money`, `TokenCount`, `IdChip`, `StatTile`); use them once they exist.
-4. **A duration shown to the user is active time.** Time waiting at a gate is never added to it (tech-stack → UI v2 → Time). Until 2.8 ships, do not add new places that show start-to-end time as "Duration".
+   Numbers use `tabular-nums`. Never `toLocaleString()` with no options. From phase 11.1 these become components (`RelativeTime`, `Duration`, `Money`, `TokenCount`, `IdChip`, `StatTile`); use them once they exist.
+4. **A duration shown to the user is active time.** Time waiting at a gate is never added to it (tech-stack → UI v2 → Time). Until 11.2 ships, do not add new places that show start-to-end time as "Duration".
 5. **Every data view has three states** from `@/components/states`: `LoadingState` (skeleton), `EmptyState` (icon, one sentence, one action) and `ErrorState` (message and Retry).
 6. **Pages start with `PageHeader`** (`@/components/page-header`): title, one-line description, actions on the right. Breadcrumbs come from the shell; do not add your own.
 7. **Fonts:** Inter for UI text; JetBrains Mono (`font-mono`) only for ids, paths, branches, code and JSON.

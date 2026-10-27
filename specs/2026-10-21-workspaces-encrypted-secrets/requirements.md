@@ -70,7 +70,7 @@ Principles and stack choices that apply:
 - Checking the key with a live Anthropic call when it is saved: see Open questions.
 - Copilot and per-node provider selection: 7.2/7.3.
 - The GitHub App and Jira credentials: 1.5 and 6.1 reuse this storage.
-- An audit log of connection changes: 2.7. This phase only keeps `created_at`/`updated_at`.
+- An audit log of connection changes: 3.7. This phase only keeps `created_at`/`updated_at`.
 - A Playwright test and a manual compose demo: not chosen for validation in this phase.
 
 ## Decisions
