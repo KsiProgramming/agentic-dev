@@ -1,7 +1,7 @@
 "use client";
 
 import { CircleDashedIcon } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import { EmptyState } from "@/components/states";
 import {
@@ -38,6 +38,7 @@ export function NodeDetailSheet({
   onClose: () => void;
 }) {
   const wide = useMediaQuery(MD_UP);
+  const returnTo = useRef<HTMLElement | null>(null);
   const node = useMemo(
     () => (nodeId ? allSpecNodes(spec).find((n) => n.id === nodeId) : undefined),
     [spec, nodeId],
@@ -55,8 +56,16 @@ export function NodeDetailSheet({
           // Focus the sheet, not its first control: that may be a value whose tooltip opens on
           // focus, and the open tooltip would take the first Escape.
           onOpenAutoFocus={(event) => {
+            const active = document.activeElement;
+            returnTo.current = active instanceof HTMLElement ? active : null;
             event.preventDefault();
             (event.currentTarget as HTMLElement).focus();
+          }}
+          // The sheet has no trigger for Radix to refocus: go back to the node it was opened from.
+          onCloseAutoFocus={(event) => {
+            if (!returnTo.current?.isConnected) return;
+            event.preventDefault();
+            returnTo.current.focus();
           }}
         >
           <SheetHeader className="border-b pr-12">

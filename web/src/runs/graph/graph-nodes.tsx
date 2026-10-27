@@ -16,7 +16,7 @@ import { createContext, useContext } from "react";
 
 import { cn } from "@/lib/utils";
 
-import { StatusMarker } from "../console/rail";
+import { StatusIcon } from "../console/rail";
 import { stepBadge } from "../console/step-status";
 import type { NodeState, NodeStatus } from "./node-status";
 import type { ContainerNode, LeafNode, NodeKind } from "./spec-graph";
@@ -66,9 +66,7 @@ export function NodeStatusLine({ status }: { status: NodeStatus }) {
       {status === "not_started" ? (
         <CircleDashedIcon aria-hidden="true" className="size-3.5" />
       ) : (
-        <span aria-hidden="true" className="flex">
-          <StatusMarker status={status} small />
-        </span>
+        <StatusIcon status={status} small />
       )}
       {statusLabel(status)}
     </span>
@@ -134,9 +132,9 @@ export function LeafNodeView({ data }: NodeProps<LeafNode>) {
           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate font-mono text-meta font-medium">
             {data.nodeId}
-          </span>
+          </span>{" "}
           <NodeStatusLine status={state.status} />
-        </span>
+        </span>{" "}
         <span className="truncate text-xs text-muted-foreground">{data.detail}</span>
       </button>
     </>
@@ -170,9 +168,9 @@ export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
           <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate font-mono text-meta font-medium">
             {data.nodeId}
-          </span>
+          </span>{" "}
           <NodeStatusLine status={state.status} />
-        </span>
+        </span>{" "}
         <span className="truncate text-xs text-muted-foreground tabular-nums">{line}</span>
       </button>
     </div>

@@ -228,8 +228,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 
 ### Fixed
 - CI is green again on `main` ([#132](https://github.com/KsiProgramming/agentic-dev/pull/132)):
-  - **Graph node detail.** The sheet now takes focus itself when it opens. It used to focus its first value, whose tooltip then took the first Escape and left the sheet open.
-  - **Graph a11y.** Each node's accessible name starts with its visible text ("worker, Done, writer, agent"; WCAG 2.5.3). React Flow's credit link is now readable and a 24 px target.
+  - **Graph node detail.** The sheet now takes focus itself when it opens. It used to focus its first value, whose tooltip then took the first Escape and left the sheet open. On close, focus goes back to the node it was opened from (Radix only refocuses a dialog's own trigger, and this sheet has none).
+  - **Graph a11y.** Each node's accessible name starts with its visible text, word for word ("worker, Done, writer, agent"; WCAG 2.5.3). The node's status line shows a new `StatusIcon`, without `StatusMarker`'s hidden copy of the label. React Flow's credit link moves bottom left, away from the zoom controls, and is now readable and a 24 px target.
   - **Tests.** The roadmap parser test accepts milestones in the order they are worked. The runs-list mock only intercepts the API's `/runs`, not the page. The home title test allows the "Needs approval" prefix that other specs' waiting runs add. The review-sheet a11y scan waits until both Monaco editors have their names.
 - The generated OpenAPI spec and web client are up to date again: the `RunEvent` description gained the parallel `branch` in 4.1 without a regeneration, so the API contract check failed on `main` ([#118](https://github.com/KsiProgramming/agentic-dev/pull/118)).
 - `github.openPR` no longer fails with "git fetch failed: transport 'file' not allowed" after an approved gate. git checks the file transport when fetching the writer's bundle, and `push_bundle` only allowed it for `file://` test remotes. It is now allowed for the bundle fetch only, and fetch and push to GitHub stay https only.

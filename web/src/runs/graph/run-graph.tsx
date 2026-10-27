@@ -64,6 +64,8 @@ export function RunGraph({
           deleteKeyCode={null}
           selectionKeyCode={null}
           multiSelectionKeyCode={null}
+          // Apart from the controls, so neither crowds the other's 24 px target.
+          attributionPosition="bottom-left"
         >
           <Controls showInteractive={false} position="bottom-right" />
         </ReactFlow>
