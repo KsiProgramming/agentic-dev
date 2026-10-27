@@ -5,10 +5,12 @@ from agentic_store.approvals import (
     ApprovalError,
     GateExpiredError,
     InvalidEditsError,
+    PendingGate,
     RunNotFoundError,
     RunNotWaitingError,
     WrongGateError,
     pending_decision,
+    pending_gate,
     record_approval,
 )
 from agentic_store.audit import AUDIT_ACTIONS, AuditAction
@@ -117,6 +119,7 @@ __all__ = [
     "GateExpiredError",
     "InvalidCursorError",
     "InvalidEditsError",
+    "PendingGate",
     "PolicyViolationError",
     "PostgresEventSink",
     "Run",
@@ -168,6 +171,7 @@ __all__ = [
     "metadata",
     "open_checkpointer",
     "pending_decision",
+    "pending_gate",
     "put_connection",
     "put_github_connection",
     "reclaim_expired_run",

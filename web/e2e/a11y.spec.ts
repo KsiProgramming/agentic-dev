@@ -131,6 +131,20 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Escape");
     });
 
+    test("the inbox, with a gate under review, has no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(request, [WRITER, GATE], "E2E inbox a11y");
+      await open(page, `/inbox?run=${runId}`);
+      const review = page.getByTestId("inbox-review").filter({ visible: true });
+      await expect(review.getByRole("heading", { name: GATE.title })).toBeVisible({
+        timeout: 30_000,
+      });
+      await expectNoSeriousIssues(page);
+      await request.post(`${apiURL}/runs/${runId}/cancel`);
+    });
+
     test("the gate review sheet has no serious a11y issues", async ({ page, request }) => {
       test.setTimeout(120_000);
       const runId = await startReviewRun(request, "E2E review a11y");

@@ -1,5 +1,6 @@
 import {
   HistoryIcon,
+  InboxIcon,
   LayoutTemplateIcon,
   ScrollTextIcon,
   SettingsIcon,
@@ -16,6 +17,7 @@ export interface NavItem {
 
 /** The sidebar's sections, in display order. Every page lives under one of them. */
 export const NAV_ITEMS: readonly NavItem[] = [
+  { href: "/inbox", label: "Inbox", icon: InboxIcon },
   { href: "/runs", label: "Runs", icon: HistoryIcon },
   { href: "/templates", label: "Templates", icon: LayoutTemplateIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },

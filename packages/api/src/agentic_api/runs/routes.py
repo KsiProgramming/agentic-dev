@@ -20,10 +20,12 @@ from agentic_api.runs.models import (
     CreateRunRequest,
     CreateRunResponse,
     EditErrorDetail,
+    GateBranch,
     PolicyErrorDetail,
     RerunRequest,
     RunCounts,
     RunDetail,
+    RunGate,
     RunStatus,
     RunSummary,
     RunSummaryPage,
@@ -38,7 +40,7 @@ from agentic_engine.gate import GateDecision
 from agentic_engine.spec import WorkflowSpec, creates_repo
 from agentic_engine.templates import wrap_with_create_repo
 from agentic_github import GithubApiError, github_remote
-from agentic_sandbox import RepoSource
+from agentic_sandbox import RepoSource, branch_name
 from agentic_store import (
     APPROVAL_EXPIRED_REASON,
     DEFAULT_WORKSPACE_ID,
@@ -62,6 +64,7 @@ from agentic_store import (
     list_changed_run_summaries,
     list_run_events,
     list_run_summaries,
+    pending_gate,
     record_approval,
     request_cancel,
 )
@@ -440,6 +443,43 @@ async def rerun(
     await enqueue_run(request.app.state.redis, new_id)
     return CreateRunResponse(
         run_id=new_id, events_url=str(request.url_for("stream_run_events", run_id=new_id))
+    )
+
+
+@router.get(
+    "/{run_id}/gate",
+    operation_id="getRunGate",
+    responses={
+        404: {"description": "No run with this id"},
+        409: {"description": "The run is not waiting at a gate, or its approval expired"},
+    },
+)
+async def gate(run_id: UUID, request: Request) -> RunGate:
+    """The gate the run waits at, for an approver to review without the run's events: its
+    title, prompt and artifact, the files the writers changed, when it expires, and the
+    branches approving lets go on."""
+    sessions = _sessions(request)
+    try:
+        pending = await pending_gate(sessions, run_id)
+    except RunNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except ApprovalError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    row = await get_run_summary(sessions, run_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+    writers = dict.fromkeys(change.node_id for change in pending.changes)
+    return RunGate(
+        node_id=pending.node_id,
+        title=pending.title,
+        prompt=pending.prompt,
+        artifact=pending.artifact,
+        changes=pending.changes,
+        changes_error=pending.changes_error,
+        expires_at=pending.expires_at,
+        repo=row.repo,
+        base=row.branch,
+        branches=[GateBranch(node_id=w, branch=branch_name(run_id, w)) for w in writers],
     )
 
 
