@@ -491,7 +491,9 @@ async def _watch_cancel(worker: Worker, run_id: UUID) -> None:
 async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> None:
     """End a run its user cancelled, unless its graph already wrote its end: `run_cancelled`
     after its last event (a run that never started gets `run_started` first). A sandbox the run
-    kept at a gate is removed."""
+    kept at a gate is removed first, so a run that reads `cancelled` has none left."""
+    if run.repo is not None:
+        await worker.sandboxes.discard(run.id)
     if not await run_ended(worker.sessions, run.id):
         last_seq = await max_event_seq(worker.sessions, run.id)
         if last_seq == 0:
@@ -507,8 +509,6 @@ async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> Non
             await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
                 RUN_CANCELLED, payload={"reason": USER_CANCEL_REASON}
             )
-    if run.repo is not None:
-        await worker.sandboxes.discard(run.id)
 
 
 async def _end_over_limit(
