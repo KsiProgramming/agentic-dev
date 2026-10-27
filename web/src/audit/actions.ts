@@ -13,6 +13,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { shortId } from "@/components/display/short-id";
+import { formatPrice, formatUsd } from "@/runs/cost";
+
 import type { components } from "@/api/schema";
 import { repoLabel } from "@/runs/summaries";
 
@@ -106,7 +109,7 @@ const END_STATUS: Record<string, string> = {
 function usd(amount: string | null): string | null {
   if (amount === null) return null;
   const n = Number(amount);
-  return Number.isFinite(n) ? `$${n.toLocaleString("en-US", { maximumFractionDigits: 4 })}` : null;
+  return Number.isFinite(n) ? formatPrice(n) : null;
 }
 
 function limit(key: string, value: Details[string] | undefined): string {
@@ -135,11 +138,7 @@ export function describe(event: AuditEvent): string {
       const budget = usd(text(d, "budget_usd"));
       return join(
         [
-          of
-            ? `Rerun of ${of.slice(0, 8)}`
-            : template
-              ? `Started ${template}`
-              : "Started a workflow",
+          of ? `Rerun of ${shortId(of)}` : template ? `Started ${template}` : "Started a workflow",
           repo ? `on ${repoLabel(repo)}` : null,
         ]
           .filter(Boolean)
@@ -153,11 +152,12 @@ export function describe(event: AuditEvent): string {
     }
     case "run.ended": {
       const status = text(d, "status");
-      const cost = usd(text(d, "estimated_usd"));
+      const spent = Number(text(d, "estimated_usd") ?? Number.NaN);
+      const cost = Number.isFinite(spent) && spent > 0 ? formatUsd(spent) : null;
       return join(
         status ? (END_STATUS[status] ?? status) : "Ended",
         status === "failed" && text(d, "failure_reason"),
-        cost && cost !== "$0" && `${d.cost_complete === false ? "≥ " : ""}${cost}`,
+        cost && `${d.cost_complete === false ? "≥ " : ""}${cost}`,
         text(d, "pr_url"),
       );
     }

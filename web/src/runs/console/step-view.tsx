@@ -3,11 +3,10 @@
 import { CircleAlertIcon, ExternalLinkIcon, RepeatIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Duration, Money, TokenCount } from "@/components/display";
 import { StatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 
-import { costCaveat, formatCost, formatTokens, usageDetails } from "../cost";
-import { formatDuration } from "../summaries";
 import {
   stepUsage,
   type Branch,
@@ -35,9 +34,9 @@ export interface StepViewOptions {
   extra?: (step: Step) => ReactNode;
 }
 
-function elapsed(startedAt: string, endedAt: string | null, now: number): string {
+function elapsedMs(startedAt: string, endedAt: string | null, now: number): number {
   const end = endedAt ? Date.parse(endedAt) : now;
-  return formatDuration(Math.max(0, end - Date.parse(startedAt)));
+  return Math.max(0, end - Date.parse(startedAt));
 }
 
 /** Status words next to a title: only what needs attention. A step that is done says so with its
@@ -71,7 +70,7 @@ function TitleLine({
     <div className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <Heading
         className={cn(
-          "min-w-0 font-mono text-[13px] break-all",
+          "min-w-0 font-mono text-meta break-all",
           level === "step" ? "font-medium" : "text-foreground",
         )}
       >
@@ -84,26 +83,21 @@ function TitleLine({
           {stepBadge(status).label}
         </span>
       ) : null}
-      <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-        {elapsed(startedAt, endedAt, now)}
-      </span>
+      <Duration
+        ms={elapsedMs(startedAt, endedAt, now)}
+        className="ml-auto shrink-0 text-xs text-muted-foreground"
+      />
     </div>
   );
 }
 
+/** One tab stop: the cost's tooltip already has every count. */
 function UsageFooter({ usage }: { usage: TokenUsage }) {
-  const caveat = costCaveat(usage);
   return (
-    <p
-      data-testid="usage"
-      title={usageDetails(usage)}
-      className="text-xs text-muted-foreground tabular-nums"
-    >
-      {formatTokens(usage.inputTokens)} in · {formatTokens(usage.outputTokens)} out ·{" "}
-      <span data-testid="usage-cost" title={caveat ?? undefined}>
-        {formatCost(usage)}
-      </span>
-      {caveat ? <span className="sr-only"> ({caveat})</span> : null}
+    <p data-testid="usage" className="text-xs text-muted-foreground">
+      <TokenCount value={usage.inputTokens} label="in" usage={usage} focusable={false} /> ·{" "}
+      <TokenCount value={usage.outputTokens} label="out" usage={usage} focusable={false} /> ·{" "}
+      <Money data-testid="usage-cost" usage={usage} />
     </p>
   );
 }
@@ -229,7 +223,7 @@ function BranchView({ branch, options }: { branch: Branch; options: StepViewOpti
 
 function ErrorLine({ error }: { error: string }) {
   return (
-    <p className="flex items-start gap-1.5 text-[13px] break-words text-destructive">
+    <p className="flex items-start gap-1.5 text-meta break-words text-destructive">
       <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       <span>{error}</span>
     </p>
@@ -289,7 +283,7 @@ export function StepBody({ step, options }: { step: Step; options: StepViewOptio
             href={step.createdRepo.url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline"
+            className="inline-flex items-center gap-1 font-mono text-meta break-all text-primary underline-offset-4 hover:underline"
           >
             {step.createdRepo.fullName}
             <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
@@ -301,7 +295,7 @@ export function StepBody({ step, options }: { step: Step; options: StepViewOptio
           href={step.prUrl}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex w-fit items-center gap-1 font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline"
+          className="inline-flex w-fit items-center gap-1 font-mono text-meta break-all text-primary underline-offset-4 hover:underline"
         >
           {step.prUrl}
           <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />

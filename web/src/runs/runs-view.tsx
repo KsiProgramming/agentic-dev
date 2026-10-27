@@ -75,7 +75,7 @@ export function RunsView({
   const allHeading = useId();
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader
         title="Runs"
         description="Every run in this workspace, newest first."
@@ -106,7 +106,7 @@ export function RunsView({
 
       {waitingRuns.length > 0 ? (
         <section aria-labelledby={waitingHeading} className="flex flex-col gap-3">
-          <h2 id={waitingHeading} className="text-base font-semibold">
+          <h2 id={waitingHeading} className="text-section font-semibold">
             Needs approval{" "}
             <span className="text-muted-foreground tabular-nums">({waitingRuns.length})</span>
           </h2>
@@ -120,7 +120,7 @@ export function RunsView({
       ) : null}
 
       <section aria-labelledby={allHeading} className="flex flex-col gap-3">
-        <h2 id={allHeading} className="text-base font-semibold">
+        <h2 id={allHeading} className="text-section font-semibold">
           All runs
         </h2>
         {all.isPending ? (

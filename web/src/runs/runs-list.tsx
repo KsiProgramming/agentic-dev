@@ -3,6 +3,7 @@
 import { EllipsisIcon, ExternalLinkIcon, RotateCcwIcon } from "lucide-react";
 import Link from "next/link";
 
+import { Duration, Money, RelativeTime, shortId } from "@/components/display";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -22,17 +23,9 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-import { costCaveat, formatCost, usageDetails, usageOfRun } from "./cost";
+import { usageOfRun } from "./cost";
 import { canRerun, RerunOf, useRerun } from "./rerun";
-import {
-  badgeStatus,
-  formatAbsolute,
-  formatDuration,
-  formatRelative,
-  repoLabel,
-  runDurationMs,
-  type RunSummary,
-} from "./summaries";
+import { badgeStatus, repoLabel, runDurationMs, type RunSummary } from "./summaries";
 
 /** A link over its whole row or card; other links in it sit above it (`relative z-10`). */
 const STRETCHED =
@@ -84,7 +77,7 @@ function RunMenu({ run, baseUrl }: { run: RunSummary; baseUrl?: string }) {
           size="icon-sm"
           className="relative z-10"
           disabled={rerun.isPending}
-          aria-label={`Actions for ${run.workflow.name} ${run.id.slice(0, 8)}`}
+          aria-label={`Actions for ${run.workflow.name} ${shortId(run.id)}`}
         >
           <EllipsisIcon aria-hidden="true" />
         </Button>
@@ -99,18 +92,19 @@ function RunMenu({ run, baseUrl }: { run: RunSummary; baseUrl?: string }) {
   );
 }
 
-function Started({ run, now }: { run: RunSummary; now: number }) {
-  const at = run.started_at ?? run.created_at;
-  return (
-    <time dateTime={at} title={formatAbsolute(at)} className="tabular-nums">
-      {formatRelative(at, now)}
-    </time>
-  );
-}
+/** Values in a row sit above its stretched link, so their tooltips open on hover. They take no
+ * focus: the row's link and actions are its tab stops. */
+const IN_ROW = "relative z-10";
 
-function Duration({ run, now }: { run: RunSummary; now: number }) {
-  const ms = runDurationMs(run, now);
-  return <span className="tabular-nums">{ms === null ? "—" : formatDuration(ms)}</span>;
+function Started({ run, now }: { run: RunSummary; now: number }) {
+  return (
+    <RelativeTime
+      iso={run.started_at ?? run.created_at}
+      now={now}
+      focusable={false}
+      className={IN_ROW}
+    />
+  );
 }
 
 /** What the run cost so far; "—" before any usage is logged. */
@@ -119,15 +113,7 @@ function Cost({ run }: { run: RunSummary }) {
   if (usage.inputTokens + usage.outputTokens === 0) {
     return <span className="text-muted-foreground">—</span>;
   }
-  return (
-    <span
-      data-testid="run-cost"
-      title={costCaveat(usage) ?? usageDetails(usage)}
-      className="tabular-nums"
-    >
-      {formatCost(usage)}
-    </span>
-  );
+  return <Money data-testid="run-cost" usage={usage} focusable={false} className={IN_ROW} />;
 }
 
 function Repo({ run }: { run: RunSummary }) {
@@ -152,7 +138,7 @@ export function RunsTable({
   baseUrl?: string;
 }) {
   return (
-    <Table aria-label={label} className="text-[13px]">
+    <Table aria-label={label} className="text-meta">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead>Status</TableHead>
@@ -191,7 +177,7 @@ export function RunsTable({
               <Started run={run} now={now} />
             </TableCell>
             <TableCell>
-              <Duration run={run} now={now} />
+              <Duration ms={runDurationMs(run, now)} />
             </TableCell>
             <TableCell className="text-right">
               <Cost run={run} />
@@ -234,7 +220,7 @@ export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; b
         <Started run={run} now={now} />
         <span>
           <span className="sr-only">Duration </span>
-          <Duration run={run} now={now} />
+          <Duration ms={runDurationMs(run, now)} />
         </span>
         <span>
           <span className="sr-only">Cost </span>

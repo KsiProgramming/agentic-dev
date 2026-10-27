@@ -22,21 +22,24 @@ Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design sy
 
 ### Rules that are not optional
 
-1. **Colour comes from semantic tokens only**: `bg-background`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-status-failed`, `bg-status-waiting-muted`. Never palette classes (`bg-red-100`, `text-indigo-600`), hex, `rgb()` or `oklch()` in a component. A new colour is a token in `web/src/app/globals.css` (light and dark) and a line in tech-stack first.
+1. **Colour comes from semantic tokens only**: `bg-background`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-status-failed`, `bg-status-waiting-muted`. Never palette classes (`bg-red-100`, `text-indigo-600`), hex, `rgb()` or `oklch()` in a component. A new colour is a token in `web/src/app/globals.css` (light and dark) and a line in tech-stack first. `pnpm lint` rejects the rest (`agentic-ui/no-raw-colors`).
 2. **Colour means status only.** Status is shown through `StatusBadge` (`@/components/status-badge`), always icon + label. API statuses go through `badgeStatus` and `statusLabel` (`@/runs/summaries`); the live console through `displayStatus` (`@/runs/status`). Never hand-roll a coloured pill.
-3. **Values have one way to be shown:**
+3. **Values have one way to be shown**, a component from `@/components/display` (tech-stack → UI design system → Display values):
    | Value | Use |
    |---|---|
-   | Durations | `formatDuration` (`@/runs/summaries`) |
-   | Times | `formatRelative` in a `<time dateTime>` with `formatAbsolute` as its tooltip |
-   | Cost and tokens | `formatCost`, `formatUsd`, `formatTokens`, with `usageDetails` / `costCaveat` in the tooltip (`@/runs/cost`) |
-   | Repos | `repoLabel` in the mono font |
+   | Times | `RelativeTime` (`clock` for a log line) |
+   | Durations | `Duration` |
+   | Cost and prices | `Money` (`usage={…}`, or `usd={…}` with `kind="price"` for a list price or limit) |
+   | Tokens | `TokenCount` |
+   | Ids | `IdChip` (copies, or links with `href`) |
+   | A figure with its label | `StatTile` |
+   | Repos | `repoLabel` (`@/runs/summaries`) in the mono font |
    | JSON | `JsonView` (`@/components/json-view`), never in a table cell |
 
-   Numbers use `tabular-nums`. Never `toLocaleString()` with no options. From phase 11.1 these become components (`RelativeTime`, `Duration`, `Money`, `TokenCount`, `IdChip`, `StatTile`); use them once they exist.
+   Dates and numbers follow the display locale (`@/lib/locale`): never `toLocaleString()` or a hand-made `Intl` format in a component. The formatters behind the components (`@/runs/summaries`, `@/runs/cost`) are for values that must be strings (placeholders, toasts, titles). In a list row, pass `focusable={false}` so values do not add tab stops.
 4. **A duration shown to the user is active time.** Time waiting at a gate is never added to it (tech-stack → UI v2 → Time). Until 11.2 ships, do not add new places that show start-to-end time as "Duration".
 5. **Every data view has three states** from `@/components/states`: `LoadingState` (skeleton), `EmptyState` (icon, one sentence, one action) and `ErrorState` (message and Retry).
-6. **Pages start with `PageHeader`** (`@/components/page-header`): title, one-line description, actions on the right. Breadcrumbs come from the shell; do not add your own.
+6. **Pages start with `PageHeader`** (`@/components/page-header`): title, one-line description, actions on the right. Breadcrumbs come from the shell; do not add your own. Pages use the full content width the shell gives them: never `mx-auto max-w-*` on a page. Sizes come from the type scale (`text-caption`, `text-meta`, `text-body`, `text-section`, `text-page`, `text-stat`), not `text-[13px]`.
 7. **Fonts:** Inter for UI text; JetBrains Mono (`font-mono`) only for ids, paths, branches, code and JSON.
 8. **Icons:** `lucide-react`, `aria-hidden="true"`, `size-4` by default. Icon-only buttons have an `aria-label`.
 9. **Build from what exists.** Use the primitives in `web/src/components/ui` (shadcn/ui, owned by us) and compose them; change a primitive only when every use should change. Check `web/src/components` and the feature folder for an existing component before writing a new one.

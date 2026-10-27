@@ -126,7 +126,7 @@ const DockBar = forwardRef<HTMLElement, { children: ReactNode }>(function DockBa
       data-testid="approval-dock"
       // Above the page, below the header's menus, sheets and dialogs (z-50). It spans the content
       // column only: the sidebar is 4rem wide as a rail (lg) and 15rem in full (xl).
-      className="fixed inset-x-0 bottom-0 z-30 border-t bg-background pb-[env(safe-area-inset-bottom)] shadow-[0_-1px_3px_0_rgb(0_0_0/0.06)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 lg:left-16 xl:left-60"
+      className="fixed inset-x-0 bottom-0 z-30 border-t bg-background pb-[env(safe-area-inset-bottom)] shadow-dock outline-none focus-visible:ring-3 focus-visible:ring-ring/50 lg:left-16 xl:left-60"
     >
       {children}
     </section>
@@ -221,7 +221,7 @@ export function ApprovalDock({
       {/* The space the dock takes, so the end of the page scrolls clear of it. */}
       <div aria-hidden="true" data-testid="dock-spacer" style={{ height }} />
       <DockBar ref={setElement}>
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:px-6">
+        <div className="mx-auto flex w-full max-w-content flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:px-6">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <CirclePauseIcon
               aria-hidden="true"
@@ -268,7 +268,7 @@ export function ApprovalDock({
           )}
         </div>
         {error ? (
-          <div className="mx-auto w-full max-w-5xl px-4 pb-3 md:px-6">
+          <div className="mx-auto w-full max-w-content px-4 pb-3 md:px-6">
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>

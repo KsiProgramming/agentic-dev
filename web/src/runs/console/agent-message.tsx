@@ -42,7 +42,7 @@ const COMPONENTS: Components = {
     <div className="overflow-x-auto">
       <table
         {...plain(props)}
-        className="text-[13px] [&_td]:border [&_td]:px-2 [&_th]:border [&_th]:px-2"
+        className="text-meta [&_td]:border [&_td]:px-2 [&_th]:border [&_th]:px-2"
       />
     </div>
   ),
@@ -67,7 +67,8 @@ export function AgentMessage({
       data-testid="agent-message"
       data-streaming={streaming || undefined}
       className={cn(
-        "flex min-w-0 flex-col gap-2 leading-relaxed break-words [&_p]:whitespace-pre-wrap",
+        // Reading text stops at 72 characters; code blocks and tables use the whole width.
+        "flex min-w-0 flex-col gap-2 text-body break-words *:max-w-prose [&_p]:whitespace-pre-wrap [&>div]:max-w-none [&>pre]:max-w-none",
         className,
       )}
     >

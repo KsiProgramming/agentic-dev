@@ -1,24 +1,15 @@
 "use client";
 
-import { CopyIcon, ExternalLinkIcon, GitBranchIcon } from "lucide-react";
+import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { toast } from "sonner";
 
+import { Duration, IdChip, Money, RelativeTime, TokenCount } from "@/components/display";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge, type RunStatus } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-import {
-  costCaveat,
-  formatCost,
-  formatTokens,
-  formatUsd,
-  usageDetails,
-  type TokenUsage,
-} from "../cost";
+import type { TokenUsage } from "../cost";
 import { RerunOf } from "../rerun";
-import { formatAbsolute, formatDuration, formatRelative, repoLabel } from "../summaries";
+import { repoLabel } from "../summaries";
 import type { RunDetail } from "../use-run-detail";
 
 export interface HeaderFacts {
@@ -54,7 +45,7 @@ export function RunHeader({
     <PageHeader
       title={facts.workflowName ?? run?.workflow.name ?? "Run"}
       description={
-        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-meta">
           <Meta>
             <span aria-live="polite">
               <StatusBadge
@@ -77,59 +68,30 @@ export function RunHeader({
           ) : null}
           {facts.startedAt ? (
             <Meta>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <time
-                    dateTime={facts.startedAt}
-                    tabIndex={0}
-                    className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  >
-                    Started {formatRelative(facts.startedAt, now)}
-                  </time>
-                </TooltipTrigger>
-                <TooltipContent>{formatAbsolute(facts.startedAt)}</TooltipContent>
-              </Tooltip>
+              <RelativeTime iso={facts.startedAt} now={now} prefix="Started " />
             </Meta>
           ) : null}
           {facts.durationMs !== null ? (
             <Meta>
-              <span data-testid="run-duration" className="tabular-nums">
-                {formatDuration(facts.durationMs)}
-              </span>
+              <Duration data-testid="run-duration" ms={facts.durationMs} />
             </Meta>
           ) : null}
           {facts.usage ? (
             <Meta>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    data-testid="run-cost"
-                    tabIndex={0}
-                    className="rounded-sm tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                  >
-                    {formatCost(facts.usage)}
-                    {budget !== null ? (
-                      <span className="text-muted-foreground"> of {formatUsd(budget)}</span>
-                    ) : null}
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {formatTokens(facts.usage.inputTokens + facts.usage.outputTokens)} tokens
-                    </span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {usageDetails(facts.usage)}
-                  {costCaveat(facts.usage) ? <p>{costCaveat(facts.usage)}</p> : null}
-                  {budget !== null ? (
-                    <p>The run stops once its cost reaches its {formatUsd(budget)} budget.</p>
-                  ) : null}
-                </TooltipContent>
-              </Tooltip>
+              <Money data-testid="run-cost" usage={facts.usage} budget={budget} />
+              <span className="text-muted-foreground">
+                ·{" "}
+                <TokenCount
+                  value={facts.usage.inputTokens + facts.usage.outputTokens}
+                  label="tokens"
+                  usage={facts.usage}
+                />
+              </span>
             </Meta>
           ) : budget !== null ? (
             <Meta>
-              <span data-testid="run-cost" className="tabular-nums">
-                Budget {formatUsd(budget)}
+              <span data-testid="run-cost">
+                Budget <Money usd={budget} />
               </span>
             </Meta>
           ) : null}
@@ -157,23 +119,7 @@ export function RunHeader({
       actions={
         <>
           {actions}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void navigator.clipboard?.writeText(runId).then(
-                () => toast.success("Run id copied"),
-                () => toast.error("Could not copy the run id"),
-              );
-            }}
-          >
-            <CopyIcon aria-hidden="true" data-icon="inline-start" />
-            <span className="sr-only">Copy run id</span>
-            <span aria-hidden="true" className="font-mono">
-              {runId.slice(0, 8)}
-            </span>
-          </Button>
+          <IdChip id={runId} label="run id" className="h-8" />
         </>
       }
     />

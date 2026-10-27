@@ -76,17 +76,35 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 
 - **Style:** modern and minimal, in the spirit of Linear, Vercel and GitHub. Neutral greys (zinc) on white, or on near-black in dark mode, with one accent colour (indigo) for primary actions and focus. Light borders, very small shadows and rounded corners (`--radius: 0.5rem`). No gradients and no decoration.
 - **Colour means status only:** `running` blue, `waiting` amber, `succeeded` green, `failed` red, `cancelled` and `queued` grey. Status is always shown as icon + label, never colour alone.
-- **Tokens:** every colour, radius and shadow is a semantic token (`--background`, `--foreground`, `--muted`, `--border`, `--primary`, `--status-*`). Components never use raw palette classes such as `bg-red-100`.
-- **Type:** Inter at 14 px base for UI text, 13 px for dense tables. JetBrains Mono for ids, paths, code and JSON. Numbers use `tabular-nums`.
+- **Tokens:** every colour, radius and shadow is a semantic token (`--background`, `--foreground`, `--muted`, `--border`, `--primary`, `--overlay`, `--shadow-dock`, `--status-*`), defined for light and dark in `web/src/app/globals.css` and nowhere else. Components never use raw palette classes such as `bg-red-100`, arbitrary colours such as `bg-[#4f46e5]`, or hex, `rgb()` and `oklch()` values; ESLint rejects them (see "How the rules are enforced").
+- **Type:** Inter for UI text, JetBrains Mono for ids, paths, code and JSON. Sizes come from the type scale tokens: `text-caption` 12 px (captions, table headers), `text-meta` 13 px (tables, metadata), `text-body` 14 px (body text, agent output), `text-section` 16 px (section titles), `text-page` 20 px (page titles), `text-stat` 24 px (stat values). Table headers are sentence case. Numbers use `tabular-nums`.
+- **Density:** table rows are `h-row`, 40 px, or 32 px in compact mode. Compact mode is a toggle in the top bar, kept per browser (`localStorage`) and applied as the `compact` class on `<html>` before the first paint.
 - **Theme:** light, dark and system, switched from the top bar.
 
 ### Layout
 
 - **App shell:** a left sidebar (Runs, Templates, Settings, Audit log; workspace switcher at the top) and a top bar (breadcrumbs, theme, user). The sidebar collapses to icons from 1024 to 1279 px and becomes a drawer below 1024 px.
 - **Breakpoints:** mobile-first. Designed and tested at 375, 768, 1024 and 1440 px. No horizontal page scroll at any width. Wide content (JSON, logs) scrolls inside its own box.
+- **Width:** pages use the content width, up to 1600 px (`max-w-content`, set once by the shell). No page wraps itself in `mx-auto max-w-*`. Only reading text (page descriptions, agent output) is capped, at 72 characters (`max-w-prose`); code blocks and tables in it use the whole width.
 - **Page header:** title, short description and primary actions on the right. On mobile the actions stack below the title.
 - **Tables on desktop, cards on mobile:** a list keeps its columns at ≥ 768 px and turns into stacked cards below that.
 - **States:** every data view has a skeleton loader, an empty state (icon, one sentence, primary action) and an error state (message plus Retry).
+
+### Display values
+
+Each kind of value has one component (`@/components/display`), used everywhere a value of that kind is shown. They are built on the formatters in `@/runs/summaries` and `@/runs/cost`, which are used directly only where the value must be a string (a placeholder, a toast, a page title).
+
+| Value | Component | Shows |
+|---|---|---|
+| A moment | `RelativeTime` | Relative ("5 min ago") in a `<time dateTime>`, the exact date and time in a tooltip; `clock` shows the time of day for a log line |
+| A duration | `Duration` | "2m 05s", "—" before it started |
+| Money | `Money` | A cost from usage ("$0.042", "≥ $x" or "—" when unpriced, every count and the reason in a tooltip, "of $x" with a budget), or a plain amount as a cost or a `price` ("$3.00") |
+| Tokens | `TokenCount` | "12.3K in", the exact counts in a tooltip |
+| An id | `IdChip` | The short id (8 characters, mono), the full id in a tooltip; copies on click, or links with `href` |
+| A figure | `StatTile` | Label, value in `text-stat`, one secondary line |
+
+- **Locale and time zone:** dates and numbers use the display locale (`@/lib/locale`), today the browser's own locale and time zone (24-hour where the locale is). A workspace setting for them will pin it in that one module. Amounts are always USD, shown with "$". No component calls `toLocaleString()` or builds an `Intl` format itself. Unit tests and Playwright pin `en-US` and UTC.
+- **Tooltips and focus:** a value with a tooltip takes keyboard focus to show it, except inside a list where every row has such values (`focusable={false}`): there the row's link and actions are its tab stops.
 
 ### Start and settings
 
@@ -148,15 +166,8 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 
 ### UI v2 (Milestone 11)
 
-Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here.
+Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here. Foundations (11.1) shipped: brand accent, type scale, density, width and display values are in Look, Layout and Display values above.
 
-- **Foundations (11.1):**
-  - Brand accent: one accent for primary actions, focus and links. Indigo stays unless 11.1 decides otherwise (open question: indigo or a near-black "ink" primary in the style of Vercel). Either way it is a token change in `globals.css` only.
-  - Type scale as tokens: 12 px captions and table headers, 13 px tables and metadata, 14 px body and agent output, 16 px section titles, 20 px page titles, 24 px stat values. Table headers are sentence case.
-  - Density: table rows are 40 px, or 32 px in a compact mode the user can turn on.
-  - Shared display components, used everywhere a value of that kind is shown: `RelativeTime` (relative, exact time in a tooltip, `<time dateTime>`), `Duration`, `Money`, `TokenCount`, `IdChip` (mono short id, full id in a tooltip, click to copy), `StatTile` (label, value, one secondary line).
-  - Dates and times use the workspace's locale and time zone (24-hour where the locale is). Never `toLocaleString()` with no options in a component.
-  - Width: pages use the content width up to 1600 px; only reading text (agent output, descriptions) is capped, at 72 characters. No page wraps itself in `mx-auto max-w-*`.
 - **Time (11.2):** a run has three durations and the UI never mixes them:
   - *Active time*: steps executing. This is the "Duration" everywhere.
   - *Waiting time*: paused at gates. Shown as its own chip ("waiting 12 h" while waiting, "waited 1m 52s" after).
@@ -202,7 +213,7 @@ Planned changes to the rules above, from a review of the shipped screens. Until 
 
 A rule an agent can break without noticing will be broken. So each one is either checked by a tool or written in [`CLAUDE.md`](../CLAUDE.md), which coding agents read before every task:
 
-- ESLint (11.1) rejects palette colour classes (`bg-red-100`, `text-indigo-600`) and arbitrary colour values (`bg-[#…]`, `text-[oklch(…)]`) in `web/src`.
+- ESLint (`agentic-ui/no-raw-colors`, a local rule in `web/eslint/`) rejects palette colour classes (`bg-red-100`, `text-indigo-600`, `bg-black/10`), arbitrary colour values (`bg-[#…]`, `text-[oklch(…)]`) and hex, `rgb()` and `oklch()` literals in `web/src`, outside tests. `pnpm lint` fails on them.
 - axe and the layout screenshots in `e2e/` run in CI at 375, 768 and 1440 px.
 - `CLAUDE.md` lists the shared components to use for each kind of value, so a new screen is assembled from them rather than restyled.
 
@@ -339,4 +350,7 @@ A rule an agent can break without noticing will be broken. So each one is either
 | UI rules for agents (11.1) | Rules in `CLAUDE.md`, backed by ESLint and the e2e layout and axe checks | Coding agents follow what they read at the start of every task and what CI rejects. A prompt pasted once drifts by the next session. |
 | Specs govern the work | `specs/mission.md`, `specs/roadmap.md` and `specs/tech-stack.md` are the repo's constitution; `CLAUDE.md` points agents to them and repeats only the rules they must not miss | An agent or a person reads one place to know what to build and how. A decision kept only in code, a chat or `CLAUDE.md` is lost by the next task, so every decision, phase and rule change lands in these files first, in the same PR. |
 | Roadmap order | A milestone added later takes the next free number and is listed where it is worked; a "Next up" line names the milestone to plan next | Phase numbers are quoted in spec folders, the changelog and code comments. Renumbering left stale references once (see `TODO.md`), so numbers never change and order lives in the list instead. |
+| Brand accent (11.1) | Indigo stays (not a near-black "ink" primary) | It is already tuned for contrast in light and dark, and the review's problems were information design, not the accent. Changing it later is a token change in `globals.css` only. |
+| Display locale (11.1) | The browser's locale and time zone, behind one module (`@/lib/locale`) | Locale-aware dates and numbers now with no API change; a workspace `locale` / `time_zone` setting later pins them in that module and nowhere else. |
+| Colour lint (11.1) | A small local ESLint rule over string and template literals | No maintained rule covers Tailwind v4 palette classes, arbitrary values and colour literals together; a regex rule is short and tested with `RuleTester`. |
 | Tool intent (11.8) | An optional `description` argument on the platform's tools, written by the agent | The console can say why a call was made, not only what it did, at no extra model call. Optional, so a provider or agent that leaves it out still works and falls back to the mechanical line. |

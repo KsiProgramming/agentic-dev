@@ -117,7 +117,7 @@ function lastPullRequest(steps: Step[]): string | null {
  * before the dock takes focus, e.g. to close the sheet the marker is in. */
 function WaitingMarker({ onGo }: { onGo?: () => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 text-[13px]" data-testid="waiting-marker">
+    <div className="flex flex-wrap items-center gap-2 text-meta" data-testid="waiting-marker">
       <CirclePauseIcon aria-hidden="true" className="size-4 text-status-waiting" />
       <span className="font-medium">Waiting for approval</span>
       <Button

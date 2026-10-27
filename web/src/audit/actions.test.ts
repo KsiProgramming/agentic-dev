@@ -18,7 +18,7 @@ describe("describe", () => {
           budget_usd: "5.00",
         },
       },
-      "Started generate-docs on acme/docs · budget $5",
+      "Started generate-docs on acme/docs · budget $5.00",
     ],
     ["a run of a raw workflow", { details: {} }, "Started a workflow"],
     [
@@ -98,7 +98,7 @@ describe("describe", () => {
           after: { agents_alive: 4, budget_usd: "10" },
         },
       },
-      "agents alive default → 4, budget none → $10",
+      "agents alive default → 4, budget none → $10.00",
     ],
     [
       "prices",

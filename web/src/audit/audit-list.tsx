@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
+import { IdChip, RelativeTime } from "@/components/display";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -11,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatAbsolute, formatRelative, repoLabel } from "@/runs/summaries";
+import { repoLabel } from "@/runs/summaries";
 
 import { actionInfo, describe, type AuditEvent } from "./actions";
 
@@ -19,11 +18,7 @@ import { actionInfo, describe, type AuditEvent } from "./actions";
 const NO_ACTOR = "Who acted is recorded once sign-in exists.";
 
 function Time({ event, now }: { event: AuditEvent; now: number }) {
-  return (
-    <time dateTime={event.at} title={formatAbsolute(event.at)} className="tabular-nums">
-      {formatRelative(event.at, now)}
-    </time>
-  );
+  return <RelativeTime iso={event.at} now={now} focusable={false} />;
 }
 
 function Action({ event }: { event: AuditEvent }) {
@@ -54,13 +49,7 @@ function RunRef({ event }: { event: AuditEvent }) {
     .join(" · ");
   return (
     <span className="flex min-w-0 flex-col">
-      <Link
-        href={`/runs/${event.run_id}`}
-        className="w-fit rounded-sm font-mono text-xs text-primary outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-        aria-label={`Run ${event.run_id.slice(0, 8)}`}
-      >
-        {event.run_id.slice(0, 8)}
-      </Link>
+      <IdChip id={event.run_id} label="run" href={`/runs/${event.run_id}`} className="text-xs" />
       {context ? (
         <span className="truncate text-xs text-muted-foreground" title={context}>
           {context}
@@ -83,7 +72,7 @@ function Details({ event }: { event: AuditEvent }) {
 /** The audit log as a table, from `md` (768 px). */
 export function AuditTable({ events, now }: { events: AuditEvent[]; now: number }) {
   return (
-    <Table aria-label="Audit log" className="text-[13px]">
+    <Table aria-label="Audit log" className="text-meta">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-28">Time</TableHead>

@@ -150,7 +150,7 @@ export function GateFilesView({
                       current && "bg-muted",
                     )}
                   >
-                    <span className="font-mono text-[13px] break-all">{file.change.path}</span>
+                    <span className="font-mono text-meta break-all">{file.change.path}</span>
                     <span className="flex flex-wrap items-center gap-2">
                       <StatusLabel status={file.change.status} />
                       {file.edited ? <Badge variant="secondary">Edited</Badge> : null}
@@ -187,7 +187,7 @@ export function GateFilesView({
 
       <section aria-label={selected.change.path} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-          <span className="min-w-0 font-mono text-[13px] break-all">
+          <span className="min-w-0 font-mono text-meta break-all">
             {selected.change.oldPath ? `${selected.change.oldPath} → ` : ""}
             {selected.change.path}
           </span>

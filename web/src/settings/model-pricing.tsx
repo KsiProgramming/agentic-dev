@@ -15,6 +15,7 @@ import {
   type Price,
   type PriceOverride,
 } from "@/api/queries";
+import { Money, TokenCount } from "@/components/display";
 import { ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -74,13 +75,6 @@ const schema = z.object({
 
 type Values = z.infer<typeof schema>;
 
-const usd = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
-
 /** The prices a model is priced with: the workspace's, else the list price. */
 function effective(model: ModelPricing): Price | null {
   return model.override ?? model.default;
@@ -135,7 +129,7 @@ export function ModelPricingCard({
   return card(
     <>
       <div className="overflow-x-auto rounded-md border">
-        <Table aria-label="Model prices, USD per million tokens" className="text-[13px]">
+        <Table aria-label="Model prices, USD per million tokens" className="text-meta">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>Model</TableHead>
@@ -165,14 +159,15 @@ export function ModelPricingCard({
                     </span>
                     {model.long_context && !model.override ? (
                       <span className="block text-xs text-muted-foreground">
-                        Higher price above {model.long_context.above_tokens.toLocaleString("en-US")}{" "}
+                        Higher price above{" "}
+                        <TokenCount value={model.long_context.above_tokens} focusable={false} />{" "}
                         prompt tokens
                       </span>
                     ) : null}
                   </TableCell>
                   {PRICE_FIELDS.map((f) => (
                     <TableCell key={f.key} className="text-right tabular-nums">
-                      {prices ? usd.format(prices[f.key]) : "—"}
+                      {prices ? <Money usd={prices[f.key]} kind="price" /> : "—"}
                     </TableCell>
                   ))}
                   <TableCell>

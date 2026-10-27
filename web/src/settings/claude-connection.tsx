@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { useConnections, useRemoveClaudeKey } from "@/api/queries";
+import { RelativeTime } from "@/components/display";
 import { ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -72,7 +73,7 @@ export function ClaudeConnection({
       detail={
         <span data-testid="claude-status">
           Key ending in <span className="font-mono">…{connection.key_hint}</span>, updated{" "}
-          {new Date(connection.updated_at).toLocaleString()}.
+          <RelativeTime iso={connection.updated_at} />.
         </span>
       }
       actions={

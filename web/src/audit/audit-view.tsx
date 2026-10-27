@@ -51,7 +51,7 @@ export function AuditView({
   const refreshing = log.isRefetching && !log.isFetchingNextPage;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader
         title="Audit log"
         description="Every run, approval and settings change in this workspace, newest first."

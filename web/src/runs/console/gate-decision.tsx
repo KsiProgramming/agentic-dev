@@ -41,7 +41,7 @@ export function GateDecision({ gate }: { gate: GateInfo }) {
   const [open, setOpen] = useState(false);
   const edited = gate.decision === "approve" ? gate.edits.length : 0;
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
       <span className="font-medium">{gate.title}</span>
       {gate.decision ? (
         <span className="text-muted-foreground" data-testid="gate-decision">

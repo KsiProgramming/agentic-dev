@@ -2,12 +2,12 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RotateCcwIcon } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { apiBaseUrl, createApiClient } from "@/api/client";
 import { ApiError } from "@/api/errors";
+import { IdChip, shortId } from "@/components/display";
 import type { RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_WORKSPACE_ID } from "@/workspace";
@@ -48,7 +48,7 @@ export function useRerun({
     },
     onSuccess: (newId, runId) => {
       void queries.invalidateQueries({ queryKey: runsKey(workspaceId) });
-      toast.success(`Started a rerun of ${runId.slice(0, 8)}`);
+      toast.success(`Started a rerun of ${shortId(runId)}`);
       const url = `/runs/${newId}`;
       if (navigate) navigate(url);
       else router.push(url);
@@ -86,13 +86,7 @@ export function RerunButton({
 export function RerunOf({ runId, className }: { runId: string; className?: string }) {
   return (
     <span className={className}>
-      Rerun of{" "}
-      <Link
-        href={`/runs/${runId}`}
-        className="relative z-10 rounded-sm font-mono text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-      >
-        {runId.slice(0, 8)}
-      </Link>
+      Rerun of <IdChip id={runId} label="run" href={`/runs/${runId}`} className="relative z-10" />
     </span>
   );
 }

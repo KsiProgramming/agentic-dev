@@ -21,8 +21,14 @@ export function PageHeader({
       className={cn("flex flex-col gap-3 md:flex-row md:items-start md:justify-between", className)}
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description ? <p className="text-muted-foreground">{description}</p> : null}
+        <h1 className="text-page font-semibold tracking-tight">{title}</h1>
+        {/* Text is a paragraph capped at reading width; anything else (the run console's facts
+            list) cannot sit in a <p>. */}
+        {typeof description === "string" ? (
+          <p className="max-w-prose text-muted-foreground">{description}</p>
+        ) : description ? (
+          <div className="text-muted-foreground">{description}</div>
+        ) : null}
       </div>
       {actions ? (
         <div className="flex flex-wrap items-center gap-2 md:shrink-0">{actions}</div>
