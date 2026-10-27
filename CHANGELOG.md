@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 4.1 `parallel` primitive with join policies:
+- Phase 4.1 `parallel` primitive with join policies ([#120](https://github.com/KsiProgramming/agentic-dev/pull/120)):
   - **Spec.** `{"type": "parallel", "id", "branches": [...], "join": "all" | "any" | "quorum", "quorum"?}`: 2 to 8 branches, each an `agent`, `tool` or `sequence` node, run at the same time on the parallel's input. A new validation code, `not_allowed_in_parallel`, refuses gates, writers, publishers and containers in a branch; a parallel cannot be inside a loop or a map, its branches are capped by the workspace's agents alive, and it counts as one level of nesting. The JSON Schema, OpenAPI spec and web client are regenerated.
   - **Engine.** One LangGraph `Send` per branch and a join node. `all`, `any` and `quorum` decide as soon as the outcome is known, and the branches still running end `node_cancelled`. The output is the completed branches' outputs in branch order, with `data.outputs` by branch id. All the branches' agents count against agents spawned when the parallel starts. Finished branches are checkpointed, so a resumed run reruns only the others.
   - **Events.** `parallel_branch_started` and `parallel_branch_completed` around each branch, a `branch` tag on its events, and the `completed`, `failed` and `cancelled` branch ids on the parallel's end.
