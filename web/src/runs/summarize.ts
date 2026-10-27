@@ -75,6 +75,7 @@ export function summarizePayload(event: RunEvent): string {
   const payload = event.payload ?? {};
   switch (event.type) {
     case "text_delta":
+    case "reasoning_delta":
     case "message":
       return truncate(str(payload.text));
     case "usage": {

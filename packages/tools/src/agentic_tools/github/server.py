@@ -279,7 +279,12 @@ def build_github_server(
         served.append(
             strict_tool(
                 tools.open_pr,
-                {"from_node": "writer", "title": "Add NOTES.md", "body": "Written by an agent."},
+                {
+                    "from_node": "writer",
+                    "title": "Add NOTES.md",
+                    "body": "Written by an agent.",
+                    "description": "Open the pull request for the notes",
+                },
                 name="openPR",
                 structured=True,
             )

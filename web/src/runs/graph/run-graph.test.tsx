@@ -39,7 +39,7 @@ function node(id: string): HTMLElement {
 
 describe("RunGraph", () => {
   it("draws every node of the spec with its status in words", async () => {
-    render(<Graph steps={stepsUpTo(84)} />);
+    render(<Graph steps={stepsUpTo(events.find((e) => e.type === "gate_waiting")!.seq)} />);
 
     await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7));
     expect(node("list_modules").dataset.status).toBe("completed");

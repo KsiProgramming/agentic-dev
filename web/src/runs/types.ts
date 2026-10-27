@@ -43,6 +43,7 @@ export const EVENT_TYPES = [
   "repo_created",
   "policy_limit_exceeded",
   "text_delta",
+  "reasoning_delta",
   "message",
   "tool_call",
   "tool_result",

@@ -248,8 +248,9 @@ def build_keys(settings: WorkerSettings) -> KeyProvider | None:
 def fake_runtime_factory(settings: WorkerSettings) -> RuntimeFactory:
     if settings.fake_step_delay_s > 0:
         delay = settings.fake_step_delay_s
+        # Tool calls wait twice as long as a chunk: a live work block stays on screen a while.
         return lambda tools: FakeRuntime(
-            default=lambda text: slow_echo_script(text, delay), tools=tools
+            default=lambda text: slow_echo_script(text, delay), tools=tools, call_delay_s=2 * delay
         )
     return lambda tools: FakeRuntime(tools=tools)
 

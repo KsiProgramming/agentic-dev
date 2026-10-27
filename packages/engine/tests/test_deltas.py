@@ -10,7 +10,7 @@ from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.graph import run_workflow
 from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.spec import parse_spec
-from agentic_runtime import AgentEvent, Message, TextDelta, Usage
+from agentic_runtime import AgentEvent, Message, ReasoningDelta, TextDelta, Usage
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
 
 CHUNKS = ["The ", "pages ", "are ", "clear", "."]
@@ -80,6 +80,24 @@ async def test_any_other_event_writes_the_pending_text_first() -> None:
         "TextDelta",
     ]
     assert out.texts() == ["a", "b", "c"]
+
+
+async def test_reasoning_is_merged_like_text_and_never_mixed_with_it() -> None:
+    out = Recorder()
+    buffer = DeltaBuffer(out, interval=10)
+    for chunk in ["Read ", "the ", "config."]:
+        await buffer.emit(ReasoningDelta(text=chunk))
+    await buffer.emit(TextDelta(text="Done"))
+    await buffer.emit(TextDelta(text="."))
+    await buffer.emit(ReasoningDelta(text="Check."))
+    await buffer.close()
+
+    assert out.events == [
+        ReasoningDelta(text="Read "),
+        ReasoningDelta(text="the config."),
+        TextDelta(text="Done."),
+        ReasoningDelta(text="Check."),
+    ]
 
 
 async def test_close_writes_what_is_pending_and_stops_the_timer() -> None:

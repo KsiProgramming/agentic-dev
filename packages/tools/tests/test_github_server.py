@@ -199,9 +199,15 @@ async def test_the_tool_offers_an_example_and_strict_arguments(
     assert sorted(definitions) == ["github.createRepo", "github.openPR"]
     definition = definitions["github.openPR"]
     assert definition.input_schema["examples"] == [
-        {"from_node": "writer", "title": "Add NOTES.md", "body": "Written by an agent."}
+        {
+            "from_node": "writer",
+            "title": "Add NOTES.md",
+            "body": "Written by an agent.",
+            "description": "Open the pull request for the notes",
+        }
     ]
     assert definition.input_schema["additionalProperties"] is False
+    assert "description" in str(definition.input_schema["properties"])
 
 
 async def test_run_tools_route_by_tool_and_refuse_unknown_ones(open_tools: OpenTools) -> None:

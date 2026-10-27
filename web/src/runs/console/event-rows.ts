@@ -2,9 +2,9 @@ import { summarizePayload } from "../summarize";
 import type { RawRow } from "../timeline";
 import type { RunEvent } from "../types";
 
-/** A row's type: a folded run of chunks is `text_delta`. */
+/** A row's type: a folded run of chunks is the type of its chunks. */
 export function rowType<E extends RunEvent>(row: RawRow<E>): string {
-  return row.kind === "text" ? "text_delta" : row.event.type;
+  return row.kind === "text" ? row.type : row.event.type;
 }
 
 /** The node a row belongs to, if any. */

@@ -10,6 +10,7 @@ from agentic_runtime import (
     Completed,
     Failed,
     Message,
+    ReasoningDelta,
     TextDelta,
     ToolCall,
     ToolResult,
@@ -240,6 +241,63 @@ async def test_tool_loop_two_turns() -> None:
     assert second[2]["content"] == [
         {"type": "tool_result", "tool_use_id": "toolu_1", "content": "# Readme", "is_error": False}
     ]
+
+
+@pytest.mark.parametrize(
+    ("model", "thinking"),
+    [
+        (DEFAULT_MODEL, {"type": "adaptive", "display": "summarized"}),
+        ("claude-opus-5-5", {"type": "adaptive", "display": "summarized"}),
+        ("claude-fable-5-1", {"type": "adaptive", "display": "summarized"}),
+        ("claude-haiku-5-5", {"type": "adaptive", "display": "summarized"}),
+        # Thinking is off by default on these, or they predate adaptive thinking.
+        ("claude-opus-4-8", None),
+        ("claude-sonnet-4-6", None),
+        ("claude-haiku-4-5", None),
+        ("claude-test", None),
+    ],
+)
+async def test_models_that_think_by_default_are_asked_to_show_it(
+    model: str, thinking: dict[str, str] | None
+) -> None:
+    mock = MockClaude([text_reply("a")])
+
+    await collect_and_check(runtime(mock), request(model=model))
+
+    assert mock.requests[0].get("thinking") == thinking
+
+
+async def test_reasoning_streams_before_the_text_and_goes_back_with_the_tool_results() -> None:
+    tools = ScriptedToolExecutor({"repo.read_file": "# Readme"})
+    mock = MockClaude(
+        [
+            tool_use_reply(
+                ("toolu_1", "repo__read_file", {"path": "README.md"}),
+                thinking=["Start with ", "the readme."],
+            ),
+            text_reply("It is a readme.", thinking=["Enough to answer."]),
+        ]
+    )
+
+    events = await collect_and_check(runtime(mock, tools=tools), request(tools=["repo.read_file"]))
+
+    assert [e for e in events if not isinstance(e, Usage)] == [
+        ReasoningDelta(text="Start with "),
+        ReasoningDelta(text="the readme."),
+        ToolCall(call_id="toolu_1", name="repo.read_file", arguments={"path": "README.md"}),
+        ToolResult(call_id="toolu_1", output="# Readme"),
+        ReasoningDelta(text="Enough to answer."),
+        TextDelta(text="It is a readme."),
+        Message(text="It is a readme."),
+        Completed(),
+    ]
+    # The thinking block goes back unchanged, signature included.
+    assistant = mock.requests[1]["messages"][1]["content"]
+    assert assistant[0] == {
+        "type": "thinking",
+        "thinking": "Start with the readme.",
+        "signature": "sig-test",
+    }
 
 
 async def test_tool_errors_are_reported_and_the_loop_continues() -> None:

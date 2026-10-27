@@ -3,6 +3,7 @@
 import { ExternalLinkIcon, FileIcon, InboxIcon } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
+import { Duration } from "@/components/display";
 import { OutputView } from "@/components/json-view";
 import { EmptyState } from "@/components/states";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,8 @@ import { GateDecision } from "./gate-decision";
 import { StatusMarker } from "./rail";
 import { lastMessage, type StepEntry, type StepRow } from "./step-entries";
 import { ErrorLine } from "./step-view";
+import { WorkBlock } from "./work-block";
+import { agentTurns, mapTotals, workStart } from "./work-blocks";
 import { writtenFiles, type WrittenFile } from "./written-files";
 
 /** An answer longer than this is capped (about 480 px) with "Show full output". */
@@ -157,6 +160,23 @@ function Children({
   );
 }
 
+/** A map's items added up: "3 items · 9 tool calls · 21s". */
+function MapTotals({ step }: { step: Step }) {
+  const totals = mapTotals(step);
+  return (
+    <p data-testid="map-totals" className="text-meta text-muted-foreground tabular-nums">
+      {totals.items} {totals.items === 1 ? "item" : "items"} · {totals.toolCalls}{" "}
+      {totals.toolCalls === 1 ? "tool call" : "tool calls"}
+      {totals.ms !== null ? (
+        <>
+          {" "}
+          · <Duration ms={totals.ms} />
+        </>
+      ) : null}
+    </p>
+  );
+}
+
 function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a
@@ -195,11 +215,24 @@ export function StepOutput({
   const tool = kind === "tool" ? step.turns.findLast((t) => t.kind === "tool") : undefined;
   const files = writtenFiles(step);
   const children = childRows(entries, row);
+  const turns = kind === "tool" ? [] : agentTurns(step);
+  const final = turns.at(-1);
   const parts: ReactNode[] = [];
 
   if (step.error) parts.push(<ErrorLine key="error" error={step.error} />);
   if (step.gate) parts.push(<GateDecision key="gate" gate={step.gate} />);
   if (extra) parts.push(<div key="extra">{extra}</div>);
+  if (final && final.work.length > 0) {
+    // The work behind the answer, folded: one line above it.
+    parts.push(
+      <WorkBlock
+        key={`work-${final.key}`}
+        turn={final}
+        startedAt={workStart(step, final, turns.length - 1)}
+        live={step.status === "running" && final.answer === null}
+      />,
+    );
+  }
   if (message && message.text.trim()) {
     parts.push(
       <Answer
@@ -212,6 +245,7 @@ export function StepOutput({
   if (tool?.output != null) {
     parts.push(<OutputView key="tool" text={tool.output} label={`Output of ${step.id}`} />);
   }
+  if (step.items) parts.push(<MapTotals key="totals" step={step} />);
   if (children.length > 0) {
     parts.push(<Children key="children" items={children} onSelect={onSelect} />);
   }

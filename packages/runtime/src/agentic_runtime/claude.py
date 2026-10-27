@@ -5,6 +5,11 @@ token counts as one `usage` event. When Claude asks for tools, the run emits `to
 tool through the `ToolExecutor`, emits `tool_result`, sends the result back and calls the API
 again, up to `max_turns` calls. The final turn's text becomes the `message`.
 
+Models that think by default (the Claude 5 family) are asked for their summarized reasoning,
+which streams as `reasoning_delta` events. They think and are billed the same either way; the
+default display only leaves the text empty. Other models are sent no `thinking` setting, so
+showing reasoning never changes what a run costs.
+
 `role` and `instructions` form the system prompt. `input` goes in the user turn inside an
 `<input>` block marked as data, and tool results go back as `tool_result` blocks, so neither is
 ever treated as instructions.
@@ -18,7 +23,7 @@ from typing import Any, cast
 
 import anthropic
 from anthropic.types import Message as ClaudeMessage
-from anthropic.types import MessageParam, ToolParam, ToolResultBlockParam
+from anthropic.types import MessageParam, ThinkingConfigParam, ToolParam, ToolResultBlockParam
 from pydantic import JsonValue
 
 from agentic_runtime.events import (
@@ -27,6 +32,7 @@ from agentic_runtime.events import (
     Completed,
     Failed,
     Message,
+    ReasoningDelta,
     TextDelta,
     ToolCall,
     ToolResult,
@@ -46,6 +52,9 @@ DEFAULT_MAX_TURNS = 50
 # Status codes worth retrying: timeout, conflict, rate limit, and server errors (529 = overloaded).
 _RETRYABLE_STATUS = frozenset({408, 409, 429})
 _API_TOOL_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
+# Models whose thinking is on when the request leaves it out (adaptive): asking them to show it
+# costs nothing. On older models it would turn thinking on, or be refused.
+_THINKS_BY_DEFAULT = re.compile(r"^claude-(fable|mythos|opus|sonnet|haiku)-5(-|$)")
 
 
 class _Stopped(Exception):
@@ -63,6 +72,13 @@ def user_turn(input: str) -> str:
 
 def system_prompt(request: AgentRequest) -> str:
     return f"Your role: {request.role}\n\n{request.instructions}"
+
+
+def thinking_config(model: str) -> ThinkingConfigParam | anthropic.Omit:
+    """Summarized reasoning for a model that thinks by default; nothing for any other."""
+    if _THINKS_BY_DEFAULT.match(model):
+        return {"type": "adaptive", "display": "summarized"}
+    return anthropic.omit
 
 
 def api_tool_name(name: str) -> str:
@@ -199,6 +215,7 @@ class ClaudeRun:
                     system=system_prompt(self._request),
                     messages=messages,
                     tools=tool_params or anthropic.omit,
+                    thinking=thinking_config(self._model),
                 ) as stream:
                     events = aiter(stream)
                     while True:
@@ -208,6 +225,8 @@ class ClaudeRun:
                             break
                         if event.type == "text":
                             yield TextDelta(text=event.text)
+                        elif event.type == "thinking" and event.thinking:
+                            yield ReasoningDelta(text=event.thinking)
                     final = await stream.get_final_message()
             except anthropic.APIError as e:
                 yield failure(e)

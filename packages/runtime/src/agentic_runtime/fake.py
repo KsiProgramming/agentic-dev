@@ -16,6 +16,7 @@ from agentic_runtime.events import (
     Completed,
     Failed,
     Message,
+    ReasoningDelta,
     TextDelta,
     ToolCall,
     ToolResult,
@@ -47,6 +48,12 @@ type Script = Sequence[Step]
 
 # Scripted, so it carries its own price: engine tests see costs without a price table.
 ECHO_USAGE = Usage(model="fake", input_tokens=10, output_tokens=10, estimated_usd=0.0001)
+
+
+FAKE_REASONING = ReasoningDelta(
+    text="Look at the repository with each tool first.\nThen answer with what I was given."
+)
+"""What a node without a script reasons before its tool calls."""
 
 
 def echo_script(text: str) -> list[Step]:
@@ -165,7 +172,8 @@ class FakeRuntime:
 
     With `tools`, `CallTool` steps run through it, and a node without a script first calls each
     tool its request names, with the first `examples` entry of the tool's input schema (or no
-    arguments). That lets a demo exercise real tools with no provider and no script.
+    arguments), after `FAKE_REASONING`, waiting `call_delay_s` before each call. That lets a demo
+    exercise real tools with no provider and no script, and be watched while it works.
 
     Scripts are checked against the contract up front, so a bad script fails at construction.
     A script without a terminal event gets `completed` appended.
@@ -177,10 +185,12 @@ class FakeRuntime:
         *,
         default: Callable[[str], Script] = echo_script,
         tools: ToolExecutor | None = None,
+        call_delay_s: float = 0,
     ) -> None:
         self._scripts = {node_id: _prepare(node_id, s) for node_id, s in (scripts or {}).items()}
         self._default = default
         self._tools = tools
+        self._call_delay = [Delay(call_delay_s)] if call_delay_s > 0 else []
         self.requests: list[AgentRequest] = []
 
     def start(self, request: AgentRequest) -> FakeRun:
@@ -190,6 +200,11 @@ class FakeRuntime:
         calls: list[Step] = []
         if self._tools is not None:
             examples = {d.name: _first_example(d.input_schema) for d in self._tools.definitions()}
-            calls = [CallTool(name, examples.get(name, {})) for name in request.tools]
-        script = [*calls, *self._default(request.input)]
+            calls = [
+                step
+                for name in request.tools
+                for step in [*self._call_delay, CallTool(name, examples.get(name, {}))]
+            ]
+        reasoning: list[Step] = [FAKE_REASONING] if calls else []
+        script = [*reasoning, *calls, *self._default(request.input)]
         return FakeRun(_prepare(request.node_id, script), self._tools, node_id=request.node_id)

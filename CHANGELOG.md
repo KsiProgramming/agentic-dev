@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 11.8 agent activity, read like a chat with Claude:
+  - **Work blocks.** In a step's Activity and Output, each agent turn's work (its reasoning, notes and tool calls) folds into one line: "Listed 1 folder, read 2 files · 3 tool calls · 8s". The answer stays open below it. A block opens on a failed call. While the agent works, the line says what it is doing, with a timer that ticks.
+  - **Why each call was made.** The platform's tools take an optional `description`, which the agent fills with its intent ("Read the frontend config"). It is the call's title in the console and in the live line, shown as plain text. Reads with no intent still fold into one row.
+  - **Reasoning.** Claude 5 models stream their summarized thinking as `reasoning_delta` events, shown as collapsed rows in muted italic. They already thought and were billed for it, so cost does not change, and older models are left as they were.
+  - **Map totals.** A map's Output adds up its items: "3 items · 9 tool calls · 21s".
+  - **Fake runtime.** It reasons before its tool calls and, with `FAKE_STEP_DELAY_S`, waits before each call, so a live work block can be watched without a provider.
 - Phase 11.7 shell and settings v2 ([#136](https://github.com/KsiProgramming/agentic-dev/pull/136)):
   - **Command palette.** `⌘K` / `Ctrl+K` (or "Search… ⌘K" in the top bar) finds a run by its id, PR number or workflow and opens it; starts a new run; opens the oldest waiting gate (or a waiting run found) in the Inbox; switches between light and dark; and goes to any section or settings sub-page.
   - **User menu.** "Preferences" at the bottom of the sidebar holds the theme and row density, which leave the top bar.

@@ -153,11 +153,12 @@ export function isContainer(step: Step): boolean {
   return step.items !== null || step.branches !== null || step.iterations !== null;
 }
 
-/** The agent's answer: the step's last message. */
+/** The agent's answer: its last final message, or the text the step ends on. Text followed by
+ * more work is a note, not an answer (`agentTurns`). */
 export function lastMessage(step: Step): MessageTurn | null {
   for (let i = step.turns.length - 1; i >= 0; i--) {
     const turn = step.turns[i]!;
-    if (turn.kind === "message") return turn;
+    if (turn.kind === "message" && (turn.final || i === step.turns.length - 1)) return turn;
   }
   return null;
 }

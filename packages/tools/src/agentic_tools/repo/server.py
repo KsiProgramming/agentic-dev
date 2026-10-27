@@ -485,10 +485,20 @@ def build_repo_server(
     and the server also has `write_file` and `commit`."""
     tools = _RepoTools(sandbox, limits or RepoLimits())
     reads = [
-        _tool(tools.list_files, {"path": "."}),
-        _tool(tools.read_file, {"path": "pyproject.toml", "end_line": 60}),
-        _tool(tools.search, {"pattern": "[project]", "max_results": 20}),
-        strict_tool(tools.list_modules, {"include": ["packages/*"]}, structured=True),
+        _tool(tools.list_files, {"path": ".", "description": "See how the repo is laid out"}),
+        _tool(
+            tools.read_file,
+            {"path": "pyproject.toml", "end_line": 60, "description": "Read the project settings"},
+        ),
+        _tool(
+            tools.search,
+            {"pattern": "[project]", "max_results": 20, "description": "Find the project table"},
+        ),
+        strict_tool(
+            tools.list_modules,
+            {"include": ["packages/*"], "description": "List the modules to document"},
+            structured=True,
+        ),
     ]
     if not writable:
         return MCPServer(
@@ -499,9 +509,13 @@ def build_repo_server(
     writes = [
         _tool(
             tools.write_file,
-            {"path": "NOTES.md", "content": "# Notes\n\nWritten by an agent.\n"},
+            {
+                "path": "NOTES.md",
+                "content": "# Notes\n\nWritten by an agent.\n",
+                "description": "Write the notes page",
+            },
         ),
-        _tool(tools.commit, {"message": "Add NOTES.md"}),
+        _tool(tools.commit, {"message": "Add NOTES.md", "description": "Commit the notes page"}),
     ]
     return MCPServer(
         SERVER_NAME,

@@ -58,9 +58,10 @@ function Preview({ text, failed }: { text: string; failed: boolean }) {
   );
 }
 
-/** One tool call as one quiet line ("Read `src/app.ts`"); opening it shows its arguments and
- * result. Only a call in flight or one that failed gets a status icon. A call that changes
- * something, or that failed, shows a preview of it under its line. */
+/** One tool call as one quiet line ("Read `src/app.ts`"), titled with its intent when the agent
+ * gave one ("Read the frontend config · Read `web/package.json`"); opening it shows its
+ * arguments and result. Only a call in flight or one that failed gets a status icon. A call that
+ * changes something, or that failed, shows a preview of it under its line. */
 export function ToolCallRow({ turn }: { turn: ToolTurn }) {
   const d = describeTool(turn.name, turn.arguments);
   const ms = took(turn);
@@ -82,10 +83,24 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
             }
           />
           {/* The spaces between the spans keep the button's accessible name readable. */}
-          <span className="shrink-0">{turn.status === "running" ? d.doing : d.done}</span>{" "}
-          {d.target ? (
-            <span className="min-w-0 truncate font-mono text-foreground">{d.target}</span>
-          ) : null}{" "}
+          {turn.intent ? (
+            <>
+              <span data-testid="tool-intent" className="min-w-0 shrink truncate text-foreground">
+                {turn.intent}
+              </span>{" "}
+              <span className="hidden min-w-0 shrink-[2] truncate sm:inline">
+                · {turn.status === "running" ? d.doing : d.done}{" "}
+                {d.target ? <span className="font-mono">{d.target}</span> : null}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="shrink-0">{turn.status === "running" ? d.doing : d.done}</span>{" "}
+              {d.target ? (
+                <span className="min-w-0 truncate font-mono text-foreground">{d.target}</span>
+              ) : null}
+            </>
+          )}{" "}
           {turn.status === "failed" ? (
             <span className="shrink-0 text-status-failed">failed</span>
           ) : null}{" "}

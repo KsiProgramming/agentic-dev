@@ -1,7 +1,8 @@
 """Record a docs-like run on the fake runtime to web/src/runs/fixtures/docs-run.json.
 
 The run console's timeline tests replay it: a tool node, a map over three modules whose agents
-stream two turns around a tool call, a reduce, a review loop of two iterations and a gate that is
+reason, write a note, call a tool with an intent and read two files without one, then answer, a
+reduce, a review loop of two iterations and a gate that is
 approved. Run with `uv run python scripts/record_console_fixture.py`.
 """
 
@@ -18,7 +19,7 @@ from agentic_engine.events import InMemoryEventSink
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.spec import parse_spec
-from agentic_runtime import Message, TextDelta, Usage
+from agentic_runtime import Message, ReasoningDelta, TextDelta, Usage
 from agentic_runtime.fake import CallTool, FakeRuntime, Script
 from agentic_runtime.testing import ScriptedToolExecutor
 
@@ -70,15 +71,24 @@ def chunks(text: str) -> list[TextDelta]:
     return [TextDelta(text=c) for c in re.findall(r"(?:\S+\s*){1,3}", text)]
 
 
+def reasoning(text: str) -> list[ReasoningDelta]:
+    """`text` as summarized reasoning streams: a few words per chunk."""
+    return [ReasoningDelta(text=c) for c in re.findall(r"(?:\S+\s*){1,3}", text)]
+
+
 def module_writer(module: str) -> Script:
+    thought = f"The input is a module path.\nI should see what `{module}` holds before writing."
     plan = f"I will look at the files of `{module}` first."
     page = (
         f"# {module}\n\nThis module holds the **{module.split('/')[-1]}** code.\n\n"
         "- Entry point\n- Tests\n"
     )
     return [
+        *reasoning(thought),
         *chunks(plan),
-        CallTool("repo.list_files", {"path": module}),
+        CallTool("repo.list_files", {"path": module, "description": "See what the module holds"}),
+        CallTool("repo.read_file", {"path": f"{module}/README.md"}),
+        CallTool("repo.read_file", {"path": f"{module}/pyproject.toml"}),
         *chunks(page),
         Message(text=page),
         Usage(input_tokens=1200, output_tokens=180),
@@ -99,6 +109,7 @@ async def main() -> None:
         {
             "repo.list_modules": '{"modules": ["packages/api", "packages/engine", "web"]}',
             "repo.list_files": '{"files": ["README.md", "src/", "tests/"]}',
+            "repo.read_file": "1\t# Module",
         }
     )
     runtime = FakeRuntime({"reviewer": REVIEWER}, default=module_writer, tools=tools)

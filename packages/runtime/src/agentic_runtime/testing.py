@@ -175,6 +175,29 @@ def _text_block(index: int, chunks: Sequence[str]) -> list[dict[str, Any]]:
     return [start, *deltas, {"type": "content_block_stop", "index": index}]
 
 
+def _thinking_block(chunks: Sequence[str]) -> list[dict[str, Any]]:
+    """A summarized thinking block at index 0, one delta per chunk, then its signature."""
+    start = {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+    }
+    deltas = [
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": c},
+        }
+        for c in chunks
+    ]
+    signature = {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {"type": "signature_delta", "signature": "sig-test"},
+    }
+    return [start, *deltas, signature, {"type": "content_block_stop", "index": 0}]
+
+
 def _end(stop_reason: str, output_tokens: int) -> list[dict[str, Any]]:
     return [
         {
@@ -193,13 +216,17 @@ def text_reply(
     output_tokens: int = 5,
     hang: bool = False,
     model: str = "claude-test",
+    thinking: Sequence[str] = (),
     **cache: Any,
 ) -> MockReply:
-    """A streamed text answer, one delta per chunk. `model` and `cache` (e.g.
-    `cache_read_input_tokens=100`) set what the reply's usage reports."""
+    """A streamed text answer, one delta per chunk, after a thinking block when `thinking` has
+    chunks. `model` and `cache` (e.g. `cache_read_input_tokens=100`) set what the reply's usage
+    reports."""
+    reasoning = _thinking_block(thinking) if thinking else []
     events = [
         _message_start(input_tokens, model, **cache),
-        *_text_block(0, chunks),
+        *reasoning,
+        *_text_block(1 if thinking else 0, chunks),
         *_end(stop_reason, output_tokens),
     ]
     return MockReply(events=events, hang=hang)
@@ -210,13 +237,18 @@ def tool_use_reply(
     text: str = "",
     input_tokens: int = 20,
     output_tokens: int = 8,
+    thinking: Sequence[str] = (),
 ) -> MockReply:
-    """Claude asks for tools: `calls` are `(tool_use_id, api_tool_name, input)`."""
+    """Claude asks for tools: `calls` are `(tool_use_id, api_tool_name, input)`, after a
+    thinking block when `thinking` has chunks."""
     events = [_message_start(input_tokens)]
     index = 0
-    if text:
-        events += _text_block(0, [text])
+    if thinking:
+        events += _thinking_block(thinking)
         index = 1
+    if text:
+        events += _text_block(index, [text])
+        index += 1
     for i, (call_id, name, args) in enumerate(calls, start=index):
         events += [
             {
