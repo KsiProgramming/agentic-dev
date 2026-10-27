@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 11.6 run console v3:
+- Phase 11.6 run console v3 ([#135](https://github.com/KsiProgramming/agentic-dev/pull/135)):
   - **Header and figures.** The workflow name with its status and id; repo › branch, what started the run and when; the pull request as the primary action, Rerun or Cancel, and a "⋯" menu (Copy link, Download events). Five tiles under it: active time (time waited under it), cost against the budget, tokens, steps done of total, and output (the PR, or the repo the run created).
   - **Banner.** A failed run names the step it failed at and why, with "Go to step"; a run waiting at a gate shows the gate, its time left, Review and "Open in Inbox"; an expired run says why it ended.
   - **Steps and the selected step.** The body is a step list (or the graph) beside the selected step from 1280 px, stacked below. Each row says in one line what the step did, with its duration and cost; map items, branches and iterations nest under their node. The selected step has Output (the agent's answer, capped with "Show full output", and the files it wrote as cards), Activity (its messages and tool calls), Input (from the spec and the run), Usage and Events. A finished run opens on its last agent's answer, a live one follows the running step; the place is kept in the URL (`?step=`, `?tab=`, `?view=graph`), and old `?tab=graph` / `?tab=raw` links still open.
