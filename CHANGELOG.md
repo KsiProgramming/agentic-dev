@@ -9,6 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- UI v2 planned as roadmap phases 2.7–2.14 (foundations, active and waiting time, approval expiry, runs list v2, Inbox, run console v3, shell and settings v2, agent activity), with their rules in `specs/tech-stack.md` → UI v2 and how they are enforced; `CLAUDE.md` gives coding agents the non-optional UI rules before every task.
 - Phase 3.7 audit log view for admins ([#117](https://github.com/KsiProgramming/agentic-dev/pull/117)):
   - **Audit log.** An append-only `audit_events` table (Alembic `0019_audit_events`; a trigger refuses updates and deletes) records each action in a workspace, written in the same transaction as the change: runs started, rerun, cancel requested and ended, gate approvals and rejections (comment and edited paths, never contents), connections added and removed (key hint, never the key), and changes to run limits (before and after) and model prices. Runs and approvals made before are backfilled. Who acted is `system` for a run ending, and a user with no name until sign-in exists.
   - **API.** `GET /workspaces/{id}/audit` lists it newest first, with cursor pagination and filters by `action`, `run_id`, `since` and `until`; each entry carries its run's template, repo and status.
