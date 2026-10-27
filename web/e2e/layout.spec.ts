@@ -64,6 +64,17 @@ test("runs", async ({ page }) => {
   await checkPage(page, "runs");
 });
 
+test("inbox, with a gate under review", async ({ page, request }) => {
+  const runId = await startRun(request, [WRITER, GATE], "E2E inbox layout");
+  await page.goto(`/inbox?run=${runId}`);
+  const review = page.getByTestId("inbox-review").filter({ visible: true });
+  await expect(review.getByRole("heading", { name: GATE.title })).toBeVisible({
+    timeout: 30_000,
+  });
+  await checkPage(page, "inbox");
+  await request.post(`${apiURL}/runs/${runId}/cancel`);
+});
+
 test("templates", async ({ page }) => {
   await page.goto("/templates");
   await expect(page.getByTestId("template-card").first()).toBeVisible();

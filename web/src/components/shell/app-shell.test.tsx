@@ -98,7 +98,7 @@ test("following a link closes the drawer", async () => {
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
-test("runs waiting at a gate are counted on Runs, the menu button and the page title", async () => {
+test("runs waiting at a gate are counted on Inbox, the menu button and the page title", async () => {
   api.waiting = [
     runSummary({ id: "r1", status: "waiting" }),
     runSummary({ id: "r2", status: "waiting" }),
@@ -106,8 +106,9 @@ test("runs waiting at a gate are counted on Runs, the menu button and the page t
   document.title = "Settings · Agentic Dev";
   render(<AppShell>page</AppShell>);
 
-  const runs = sidebar().getByRole("link", { name: /Runs/ });
-  await waitFor(() => expect(runs.textContent).toContain("2 need approval"));
+  const inbox = sidebar().getByRole("link", { name: /Inbox/ });
+  await waitFor(() => expect(inbox.textContent).toContain("2 need approval"));
+  expect(sidebar().getByRole("link", { name: "Runs" }).textContent).toBe("Runs");
   expect(
     screen.getByRole("button", { name: "Open navigation (2 runs need approval)" }),
   ).toBeDefined();
@@ -137,16 +138,16 @@ test("a gate past its time to live is not counted, even before its run is cancel
   ];
   render(<AppShell>page</AppShell>);
 
-  const runs = sidebar().getByRole("link", { name: /Runs/ });
-  await waitFor(() => expect(runs.textContent).toContain("1 needs approval"));
+  const inbox = sidebar().getByRole("link", { name: /Inbox/ });
+  await waitFor(() => expect(inbox.textContent).toContain("1 needs approval"));
 });
 
-test("with nothing waiting, Runs has no badge and the title is left alone", async () => {
+test("with nothing waiting, Inbox has no badge and the title is left alone", async () => {
   document.title = "Runs · Agentic Dev";
   render(<AppShell>page</AppShell>);
 
   await sidebar().findByTestId("workspace-name");
-  expect(sidebar().queryByTestId("runs-waiting-badge")).toBeNull();
+  expect(sidebar().queryByTestId("inbox-waiting-badge")).toBeNull();
   expect(document.title).toBe("Runs · Agentic Dev");
 });
 

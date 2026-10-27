@@ -3,14 +3,9 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { apiBaseUrl } from "@/api/client";
-import { NO_FILTERS } from "@/runs/filters";
-import { gateExpired } from "@/runs/summaries";
-import { useRunList } from "@/runs/use-run-summaries";
+import { inboxRuns, useWaitingRuns, WAITING_LIMIT } from "@/inbox/waiting";
 import { useRunsStream } from "@/runs/use-runs-stream";
 import { useWorkspaceId } from "@/workspace";
-
-/** Runs listed for the count; more shows as "99+". */
-const WAITING_LIMIT = 100;
 
 /** What needs the user, shared by the shell (sidebar badge, page title) and the run console. */
 interface Attention {
@@ -67,17 +62,13 @@ export function AttentionProvider({
   workspaceId?: string;
 }) {
   const workspaceId = useWorkspaceId(givenWorkspaceId);
-  // Kept live by the runs stream below, like the runs page's lists.
-  const waitingRuns = useRunList(
-    { ...NO_FILTERS, status: ["waiting"] },
-    { workspaceId, baseUrl, limit: WAITING_LIMIT },
-  );
+  // Kept live by the runs stream below, like the runs page's lists; the Inbox lists the same.
+  const waitingRuns = useWaitingRuns({ workspaceId, baseUrl });
   useRunsStream({ workspaceId, baseUrl });
   // A gate past its time to live no longer waits, even before the worker has cancelled its run.
   const now = useClientNow(30_000);
-  const waiting = (waitingRuns.data?.pages[0]?.items ?? []).filter(
-    (run) => now === null || !gateExpired(run, now),
-  ).length;
+  const loaded = waitingRuns.data?.pages[0]?.items ?? [];
+  const waiting = now === null ? loaded.length : inboxRuns(loaded, now).length;
   const [consoleWaiting, setConsoleWaiting] = useState(false);
   useAttentionTitle(waiting, consoleWaiting);
   const value = useMemo(() => ({ waiting, setConsoleWaiting }), [waiting]);

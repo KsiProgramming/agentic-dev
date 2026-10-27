@@ -83,7 +83,7 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 
 ### Layout
 
-- **App shell:** a left sidebar (Runs, Templates, Settings, Audit log; workspace switcher at the top) and a top bar (breadcrumbs, theme, user). The sidebar collapses to icons from 1024 to 1279 px and becomes a drawer below 1024 px.
+- **App shell:** a left sidebar (Inbox, Runs, Templates, Settings, Audit log; workspace switcher at the top) and a top bar (breadcrumbs, theme, user). The sidebar collapses to icons from 1024 to 1279 px and becomes a drawer below 1024 px.
 - **Breakpoints:** mobile-first. Designed and tested at 375, 768, 1024 and 1440 px. No horizontal page scroll at any width. Wide content (JSON, logs) scrolls inside its own box.
 - **Width:** pages use the content width, up to 1600 px (`max-w-content`, set once by the shell). No page wraps itself in `mx-auto max-w-*`. Only reading text (page descriptions, agent output) is capped, at 72 characters (`max-w-prose`); code blocks and tables in it use the whole width.
 - **Page header:** title, short description and primary actions on the right. On mobile the actions stack below the title.
@@ -135,6 +135,14 @@ Each kind of value has one component (`@/components/display`), used everywhere a
 - **Date groups:** rows sit under date headers (Today, Yesterday, This week for the 7 days up to today, Earlier), by when the run was created, in calendar days of the display time zone. From 1024 px the table fits the page, so the headers stick under the top bar; below that the table scrolls in its own box. Cards (below 768 px) have the same sticky headers.
 - **Workspace:** the page shows the browser's workspace (`useWorkspaceId`, `@/workspace`): the default one, or the one the `agentic-workspace` cookie names. Only the e2e tests set that cookie, so their runs (in the "E2E" workspace) and demo runs ("Demo") never show among real ones. A workspace switcher comes with users.
 
+### Inbox
+
+- **Page (`/inbox`):** page header, then the gates waiting in the browser's workspace (there are no users yet, so "waiting on the user" means waiting in the workspace), oldest run first, from the same `GET /runs?status=waiting` list as the sidebar count (`useWaitingRuns`, `@/inbox/waiting`). A gate past its `expires_at` is left out. Each entry is a link with the gate title, the workflow, the repo (mono), `WaitingTime` and `ExpiresIn`.
+- **Selection:** selecting an entry shows its review beside the list from 1024 px, below it under that. The selection lives in the URL (`/inbox?run=<id>`); from 1024 px the first gate is selected when none is. After a decision the gate leaves the list at once and the next one is selected. A selected run that no longer waits says so, with Open run.
+- **Review:** the gate title with `ExpiresIn`, the workflow and `IdChip`, the gate's prompt; "Approving lets the run go on" (the repo, and each writer's `agent/<run>/<node>` branch into its base, from `GET /runs/{id}/gate`); the run's active time (waiting time under it) and cost so far as `StatTile`s; the changed files in short with "Review N files", which opens the review sheet (editable, as from the dock), or the artifact as Markdown when there are none; Approve, Reject (with comment) and Open run. `A` / `R` work as in the dock.
+- **One decision for both screens:** the dock and the Inbox share `useGateDecision` and `GateDecisionDialogs` (`@/runs/console`): the same approve-with-edits, Reject dialog, review sheet, toasts and refusal messages.
+- Each part has the three states: the list (loading, "Nothing waits for your approval." with "Show all runs", error with Retry) and the review (loading, error with Retry).
+
 ### Run console
 
 - **Header:** status badge, workflow name, repo and branch, started time and duration, and the PR link once opened. Actions: Rerun, Cancel, Copy run id.
@@ -149,7 +157,7 @@ Each kind of value has one component (`@/components/display`), used everywhere a
   - Status comes from the same timeline as the Timeline tab. The layout is computed once per spec; events only change the nodes' states.
   - Nothing moves, connects or is deleted; the graph pans and zooms inside its own box (`min(70svh, 720px)`), so the page never scrolls sideways.
   - Each node is a button (one tab stop, Enter or Space opens it) with an accessible name that starts with its visible text ("worker, Done, writer, agent": WCAG 2.5.3). It opens a sheet (side sheet 480 px from 768 px, bottom sheet below) with the timeline's step view; a node inside a map or a loop shows one entry per item or iteration. The dock's `A` / `R` shortcuts work while a node has focus, not while the sheet is open.
-- **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with:
+- **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport (its decision and dialogs are the Inbox's, see Inbox) with:
   - the gate title, and when it expires (`ExpiresIn`, when the gate has an expiry);
   - a one-line summary: the gate's prompt, else the first line of its artifact;
   - "Review details", which opens a sheet with the full summary or diff (side sheet from 768 px, bottom sheet below);
@@ -162,7 +170,7 @@ Each kind of value has one component (`@/components/display`), used everywhere a
   - The diff is a Monaco `DiffEditor`, bundled and loaded only when the sheet opens: side by side from 1024 px, inline below. The original side is read-only; the changed side is editable for editable files. Its theme follows the app's.
   - Each edited file has "Discard edits". With edits, Approve reads "Approve with N edits" (dock and sheet footer), and Reject says the edits will be dropped. `Esc` closes the sheet and keeps the edits; leaving the page with edits asks first.
   - The decided step reads "Approved with edits to N files", and each edited file opens as a read-only diff.
-- **Waiting signals:** while a gate is waiting, the run's tab title is "● Needs approval · Run <id8>". While any run in the workspace waits, every other page's title gets an "(N) ● Needs approval · " prefix, and "Runs" in the sidebar (and the mobile menu button) shows a count badge. Approvals are made on the console only: in the runs list, a waiting run's status badge links to it. A gate past its `expires_at` is not counted anywhere, even in the seconds before the worker cancels its run.
+- **Waiting signals:** while a gate is waiting, the run's tab title is "● Needs approval · Run <id8>". While any run in the workspace waits, every other page's title gets an "(N) ● Needs approval · " prefix, and "Inbox" in the sidebar (and the mobile menu button) shows a count badge. Approvals are made in the Inbox, or on the console through the dock: in the runs list, a waiting run's status badge links to its console. A gate past its `expires_at` is not counted anywhere, even in the seconds before the worker cancels its run.
 - **Expired runs:** a run whose gate expired is `cancelled`, not a status of its own. Its badge has Cancelled's grey and icon with the label "Expired" (runs list, console header), and the console shows the reason above the timeline in a neutral alert ("Approval expired: nobody approved or rejected the gate before its time to live ran out"). A run its user cancelled stays "Cancelled".
 - **Live updates:** while a run executes, a live line at the end of the timeline says where it is and what it is doing ("writer · Reading `src/app.ts`…"). The page opens at the top; auto-scroll follows new content only once the user is at the bottom. Otherwise a "Jump to latest" pill appears.
 
@@ -181,12 +189,8 @@ Each kind of value has one component (`@/components/display`), used everywhere a
 
 ### UI v2 (Milestone 11)
 
-Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here. Foundations (11.1) shipped: brand accent, type scale, density, width and display values are in Look, Layout and Display values above. Time (11.2) shipped: it is in Display values above and in the run history contract below. Approval expiry (11.3) shipped: it is in Display values and Run console above, and in the run history, gate review, audit log and security sections below. Runs list (11.4) shipped: it is in "Runs list" above and in the run history contract below.
+Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here. Foundations (11.1) shipped: brand accent, type scale, density, width and display values are in Look, Layout and Display values above. Time (11.2) shipped: it is in Display values above and in the run history contract below. Approval expiry (11.3) shipped: it is in Display values and Run console above, and in the run history, gate review, audit log and security sections below. Runs list (11.4) shipped: it is in "Runs list" above and in the run history contract below. Inbox (11.5) shipped: it is in "Inbox" and "Run console" above and in the gate review contract below.
 
-- **Inbox (11.5)**, replacing "Approvals are made on the console only" from 2.6:
-  - `/inbox` lists the gates waiting on the user, oldest first, with the workflow, repo, waiting time and time left before expiry.
-  - Selecting one shows its review beside the list (below it under 1024 px): what approving does (target repo, branch into base), the summary or the changed files with the same diff view as the review sheet, the run's cost and active time so far, and Approve, Reject (with comment) and Open run. `A` / `R` work as in the dock.
-  - The sidebar gets an "Inbox" entry first; the waiting count moves there from "Runs". The console's approval dock is unchanged.
 - **Run console (11.6)**, replacing the Header and the tab layout of the Run console section:
   - Header: workflow name, status badge, `IdChip`; under it repo › branch, who started it and when. Actions on the right: the pull request as the primary action once opened, Rerun, Cancel while live, and a "⋯" menu (copy link, download events).
   - Stat tiles under the header: Active time (waited time under it), Cost (against the budget when one is set), Tokens (in, out and cache in the tooltip), Steps (done of total), Output (PR number and state).
@@ -261,6 +265,7 @@ A rule an agent can break without noticing will be broken. So each one is either
   - Other files are listed with a `reason`: `binary`, `too_large`, `deleted`, `renamed`, or `over_limit` past the first 50 files or 512 KB of text.
   - If the changes cannot be read, the gate pauses anyway with `changes: []` and `changes_error`.
   - The worker reads them through a `GateReview` (`agentic_engine.gate`) over the run's sandbox, so the engine never runs git.
+- `GET /runs/{id}/gate` (11.5): the gate a run waits at, read from its last `gate_waiting` (`agentic_store.pending_gate`), so a client reviews it without the run's events: `node_id`, `title`, `prompt`, `artifact`, `changes`, `changes_error`, `expires_at`, and what approving does: `repo`, `base` (the run's `branch`; `null` for the default branch) and `branches` (`{node_id, branch}` for each writer whose files it shows, `agent/<run>/<node>`). `404` for an unknown run, `409` when the run is not waiting or its gate has expired.
 - `POST /runs/{id}/approvals` takes `edits: [{node_id, path, content}]` on an approval.
   - Each must name an editable file of the gate's last `gate_waiting`. An edit equal to `after` is dropped.
   - `422` with `detail: {code, message, path}`: `edit_not_allowed`, `edits_with_reject`, `edit_too_large` (a file over 256 KB, or edits over 512 KB in all), `duplicate_edit`.
@@ -369,6 +374,7 @@ A rule an agent can break without noticing will be broken. So each one is either
 | Trigger and branch (11.4) | A `trigger` the client declares when it creates a run, and the requested ref (or a created repo's default branch) as `branch` | Only the client knows whether a person or a script started a run; storing it keeps the list from guessing. The branch is known without cloning; resolving a default branch at clone time would need a new event for one muted line. |
 | Test runs (11.4) | A real "E2E" workspace made by the e2e setup and picked per browser by a cookie; demos in "Demo" | Local e2e shares the developer's stack and its one web container, so a server setting would switch every browser. Connections are per workspace, so the tests no longer change the developer's own. A flag on runs would hide them, not keep them apart. |
 | Where approvals happen (11.5) | An Inbox beside the console's dock, both on the same review components | An approver works through what waits on them in one place; the dock still serves someone already watching the run. One set of review components means the two never disagree. |
+| Inbox data (11.5) | The list from `GET /runs?status=waiting` (sorted on the client), the review from a new `GET /runs/{id}/gate` | The waiting set is small and already listed and kept live for the sidebar count, so no new list endpoint. The summary's `waiting_gate` has only the title and expiry; replaying a run's whole event stream for each selected entry is heavy, one read of its last `gate_waiting` is not. |
 | UI rules for agents (11.1) | Rules in `CLAUDE.md`, backed by ESLint and the e2e layout and axe checks | Coding agents follow what they read at the start of every task and what CI rejects. A prompt pasted once drifts by the next session. |
 | Specs govern the work | `specs/mission.md`, `specs/roadmap.md` and `specs/tech-stack.md` are the repo's constitution; `CLAUDE.md` points agents to them and repeats only the rules they must not miss | An agent or a person reads one place to know what to build and how. A decision kept only in code, a chat or `CLAUDE.md` is lost by the next task, so every decision, phase and rule change lands in these files first, in the same PR. |
 | Roadmap order | A milestone added later takes the next free number and is listed where it is worked; a "Next up" line names the milestone to plan next | Phase numbers are quoted in spec folders, the changelog and code comments. Renumbering left stale references once (see `TODO.md`), so numbers never change and order lives in the list instead. |

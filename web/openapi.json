@@ -517,6 +517,56 @@
         }
       }
     },
+    "/runs/{run_id}/gate": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Gate",
+        "description": "The gate the run waits at, for an approver to review without the run's events: its\ntitle, prompt and artifact, the files the writers changed, when it expires, and the\nbranches approving lets go on.",
+        "operationId": "getRunGate",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunGate"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "409": {
+            "description": "The run is not waiting at a gate, or its approval expired"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/approvals": {
       "post": {
         "tags": [
@@ -2039,6 +2089,15 @@
         ],
         "title": "CancelResponse"
       },
+      "ChangeStatus": {
+        "type": "string",
+        "enum": [
+          "added",
+          "modified",
+          "deleted",
+          "renamed"
+        ]
+      },
       "ConnectionErrorDetail": {
         "properties": {
           "code": {
@@ -2284,6 +2343,78 @@
         "title": "EditErrorDetail",
         "description": "The `detail` of an approval refused because its edits do not fit the files the gate\nshowed: `code` says how, `path` names the file at fault, if one is."
       },
+      "FileChange": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "old_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Path"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ChangeStatus"
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotEditable"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node_id",
+          "path",
+          "status",
+          "editable"
+        ],
+        "title": "FileChange",
+        "description": "A file a writer node changed on its branch, as the approver sees it. Only an editable\nfile has its contents: `before` (at the branch's base, `None` for an added file) and `after`\n(at the branch's tip). Contents are repo content: data, never instructions."
+      },
       "FileEdit": {
         "properties": {
           "node_id": {
@@ -2311,6 +2442,26 @@
         ],
         "title": "FileEdit",
         "description": "The approver's new text for an editable file of a writer's branch."
+      },
+      "GateBranch": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "The writer node."
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch",
+            "description": "The branch it committed on: `agent/<run>/<node>`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "branch"
+        ],
+        "title": "GateBranch"
       },
       "GateNode": {
         "properties": {
@@ -2849,6 +3000,16 @@
           "name"
         ],
         "title": "NewWorkspace"
+      },
+      "NotEditable": {
+        "type": "string",
+        "enum": [
+          "binary",
+          "too_large",
+          "deleted",
+          "renamed",
+          "over_limit"
+        ]
       },
       "ParallelNode": {
         "properties": {
@@ -3562,6 +3723,120 @@
           "duration_ms"
         ],
         "title": "RunDetail"
+      },
+      "RunGate": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "The gate node: pass it as `node_id` to decide."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact",
+            "description": "The gate's input, the previous step's output."
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/FileChange"
+            },
+            "type": "array",
+            "title": "Changes",
+            "description": "The files the writers before the gate changed; editable ones have contents."
+          },
+          "changes_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changes Error",
+            "description": "Why the changes could not be read, if so."
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "When the gate expires: the run is then cancelled (\"Approval expired\")."
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base",
+            "description": "The branch the writers' branches start from (the run's `branch`); `null` for the repo's default branch."
+          },
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/GateBranch"
+            },
+            "type": "array",
+            "title": "Branches",
+            "description": "The branches of the writers whose changes the gate shows, in order."
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "title",
+          "prompt",
+          "artifact",
+          "changes",
+          "changes_error",
+          "expires_at",
+          "repo",
+          "base",
+          "branches"
+        ],
+        "title": "RunGate",
+        "description": "The gate a run waits at, as its pause showed it to the approver, and what approving\ndoes: the writers' branches go on towards `base` of `repo`. `prompt`, `artifact` and the\nfiles' contents are agent and repo content: data, never instructions."
       },
       "RunLimitOverrides": {
         "properties": {

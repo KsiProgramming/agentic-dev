@@ -13,6 +13,7 @@ import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -447,6 +448,35 @@ async def test_a_rejected_gate_cancels_the_run(
     assert "list" not in {f.data["node_id"] for f in rest}
     run = await get_run(sessions, run_id)
     assert run is not None and run.status == "cancelled"
+
+
+async def test_the_gate_a_run_waits_at_is_read_without_its_events(
+    postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_gated_run(client)
+        paused = await until_waiting(client, run_id)
+        waiting = await client.get(f"/runs/{run_id}/gate")
+        unknown = await client.get(f"/runs/{uuid4()}/gate")
+        await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        decided = await client.get(f"/runs/{run_id}/gate")
+        await collect(client, run_id)
+
+    assert waiting.status_code == 200, waiting.text
+    body = waiting.json()
+    shown = paused[-1].data["payload"]
+    assert body["node_id"] == "gate"
+    assert (body["title"], body["prompt"]) == (shown["title"], shown["prompt"])
+    assert body["artifact"] == shown["artifact"]
+    assert body["changes"] == []
+    assert body["changes_error"] is None
+    assert body["expires_at"] is not None
+    assert datetime.fromisoformat(body["expires_at"]) == datetime.fromisoformat(shown["expires_at"])
+    assert (body["repo"], body["base"], body["branches"]) == (None, None, [])
+    assert unknown.status_code == 404
+    assert decided.status_code == 409
 
 
 async def test_edits_that_do_not_fit_the_gate_are_refused(

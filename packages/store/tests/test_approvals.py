@@ -2,12 +2,13 @@
 
 import json
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.gate import FileChange, FileEdit, GateDecision, GateReview
@@ -18,8 +19,10 @@ from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
 from agentic_store import (
     AlreadyDecidedError,
     Approval,
+    GateExpiredError,
     InvalidEditsError,
     PostgresEventSink,
+    Run,
     RunNotFoundError,
     RunNotWaitingError,
     WrongGateError,
@@ -27,6 +30,7 @@ from agentic_store import (
     get_run,
     max_event_seq,
     pending_decision,
+    pending_gate,
     record_approval,
 )
 
@@ -146,6 +150,45 @@ async def test_decisions_that_do_not_fit_are_refused(
     await record_approval(sessions, run_id, "gate", APPROVE)
     with pytest.raises(RunNotWaitingError, match="is queued"):
         await record_approval(sessions, run_id, "gate", APPROVE)
+
+
+async def test_the_pending_gate_is_what_its_pause_showed(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await paused_run(sessions, InMemorySaver(serde=checkpoint_serde()), ShownReview())
+
+    gate = await pending_gate(sessions, run_id)
+
+    assert gate.node_id == "gate"
+    assert gate.title == "Approve the notes"
+    assert gate.prompt == "Check the writer's summary before the run continues."
+    assert gate.artifact == "notes"
+    assert gate.changes == [PAGE, LOGO]
+    assert gate.changes_error is None
+    async with sessions() as session:
+        expires_at = await session.scalar(select(Run.gate_expires_at).where(Run.id == run_id))
+    assert gate.expires_at == expires_at is not None
+
+
+async def test_only_a_waiting_run_has_a_pending_gate(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await paused_run(sessions, InMemorySaver(serde=checkpoint_serde()))
+
+    with pytest.raises(RunNotFoundError):
+        await pending_gate(sessions, uuid4())
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.id == run_id)
+            .values(gate_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    with pytest.raises(GateExpiredError):
+        await pending_gate(sessions, run_id)
+    async with sessions.begin() as session:
+        await session.execute(update(Run).where(Run.id == run_id).values(status="queued"))
+    with pytest.raises(RunNotWaitingError, match="is queued"):
+        await pending_gate(sessions, run_id)
 
 
 async def test_a_gate_is_decided_once(sessions: async_sessionmaker[AsyncSession]) -> None:

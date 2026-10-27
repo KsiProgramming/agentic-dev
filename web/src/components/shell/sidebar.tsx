@@ -47,7 +47,7 @@ function CurrentNavLinks(props: NavLinksProps) {
   return <NavLinks pathname={usePathname()} {...props} />;
 }
 
-/** The runs waiting at a gate, on "Runs": a count, or a dot on the icon rail. */
+/** The gates waiting for a decision, on "Inbox": a count, or a dot on the icon rail. */
 function WaitingBadge({ count, rail }: { count: number; rail: boolean }) {
   if (count === 0) return null;
   const text = `${countLabel(count)} ${count === 1 ? "needs" : "need"} approval`;
@@ -55,7 +55,7 @@ function WaitingBadge({ count, rail }: { count: number; rail: boolean }) {
     <>
       <span
         aria-hidden="true"
-        data-testid="runs-waiting-badge"
+        data-testid="inbox-waiting-badge"
         className={cn(
           "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-status-waiting-muted px-1.5 text-xs font-semibold text-status-waiting tabular-nums",
           rail &&
@@ -90,7 +90,7 @@ function NavLinks({ pathname, rail, onNavigate }: NavLinksProps & { pathname: st
           >
             <Icon aria-hidden="true" className="size-4 shrink-0" />
             <span className={railHidden}>{label}</span>
-            {href === "/runs" ? <WaitingBadge count={waiting} rail={rail} /> : null}
+            {href === "/inbox" ? <WaitingBadge count={waiting} rail={rail} /> : null}
           </Link>
         );
         return (

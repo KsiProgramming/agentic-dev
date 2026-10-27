@@ -8,6 +8,7 @@ a run spends at gates never uses up its retries. The gate a run waits at is the 
 `gate_expires_at` takes no decision: the run is being cancelled (`agentic_store.expiry`).
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
@@ -123,6 +124,48 @@ async def record_approval(
     return decision
 
 
+@dataclass(frozen=True)
+class PendingGate:
+    """The gate a run waits at, as its last `gate_waiting` showed it to the approver."""
+
+    node_id: str
+    title: str | None
+    prompt: str | None
+    # The gate's input: data, never instructions.
+    artifact: str
+    changes: list[FileChange]
+    # Why the changes could not be read, if they could not.
+    changes_error: str | None
+    expires_at: datetime | None
+
+
+async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> PendingGate:
+    """The gate the run waits at, for an approver to review. Raises `RunNotFoundError`, or
+    `RunNotWaitingError` when the run is not waiting (`GateExpiredError` past the gate's expiry,
+    as `record_approval` would refuse a decision on it)."""
+    async with sessions() as session:
+        run = await session.get(Run, run_id)
+        if run is None:
+            raise RunNotFoundError(f"run {run_id} not found")
+        if run.status != "waiting":
+            raise RunNotWaitingError(f"run {run_id} is {run.status}, not waiting at a gate")
+        if run.gate_expires_at is not None and run.gate_expires_at <= await _now(session):
+            raise GateExpiredError(f"the approval of run {run_id} expired")
+        row = await _last_gate_waiting(session, run_id)
+    if row is None:
+        raise RunNotWaitingError(f"run {run_id} has not paused at a gate")
+    node_id, payload = row
+    return PendingGate(
+        node_id=node_id,
+        title=_text(payload.get("title")),
+        prompt=_text(payload.get("prompt")),
+        artifact=_text(payload.get("artifact")) or "",
+        changes=_shown_changes(payload),
+        changes_error=_text(payload.get("changes_error")),
+        expires_at=run.gate_expires_at,
+    )
+
+
 async def pending_decision(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID
 ) -> GateDecision | None:
@@ -148,6 +191,17 @@ async def _waiting_gate_changes(
 ) -> tuple[str | None, list[FileChange]]:
     """The gate the run last paused at, and the files its pause showed (none if its payload has
     none, as before phase 3.6, or they cannot be read)."""
+    row = await _last_gate_waiting(session, run_id)
+    if row is None:
+        return None, []
+    node_id, payload = row
+    return node_id, _shown_changes(payload)
+
+
+async def _last_gate_waiting(
+    session: AsyncSession, run_id: UUID
+) -> tuple[str, dict[str, JsonValue]] | None:
+    """The node and payload of the run's last `gate_waiting` event, if it paused at a gate."""
     row = (
         await session.execute(
             select(RunEventRow.node_id, RunEventRow.payload)
@@ -156,13 +210,21 @@ async def _waiting_gate_changes(
             .limit(1)
         )
     ).first()
-    if row is None:
-        return None, []
-    shown: JsonValue = row.payload.get("changes", [])
+    if row is None or row.node_id is None:
+        return None
+    return row.node_id, row.payload
+
+
+def _shown_changes(payload: dict[str, JsonValue]) -> list[FileChange]:
+    shown: JsonValue = payload.get("changes", [])
     try:
-        return row.node_id, _CHANGES.validate_python(shown)
+        return _CHANGES.validate_python(shown)
     except ValidationError:
-        return row.node_id, []
+        return []
+
+
+def _text(value: JsonValue) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 async def _now(session: AsyncSession) -> datetime:
