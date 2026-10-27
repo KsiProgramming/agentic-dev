@@ -20,7 +20,13 @@ from agentic_github.fake import (
     FakeGithubApp,
     fixture_path,
 )
-from agentic_github.models import InstallationInfo, PullRequestInfo, RepoInfo
+from agentic_github.models import (
+    GITIGNORE_TEMPLATES,
+    LICENSE_TEMPLATES,
+    InstallationInfo,
+    PullRequestInfo,
+    RepoInfo,
+)
 from agentic_github.platform import GithubPlatform, installation_settings_url
 from agentic_github.push import auth_env, github_remote, push_bundle, repo_full_name
 
@@ -29,6 +35,8 @@ __all__ = [
     "FAKE_INSTALLATION_ID",
     "FAKE_REPOS",
     "GITHUB_API_URL",
+    "GITIGNORE_TEMPLATES",
+    "LICENSE_TEMPLATES",
     "FakeGithubApp",
     "GithubApiError",
     "GithubApp",

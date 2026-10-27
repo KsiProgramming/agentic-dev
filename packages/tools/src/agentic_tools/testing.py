@@ -3,13 +3,14 @@
 import os
 import subprocess
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from mcp import Client
 from pydantic import SecretStr
 
-from agentic_github import PullRequestInfo
+from agentic_github import PullRequestInfo, RepoExistsError, RepoInfo
 from agentic_sandbox import Sandbox
 from agentic_tools.repo import RepoLimits, build_repo_server
 
@@ -35,14 +36,60 @@ async def call_tool(
 
 
 class FakeGithub:
-    """Implements `GithubPublisher` without GitHub: hands out `token` and records the pull
-    requests it is asked to open (numbered from 1). Set `refuse` to make it raise instead."""
+    """Implements `GithubPublisher` without GitHub: hands out `token`, records the pull requests
+    it is asked to open (numbered from 1) and the repos it creates (`repos`, by full name; a test
+    may add one). Set `refuse` to make it raise instead."""
 
     def __init__(self, token: str = "ghs_faketoken0000") -> None:
         self.token = SecretStr(token)
         self.tokens_issued = 0
         self.pulls: list[dict[str, str]] = []
+        self.repos: dict[str, RepoInfo] = {}
+        self.created: list[dict[str, Any]] = []
         self.refuse: Exception | None = None
+
+    async def get_repo(self, installation_id: int, full_name: str) -> RepoInfo | None:
+        if self.refuse is not None:
+            raise self.refuse
+        return self.repos.get(full_name)
+
+    async def create_org_repo(
+        self,
+        installation_id: int,
+        org: str,
+        name: str,
+        *,
+        private: bool,
+        description: str | None = None,
+        gitignore_template: str | None = None,
+        license_template: str | None = None,
+    ) -> RepoInfo:
+        if self.refuse is not None:
+            raise self.refuse
+        full_name = f"{org}/{name}"
+        if full_name in self.repos:
+            raise RepoExistsError(f"repo {full_name} already exists")
+        self.created.append(
+            {
+                "repo": full_name,
+                "private": private,
+                "description": description,
+                "gitignore": gitignore_template,
+                "license": license_template,
+            }
+        )
+        repo = RepoInfo(
+            id=len(self.repos) + 1,
+            full_name=full_name,
+            name=name,
+            owner=org,
+            private=private,
+            default_branch="main",
+            html_url=f"https://github.com/{full_name}",
+            created_at=datetime.now(UTC),
+        )
+        self.repos[full_name] = repo
+        return repo
 
     async def installation_token(self, installation_id: int) -> SecretStr:
         self.tokens_issued += 1

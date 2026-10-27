@@ -30,3 +30,10 @@ class PullRequestInfo:
     # Branch names, as GitHub reports them.
     head: str
     base: str
+
+
+GITIGNORE_TEMPLATES = ("Python", "Node", "Go", "Rust", "Java", "VisualStudio")
+"""The `.gitignore` templates a new repo may start with (GitHub's template names)."""
+
+LICENSE_TEMPLATES = ("mit", "apache-2.0")
+"""The licenses a new repo may start with (GitHub's license keys)."""

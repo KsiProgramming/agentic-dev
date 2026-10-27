@@ -194,9 +194,10 @@ async def test_the_tool_offers_an_example_and_strict_arguments(
 ) -> None:
     target = GithubTarget(installation_id=1, full_name="acme/hello")
     async with open_github_tools(github, target, sandbox, run_id=run_id, writers=()) as gh:
-        (definition,) = gh.definitions()
+        definitions = {d.name: d for d in gh.definitions()}
 
-    assert definition.name == "github.openPR"
+    assert sorted(definitions) == ["github.createRepo", "github.openPR"]
+    definition = definitions["github.openPR"]
     assert definition.input_schema["examples"] == [
         {"from_node": "writer", "title": "Add NOTES.md", "body": "Written by an agent."}
     ]

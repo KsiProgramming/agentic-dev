@@ -43,6 +43,17 @@ INVALID: dict[str, Rejection] = {
     "open-pr-by-agent": Rejection(
         (), "value_error", "'writer': github.openPR can only be called by a tool node"
     ),
+    "create-repo-by-agent": Rejection(
+        (), "value_error", "'creator': github.createRepo can only be called by a tool node"
+    ),
+    "create-repo-without-gate": Rejection(
+        (), "value_error", "'create_repo': github.createRepo must come after a gate"
+    ),
+    "create-repo-after-repo-use": Rejection(
+        (), "value_error", "must come before 'list', which uses the repo"
+    ),
+    "create-repo-nested": Rejection((), "value_error", "must be a step of the root sequence"),
+    "create-repo-twice": Rejection((), "value_error", "a workflow creates at most one repo"),
     "loop-bad-cel": Rejection(
         (), "value_error", "loop 'revise' at root: invalid until: syntax error at column 15"
     ),

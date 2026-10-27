@@ -2,6 +2,7 @@
 and `validate_workflow`, which reports every reason a spec cannot run."""
 
 from agentic_engine.spec.models import (
+    CREATE_TOOLS,
     MAX_AGENTS_ALIVE,
     MAX_AGENTS_SPAWNED,
     MAX_LOOP_ITERATIONS,
@@ -24,6 +25,8 @@ from agentic_engine.spec.models import (
     WorkflowSpec,
     budget_errors,
     budget_issues,
+    create_repo_issues,
+    creates_repo,
     iter_nodes,
     loop_errors,
     map_errors,
@@ -38,6 +41,7 @@ from agentic_engine.spec.models import (
 from agentic_engine.spec.validate import validate_workflow
 
 __all__ = [
+    "CREATE_TOOLS",
     "MAX_AGENTS_ALIVE",
     "MAX_AGENTS_SPAWNED",
     "MAX_LOOP_ITERATIONS",
@@ -60,6 +64,8 @@ __all__ = [
     "WorkflowSpec",
     "budget_errors",
     "budget_issues",
+    "create_repo_issues",
+    "creates_repo",
     "iter_nodes",
     "loop_errors",
     "map_errors",

@@ -210,7 +210,11 @@ PUBLISH_TOOLS = frozenset({"github.openPR"})
 """Tools that publish a writer's branch outside the sandbox (push, pull request). They are
 irreversible, so only a tool node may call one, after a gate that follows the writer."""
 
-PLATFORM_TOOLS = READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS
+CREATE_TOOLS = frozenset({"github.createRepo"})
+"""Tools that create the run's repo on GitHub. Irreversible, so only a tool node may call one,
+after a gate, as a step of the root sequence before anything uses the repo."""
+
+PLATFORM_TOOLS = READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS | CREATE_TOOLS
 """Every tool a node may name. The tool servers register exactly these (checked in tests)."""
 
 type IssueCode = Literal[
@@ -223,6 +227,9 @@ type IssueCode = Literal[
     "reference",
     "publish_not_tool_node",
     "publish_without_gate",
+    "create_not_tool_node",
+    "create_without_gate",
+    "create_not_first",
     "unknown_tool",
     "policy_limit",
     "budget_unpriced_model",
@@ -329,6 +336,66 @@ def _publish_issue(node: "ToolNode", earlier: list[Node]) -> tuple[IssueCode, st
     return None
 
 
+def create_repo_issues(root: Node) -> list[ValidationIssue]:
+    """Why the nodes under `root` that create the run's repo are not safe to run, in run order;
+    empty if they are. Each must be a tool node, a step of the root sequence, and the only one;
+    a gate must come before it, so a human approves the new repo, and no node before it may use
+    the repo (`repo.*`, `github.*`), which does not exist yet."""
+    issues: list[ValidationIssue] = []
+    top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else set[int]()
+    earlier: list[Node] = []
+    created = False
+    for path, node in iter_nodes(root):
+        tools = node_tools(node)
+        for tool in sorted(CREATE_TOOLS.intersection(tools)):
+            found: tuple[IssueCode, str] | None
+            if not isinstance(node, ToolNode):
+                found = (
+                    "create_not_tool_node",
+                    f"node {node.id!r}: {tool} can only be called by a tool node",
+                )
+            elif created:
+                found = (
+                    "create_not_first",
+                    f"node {node.id!r}: a workflow creates at most one repo",
+                )
+            elif id(node) not in top:
+                found = (
+                    "create_not_first",
+                    f"node {node.id!r}: {tool} must be a step of the root sequence",
+                )
+            elif user := next((n for n in earlier if _uses_repo(n)), None):
+                found = (
+                    "create_not_first",
+                    f"node {node.id!r}: {tool} must come before {user.id!r}, which uses the repo",
+                )
+            elif not any(isinstance(n, GateNode) for n in earlier):
+                found = (
+                    "create_without_gate",
+                    f"node {node.id!r}: {tool} must come after a gate, so a human approves the "
+                    "new repo",
+                )
+            else:
+                found = None
+            if found is not None:
+                code, message = found
+                issues.append(
+                    ValidationIssue(code=code, path=path, node_id=node.id, message=message)
+                )
+            created = True
+        earlier.append(node)
+    return issues
+
+
+def creates_repo(root: Node) -> bool:
+    """Whether a node under `root` creates the run's repo."""
+    return any(CREATE_TOOLS.intersection(node_tools(node)) for _, node in iter_nodes(root))
+
+
+def _uses_repo(node: Node) -> bool:
+    return any(tool.startswith(("repo.", "github.")) for tool in node_tools(node))
+
+
 def loop_issues(root: Node) -> list[ValidationIssue]:
     """Why the loops under `root` cannot run, in run order (depth first); empty if they can. A
     loop's `until` must be a valid condition, and its body must not hold a gate, a writer, a
@@ -379,6 +446,8 @@ def _not_in_loop(node: Node) -> str | None:
             return "map"
         case _ if tools & PUBLISH_TOOLS:
             return "publisher"
+        case _ if tools & CREATE_TOOLS:
+            return "repo creator"
         case _ if tools & WRITE_TOOLS:
             return "writer"
         case _:
@@ -572,9 +641,11 @@ def budget_errors(
 
 def structure_issues(root: Node) -> list[ValidationIssue]:
     """Why the spec under `root` cannot run anywhere, in run order: duplicate node ids, the loop
-    and map rules, references to other nodes, and a gate before every publisher."""
+    and map rules, references to other nodes, a gate before every publisher, and the rules for
+    creating the repo."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
-    return in_run_order(root, issues + publish_gate_issues(root))
+    issues += publish_gate_issues(root) + create_repo_issues(root)
+    return in_run_order(root, issues)
 
 
 def in_run_order(root: Node, issues: list[ValidationIssue]) -> list[ValidationIssue]:

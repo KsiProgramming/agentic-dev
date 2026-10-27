@@ -1,0 +1,34 @@
+{
+  "spec_version": "0",
+  "id": "create-repo-twice",
+  "name": "Creates two repos",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "gate",
+        "id": "approve_repo",
+        "title": "Create the repo?"
+      },
+      {
+        "type": "tool",
+        "id": "create_repo",
+        "tool": "github.createRepo",
+        "args": {
+          "name": "docs-new",
+          "private": true
+        }
+      },
+      {
+        "type": "tool",
+        "id": "create_again",
+        "tool": "github.createRepo",
+        "args": {
+          "name": "docs-new",
+          "private": true
+        }
+      }
+    ]
+  }
+}
