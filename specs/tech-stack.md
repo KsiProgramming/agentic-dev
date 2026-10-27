@@ -146,6 +146,66 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 - Destructive actions (Reject, Disconnect, Remove key) ask for confirmation in a dialog. Success and failure of actions are shown with toasts.
 - Motion is short (150–200 ms) and respects `prefers-reduced-motion`.
 
+### UI v2 (phases 2.7–2.14)
+
+Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here.
+
+- **Foundations (2.7):**
+  - Brand accent: one accent for primary actions, focus and links. Indigo stays unless 2.7 decides otherwise (open question: indigo or a near-black "ink" primary in the style of Vercel). Either way it is a token change in `globals.css` only.
+  - Type scale as tokens: 12 px captions and table headers, 13 px tables and metadata, 14 px body and agent output, 16 px section titles, 20 px page titles, 24 px stat values. Table headers are sentence case.
+  - Density: table rows are 40 px, or 32 px in a compact mode the user can turn on.
+  - Shared display components, used everywhere a value of that kind is shown: `RelativeTime` (relative, exact time in a tooltip, `<time dateTime>`), `Duration`, `Money`, `TokenCount`, `IdChip` (mono short id, full id in a tooltip, click to copy), `StatTile` (label, value, one secondary line).
+  - Dates and times use the workspace's locale and time zone (24-hour where the locale is). Never `toLocaleString()` with no options in a component.
+  - Width: pages use the content width up to 1600 px; only reading text (agent output, descriptions) is capped, at 72 characters. No page wraps itself in `mx-auto max-w-*`.
+- **Time (2.8):** a run has three durations and the UI never mixes them:
+  - *Active time*: steps executing. This is the "Duration" everywhere.
+  - *Waiting time*: paused at gates. Shown as its own chip ("waiting 12 h" while waiting, "waited 1m 52s" after).
+  - *Wall clock*: start to end. Only in the tooltip of the start time.
+- **Approval expiry (2.9):** a waiting gate expires after its time to live (workspace default 72 h; a gate may set its own). Expiry cancels the run with the reason "Approval expired"; it is not a new status. The badge shows Cancelled's grey with the label "Expired", and expired runs never count as waiting.
+- **Runs list (2.10)**, replacing "Needs approval first" from 2.4:
+  - Saved views as tabs, each with a count: All, Running, Needs approval, Failed. The view and filters live in the URL. Nothing is pinned above the list.
+  - Columns: Status, Run (workflow name; under it the short id and the trigger), Repository (with the branch under it), Started, Duration (active, plus the waiting chip), Cost, Pull request, actions. A waiting row's status badge links to its review, replacing the separate "Review" button.
+  - Rows are grouped under sticky date headers (Today, Yesterday, This week, Earlier).
+  - Runs started by e2e tests and demos run in their own workspace, never in the default one.
+- **Inbox (2.11)**, replacing "Approvals are made on the console only" from 2.6:
+  - `/inbox` lists the gates waiting on the user, oldest first, with the workflow, repo, waiting time and time left before expiry.
+  - Selecting one shows its review beside the list (below it under 1024 px): what approving does (target repo, branch into base), the summary or the changed files with the same diff view as the review sheet, the run's cost and active time so far, and Approve, Reject (with comment) and Open run. `A` / `R` work as in the dock.
+  - The sidebar gets an "Inbox" entry first; the waiting count moves there from "Runs". The console's approval dock is unchanged.
+- **Run console (2.12)**, replacing the Header and the tab layout of the Run console section:
+  - Header: workflow name, status badge, `IdChip`; under it repo › branch, who started it and when. Actions on the right: the pull request as the primary action once opened, Rerun, Cancel while live, and a "⋯" menu (copy link, download events).
+  - Stat tiles under the header: Active time (waited time under it), Cost (against the budget when one is set), Tokens (in, out and cache in the tooltip), Steps (done of total), Output (PR number and state).
+  - A banner under the tiles when the run failed (failing step, reason, "Go to step") or waits at a gate (title, time left, link to the decision).
+  - Body in two panes from 1280 px, stacked below: on the left the step list (status icon, type icon, name, one line on what it did, duration and cost; map items and loop iterations nested), switchable to the Graph; on the right the selected step with tabs Output (default), Activity (the tool calls), Input, Usage and Events. The running step is selected while the run is live, unless the user picked another.
+  - Output: the agent's final message as Markdown, capped at about 480 px with "Show full output". Files the step wrote are cards (path, kind) that open the file.
+  - Raw events: one 32 px row per event (number, time from start, type, step, one-line summary). The payload opens in a side drawer in `JsonView`; table cells never hold JSON.
+- **Shell and settings (2.13):**
+  - Command palette on `⌘K` / `Ctrl+K`: jump to a run by id, PR number or workflow; New run; Approve (on a waiting run); Toggle theme.
+  - The theme moves into a user menu at the bottom of the sidebar.
+  - Settings is split into sub-pages with a secondary nav: Integrations (Claude, GitHub), Models and pricing, Limits and budgets. Each sub-page is a short stack of cards.
+  - The pricing table fits its card: Model, Input, Output, Cache write and Cache read, with the two cache-write prices stacked in one cell.
+  - The limits form: each field with its unit and the platform maximum as help text; a sticky Save / Discard bar appears only once the form has changes.
+- **Agent activity (2.14)**, replacing the tool-call grouping in "Timeline" and shown in the step's Output and Activity from 2.12. An agent's work reads the way a chat with Claude does: the work folds away, the answer stays.
+  - **Agent turn = work block + answer.** Everything an agent does before its answer (tool calls, short notes, reasoning) is one collapsible work block. The answer (the turn's final message) sits below it, always open. A turn with no tool calls is just its answer.
+  - **Header of a live block:** a spinner, the current step's title ("Reading the frontend config") and an elapsed timer that ticks ("1m 06s"). The block is open while live and follows new rows only when the user is at its bottom (same rule as the timeline).
+  - **Header of a finished block:** a chevron, the summary of what was done ("Listed 3 folders, read 11 files, ran 1 search"), then "15 tool calls · 8s" on the right. Closed by default; a block with a failed call opens and shows the failure.
+  - **Rows inside, in order:**
+    - a *tool row*: the call's intent as its title ("Read the frontend config and agent rules"), what it touched as a quiet second part (the existing `describeTool` line: "Read `web/package.json`"), its duration on the right, a chevron to arguments and result. Consecutive reads, listings and searches with no intent fold into one summary row, as today.
+    - a *note row*: text the agent wrote between calls, one or two quiet lines, not a message block.
+    - a *reasoning row*, only when the provider streams it: the first line of the reasoning in muted italic, the rest on expand. Never open by default.
+    - Writes, commits, pull requests and failed calls keep their preview under the row, as today.
+  - **Where intents come from:** the platform's tools (`repo.*`, `github.*`) accept an optional `description` argument ("why this call, in under 10 words"); the agent instructions ask for it. Without one, the row's title is the `describeTool` line. The description is agent output: shown as plain text, never as Markdown or HTML (mission principle 5).
+  - **Reasoning events:** an adapter that receives reasoning from its provider (Claude extended thinking) logs it as `reasoning_delta` events, buffered like `text_delta`. An adapter that does not simply logs none, and the UI shows no reasoning rows.
+  - **Groups across a map:** each map item has its own work blocks under the item, as today; the map's header sums its items ("2 items · 31 tool calls · 21s").
+  - **Accessibility:** a block's header is a button with `aria-expanded`; its name reads the summary and count ("Listed 3 folders, read 11 files, 15 tool calls, 8 seconds"). The ticking timer is not announced; the live line keeps `aria-live="polite"`.
+
+#### How the rules are enforced
+
+A rule an agent can break without noticing will be broken. So each one is either checked by a tool or written in [`CLAUDE.md`](../CLAUDE.md), which coding agents read before every task:
+
+- ESLint (2.7) rejects palette colour classes (`bg-red-100`, `text-indigo-600`) and arbitrary colour values (`bg-[#…]`, `text-[oklch(…)]`) in `web/src`.
+- axe and the layout screenshots in `e2e/` run in CI at 375, 768 and 1440 px.
+- `CLAUDE.md` lists the shared components to use for each kind of value, so a new screen is assembled from them rather than restyled.
+
 ## Run history and rerun (API contract)
 
 - `GET /runs`: run summaries, newest first, with cursor pagination and filters `status`, `template`, `repo`. Status, timings, PR URL and the waiting gate come from the run's events. They are kept in the `runs` row when events are written, so listing does not scan the log.
@@ -259,3 +319,8 @@ The UI follows the mission's "Enterprise-grade, calm UI" principle. Every screen
 | Validation | `200` with structured issues from one engine validator | The canvas and the Architect read issues as data, not as failures. One validator means they never disagree with what a run accepts. |
 | Gate edits | The writers' changed files in `gate_waiting`, edits committed by the gate node | The PR is pushed from the writers' branches, so editing them is what changes it. The log records what the approver saw and changed. Committing inside the gate node checkpoints it with the gate, and the next node (`openPR`) needs no change. |
 | Audit log | An append-only `audit_events` table written in each change's transaction | It records settings changes no other table keeps, and its rows never change, unlike `runs`. Writing it with the change means no row is missing or invented. Who acted is a nullable `actor_id` until users exist. |
+| Run durations (2.8) | Active time, waiting time and wall clock kept apart; "Duration" means active time | A run that waited a weekend for approval is not a 60-hour run. Mixing the two makes every duration in the product untrustworthy. |
+| Approval expiry (2.9) | A gate's time to live cancels the run with a reason; no new run status | Stale gates stop shouting in every waiting count, and the six statuses (and every filter and badge built on them) stay as they are. The reason keeps the history truthful. |
+| Where approvals happen (2.11) | An Inbox beside the console's dock, both on the same review components | An approver works through what waits on them in one place; the dock still serves someone already watching the run. One set of review components means the two never disagree. |
+| UI rules for agents (2.7) | Rules in `CLAUDE.md`, backed by ESLint and the e2e layout and axe checks | Coding agents follow what they read at the start of every task and what CI rejects. A prompt pasted once drifts by the next session. |
+| Tool intent (2.14) | An optional `description` argument on the platform's tools, written by the agent | The console can say why a call was made, not only what it did, at no extra model call. Optional, so a provider or agent that leaves it out still works and falls back to the mechanical line. |
