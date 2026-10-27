@@ -20,6 +20,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group";
 import { FieldMessage } from "@/forms/schema-form/schema-fields";
 import { budgetSchema, parseBudget } from "@/runs/budget";
 import { useWorkspaceId } from "@/workspace";
@@ -33,11 +39,31 @@ const PURPOSE =
 type CountKey = Exclude<keyof RunLimits, "wall_time_s" | "approval_ttl_s" | "budget_usd">;
 
 const COUNT_FIELDS = [
-  { key: "agents_alive", label: "Agents at once", help: "Agents running at the same time." },
-  { key: "agents_spawned", label: "Agents per run", help: "Agents a run may start in all." },
-  { key: "loop_iterations", label: "Loop iterations", help: "The most rounds a loop may run." },
-  { key: "max_depth", label: "Nesting depth", help: "How deep loops and maps may nest." },
-] as const satisfies readonly { key: CountKey; label: string; help: string }[];
+  {
+    key: "agents_alive",
+    label: "Agents at once",
+    unit: "agents",
+    help: "Agents running at the same time.",
+  },
+  {
+    key: "agents_spawned",
+    label: "Agents per run",
+    unit: "agents",
+    help: "Agents a run may start in all.",
+  },
+  {
+    key: "loop_iterations",
+    label: "Loop iterations",
+    unit: "rounds",
+    help: "The most rounds a loop may run.",
+  },
+  {
+    key: "max_depth",
+    label: "Nesting depth",
+    unit: "levels",
+    help: "How deep loops and maps may nest.",
+  },
+] as const satisfies readonly { key: CountKey; label: string; unit: string; help: string }[];
 
 /** "" keeps the platform's limit; otherwise a whole number from 1 to `max`. */
 function count(max: number) {
@@ -187,11 +213,14 @@ function LimitsForm({
   });
   const errors = form.formState.errors;
   const pending = form.formState.isSubmitting || save.isPending;
+  const dirty = form.formState.isDirty;
   const lowered = Object.values(overrides).some((v) => v != null);
 
   async function onSubmit(values: Values) {
     try {
       await save.mutateAsync(overridesOf(values));
+      // The card remounts with what was stored; until then the bar has nothing left to save.
+      form.reset(values);
       toast.success("Run limits saved. New runs get them.");
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 422) return; // Shown below.
@@ -226,6 +255,7 @@ function LimitsForm({
           <LimitInput
             key={f.key}
             label={f.label}
+            unit={f.unit}
             help={`${f.help} Platform limit: ${defaults[f.key]}.`}
             placeholder={String(defaults[f.key])}
             error={errors[f.key]?.message}
@@ -245,6 +275,7 @@ function LimitsForm({
         label="Approval time to live (hours)"
         help={`How long a gate waits for a decision; then the run is cancelled as "Expired". A gate may set a shorter time. Platform limit: ${duration(defaults.approval_ttl_s)}.`}
         placeholder={String(defaults.approval_ttl_s / 3600)}
+        unit="h"
         inputMode="decimal"
         error={errors.approval_ttl_hours?.message}
         registration={form.register("approval_ttl_hours")}
@@ -254,6 +285,8 @@ function LimitsForm({
         label="Budget (USD)"
         help="The most a run may spend; it stops once its cost reaches this. Empty: no budget, and runs are not capped. A run may set its own when it starts."
         placeholder="No budget"
+        unit="$"
+        unitFirst
         inputMode="decimal"
         error={errors.budget_usd?.message}
         registration={form.register("budget_usd")}
@@ -264,18 +297,8 @@ function LimitsForm({
           <AlertDescription>{formError}</AlertDescription>
         </Alert>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={pending}>
-          {form.formState.isSubmitting ? (
-            <LoaderCircleIcon
-              aria-hidden="true"
-              data-icon="inline-start"
-              className="motion-safe:animate-spin"
-            />
-          ) : null}
-          {form.formState.isSubmitting ? "Saving…" : "Save limits"}
-        </Button>
-        {lowered ? (
+      {lowered ? (
+        <div>
           <ConfirmButton
             label="Reset to defaults"
             title="Reset the run limits?"
@@ -289,14 +312,48 @@ function LimitsForm({
               )
             }
           />
-        ) : null}
-      </div>
+        </div>
+      ) : null}
+      {/* Only once there is something to save; it stays in view at the bottom while it does. */}
+      {dirty ? (
+        <div
+          data-testid="limits-save-bar"
+          className="sticky bottom-4 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-3 shadow-dock"
+        >
+          <p role="status" className="mr-auto font-medium">
+            Unsaved changes
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              form.reset();
+              save.reset();
+            }}
+          >
+            Discard
+          </Button>
+          <Button type="submit" disabled={pending}>
+            {form.formState.isSubmitting ? (
+              <LoaderCircleIcon
+                aria-hidden="true"
+                data-icon="inline-start"
+                className="motion-safe:animate-spin"
+              />
+            ) : null}
+            {form.formState.isSubmitting ? "Saving…" : "Save limits"}
+          </Button>
+        </div>
+      ) : null}
     </form>
   );
 }
 
 function LimitInput({
   label,
+  unit,
+  unitFirst = false,
   help,
   placeholder,
   inputMode = "numeric",
@@ -305,6 +362,9 @@ function LimitInput({
   disabled,
 }: {
   label: string;
+  /** Shown in the field; the label or help already says it to a screen reader. */
+  unit: string;
+  unitFirst?: boolean;
   help: string;
   placeholder: string;
   inputMode?: "numeric" | "decimal";
@@ -316,17 +376,22 @@ function LimitInput({
   return (
     <Field data-invalid={error ? true : undefined}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        inputMode={inputMode}
-        autoComplete="off"
-        placeholder={placeholder}
-        className="tabular-nums"
-        aria-invalid={error ? true : undefined}
-        aria-describedby={[`${id}-help`, error ? `${id}-error` : null].filter(Boolean).join(" ")}
-        disabled={disabled}
-        {...registration}
-      />
+      <InputGroup data-disabled={disabled ? true : undefined}>
+        <InputGroupInput
+          id={id}
+          inputMode={inputMode}
+          autoComplete="off"
+          placeholder={placeholder}
+          className="tabular-nums"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={[`${id}-help`, error ? `${id}-error` : null].filter(Boolean).join(" ")}
+          disabled={disabled}
+          {...registration}
+        />
+        <InputGroupAddon align={unitFirst ? "inline-start" : "inline-end"} aria-hidden="true">
+          <InputGroupText>{unit}</InputGroupText>
+        </InputGroupAddon>
+      </InputGroup>
       <FieldDescription id={`${id}-help`}>{help}</FieldDescription>
       {error ? <FieldMessage id={`${id}-error`}>{error}</FieldMessage> : null}
     </Field>

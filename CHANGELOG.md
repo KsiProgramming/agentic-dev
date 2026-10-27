@@ -9,6 +9,13 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 11.7 shell and settings v2:
+  - **Command palette.** `⌘K` / `Ctrl+K` (or "Search… ⌘K" in the top bar) finds a run by its id, PR number or workflow and opens it; starts a new run; opens the oldest waiting gate (or a waiting run found) in the Inbox; switches between light and dark; and goes to any section or settings sub-page.
+  - **User menu.** "Preferences" at the bottom of the sidebar holds the theme and row density, which leave the top bar.
+  - **Settings sub-pages.** Settings is split into Integrations, Models and pricing, and Limits and budgets, with a secondary nav beside the page from 768 px (tabs above it below). `/settings` and the GitHub install return open Integrations, keeping their query.
+  - **Pricing table** fits its card: one Cache write column with the 5 min and 1 h prices stacked; a card per model below 768 px.
+  - **Limits form.** Units in each field, and a sticky Save / Discard bar that appears only once the form has changes.
+  - **API.** `GET /runs` takes `q`: an id prefix, a PR number (`42` or `#42`) or part of a workflow name. The GitHub install returns to `/settings/integrations` by default. The OpenAPI spec and web client are regenerated.
 - Phase 11.6 run console v3 ([#135](https://github.com/KsiProgramming/agentic-dev/pull/135)):
   - **Header and figures.** The workflow name with its status and id; repo › branch, what started the run and when; the pull request as the primary action, Rerun or Cancel, and a "⋯" menu (Copy link, Download events). Five tiles under it: active time (time waited under it), cost against the budget, tokens, steps done of total, and output (the PR, or the repo the run created).
   - **Banner.** A failed run names the step it failed at and why, with "Go to step"; a run waiting at a gate shows the gate, its time left, Review and "Open in Inbox"; an expired run says why it ended.

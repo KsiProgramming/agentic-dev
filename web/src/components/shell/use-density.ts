@@ -1,9 +1,6 @@
 "use client";
 
-import { Rows3Icon, Rows4Icon } from "lucide-react";
 import { useLayoutEffect, useSyncExternalStore } from "react";
-
-import { Button } from "@/components/ui/button";
 
 import { DENSITY_KEY } from "./density";
 
@@ -34,7 +31,7 @@ function setCompact(compact: boolean) {
 
 /** Compact mode: table rows of 32 px instead of 40 px (the `compact` class on `<html>`). The
  * choice is kept in this browser. */
-export function DensityToggle() {
+export function useCompact(): [boolean, (compact: boolean) => void] {
   const compact = useSyncExternalStore(subscribe, storedCompact, () => false);
 
   // Puts the class back after React's dev remount clears what the head script set.
@@ -42,16 +39,5 @@ export function DensityToggle() {
     document.documentElement.classList.toggle("compact", storedCompact());
   }, []);
 
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label="Compact rows"
-      aria-pressed={compact}
-      onClick={() => setCompact(!compact)}
-    >
-      {compact ? <Rows4Icon aria-hidden="true" /> : <Rows3Icon aria-hidden="true" />}
-    </Button>
-  );
+  return [compact, setCompact];
 }

@@ -42,12 +42,12 @@ test("connect, start a docs run, reject, rerun and approve, rerun from the list"
   await request.delete(`${connectionsURL()}/github`);
 
   // 1. Connect Claude and GitHub from Settings.
-  await page.goto("/settings");
+  await page.goto("/settings/integrations");
   await page.getByLabel("Claude API key").fill(TEST_KEY);
   await page.getByRole("button", { name: "Save key" }).click();
   await expect(page.getByTestId("claude-status")).toContainText(`…${TEST_KEY.slice(-4)}`);
   await page.getByRole("button", { name: "Install GitHub App" }).click();
-  await expect(page).toHaveURL(/\/settings\?github=connected/);
+  await expect(page).toHaveURL(/\/settings\/integrations\?github=connected/);
   await expect(page.getByTestId("github-status")).toContainText("Installed on e2e-org");
 
   // 2. Start "Generate docs" on the fixture repo from the gallery.

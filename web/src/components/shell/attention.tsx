@@ -77,7 +77,7 @@ export function AttentionProvider({
 
 /** The time every `intervalMs`, read only in the browser: `null` while the shell prerenders,
  * which may not read the clock. */
-function useClientNow(intervalMs: number): number | null {
+export function useClientNow(intervalMs: number): number | null {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     const tick = () => setNow(Date.now());

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 
 import { shortId } from "@/components/display/short-id";
+import { SETTINGS_PAGES } from "@/settings/pages";
 
 export interface NavItem {
   href: string;
@@ -42,13 +43,16 @@ export interface Crumb {
 /** Ids longer than this are cut to their first 8 characters in breadcrumbs. */
 const LONG_SEGMENT = 12;
 
-/** Breadcrumbs for a path: the section, then the item inside it, if any (`Runs › 1a2b3c4d`). */
+/** Breadcrumbs for a path: the section, then the item inside it, if any (`Runs › 1a2b3c4d`, or
+ * `Settings › Integrations` for a settings sub-page). */
 export function breadcrumbsFor(pathname: string): Crumb[] {
   const section = NAV_ITEMS.find((item) => isActive(pathname, item.href));
   if (!section) return [];
   const rest = pathname.slice(section.href.length + 1).split("/")[0];
   if (!rest) return [{ label: section.label }];
   const segment = decodeURIComponent(rest);
+  const page = section.href === "/settings" && SETTINGS_PAGES.find((p) => p.segment === segment);
+  if (page) return [{ label: section.label, href: section.href }, { label: page.label }];
   const short = segment.length > LONG_SEGMENT ? shortId(segment) : segment;
   return [
     { label: section.label, href: section.href },

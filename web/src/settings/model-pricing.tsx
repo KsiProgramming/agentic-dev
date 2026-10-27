@@ -122,23 +122,27 @@ export function ModelPricingCard({
 
   const { models, as_of: asOf } = pricing.data;
   const custom = models.filter((m) => m.override).length;
-  const reset = (model: string) =>
-    save.mutate(overridesWith(models, model, null), {
-      onSuccess: () => toast.success(`${model} is back to its list price.`),
-    });
+  const actions = {
+    onEdit: setEditing,
+    onReset: (model: string) =>
+      save.mutate(overridesWith(models, model, null), {
+        onSuccess: () => toast.success(`${model} is back to its list price.`),
+      }),
+    pending: save.isPending,
+  };
 
   return card(
     <>
-      <div className="overflow-x-auto rounded-md border">
+      {/* A table from `md`, sized to fit its card; a card per model below that. */}
+      <div className="hidden rounded-md border md:block">
         <Table aria-label="Model prices, USD per million tokens" className="text-meta">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>Model</TableHead>
-              {PRICE_FIELDS.map((f) => (
-                <TableHead key={f.key} className="text-right">
-                  {f.label}
-                </TableHead>
-              ))}
+              <TableHead className="text-right">Input</TableHead>
+              <TableHead className="text-right">Output</TableHead>
+              <TableHead className="text-right">Cache write</TableHead>
+              <TableHead className="text-right">Cache read</TableHead>
               <TableHead>
                 <span className="sr-only">Actions</span>
               </TableHead>
@@ -149,53 +153,23 @@ export function ModelPricingCard({
               const prices = effective(model);
               return (
                 <TableRow key={model.model} data-model={model.model}>
-                  <TableCell>
-                    <span className="flex items-center gap-2">
-                      <span className="font-mono text-xs">{model.model}</span>
-                      {model.override ? (
-                        <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-                          Custom
-                        </Badge>
-                      ) : null}
-                    </span>
-                    {model.long_context && !model.override ? (
-                      <span className="block text-xs text-muted-foreground">
-                        Higher price above{" "}
-                        <TokenCount value={model.long_context.above_tokens} focusable={false} />{" "}
-                        prompt tokens
-                      </span>
-                    ) : null}
+                  <TableCell className="whitespace-normal">
+                    <ModelName model={model} />
                   </TableCell>
-                  {PRICE_FIELDS.map((f) => (
-                    <TableCell key={f.key} className="text-right tabular-nums">
-                      {prices ? <Money usd={prices[f.key]} kind="price" /> : "—"}
-                    </TableCell>
-                  ))}
+                  <TableCell className="text-right tabular-nums">
+                    <PriceValue prices={prices} field="input" />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <PriceValue prices={prices} field="output" />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <CacheWrite prices={prices} />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <PriceValue prices={prices} field="cache_read" />
+                  </TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="ghost"
-                        onClick={() => setEditing(model.model)}
-                      >
-                        Edit<span className="sr-only"> {model.model}</span>
-                      </Button>
-                      {model.override ? (
-                        <ConfirmButton
-                          label="Reset"
-                          title={`Reset ${model.model}?`}
-                          description={
-                            model.default
-                              ? "New usage is priced at the list price again. Past runs keep their cost."
-                              : "This model has no list price: its new usage will have no cost."
-                          }
-                          confirmLabel="Reset price"
-                          disabled={save.isPending}
-                          onConfirm={() => reset(model.model)}
-                        />
-                      ) : null}
-                    </div>
+                    <ModelActions model={model} {...actions} />
                   </TableCell>
                 </TableRow>
               );
@@ -203,6 +177,38 @@ export function ModelPricingCard({
           </TableBody>
         </Table>
       </div>
+      <ul
+        aria-label="Model prices, USD per million tokens"
+        className="flex flex-col gap-2 md:hidden"
+      >
+        {models.map((model) => {
+          const prices = effective(model);
+          return (
+            <li
+              key={model.model}
+              data-model={model.model}
+              className="flex flex-col gap-3 rounded-md border p-3 text-meta"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <ModelName model={model} />
+                </div>
+                <ModelActions model={model} {...actions} />
+              </div>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 tabular-nums">
+                {PRICE_FIELDS.map((f) => (
+                  <div key={f.key} className="flex flex-col">
+                    <dt className="text-caption text-muted-foreground">{f.label}</dt>
+                    <dd>
+                      <PriceValue prices={prices} field={f.key} />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </li>
+          );
+        })}
+      </ul>
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant="outline" onClick={() => setEditing("")}>
           <PlusIcon aria-hidden="true" data-icon="inline-start" />
@@ -239,6 +245,85 @@ export function ModelPricingCard({
         />
       ) : null}
     </>,
+  );
+}
+
+function ModelName({ model }: { model: ModelPricing }) {
+  return (
+    <>
+      <span className="flex items-center gap-2">
+        <span className="font-mono text-xs break-all">{model.model}</span>
+        {model.override ? (
+          <Badge variant="secondary" className="h-5 px-1.5 text-xs">
+            Custom
+          </Badge>
+        ) : null}
+      </span>
+      {model.long_context && !model.override ? (
+        <span className="block text-xs text-muted-foreground">
+          Higher price above{" "}
+          <TokenCount value={model.long_context.above_tokens} focusable={false} /> prompt tokens
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function PriceValue({ prices, field }: { prices: Price | null; field: keyof Price }) {
+  return prices ? <Money usd={prices[field]} kind="price" /> : "—";
+}
+
+/** The two cache-write prices in one cell, each with its window, so the table fits its card. */
+function CacheWrite({ prices }: { prices: Price | null }) {
+  if (!prices) return "—";
+  return (
+    <span className="flex flex-col items-end">
+      {(
+        [
+          ["5 min", prices.cache_write_5m],
+          ["1 h", prices.cache_write_1h],
+        ] as const
+      ).map(([window, usd]) => (
+        <span key={window} className="flex items-baseline gap-1.5">
+          <span className="text-caption text-muted-foreground">{window}</span>
+          <Money usd={usd} kind="price" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function ModelActions({
+  model,
+  onEdit,
+  onReset,
+  pending,
+}: {
+  model: ModelPricing;
+  onEdit: (model: string) => void;
+  onReset: (model: string) => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="flex justify-end gap-1">
+      <Button type="button" size="xs" variant="ghost" onClick={() => onEdit(model.model)}>
+        Edit<span className="sr-only"> {model.model}</span>
+      </Button>
+      {model.override ? (
+        <ConfirmButton
+          label="Reset"
+          title={`Reset ${model.model}?`}
+          description={
+            model.default
+              ? "New usage is priced at the list price again. Past runs keep their cost."
+              : "This model has no list price: its new usage will have no cost."
+          }
+          confirmLabel="Reset price"
+          disabled={pending}
+          onConfirm={() => onReset(model.model)}
+        />
+      ) : null}
+    </div>
   );
 }
 

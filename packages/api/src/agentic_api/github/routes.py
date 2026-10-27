@@ -102,7 +102,7 @@ async def start_install(
     body: StartInstall | None = None,
 ) -> InstallUrlOut:
     """An install URL for the GitHub App. Installing it links the installation to the workspace,
-    then sends the browser to `return_to` (the settings page by default)."""
+    then sends the browser to `return_to` (the Integrations settings page by default)."""
     if await get_workspace(_sessions(request), workspace_id) is None:
         raise _not_found(workspace_id)
     state = secrets.token_urlsafe(32)
@@ -126,7 +126,7 @@ async def complete_install(
     state: str | None = None,
 ) -> RedirectResponse:
     """GitHub's redirect after an install (the App's Setup URL). Sends the browser back to the
-    page that started the install (the web app's settings page by default) with
+    page that started the install (the Integrations settings page by default) with
     `github=connected`, or `github=error` and a `reason`."""
     settings: Settings = request.app.state.settings
     github: GithubPlatform | None = request.app.state.github
@@ -139,7 +139,7 @@ async def complete_install(
     )
     pending = None if stored is None else _PendingInstall.model_validate_json(bytes(stored))
     workspace_id = None if pending is None else pending.workspace_id
-    return_to = (pending.return_to if pending else None) or "/settings"
+    return_to = (pending.return_to if pending else None) or "/settings/integrations"
 
     def back(**params: str) -> RedirectResponse:
         separator = "&" if "?" in return_to else "?"

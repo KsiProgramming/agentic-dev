@@ -115,7 +115,7 @@ async def install(client: AsyncClient, installation_id: int = 42, **extra: str) 
     back = await client.get("/github/setup", params=params | extra)
     assert back.status_code == 303
     location = urlsplit(back.headers["location"])
-    assert f"{location.scheme}://{location.netloc}{location.path}" == "http://web.test/settings"
+    assert f"{location.scheme}://{location.netloc}{location.path}" == "http://web.test/settings/integrations"
     return {k: v[0] for k, v in parse_qs(location.query).items()}
 
 
@@ -172,7 +172,7 @@ async def test_a_setup_without_a_valid_state_links_nothing(
     back = await client.get("/github/setup", params=params)
 
     assert back.status_code == 303
-    assert back.headers["location"] == f"http://web.test/settings?github=error&reason={reason}"
+    assert back.headers["location"] == f"http://web.test/settings/integrations?github=error&reason={reason}"
     assert (await client.get(f"{WORKSPACE}/connections")).json() == []
 
 
@@ -351,7 +351,7 @@ async def test_the_fake_app_installs_without_github(migrated: str, redis_url: st
         await client.delete(f"{WORKSPACE}/connections/github")
 
     assert (url.scheme, url.netloc, url.path) == ("http", "api.test", "/github/setup")
-    assert back.headers["location"] == "http://web.test/settings?github=connected"
+    assert back.headers["location"] == "http://web.test/settings/integrations?github=connected"
     assert [(c["account_login"], c["manage_url"]) for c in connections] == [
         ("e2e-org", "https://github.com/organizations/e2e-org/settings/installations/1")
     ]

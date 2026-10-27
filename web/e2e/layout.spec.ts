@@ -113,11 +113,52 @@ test("the New run sheet, before connecting", async ({ page }) => {
   await checkSheet(page, "new-run-sheet-checklist");
 });
 
-test("settings", async ({ page }) => {
-  await page.goto("/settings");
+/** The secondary nav sits beside the sub-page from 768 px and above it below that (11.7). */
+async function expectSettingsLayout(page: Page) {
+  const nav = (await page.getByRole("navigation", { name: "Settings" }).boundingBox())!;
+  const content = (await page.getByRole("heading", { level: 2 }).first().boundingBox())!;
+  if (page.viewportSize()!.width >= 768) expect(nav.x + nav.width).toBeLessThan(content.x);
+  else expect(nav.y + nav.height).toBeLessThanOrEqual(content.y);
+}
+
+test("settings opens Integrations, keeping its query", async ({ page }) => {
+  await page.goto("/settings?github=error&reason=denied");
+  await expect(page).toHaveURL(/\/settings\/integrations\?github=error&reason=denied$/);
+});
+
+test("settings: integrations", async ({ page }) => {
+  await page.goto("/settings/integrations");
   await expect(page.getByTestId("claude-status")).toBeVisible();
   await expect(page.getByTestId("github-status")).toBeVisible();
-  await checkPage(page, "settings");
+  await expectSettingsLayout(page);
+  await checkPage(page, "settings-integrations");
+});
+
+test("settings: models and pricing", async ({ page }) => {
+  await page.goto("/settings/models");
+  const table = page.getByRole("table", { name: /Model prices/ });
+  if (page.viewportSize()!.width >= 768) {
+    await expect(table).toBeVisible();
+    // Done when (11.7): the pricing table fits its card, with no scroll of its own.
+    const overflow = await table.evaluate(
+      (t) => t.parentElement!.scrollWidth - t.parentElement!.clientWidth,
+    );
+    expect(overflow, "pricing table scrolls sideways").toBeLessThanOrEqual(0);
+  } else {
+    await expect(table).toBeHidden();
+    await expect(page.getByRole("list", { name: /Model prices/ })).toBeVisible();
+  }
+  await expectSettingsLayout(page);
+  await checkPage(page, "settings-models");
+});
+
+test("settings: limits and budgets, with unsaved changes", async ({ page }) => {
+  await page.goto("/settings/limits");
+  await expect(page.getByTestId("limits-save-bar")).toBeHidden();
+  await page.getByLabel("Loop iterations").fill("2");
+  await expect(page.getByTestId("limits-save-bar")).toBeVisible();
+  await expectSettingsLayout(page);
+  await checkPage(page, "settings-limits");
 });
 
 test("audit log", async ({ page, request }) => {
@@ -129,7 +170,7 @@ test("audit log", async ({ page, request }) => {
 
 test("settings, not connected", async ({ page }) => {
   await pretendConnections(page, "none");
-  await page.goto("/settings");
+  await page.goto("/settings/integrations");
   await expect(page.getByLabel("Claude API key")).toBeVisible();
   await expect(page.getByRole("button", { name: "Install GitHub App" })).toBeVisible();
   await checkPage(page, "settings-not-connected");
@@ -137,7 +178,7 @@ test("settings, not connected", async ({ page }) => {
 
 test("settings, GitHub needs attention", async ({ page }) => {
   await pretendConnections(page, "github-gone");
-  await page.goto("/settings");
+  await page.goto("/settings/integrations");
   await expect(page.getByRole("button", { name: "Reconnect" })).toBeVisible();
   await checkPage(page, "settings-needs-attention");
 });
