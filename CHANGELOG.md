@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 11.4 runs list v2:
+- Phase 11.4 runs list v2 ([#133](https://github.com/KsiProgramming/agentic-dev/pull/133)):
   - **Views.** The runs page shows saved views as tabs (All, Running, Needs approval, Failed), each with its count from a new `GET /runs/counts`, kept live by the runs stream. The view lives in the URL (`?view=waiting`). The pinned "Needs approval" section and the status filter are gone, so real runs are the first rows whatever waits.
   - **Rows.** A Run column with the workflow, its short id and what started it ("Manual", "API", "Rerun of …"); the branch under the repo; a waiting run's status badge links to its review instead of a "Review" button; rows grouped under date headers (Today, Yesterday, This week, Earlier) that stick under the top bar from 1024 px. `IdChip` takes `focusable={false}` for list rows.
   - **API.** Run summaries add `trigger` (`manual`, `api`, `rerun`) and `branch`; `POST /runs` takes `trigger` (the web sends `manual`); `POST /workspaces` creates a workspace. Alembic `0022_runs_trigger_branch` adds and backfills `runs.trigger` and `runs.branch`. The OpenAPI spec and web client are regenerated.
