@@ -115,3 +115,19 @@ test("a waiting run's wait is live; a run that never waited shows its duration a
     "2m 05s",
   ]);
 });
+
+test("a run whose approval expired shows Expired, in Cancelled's grey", () => {
+  show([
+    runSummary({
+      id: "r-exp",
+      status: "cancelled",
+      expired: true,
+      cancel_reason: "Approval expired",
+    }),
+  ]);
+
+  const table = within(screen.getByRole("table", { name: "Runs" }));
+  const badge = table.getByText("Expired");
+  expect(badge.closest("[data-status]")?.getAttribute("data-status")).toBe("cancelled");
+  expect(table.queryByRole("link", { name: /^Review/ })).toBeNull();
+});

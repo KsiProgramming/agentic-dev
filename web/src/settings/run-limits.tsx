@@ -30,7 +30,7 @@ import { ConnectionCard } from "./connection-card";
 const PURPOSE =
   "What one run may use. A run that goes over a limit stops with the reason. Lower a limit to tighten it; a run keeps the limits it started with.";
 
-type CountKey = Exclude<keyof RunLimits, "wall_time_s" | "budget_usd">;
+type CountKey = Exclude<keyof RunLimits, "wall_time_s" | "approval_ttl_s" | "budget_usd">;
 
 const COUNT_FIELDS = [
   { key: "agents_alive", label: "Agents at once", help: "Agents running at the same time." },
@@ -61,6 +61,14 @@ function schemaFor(defaults: RunLimits) {
       max_depth: count(defaults.max_depth),
       wall_time_hours: minutes,
       wall_time_minutes: minutes,
+      approval_ttl_hours: z
+        .string()
+        .trim()
+        .refine((v) => v === "" || /^\d+(\.\d{1,2})?$/.test(v), "Hours, like 24 or 0.5.")
+        .refine(
+          (v) => v === "" || (ttlSeconds(v)! >= 60 && ttlSeconds(v)! <= defaults.approval_ttl_s),
+          `From 1 minute to ${duration(defaults.approval_ttl_s)}.`,
+        ),
       budget_usd: budgetSchema(),
     })
     .superRefine((v, ctx) => {
@@ -84,6 +92,11 @@ function wallTimeSeconds(hours: string, minutes: string): number | null {
   return (Number(hours || 0) * 60 + Number(minutes || 0)) * 60;
 }
 
+/** Seconds from the approval time to live in hours; null when empty (the platform's). */
+function ttlSeconds(hours: string): number | null {
+  return hours.trim() === "" ? null : Math.round(Number(hours) * 3600);
+}
+
 /** `7200` → "2 h", `5400` → "1 h 30 min", `90` → "1 min 30 s". */
 export function duration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -102,6 +115,10 @@ function valuesOf(overrides: RunLimitOverrides): Values {
     max_depth: overrides.max_depth?.toString() ?? "",
     wall_time_hours: wall == null ? "" : String(Math.floor(wall / 3600)),
     wall_time_minutes: wall == null ? "" : String(Math.floor((wall % 3600) / 60)),
+    approval_ttl_hours:
+      overrides.approval_ttl_s == null
+        ? ""
+        : String(Math.round((overrides.approval_ttl_s / 3600) * 100) / 100),
     budget_usd: overrides.budget_usd?.toString() ?? "",
   };
 }
@@ -114,6 +131,7 @@ function overridesOf(values: Values): RunLimitOverrides {
     loop_iterations: number(values.loop_iterations),
     max_depth: number(values.max_depth),
     wall_time_s: wallTimeSeconds(values.wall_time_hours, values.wall_time_minutes),
+    approval_ttl_s: ttlSeconds(values.approval_ttl_hours),
     budget_usd: parseBudget(values.budget_usd),
   };
 }
@@ -180,6 +198,9 @@ function LimitsForm({
       for (const issue of validationIssues(err.body)) {
         const field = issue.loc.at(-1);
         if (field === "wall_time_s") form.setError("wall_time_hours", { message: issue.msg });
+        if (field === "approval_ttl_s") {
+          form.setError("approval_ttl_hours", { message: issue.msg });
+        }
         if (field === "budget_usd") form.setError("budget_usd", { message: issue.msg });
         const known = COUNT_FIELDS.find((f) => f.key === field);
         if (known) form.setError(known.key, { message: issue.msg });
@@ -217,6 +238,15 @@ function LimitsForm({
         error={errors.wall_time_hours?.message ?? errors.wall_time_minutes?.message}
         hours={form.register("wall_time_hours")}
         minutes={form.register("wall_time_minutes")}
+        disabled={pending}
+      />
+      <LimitInput
+        label="Approval time to live (hours)"
+        help={`How long a gate waits for a decision; then the run is cancelled as "Expired". A gate may set a shorter time. Platform limit: ${duration(defaults.approval_ttl_s)}.`}
+        placeholder={String(defaults.approval_ttl_s / 3600)}
+        inputMode="decimal"
+        error={errors.approval_ttl_hours?.message}
+        registration={form.register("approval_ttl_hours")}
         disabled={pending}
       />
       <LimitInput

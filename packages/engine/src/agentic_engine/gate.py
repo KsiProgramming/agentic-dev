@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agentic_engine.agent import AgentNodeResult
 from agentic_engine.events import GATE_DECIDED, RunEventLog
+from agentic_engine.policy import APPROVAL_TTL_S
 from agentic_engine.spec import GateNode
 
 MAX_REVIEW_FILES = 50
@@ -146,11 +147,17 @@ def check_edits(
     return kept
 
 
-def gate_request(node: GateNode, input: str) -> dict[str, JsonValue]:
+def gate_request(node: GateNode, input: str, ttl_s: int) -> dict[str, JsonValue]:
     """What the approver is shown: the `gate_waiting` payload, before the runner adds the
-    `changes`. `artifact` is the gate's input, the previous node's output (data, never
-    instructions)."""
-    return {"title": node.title, "prompt": node.prompt, "artifact": input}
+    `changes` and `expires_at`. `artifact` is the gate's input, the previous node's output (data,
+    never instructions). `ttl_s` is how long the gate waits: its own time to live, else the run
+    policy's `ttl_s`."""
+    return {
+        "title": node.title,
+        "prompt": node.prompt,
+        "artifact": input,
+        "ttl_s": node.ttl_s if node.ttl_s is not None else ttl_s,
+    }
 
 
 def decided_payload(decision: GateDecision, commits: dict[str, str]) -> dict[str, JsonValue]:
@@ -164,12 +171,18 @@ def decided_payload(decision: GateDecision, commits: dict[str, str]) -> dict[str
 
 
 async def run_gate_node(
-    node: GateNode, input: str, log: RunEventLog, review: GateReview | None = None
+    node: GateNode,
+    input: str,
+    log: RunEventLog,
+    review: GateReview | None = None,
+    ttl_s: int = APPROVAL_TTL_S,
 ) -> AgentNodeResult:
     """Pause until the run is continued with a `GateDecision`, then log it. Approve completes the
     node and passes `input` on unchanged, once its edits are committed through `review`; edits
-    that cannot be committed fail the node. Reject cancels it, which stops the run."""
-    decision = GateDecision.model_validate(interrupt(gate_request(node, input)))
+    that cannot be committed fail the node. Reject cancels it, which stops the run. The gate
+    waits `ttl_s` (the run's `approval_ttl_s`) unless it sets its own; the worker cancels the run
+    once that has passed (`agentic_store.expiry`)."""
+    decision = GateDecision.model_validate(interrupt(gate_request(node, input, ttl_s)))
     commits: dict[str, str] = {}
     if decision.decision == "approve" and decision.edits:
         try:

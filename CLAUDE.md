@@ -30,6 +30,7 @@ Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design sy
    | Times | `RelativeTime` (`clock` for a log line) |
    | Durations | `Duration` (a run's `active_ms`) |
    | Time waited at gates | `WaitingTime`, beside the duration |
+   | When something expires | `ExpiresIn` |
    | Cost and prices | `Money` (`usage={…}`, or `usd={…}` with `kind="price"` for a list price or limit) |
    | Tokens | `TokenCount` |
    | Ids | `IdChip` (copies, or links with `href`) |

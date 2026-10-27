@@ -35,6 +35,8 @@ export interface PendingGate {
   changes: FileChange[];
   /** Why the changes could not be read, if they could not. */
   changesError: string | null;
+  /** When the gate expires and its run is cancelled; null for a gate paused without one. */
+  expiresAt: string | null;
 }
 
 const STATUSES: readonly FileChangeStatus[] = ["added", "modified", "deleted", "renamed"];
@@ -107,7 +109,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
     if (!event || event.node_id == null) continue;
     if (event.type === "gate_decided") return null;
     if (event.type === "gate_waiting") {
-      const { title, prompt, artifact, changes, changes_error } = event.payload ?? {};
+      const { title, prompt, artifact, changes, changes_error, expires_at } = event.payload ?? {};
       return {
         nodeId: event.node_id,
         title: typeof title === "string" ? title : "Approve?",
@@ -115,6 +117,10 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         artifact: typeof artifact === "string" ? artifact : "",
         changes: parseChanges(changes),
         changesError: typeof changes_error === "string" ? changes_error : null,
+        expiresAt:
+          typeof expires_at === "string" && !Number.isNaN(Date.parse(expires_at))
+            ? expires_at
+            : null,
       };
     }
   }

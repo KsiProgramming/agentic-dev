@@ -20,6 +20,7 @@ DEFAULTS = {
     "max_depth": 2,
     "loop_iterations": 5,
     "wall_time_s": 7200,
+    "approval_ttl_s": 259_200,
     "budget_usd": None,
 }
 UNSET = dict.fromkeys(DEFAULTS)
@@ -57,16 +58,15 @@ async def test_a_new_workspace_has_the_platform_limits(
 
 
 async def test_lowered_limits_round_trip_and_reset(client: AsyncClient, workspace: UUID) -> None:
-    put = await client.put(
-        f"/workspaces/{workspace}/policy", json={"loop_iterations": 2, "wall_time_s": 600}
-    )
+    lowered = {"loop_iterations": 2, "wall_time_s": 600, "approval_ttl_s": 3600}
+    put = await client.put(f"/workspaces/{workspace}/policy", json=lowered)
     got = await client.get(f"/workspaces/{workspace}/policy")
     reset = await client.put(f"/workspaces/{workspace}/policy", json={})
 
     assert put.status_code == 200
     assert put.json() == got.json()
-    assert got.json()["overrides"] == {**UNSET, "loop_iterations": 2, "wall_time_s": 600}
-    assert got.json()["effective"] == {**DEFAULTS, "loop_iterations": 2, "wall_time_s": 600}
+    assert got.json()["overrides"] == {**UNSET, **lowered}
+    assert got.json()["effective"] == {**DEFAULTS, **lowered}
     assert reset.json()["overrides"] == UNSET
     assert reset.json()["effective"] == DEFAULTS
 
@@ -76,6 +76,7 @@ async def test_lowered_limits_round_trip_and_reset(client: AsyncClient, workspac
     [
         {"agents_spawned": 41},
         {"wall_time_s": 7201},
+        {"approval_ttl_s": 259_201},
         {"loop_iterations": 0},
         {"max_depth": -1},
         {"budget_usd": 0},

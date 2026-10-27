@@ -167,6 +167,10 @@ class RunLimits(BaseModel):
     wall_time_s: int = Field(
         description="Seconds a run may spend executing; time waiting at a gate does not count."
     )
+    approval_ttl_s: int = Field(
+        description="Seconds a gate waits for a decision before its run is cancelled "
+        '("Approval expired"); a gate may set a shorter time of its own.'
+    )
     budget_usd: float | None = Field(
         default=None,
         description="USD a run may spend, a hard stop once reached; unset is no cost cap.",
@@ -221,6 +225,9 @@ class RunLimitOverrides(BaseModel):
     )
     wall_time_s: int | None = _lower_limit(
         PLATFORM_POLICY.wall_time_s, "Seconds a run may spend executing, gates aside."
+    )
+    approval_ttl_s: int | None = _lower_limit(
+        PLATFORM_POLICY.approval_ttl_s, "Seconds a gate waits for a decision before it expires."
     )
     budget_usd: float | None = budget_field(
         "The default budget of the workspace's runs, which a run may replace. It has no "

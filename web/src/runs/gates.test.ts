@@ -25,6 +25,7 @@ test("a gate waits until it is decided", () => {
     artifact: "abc123 on agent/x/writer",
     changes: [],
     changesError: null,
+    expiresAt: null,
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
@@ -49,6 +50,7 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     artifact: "",
     changes: [],
     changesError: null,
+    expiresAt: null,
     ...overrides,
   };
 }
@@ -143,4 +145,14 @@ test("a decision's edits are read, leaving out malformed ones", () => {
     ]),
   ).toEqual([{ nodeId: "writer", path: "docs/a.md", content: "" }]);
   expect(parseEdits(undefined)).toEqual([]);
+});
+
+test("a gate says when it expires, if it does", () => {
+  const at = "2026-10-30T12:00:00+00:00";
+  const expiring = runEvent(2, "gate_waiting", { title: "Go?", expires_at: at });
+  const garbled = runEvent(2, "gate_waiting", { title: "Go?", expires_at: "soon" });
+
+  expect(pendingGate([expiring])?.expiresAt).toBe(at);
+  expect(pendingGate([garbled])?.expiresAt).toBeNull();
+  expect(pendingGate([WAITING])?.expiresAt).toBeNull();
 });

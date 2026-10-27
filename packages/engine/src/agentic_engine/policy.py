@@ -15,11 +15,20 @@ from typing import Annotated, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 type PolicyLimit = Literal[
-    "agents_alive", "agents_spawned", "max_depth", "loop_iterations", "wall_time_s", "budget_usd"
+    "agents_alive",
+    "agents_spawned",
+    "max_depth",
+    "loop_iterations",
+    "wall_time_s",
+    "approval_ttl_s",
+    "budget_usd",
 ]
 
 Limit = Annotated[int, Field(ge=1)]
 Usd = Annotated[Decimal, Field(gt=0, max_digits=16, decimal_places=8)]
+
+APPROVAL_TTL_S: Final = 72 * 60 * 60
+"""How long a gate waits for a decision by default, and at most: 72 h."""
 
 
 class Policy(BaseModel):
@@ -34,6 +43,12 @@ class Policy(BaseModel):
     wall_time_s: Limit = Field(
         description="Seconds a run may spend executing; time waiting at a gate does not count."
     )
+    # A default, so the policy frozen on a run created before phase 11.3 still loads.
+    approval_ttl_s: Limit = Field(
+        default=APPROVAL_TTL_S,
+        description="Seconds a gate waits for a decision before its run is cancelled; a gate "
+        "may set a shorter time of its own.",
+    )
     budget_usd: Usd | None = Field(
         default=None,
         description="USD the run may spend, a hard stop once reached; `None` is no cost cap.",
@@ -41,7 +56,12 @@ class Policy(BaseModel):
 
 
 PLATFORM_POLICY: Final = Policy(
-    agents_alive=8, agents_spawned=40, max_depth=2, loop_iterations=5, wall_time_s=2 * 60 * 60
+    agents_alive=8,
+    agents_spawned=40,
+    max_depth=2,
+    loop_iterations=5,
+    wall_time_s=2 * 60 * 60,
+    approval_ttl_s=APPROVAL_TTL_S,
 )
 """The tech-stack defaults, and the ceilings a workspace policy cannot go above."""
 
@@ -56,6 +76,7 @@ class PolicyOverrides(BaseModel):
     max_depth: Limit | None = None
     loop_iterations: Limit | None = None
     wall_time_s: Limit | None = None
+    approval_ttl_s: Limit | None = None
     budget_usd: Usd | None = None
 
 
@@ -80,6 +101,7 @@ LIMIT_LABELS: Final[dict[PolicyLimit, str]] = {
     "max_depth": "nesting depth",
     "loop_iterations": "loop iterations",
     "wall_time_s": "wall time",
+    "approval_ttl_s": "approval time to live",
     "budget_usd": "budget",
 }
 

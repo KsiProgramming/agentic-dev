@@ -713,7 +713,7 @@ async def test_the_summaries_stream_follows_a_gated_run(
     ):
         run_id = await post_gated_run(client)
         seen = await summaries_until(frames, run_id, "waiting")
-        assert seen[-1]["waiting_gate"] == {"node_id": "gate", "title": "Approve the notes"}
+        assert seen[-1]["waiting_gate"]["title"] == "Approve the notes"
 
         response = await client.post(
             f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}

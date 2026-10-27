@@ -121,6 +121,25 @@ test("runs waiting at a gate are counted on Runs, the menu button and the page t
   );
 });
 
+test("a gate past its time to live is not counted, even before its run is cancelled", async () => {
+  api.waiting = [
+    runSummary({
+      id: "r1",
+      status: "waiting",
+      waiting_gate: { node_id: "g", title: "Go?", expires_at: "2000-01-01T00:00:00Z" },
+    }),
+    runSummary({
+      id: "r2",
+      status: "waiting",
+      waiting_gate: { node_id: "g", title: "Go?", expires_at: "2999-01-01T00:00:00Z" },
+    }),
+  ];
+  render(<AppShell>page</AppShell>);
+
+  const runs = sidebar().getByRole("link", { name: /Runs/ });
+  await waitFor(() => expect(runs.textContent).toContain("1 needs approval"));
+});
+
 test("with nothing waiting, Runs has no badge and the title is left alone", async () => {
   document.title = "Runs · Agentic Dev";
   render(<AppShell>page</AppShell>);

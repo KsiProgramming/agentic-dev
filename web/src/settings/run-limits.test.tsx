@@ -15,6 +15,7 @@ const DEFAULTS: RunLimits = {
   max_depth: 2,
   loop_iterations: 5,
   wall_time_s: 7200,
+  approval_ttl_s: 259_200,
   budget_usd: null,
 };
 const UNSET: RunLimitOverrides = {
@@ -23,6 +24,7 @@ const UNSET: RunLimitOverrides = {
   max_depth: null,
   loop_iterations: null,
   wall_time_s: null,
+  approval_ttl_s: null,
   budget_usd: null,
 };
 
@@ -162,5 +164,34 @@ test("a budget out of range is caught before calling the API", async () => {
   type("Budget (USD)", "five");
   fireEvent.click(card().getByRole("button", { name: "Save limits" }));
   expect(await card().findByText("An amount in dollars, like 5 or 2.50.")).toBeDefined();
+  expect(fetch.mock.calls.some(([r]) => r.method === "PUT")).toBe(false);
+});
+
+test("the approval time to live is entered in hours and saved in seconds", async () => {
+  const fetch = storingApi();
+  show();
+  const ttl = await card().findByLabelText("Approval time to live (hours)");
+  expect(ttl.getAttribute("placeholder")).toBe("72");
+
+  type("Approval time to live (hours)", "1.5");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await putBody(fetch)).toEqual({ ...UNSET, approval_ttl_s: 5400 });
+  await waitFor(() =>
+    expect((card().getByLabelText("Approval time to live (hours)") as HTMLInputElement).value).toBe(
+      "1.5",
+    ),
+  );
+});
+
+test("an approval time to live above the platform's is caught before calling the API", async () => {
+  const fetch = storingApi();
+  show();
+  await card().findByLabelText("Approval time to live (hours)");
+
+  type("Approval time to live (hours)", "100");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await card().findByText("From 1 minute to 72 h.")).toBeDefined();
   expect(fetch.mock.calls.some(([r]) => r.method === "PUT")).toBe(false);
 });

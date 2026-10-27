@@ -431,7 +431,7 @@
           "runs"
         ],
         "summary": "Approve",
-        "description": "Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it\n`cancelled`. An approval may edit the files the gate showed as editable; the gate commits\nthe edits on the writers' branches before the run goes on. The run is queued again; its\nstream carries on with `gate_decided`.",
+        "description": "Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it\n`cancelled`. An approval may edit the files the gate showed as editable; the gate commits\nthe edits on the writers' branches before the run goes on. The run is queued again; its\nstream carries on with `gate_decided`. A gate past its `expires_at` takes no decision.",
         "operationId": "approveRun",
         "parameters": [
           {
@@ -470,7 +470,7 @@
             "description": "No run with this id"
           },
           "409": {
-            "description": "The run is not waiting at this gate, or it was already decided"
+            "description": "The run is not waiting at this gate, the gate was already decided, or its approval expired"
           },
           "422": {
             "description": "The edits do not fit the files the gate showed",
@@ -1049,6 +1049,7 @@
                       "repo.created",
                       "gate.approved",
                       "gate.rejected",
+                      "gate.expired",
                       "connection.added",
                       "connection.removed",
                       "policy.updated",
@@ -1756,6 +1757,7 @@
               "repo.created",
               "gate.approved",
               "gate.rejected",
+              "gate.expired",
               "connection.added",
               "connection.removed",
               "policy.updated",
@@ -2197,6 +2199,19 @@
             ],
             "title": "Prompt",
             "description": "More guidance for the approver, shown with the input."
+          },
+          "ttl_s": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl S",
+            "description": "Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset."
           }
         },
         "additionalProperties": false,
@@ -2777,6 +2792,7 @@
           "max_depth",
           "loop_iterations",
           "wall_time_s",
+          "approval_ttl_s",
           "budget_usd"
         ]
       },
@@ -3222,6 +3238,23 @@
             ],
             "description": "Set while the run waits at a gate."
           },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason",
+            "description": "Why a cancelled run was cancelled: `cancelled by user`, or `Approval expired` when its gate waited past its time to live."
+          },
+          "expired": {
+            "type": "boolean",
+            "title": "Expired",
+            "description": "True for a run cancelled because its gate expired: shown as \"Expired\"."
+          },
           "rerun_of": {
             "anyOf": [
               {
@@ -3309,6 +3342,8 @@
           "finished_at",
           "pr_url",
           "waiting_gate",
+          "cancel_reason",
+          "expired",
           "rerun_of",
           "usage",
           "active_ms",
@@ -3393,6 +3428,20 @@
             "title": "Wall Time S",
             "description": "Seconds a run may spend executing, gates aside. At most 7200, the platform's limit; unset keeps it."
           },
+          "approval_ttl_s": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 259200.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Ttl S",
+            "description": "Seconds a gate waits for a decision before it expires. At most 259200, the platform's limit; unset keeps it."
+          },
           "budget_usd": {
             "anyOf": [
               {
@@ -3440,6 +3489,11 @@
             "title": "Wall Time S",
             "description": "Seconds a run may spend executing; time waiting at a gate does not count."
           },
+          "approval_ttl_s": {
+            "type": "integer",
+            "title": "Approval Ttl S",
+            "description": "Seconds a gate waits for a decision before its run is cancelled (\"Approval expired\"); a gate may set a shorter time of its own."
+          },
           "budget_usd": {
             "anyOf": [
               {
@@ -3459,7 +3513,8 @@
           "agents_spawned",
           "max_depth",
           "loop_iterations",
-          "wall_time_s"
+          "wall_time_s",
+          "approval_ttl_s"
         ],
         "title": "RunLimits",
         "description": "The limits a run executes under."
@@ -3567,6 +3622,23 @@
             ],
             "description": "Set while the run waits at a gate."
           },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason",
+            "description": "Why a cancelled run was cancelled: `cancelled by user`, or `Approval expired` when its gate waited past its time to live."
+          },
+          "expired": {
+            "type": "boolean",
+            "title": "Expired",
+            "description": "True for a run cancelled because its gate expired: shown as \"Expired\"."
+          },
           "rerun_of": {
             "anyOf": [
               {
@@ -3634,6 +3706,8 @@
           "finished_at",
           "pr_url",
           "waiting_gate",
+          "cancel_reason",
+          "expired",
           "rerun_of",
           "usage",
           "active_ms",
@@ -4123,6 +4197,19 @@
               }
             ],
             "title": "Title"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "When the gate expires: the run is then cancelled (\"Approval expired\")."
           }
         },
         "type": "object",

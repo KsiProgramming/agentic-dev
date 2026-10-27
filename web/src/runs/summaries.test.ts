@@ -2,10 +2,14 @@ import { expect, test } from "vitest";
 
 import {
   badgeStatus,
+  expiredLabel,
   formatDuration,
+  formatTimeLeft,
+  gateExpired,
   formatRelative,
   isLive,
   repoLabel,
+  runStatusLabel,
   runTimes,
   wallClockLine,
   statusLabel,
@@ -83,4 +87,44 @@ test("statuses map onto the design system", () => {
   expect(statusLabel("waiting")).toBe("Needs approval");
   expect(isLive("waiting")).toBe(true);
   expect(isLive("failed")).toBe(false);
+});
+
+test.each([
+  [3 * 86_400_000, "Expires in 3 d"],
+  [25 * 3_600_000, "Expires in 1 d"],
+  [3 * 3_600_000 + 59 * 60_000, "Expires in 3 h"],
+  [12 * 60_000 + 30_000, "Expires in 12 min"],
+  [30_000, "Expires in <1 min"],
+  [0, "Expired"],
+  [-60_000, "Expired"],
+])("formatTimeLeft with %i ms left is %s", (left, text) => {
+  const now = Date.parse("2026-10-27T12:00:00Z");
+  expect(formatTimeLeft(new Date(now + left).toISOString(), now)).toBe(text);
+});
+
+test("an expired run reads Expired, in Cancelled's grey", () => {
+  const expired = runSummary({
+    status: "cancelled",
+    expired: true,
+    cancel_reason: "Approval expired",
+  });
+  const byUser = runSummary({ status: "cancelled", cancel_reason: "cancelled by user" });
+
+  expect([badgeStatus(expired.status), runStatusLabel(expired), expiredLabel(expired)]).toEqual([
+    "cancelled",
+    "Expired",
+    "Expired",
+  ]);
+  expect([runStatusLabel(byUser), expiredLabel(byUser)]).toEqual(["Cancelled", undefined]);
+});
+
+test("a gate past its expiry no longer waits", () => {
+  const now = Date.parse("2026-10-27T12:00:00Z");
+  const gate = (expires_at: string | null) =>
+    runSummary({ status: "waiting", waiting_gate: { node_id: "g", title: "Go?", expires_at } });
+
+  expect(gateExpired(gate("2026-10-27T11:59:59Z"), now)).toBe(true);
+  expect(gateExpired(gate("2026-10-27T12:00:01Z"), now)).toBe(false);
+  expect(gateExpired(gate(null), now)).toBe(false);
+  expect(gateExpired(runSummary(), now)).toBe(false);
 });

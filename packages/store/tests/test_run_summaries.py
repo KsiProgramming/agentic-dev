@@ -133,7 +133,12 @@ async def test_a_run_at_a_gate_shows_the_gate_until_it_is_decided(
 
     row = await summary(sessions, run_id)
     assert row.status == "waiting"
-    assert row.waiting_gate == {"node_id": "gate", "title": "Approve the notes"}
+    waiting = await first(sessions, run_id, "gate_waiting")
+    assert row.waiting_gate == {
+        "node_id": "gate",
+        "title": "Approve the notes",
+        "expires_at": waiting.payload["expires_at"],
+    }
     assert row.finished_at is None
     started_at = row.started_at
 

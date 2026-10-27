@@ -115,6 +115,7 @@ class WorkspacePolicy(Base):
     max_depth: Mapped[int | None] = mapped_column(Integer)
     loop_iterations: Mapped[int | None] = mapped_column(Integer)
     wall_time_s: Mapped[int | None] = mapped_column(Integer)
+    approval_ttl_s: Mapped[int | None] = mapped_column(Integer)
     budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(16, 8))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -135,7 +136,8 @@ class Run(Base):
     the time columns) are a projection of the run's events, written by `PostgresEventSink` with
     each event, so listing runs never scans the log. `template_id` and `repo_url` are set at
     creation, and `rerun_of` links a rerun to the run it repeats. `cancel_requested_at` is set
-    when a user asks to cancel the run; the worker then ends it `cancelled`. `policy` holds the
+    when a user asks to cancel the run, or when its gate expires (`agentic_store.expiry`), with
+    `cancel_reason`; the worker then ends it `cancelled`. `policy` holds the
     limits the run got when it was created (`agentic_engine.policy.Policy`); they never change,
     resumes included."""
 
@@ -145,6 +147,12 @@ class Run(Base):
             "ix_runs_lease_expires_at",
             "lease_expires_at",
             postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+        # The expiry sweep (`agentic_store.expiry`).
+        Index(
+            "ix_runs_gate_expires_at",
+            "gate_expires_at",
+            postgresql_where=text("status = 'waiting'"),
         ),
         # Listing runs, newest first.
         Index(
@@ -172,8 +180,10 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pr_url: Mapped[str | None] = mapped_column(Text)
     failure_reason: Mapped[str | None] = mapped_column(Text)
-    # `{node_id, title}` of the gate the run is paused at.
+    # `{node_id, title, expires_at}` of the gate the run is paused at.
     waiting_gate: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    # When that gate expires: the worker then cancels the run (`agentic_store.expiry`).
+    gate_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rerun_of: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):
     # `active_ms` is null until the run starts. The open stretch, if any, began at
@@ -182,8 +192,10 @@ class Run(Base):
     waiting_ms: Mapped[int] = mapped_column(BigInteger, server_default="0")
     active_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     waiting_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # When a user asked to cancel the run (`agentic_store.cancel`).
+    # When a user asked to cancel the run (`agentic_store.cancel`), or its gate expired, and why:
+    # the `reason` of its `run_cancelled` event, which also sets it.
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
     # Totals of the run's `usage` events.
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")

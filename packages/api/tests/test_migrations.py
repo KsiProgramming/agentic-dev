@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -39,7 +39,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0020_active_waiting_time"
+    assert version == "0021_approval_expiry"
     assert {
         "runs",
         "run_events",
@@ -470,3 +470,67 @@ async def test_the_time_revision_fills_live_runs_from_their_events(postgres_url:
     await asyncio.to_thread(command.downgrade, config, "0019_audit_events")
     assert "active_ms" not in await run_columns(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
+
+
+async def test_the_approval_expiry_revision_gives_waiting_gates_72_hours(
+    postgres_url: str,
+) -> None:
+    """A gate that paused before phase 11.3 expires 72 h after it started waiting, so one paused
+    4 days ago is past its time and goes on the first sweep."""
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.downgrade, config, "0020_active_waiting_time")
+    assert {"gate_expires_at", "cancel_reason"}.isdisjoint(await run_columns(postgres_url))
+    assert "approval_ttl_s" not in await policy_columns(postgres_url)
+
+    engine = create_async_engine(postgres_url)
+    insert = (
+        "INSERT INTO runs (id, workspace_id, status, spec, policy, waiting_gate, waiting_since, "
+        "cancel_requested_at) VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', "
+        ":status, '{}', '{}', CAST(:gate AS jsonb), :since, :cancel) RETURNING id"
+    )
+    gate = '{"node_id": "approve", "title": "Ship it?"}'
+    now = datetime.now(UTC)
+    async with engine.begin() as conn:
+        stale, fresh, cancelled = [
+            (
+                await conn.execute(
+                    text(insert),
+                    {"status": status, "gate": gate_json, "since": since, "cancel": cancel},
+                )
+            ).scalar_one()
+            for status, gate_json, since, cancel in (
+                ("waiting", gate, now - timedelta(days=4), None),
+                ("waiting", gate, now - timedelta(hours=1), None),
+                ("cancelled", None, None, now),
+            )
+        ]
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.connect() as conn:
+        rows = {
+            row.id: row
+            for row in await conn.execute(
+                text(
+                    "SELECT id, gate_expires_at, waiting_gate, cancel_reason FROM runs "
+                    "WHERE id IN (:a, :b, :c)"
+                ),
+                {"a": stale, "b": fresh, "c": cancelled},
+            )
+        }
+    # Gone again, so no later test's worker expires them (their specs cannot run).
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM runs WHERE id IN (:a, :b, :c)"),
+            {"a": stale, "b": fresh, "c": cancelled},
+        )
+    await engine.dispose()
+
+    assert rows[stale].gate_expires_at < now < rows[fresh].gate_expires_at
+    assert rows[fresh].gate_expires_at - (now - timedelta(hours=1)) == pytest.approx(
+        timedelta(hours=72), abs=timedelta(seconds=1)
+    )
+    expires_at = datetime.fromisoformat(rows[fresh].waiting_gate["expires_at"])
+    assert expires_at == rows[fresh].gate_expires_at
+    assert rows[cancelled].cancel_reason == "cancelled by user"
+    assert "approval_ttl_s" in await policy_columns(postgres_url)

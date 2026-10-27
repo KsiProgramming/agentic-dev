@@ -39,6 +39,9 @@ export const GATE = {
   prompt: "Check it before the run ends.",
 };
 
+/** A gate that expires a few seconds after it pauses (the e2e worker sweeps every second). */
+export const EXPIRING_GATE = { ...GATE, ttl_s: 8 };
+
 /** A loop whose `until` is not a bool: it fails after its first round, and so does the run. */
 export const FAILING = {
   type: "loop",

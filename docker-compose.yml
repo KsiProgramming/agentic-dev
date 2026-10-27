@@ -133,6 +133,8 @@ services:
       # A run whose worker stops renewing its lease for LEASE_TTL_S is resumed by another worker.
       LEASE_TTL_S: ${LEASE_TTL_S:-30}
       MAX_ATTEMPTS: ${MAX_ATTEMPTS:-3}
+      # How often the worker cancels runs whose gate waited past its time to live (phase 11.3).
+      GATE_SWEEP_S: ${GATE_SWEEP_S:-30}
       # Runs with a repo get a sandbox container on the host's Docker. Local repo paths may only
       # come from /samples, where this project's own git history is mounted as a demo repo.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}

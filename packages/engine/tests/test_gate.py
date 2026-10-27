@@ -1,5 +1,6 @@
 """The `gate` primitive: a run pauses at a gate and continues on a human decision (phase 1.7)."""
 
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,6 +16,7 @@ from agentic_engine.graph import (
     resume_workflow,
     run_workflow,
 )
+from agentic_engine.policy import PLATFORM_POLICY, Policy
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime import Message
 from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
@@ -23,11 +25,12 @@ APPROVE = GateDecision(decision="approve", decided_by="ada")
 REJECT = GateDecision(decision="reject", comment="not this time")
 
 
-def gated(*gates: str) -> WorkflowSpec:
-    """`writer`, then each gate followed by an agent `after-<gate>`."""
+def gated(*gates: str, ttl_s: int | None = None) -> WorkflowSpec:
+    """`writer`, then each gate (waiting `ttl_s`, if given) followed by an agent `after-<gate>`."""
     steps: list[object] = [{"type": "agent", "id": "writer", "role": "W", "instructions": "Go."}]
     for gate in gates:
-        steps.append({"type": "gate", "id": gate, "title": f"Approve {gate}", "prompt": "Check."})
+        step = {"type": "gate", "id": gate, "title": f"Approve {gate}", "prompt": "Check."}
+        steps.append(step if ttl_s is None else {**step, "ttl_s": ttl_s})
         steps.append({"type": "agent", "id": f"after-{gate}", "role": "A", "instructions": "Go."})
     return parse_spec(
         {
@@ -50,8 +53,11 @@ def lifecycle(events: list[RunEvent]) -> list[tuple[str, str | None]]:
 class Run:
     """One run across its pauses: every attempt writes to the same sink, continuing `seq`."""
 
-    def __init__(self, spec: WorkflowSpec, runtime: FakeRuntime | None = None) -> None:
+    def __init__(
+        self, spec: WorkflowSpec, runtime: FakeRuntime | None = None, policy: Policy | None = None
+    ) -> None:
         self.spec = spec
+        self.policy = policy or PLATFORM_POLICY
         self.runtime = runtime or FakeRuntime({"writer": [Message(text="draft notes"), ECHO_USAGE]})
         self.run_id: UUID = uuid4()
         self.sink = InMemoryEventSink()
@@ -66,6 +72,7 @@ class Run:
             run_id=self.run_id,
             sink=self.sink,
             checkpointer=self.checkpointer,
+            policy=self.policy,
         )
 
     async def resume(self, decision: GateDecision | None) -> WorkflowRunResult:
@@ -102,12 +109,45 @@ async def test_run_pauses_at_gate() -> None:
         ("gate_waiting", "gate"),
     ]
     waiting = run.sink.events[-1]
+    expires_at = waiting.payload.pop("expires_at")
     assert waiting.payload == {
         "title": "Approve gate",
         "prompt": "Check.",
         "artifact": "draft notes",
+        "ttl_s": 72 * 60 * 60,
         "changes": [],
     }
+    assert isinstance(expires_at, str)
+    assert datetime.fromisoformat(expires_at) - waiting.created_at == pytest.approx(
+        timedelta(hours=72), abs=timedelta(seconds=1)
+    )
+
+
+async def test_a_gate_expires_after_the_run_policys_time_to_live() -> None:
+    """Phase 11.3: a gate with no time to live of its own waits the run's `approval_ttl_s`."""
+    run = Run(gated("gate"), policy=PLATFORM_POLICY.model_copy(update={"approval_ttl_s": 600}))
+
+    await run.start()
+
+    waiting = run.sink.events[-1]
+    assert waiting.payload["ttl_s"] == 600
+    expires_at = datetime.fromisoformat(str(waiting.payload["expires_at"]))
+    assert expires_at - waiting.created_at == pytest.approx(
+        timedelta(minutes=10), abs=timedelta(seconds=1)
+    )
+
+
+async def test_a_gate_sets_its_own_time_to_live() -> None:
+    run = Run(gated("gate", ttl_s=5))
+
+    await run.start()
+
+    waiting = run.sink.events[-1]
+    assert waiting.payload["ttl_s"] == 5
+    expires_at = datetime.fromisoformat(str(waiting.payload["expires_at"]))
+    assert expires_at - waiting.created_at == pytest.approx(
+        timedelta(seconds=5), abs=timedelta(seconds=1)
+    )
 
 
 async def test_approve_continues_the_run() -> None:
@@ -212,7 +252,8 @@ async def test_gate_first_shows_the_run_input() -> None:
     run = Run(spec)
 
     assert (await run.start()).waiting_at == "gate"
-    assert run.sink.events[-1].payload == {
+    shown = run.sink.events[-1].payload
+    assert {k: v for k, v in shown.items() if k not in ("ttl_s", "expires_at")} == {
         "title": "Start?",
         "prompt": None,
         "artifact": "go",

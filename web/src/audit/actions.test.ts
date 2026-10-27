@@ -147,7 +147,7 @@ test("each category has its actions", () => {
     "run.ended",
     "repo.created",
   ]);
-  expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected"]);
+  expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
   expect(actionsOf("settings")).toEqual([
     "connection.added",
     "connection.removed",

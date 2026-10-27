@@ -32,6 +32,24 @@ export function badgeStatus(status: ApiRunStatus): RunStatus {
   return BADGE_STATUS[status];
 }
 
+/** How a run's status is worded: its `statusLabel`, or "Expired" for a run cancelled because
+ * its gate waited past its time to live (shown in Cancelled's grey). */
+export function runStatusLabel(run: Pick<RunSummary, "status" | "expired">): string {
+  return run.expired ? "Expired" : statusLabel(run.status);
+}
+
+/** The badge wording of a run whose gate expired ("Expired"); undefined keeps the status's. */
+export function expiredLabel(run: Pick<RunSummary, "expired">): string | undefined {
+  return run.expired ? "Expired" : undefined;
+}
+
+/** Whether the run waits at a gate whose time to live has passed. The worker cancels it within
+ * a few seconds; until then it no longer counts as waiting. */
+export function gateExpired(run: Pick<RunSummary, "waiting_gate">, now: number): boolean {
+  const at = run.waiting_gate?.expires_at;
+  return at != null && Date.parse(at) <= now;
+}
+
 /** How the runs list words a status: a waiting run needs the user. */
 export function statusLabel(status: ApiRunStatus): string {
   return STATUS_LABEL[status];
@@ -102,6 +120,20 @@ export function formatRelative(iso: string, now: number): string {
   const d = Math.round(h / 24);
   if (d < 7) return `${d} d ago`;
   return dateFormat({ day: "numeric", month: "short", year: "numeric" }).format(Date.parse(iso));
+}
+
+/** How long until something runs out at `iso`: `Expires in 2 d`, `Expires in 3 h`,
+ * `Expires in 12 min`, `Expires in <1 min`, then `Expired`. Rounded down, so it never promises
+ * more time than is left. */
+export function formatTimeLeft(iso: string, now: number): string {
+  const s = Math.floor((Date.parse(iso) - now) / 1000);
+  if (s <= 0) return "Expired";
+  const m = Math.floor(s / 60);
+  if (m < 1) return "Expires in <1 min";
+  if (m < 60) return `Expires in ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `Expires in ${h} h`;
+  return `Expires in ${Math.floor(h / 24)} d`;
 }
 
 /** The full date and time, for a tooltip. */

@@ -3,6 +3,7 @@
 from agentic_store.approvals import (
     AlreadyDecidedError,
     ApprovalError,
+    GateExpiredError,
     InvalidEditsError,
     RunNotFoundError,
     RunNotWaitingError,
@@ -15,6 +16,7 @@ from agentic_store.audit_log import AuditEventRow, AuditRunRef, list_audit_event
 from agentic_store.cancel import (
     USER_CANCEL_REASON,
     RunEndedError,
+    cancel_reason,
     cancel_requested,
     request_cancel,
     run_ended,
@@ -34,6 +36,7 @@ from agentic_store.connections import (
     put_connection,
     put_github_connection,
 )
+from agentic_store.expiry import APPROVAL_EXPIRED_REASON, expire_gates
 from agentic_store.lease import (
     claim_run,
     leased_run_ids,
@@ -90,6 +93,7 @@ from agentic_store.summaries import (
 )
 
 __all__ = [
+    "APPROVAL_EXPIRED_REASON",
     "AUDIT_ACTIONS",
     "CONNECTION_COLUMNS_CHECK",
     "DEFAULT_WORKSPACE_ID",
@@ -107,6 +111,7 @@ __all__ = [
     "Base",
     "Connection",
     "ConnectionInfo",
+    "GateExpiredError",
     "InvalidCursorError",
     "InvalidEditsError",
     "PolicyViolationError",
@@ -128,6 +133,7 @@ __all__ = [
     "WorkspacePolicy",
     "WrongGateError",
     "active_seconds",
+    "cancel_reason",
     "cancel_requested",
     "check_workflow",
     "claim_run",
@@ -136,6 +142,7 @@ __all__ = [
     "delete_connection",
     "dequeue_run",
     "enqueue_run",
+    "expire_gates",
     "get_github_installation",
     "get_policy_overrides",
     "get_run",

@@ -5,6 +5,7 @@ import { forwardRef, useEffect, useId, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { createApiClient } from "@/api/client";
+import { ExpiresIn } from "@/components/display";
 import { ApiError, failure } from "@/api/errors";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -228,7 +229,12 @@ export function ApprovalDock({
               className="mt-0.5 size-5 shrink-0 text-status-waiting"
             />
             <div className="flex min-w-0 flex-col">
-              <h2 className="font-medium">{gate.title}</h2>
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <h2 className="font-medium">{gate.title}</h2>
+                {gate.expiresAt ? (
+                  <ExpiresIn iso={gate.expiresAt} className="text-meta text-muted-foreground" />
+                ) : null}
+              </div>
               {summary ? (
                 <p className="truncate text-sm text-muted-foreground" title={summary}>
                   {summary}
