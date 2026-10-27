@@ -52,8 +52,13 @@ describe("RunGraph", () => {
     await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7));
     expect(node("list_modules").dataset.status).toBe("completed");
     expect(node("approve").dataset.status).toBe("waiting");
-    expect(node("approve").getAttribute("aria-label")).toBe("approve, gate, Needs approval");
-    expect(node("document").getAttribute("aria-label")).toBe("document, map, Done, 3 of 3 items");
+    expect(node("approve").getAttribute("aria-label")).toBe(
+      "approve, Needs approval, Open the docs PR?, gate",
+    );
+    expect(node("document").getAttribute("aria-label")).toBe("document, Done, 3 of 3 items, map");
+    // The name holds the visible text word for word (axe reads the text nodes as they come).
+    expect(node("approve").textContent).toBe("approve Needs approval Open the docs PR?");
+    expect(node("document").textContent).toBe("document Done 3 of 3 items");
     expect(within(node("revise")).getByText("Iteration 2 of 3")).toBeTruthy();
   });
 
@@ -102,7 +107,7 @@ describe("RunGraph", () => {
     expect(within(node("document")).getByText("1 of 3 items")).toBeTruthy();
   });
 
-  it("is reached by keyboard: each node is a button, Escape closes its detail", async () => {
+  it("is reached by keyboard: each node is a button, Escape closes its detail and refocuses it", async () => {
     render(<Graph steps={stepsUpTo(88)} />);
     const writer = await waitFor(() => node("module-writer"));
 
@@ -113,8 +118,12 @@ describe("RunGraph", () => {
 
     fireEvent.click(writer);
     const sheet = await screen.findByTestId("node-detail");
+    // The sheet takes focus, not a value in it whose tooltip would take the first Escape.
+    await waitFor(() => expect(document.activeElement).toBe(sheet));
     fireEvent.keyDown(sheet, { key: "Escape" });
 
     await waitFor(() => expect(screen.queryByTestId("node-detail")).toBeNull());
+    // Focus goes back to the node the sheet was opened from.
+    await waitFor(() => expect(document.activeElement).toBe(node("module-writer")));
   });
 });

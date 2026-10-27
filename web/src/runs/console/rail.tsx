@@ -70,13 +70,18 @@ const STATUS_ICON: Record<StepStatus, { icon: LucideIcon; className: string }> =
 /** A step's or map item's status as the marker: an icon, with its label for screen readers
  * (status is never colour alone). */
 export function StatusMarker({ status, small = false }: { status: StepStatus; small?: boolean }) {
-  const { icon: Icon, className } = STATUS_ICON[status];
   return (
     <>
-      <Icon aria-hidden="true" className={cn(small ? "size-3.5" : "size-4", className)} />
+      <StatusIcon status={status} small={small} />
       <span className="sr-only">{stepBadge(status).label}</span>
     </>
   );
+}
+
+/** The status icon alone, beside a status label that is already shown. */
+export function StatusIcon({ status, small = false }: { status: StepStatus; small?: boolean }) {
+  const { icon: Icon, className } = STATUS_ICON[status];
+  return <Icon aria-hidden="true" className={cn(small ? "size-3.5" : "size-4", className)} />;
 }
 
 /** A quiet dot, for an entry whose status says nothing (a message). */

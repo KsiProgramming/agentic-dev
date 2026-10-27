@@ -140,7 +140,7 @@ Each kind of value has one component (`@/components/display`), used everywhere a
   - Each node shows a type icon, its id (mono), one line on what it does (role, tool, gate title) and its status as icon + label; "Not started" until the run reaches it. A node run several times (in a map or a loop) shows what needs attention first: failed, waiting, running, cancelled, then done. Running, waiting and failed tint the border.
   - Status comes from the same timeline as the Timeline tab. The layout is computed once per spec; events only change the nodes' states.
   - Nothing moves, connects or is deleted; the graph pans and zooms inside its own box (`min(70svh, 720px)`), so the page never scrolls sideways.
-  - Each node is a button (one tab stop, Enter or Space opens it) with an accessible name ("worker, agent, Done"). It opens a sheet (side sheet 480 px from 768 px, bottom sheet below) with the timeline's step view; a node inside a map or a loop shows one entry per item or iteration. The dock's `A` / `R` shortcuts work while a node has focus, not while the sheet is open.
+  - Each node is a button (one tab stop, Enter or Space opens it) with an accessible name that starts with its visible text ("worker, Done, writer, agent": WCAG 2.5.3). It opens a sheet (side sheet 480 px from 768 px, bottom sheet below) with the timeline's step view; a node inside a map or a loop shows one entry per item or iteration. The dock's `A` / `R` shortcuts work while a node has focus, not while the sheet is open.
 - **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with:
   - the gate title, and when it expires (`ExpiresIn`, when the gate has an expiry);
   - a one-line summary: the gate's prompt, else the first line of its artifact;
