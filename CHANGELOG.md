@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 11.7 shell and settings v2:
+- Phase 11.7 shell and settings v2 ([#136](https://github.com/KsiProgramming/agentic-dev/pull/136)):
   - **Command palette.** `⌘K` / `Ctrl+K` (or "Search… ⌘K" in the top bar) finds a run by its id, PR number or workflow and opens it; starts a new run; opens the oldest waiting gate (or a waiting run found) in the Inbox; switches between light and dark; and goes to any section or settings sub-page.
   - **User menu.** "Preferences" at the bottom of the sidebar holds the theme and row density, which leave the top bar.
   - **Settings sub-pages.** Settings is split into Integrations, Models and pricing, and Limits and budgets, with a secondary nav beside the page from 768 px (tabs above it below). `/settings` and the GitHub install return open Integrations, keeping their query.
