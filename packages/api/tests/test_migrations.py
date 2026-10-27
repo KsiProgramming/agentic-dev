@@ -39,7 +39,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0019_audit_events"
+    assert version == "0020_active_waiting_time"
     assert {
         "runs",
         "run_events",
@@ -404,3 +404,69 @@ async def test_audit_events_are_append_only(postgres_url: str) -> None:
     assert "audit_events" not in await table_names(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
     assert "audit_events" in await table_names(postgres_url)
+
+
+async def test_the_time_revision_fills_live_runs_from_their_events(postgres_url: str) -> None:
+    """A run waiting at a gate when it ships gets its active time; one that had ended keeps
+    none."""
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.downgrade, config, "0019_audit_events")
+
+    engine = create_async_engine(postgres_url)
+    runs: dict[str, object] = {}
+    async with engine.begin() as conn:
+        for status, events in (
+            (
+                "waiting",
+                (("run_started", 0), ("node_started", 10), ("gate_waiting", 60)),
+            ),
+            (
+                "completed",
+                (("run_started", 0), ("run_completed", 60)),
+            ),
+        ):
+            runs[status] = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO runs (id, workspace_id, status, spec, policy) VALUES "
+                        "(gen_random_uuid(), '00000000-0000-0000-0000-000000000001', :status, "
+                        "'{}', '{}') RETURNING id"
+                    ),
+                    {"status": status},
+                )
+            ).scalar_one()
+            for seq, (type, seconds) in enumerate(events, 1):
+                await conn.execute(
+                    text(
+                        "INSERT INTO run_events (run_id, seq, type, payload, created_at) VALUES "
+                        "(:run, :seq, :type, '{}', "
+                        "timestamptz '2026-10-27 09:00:00+00' + make_interval(secs => :s))"
+                    ),
+                    {"run": runs[status], "seq": seq, "type": type, "s": seconds},
+                )
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.connect() as conn:
+        rows = {
+            status: (
+                await conn.execute(
+                    text(
+                        "SELECT active_ms, waiting_ms, active_since, waiting_since FROM runs "
+                        "WHERE id = :id"
+                    ),
+                    {"id": run_id},
+                )
+            ).one()
+            for status, run_id in runs.items()
+        }
+    await engine.dispose()
+
+    waiting = rows["waiting"]
+    assert (waiting.active_ms, waiting.waiting_ms, waiting.active_since) == (60_000, 0, None)
+    assert waiting.waiting_since == datetime.fromisoformat("2026-10-27T09:01:00+00:00")
+    assert tuple(rows["completed"]) == (None, 0, None, None)
+
+    await asyncio.to_thread(command.downgrade, config, "0019_audit_events")
+    assert "active_ms" not in await run_columns(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")

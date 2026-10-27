@@ -8,12 +8,13 @@ import { FOCUSABLE_VALUE, ValueTooltip } from "./value-tooltip";
 
 /** When something happened, relative to now ("5 min ago"), with the exact date and time in a
  * tooltip. A page that shows many times passes its own `now`; otherwise it ticks every minute.
- * A log line shows the time of day instead (`clock`). */
+ * A log line shows the time of day instead (`clock`); `detail` adds a line to the tooltip. */
 export function RelativeTime({
   iso,
   now,
   clock = false,
   prefix,
+  detail,
   focusable = true,
   className,
 }: {
@@ -22,12 +23,25 @@ export function RelativeTime({
   clock?: boolean;
   /** Words before the time, inside the `<time>` ("Started "). */
   prefix?: string;
+  /** A second tooltip line ("2h 03m start to end"). */
+  detail?: string;
   focusable?: boolean;
   className?: string;
 }) {
   const ticking = useNow(60_000, now === undefined && !clock);
   return (
-    <ValueTooltip content={formatAbsolute(iso)}>
+    <ValueTooltip
+      content={
+        detail ? (
+          <>
+            <span>{formatAbsolute(iso)}</span>
+            <span>{detail}</span>
+          </>
+        ) : (
+          formatAbsolute(iso)
+        )
+      }
+    >
       <time
         dateTime={iso}
         tabIndex={focusable ? 0 : undefined}

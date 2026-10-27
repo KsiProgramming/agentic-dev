@@ -1205,6 +1205,22 @@ export interface components {
              */
             rerun_of: string | null;
             usage: components["schemas"]["RunUsage"];
+            /**
+             * Active Ms
+             * @description Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded).
+             */
+            active_ms: number | null;
+            /**
+             * Waiting Ms
+             * @description Time paused at gates, up to the resume (or the end, if it was cancelled while waiting). Up to now while the run waits.
+             */
+            waiting_ms: number;
+            /**
+             * Measured At
+             * Format: date-time
+             * @description When `active_ms` and `waiting_ms` were measured: a client keeps a running run's active time, or a waiting run's waiting time, growing from here.
+             */
+            measured_at: string;
             /** Input */
             input: string;
             /**
@@ -1216,7 +1232,9 @@ export interface components {
             spec: components["schemas"]["WorkflowSpec"];
             /**
              * Duration Ms
-             * @description From start to end; `null` until the run has ended.
+             * @deprecated
+             * @description Wall clock, from start to end, waiting at gates included; `null` until the run has
+             *     ended. Deprecated: a run's duration is `active_ms`.
              */
             readonly duration_ms: number | null;
         };
@@ -1341,8 +1359,26 @@ export interface components {
             rerun_of: string | null;
             usage: components["schemas"]["RunUsage"];
             /**
+             * Active Ms
+             * @description Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded).
+             */
+            active_ms: number | null;
+            /**
+             * Waiting Ms
+             * @description Time paused at gates, up to the resume (or the end, if it was cancelled while waiting). Up to now while the run waits.
+             */
+            waiting_ms: number;
+            /**
+             * Measured At
+             * Format: date-time
+             * @description When `active_ms` and `waiting_ms` were measured: a client keeps a running run's active time, or a waiting run's waiting time, growing from here.
+             */
+            measured_at: string;
+            /**
              * Duration Ms
-             * @description From start to end; `null` until the run has ended.
+             * @deprecated
+             * @description Wall clock, from start to end, waiting at gates included; `null` until the run has
+             *     ended. Deprecated: a run's duration is `active_ms`.
              */
             readonly duration_ms: number | null;
         };

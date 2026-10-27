@@ -127,6 +127,8 @@ async def existing_workspace(
 
 
 def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    active_ms, waiting_ms = row.times.at(now)
     return {
         "id": row.id,
         "workspace_id": row.workspace_id,
@@ -141,6 +143,9 @@ def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
         "waiting_gate": WaitingGate.model_validate(row.waiting_gate) if row.waiting_gate else None,
         "rerun_of": row.rerun_of,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
+        "active_ms": active_ms,
+        "waiting_ms": waiting_ms,
+        "measured_at": now,
     }
 
 
@@ -208,7 +213,7 @@ async def stream_summaries(
     listener: RunEventListener = request.app.state.run_events
     watermark = datetime.now(UTC)
     # What was last sent per run, kept while the run is inside the lookback window.
-    sent: dict[UUID, tuple[datetime, RunSummary]] = {}
+    sent: dict[UUID, tuple[datetime, object]] = {}
     # Subscribe before reading, so a change written in between still wakes us.
     with listener.subscribe_all() as woke:
         while True:
@@ -218,11 +223,16 @@ async def stream_summaries(
             )
             for updated_at, row in changed:
                 summary = RunSummary(**_summary_fields(row))
-                if (last := sent.get(row.id)) is None or last[1] != summary:
+                # Its times grow with the clock, which the client follows by itself.
+                seen = (
+                    row.times,
+                    summary.model_dump(exclude={"active_ms", "waiting_ms", "measured_at"}),
+                )
+                if (last := sent.get(row.id)) is None or last[1] != seen:
                     yield ServerSentEvent(
                         id=updated_at.isoformat(), event="run_summary", data=summary
                     )
-                sent[row.id] = (updated_at, summary)
+                sent[row.id] = (updated_at, seen)
                 watermark = max(watermark, updated_at)
             sent = {
                 run_id: kept

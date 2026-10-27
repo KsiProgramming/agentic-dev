@@ -1,10 +1,23 @@
 """Persists a run's event stream to Postgres."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final
 from uuid import UUID
 
-from sqlalchemy import false, func, null, select, update
+from sqlalchemy import (
+    BigInteger,
+    ColumnElement,
+    DateTime,
+    case,
+    cast,
+    false,
+    func,
+    literal,
+    null,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import (
@@ -51,6 +64,8 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     | `run_completed`, `run_cancelled` | end status, `finished_at`; clears the gate and reason |
     | `run_failed` | `failed`, `finished_at`, clears `waiting_gate`; `failure_reason` = `error` |
     | `usage` | adds its tokens and `estimated_usd`; `cost_complete=false` if it has no price |
+
+    and the time columns (see `time_values`).
     """
     values: dict[str, Any] = {}
     if status := RUN_STATUS.get(event.type) or RUN_END_STATUS.get(event.type):
@@ -58,6 +73,7 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     payload = event.payload
     if event.type == USAGE and isinstance(usage := event.agent_event(), Usage):
         return _usage_values(usage)
+    values.update(time_values(event))
     if event.type == RUN_STARTED:
         values["started_at"] = func.coalesce(Run.started_at, event.created_at)
     elif event.type in (RUN_RESUMED, GATE_DECIDED):
@@ -85,6 +101,58 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
         else:
             values["failure_reason"] = None
     return values
+
+
+def time_values(event: RunEvent) -> dict[str, Any]:
+    """How long the run has spent executing (`active_ms`) and paused at gates (`waiting_ms`),
+    added up in stretches; `active_since` or `waiting_since` is the start of the open one.
+
+    | Event | Closes | Opens |
+    |---|---|---|
+    | started, resumed | waiting; active to its last event (a cut-off attempt) | active |
+    | `gate_waiting` | active | waiting (the first gate's, if two wait at once) |
+    | end events | whichever is open | none |
+
+    The gap between a cut-off attempt's last event and the next attempt counts as neither.
+    A run that ends before it started keeps `active_ms` null."""
+    at = literal(event.created_at, DateTime(timezone=True))
+    if event.type in (RUN_STARTED, RUN_RESUMED):
+        last = (
+            select(func.max(RunEventRow.created_at))
+            .where(RunEventRow.run_id == event.run_id, RunEventRow.seq < event.seq)
+            .scalar_subquery()
+        )
+        return {
+            "active_ms": func.coalesce(Run.active_ms, 0)
+            + func.coalesce(_ms(Run.active_since, last), 0),
+            "waiting_ms": Run.waiting_ms + func.coalesce(_ms(Run.waiting_since, at), 0),
+            "active_since": at,
+            "waiting_since": None,
+        }
+    if event.type == GATE_WAITING:
+        return {
+            "active_ms": _closed(Run.active_ms, Run.active_since, at),
+            "active_since": None,
+            "waiting_since": func.coalesce(Run.waiting_since, at),
+        }
+    if event.type in RUN_END_STATUS:
+        return {
+            "active_ms": _closed(Run.active_ms, Run.active_since, at),
+            "waiting_ms": Run.waiting_ms + func.coalesce(_ms(Run.waiting_since, at), 0),
+            "active_since": None,
+            "waiting_since": None,
+        }
+    return {}
+
+
+def _ms(start: Any, end: Any) -> ColumnElement[int]:
+    """Milliseconds from `start` to `end`; null if either is."""
+    return cast(func.round(func.extract("epoch", end - start) * 1000), BigInteger)
+
+
+def _closed(total: Any, since: Any, at: ColumnElement[datetime]) -> ColumnElement[int | None]:
+    """`total` with the stretch open since `since` closed at `at`; unchanged with none open."""
+    return case((since.is_(None), total), else_=func.coalesce(total, 0) + _ms(since, at))
 
 
 def _usage_values(usage: Usage) -> dict[str, Any]:

@@ -5,6 +5,7 @@ Each test lists the runs of its own workspace, so runs made by other tests do no
 
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_api import create_app
 from agentic_api.settings import Settings
-from agentic_engine.events import RunEventLog
+from agentic_engine.events import RunEvent, RunEventLog
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_sandbox import RepoSource
 from agentic_store import PostgresEventSink, Workspace, create_run
@@ -120,6 +121,11 @@ async def test_done_when_the_api_lists_past_runs_with_status_from_the_log(
     assert done["started_at"] is not None and done["finished_at"] is not None
     assert done["duration_ms"] >= 0
     assert by_id[str(queued)]["duration_ms"] is None
+    assert done["active_ms"] >= 0 and done["waiting_ms"] == 0
+    assert (by_id[str(queued)]["active_ms"], by_id[str(queued)]["waiting_ms"]) == (None, 0)
+    # A waiting run's wait counts up to now; its active time stopped at the gate.
+    assert by_id[str(waiting)]["waiting_ms"] >= 0
+    assert by_id[str(waiting)]["active_ms"] is not None
     # The list does not carry the input or the failure reason; the detail does.
     assert "input" not in done and "failure_reason" not in done
 
@@ -233,3 +239,32 @@ async def test_an_unknown_run_is_404(client: AsyncClient) -> None:
     response = await client.get(f"/runs/{uuid4()}")
 
     assert response.status_code == 404
+
+
+async def test_a_runs_active_and_waiting_time_are_apart(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    """Done when (11.2): a run that waited 1 h at a gate and worked 2 min reports both."""
+    run_id = await create_run(sessions, two_step_spec(), "go", None, workspace)
+    sink = PostgresEventSink(sessions)
+    t0 = datetime(2026, 10, 27, 9, 0, tzinfo=UTC)
+    for seq, (type, seconds) in enumerate(
+        (("run_started", 0), ("gate_waiting", 60), ("run_resumed", 3660), ("run_completed", 3720)),
+        1,
+    ):
+        await sink.emit(
+            RunEvent(
+                run_id=run_id,
+                seq=seq,
+                type=type,
+                node_id="gate" if type == "gate_waiting" else None,
+                created_at=t0 + timedelta(seconds=seconds),
+            )
+        )
+
+    detail = (await client.get(f"/runs/{run_id}")).json()
+    item = (await list_runs(client, workspace))["items"][0]
+
+    for run in (detail, item):
+        assert (run["active_ms"], run["waiting_ms"]) == (120_000, 3_600_000)
+        assert run["duration_ms"] == 3_720_000  # wall clock, deprecated

@@ -3,7 +3,14 @@
 import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { Duration, IdChip, Money, RelativeTime, TokenCount } from "@/components/display";
+import {
+  Duration,
+  IdChip,
+  Money,
+  RelativeTime,
+  TokenCount,
+  WaitingTime,
+} from "@/components/display";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge, type RunStatus } from "@/components/status-badge";
 
@@ -16,7 +23,13 @@ export interface HeaderFacts {
   status: { status: RunStatus; label: string };
   workflowName: string | null;
   startedAt: string | null;
-  durationMs: number | null;
+  /** The run's duration: the time it worked. */
+  activeMs: number | null;
+  /** The time it was paused at gates, growing while `waitingLive`. */
+  waitingMs: number;
+  waitingLive: boolean;
+  /** Start to end, for the start time's tooltip only. */
+  wallClock: string | undefined;
   prUrl: string | null;
   usage: TokenUsage | null;
 }
@@ -68,12 +81,25 @@ export function RunHeader({
           ) : null}
           {facts.startedAt ? (
             <Meta>
-              <RelativeTime iso={facts.startedAt} now={now} prefix="Started " />
+              <RelativeTime
+                iso={facts.startedAt}
+                now={now}
+                prefix="Started "
+                detail={facts.wallClock}
+              />
             </Meta>
           ) : null}
-          {facts.durationMs !== null ? (
+          {facts.activeMs !== null ? (
             <Meta>
-              <Duration data-testid="run-duration" ms={facts.durationMs} />
+              <span data-testid="run-time" className="tabular-nums">
+                <Duration data-testid="run-duration" ms={facts.activeMs} />
+                {facts.waitingMs > 0 || facts.waitingLive ? (
+                  <span className="text-muted-foreground">
+                    {" · "}
+                    <WaitingTime ms={facts.waitingMs} live={facts.waitingLive} />
+                  </span>
+                ) : null}
+              </span>
             </Meta>
           ) : null}
           {facts.usage ? (

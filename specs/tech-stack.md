@@ -98,11 +98,16 @@ Each kind of value has one component (`@/components/display`), used everywhere a
 |---|---|---|
 | A moment | `RelativeTime` | Relative ("5 min ago") in a `<time dateTime>`, the exact date and time in a tooltip; `clock` shows the time of day for a log line |
 | A duration | `Duration` | "2m 05s", "—" before it started |
+| Time waited at gates | `WaitingTime` | "waiting 12m 04s" while the run waits, "waited 1h 00m" after; nothing if it never waited |
 | Money | `Money` | A cost from usage ("$0.042", "≥ $x" or "—" when unpriced, every count and the reason in a tooltip, "of $x" with a budget), or a plain amount as a cost or a `price` ("$3.00") |
 | Tokens | `TokenCount` | "12.3K in", the exact counts in a tooltip |
 | An id | `IdChip` | The short id (8 characters, mono), the full id in a tooltip; copies on click, or links with `href` |
 | A figure | `StatTile` | Label, value in `text-stat`, one secondary line |
 
+- **Time:** a run has three durations and the UI never mixes them:
+  - *Active time*: steps executing. This is the "Duration" everywhere: `Duration` with the run's `active_ms`.
+  - *Waiting time*: paused at gates, shown apart from it with `WaitingTime` ("2m 00s · waited 1h 00m"). A gate step's own time is waiting time.
+  - *Wall clock*: start to end. Only in the tooltip of the start time (`RelativeTime` `detail`: "1h 02m start to end").
 - **Locale and time zone:** dates and numbers use the display locale (`@/lib/locale`), today the browser's own locale and time zone (24-hour where the locale is). A workspace setting for them will pin it in that one module. Amounts are always USD, shown with "$". No component calls `toLocaleString()` or builds an `Intl` format itself. Unit tests and Playwright pin `en-US` and UTC.
 - **Tooltips and focus:** a value with a tooltip takes keyboard focus to show it, except inside a list where every row has such values (`focusable={false}`): there the row's link and actions are its tab stops.
 
@@ -166,12 +171,8 @@ Each kind of value has one component (`@/components/display`), used everywhere a
 
 ### UI v2 (Milestone 11)
 
-Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here. Foundations (11.1) shipped: brand accent, type scale, density, width and display values are in Look, Layout and Display values above.
+Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here. Foundations (11.1) shipped: brand accent, type scale, density, width and display values are in Look, Layout and Display values above. Time (11.2) shipped: it is in Display values above and in the run history contract below.
 
-- **Time (11.2):** a run has three durations and the UI never mixes them:
-  - *Active time*: steps executing. This is the "Duration" everywhere.
-  - *Waiting time*: paused at gates. Shown as its own chip ("waiting 12 h" while waiting, "waited 1m 52s" after).
-  - *Wall clock*: start to end. Only in the tooltip of the start time.
 - **Approval expiry (11.3):** a waiting gate expires after its time to live (workspace default 72 h; a gate may set its own). Expiry cancels the run with the reason "Approval expired"; it is not a new status. The badge shows Cancelled's grey with the label "Expired", and expired runs never count as waiting.
 - **Runs list (11.4)**, replacing "Needs approval first" from 2.4:
   - Saved views as tabs, each with a count: All, Running, Needs approval, Failed. The view and filters live in the URL. Nothing is pinned above the list.
@@ -221,6 +222,7 @@ A rule an agent can break without noticing will be broken. So each one is either
 
 - `GET /runs`: run summaries, newest first, with cursor pagination and filters `status`, `template`, `repo`. Status, timings, PR URL and the waiting gate come from the run's events. They are kept in the `runs` row when events are written, so listing does not scan the log.
 - `GET /runs/{id}`: one summary (the same shape as the list items, plus `input` and `failure_reason`).
+- **Run time (11.2):** each summary has `active_ms` (time executing; `null` until the run started, and for runs that ended before 11.2) and `waiting_ms` (time paused at gates), each counting its open stretch up to `measured_at`, from which a client keeps a running run's active time or a waiting run's waiting time growing. Active runs from `run_started` or `run_resumed` to `gate_waiting` or the end; waiting from `gate_waiting` to `run_resumed` or the end (a cancel while waiting). An attempt that was cut off counts until its last event, and the gap before the next attempt is neither. The sink keeps both in the `runs` row (`active_ms`, `waiting_ms` and the open stretch's `active_since` or `waiting_since`) as it writes the boundary events. `duration_ms` (wall clock) is deprecated.
 - `POST /runs/{id}/rerun`: creates a **new** run with the same workflow spec, input, repo and workspace. It sets `rerun_of` and returns `CreateRunResponse`. The original run is never changed (the log is append-only). Resuming a failed run from its last completed node, which the checkpointer would allow, is a later option and not part of rerun.
 - `POST /runs/{id}/cancel`: sets `runs.cancel_requested_at` and returns `202`. Only workers write events, so the worker running the run ends it (it checks every second); a queued run, or one waiting at a gate (queued again), is ended by the worker that claims it. The run ends `cancelled` with reason `cancelled by user`. An ended run answers `409`.
 - **Delta volume:** the Claude adapter keeps streaming `text_delta`. The engine buffers deltas per node and writes at most one merged `text_delta` event every 250 ms. This keeps the log small and the stream live, while the client still merges what it receives.
@@ -297,7 +299,7 @@ A rule an agent can break without noticing will be broken. So each one is either
   - Agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h, gates before push/PR/repo creation/Jira status change.
   - These defaults (`agentic_engine.policy.PLATFORM_POLICY`) are also the ceilings. A workspace may lower each one (`GET`/`PUT /workspaces/{id}/policy`, the "Run limits" card in Settings), never raise it.
   - A run gets the workspace's effective limits when it is created (`runs.policy`) and keeps them, resumes included. A rerun gets the limits as they are then.
-  - Checked before the run (`POST /runs` and rerun answer `422`): loop `max_iterations`, map `max_concurrency` and a parallel's branches against agents alive, and nesting depth (loops, maps and parallels). Checked while it runs: agents spawned (every agent start, a map's items all at once when it starts) and agents alive (extra agents wait for a slot). The worker checks wall time, which counts only time spent executing, not time waiting at a gate.
+  - Checked before the run (`POST /runs` and rerun answer `422`): loop `max_iterations`, map `max_concurrency` and a parallel's branches against agents alive, and nesting depth (loops, maps and parallels). Checked while it runs: agents spawned (every agent start, a map's items all at once when it starts) and agents alive (extra agents wait for a slot). The worker checks wall time, which counts only time spent executing, not time waiting at a gate: the run's active time (above), read from its `runs` row.
   - A run over a limit ends `failed`: a `policy_limit_exceeded` event (`limit`, `value`, `observed`), then the failure with a readable reason.
 
 ## Observability
@@ -345,6 +347,7 @@ A rule an agent can break without noticing will be broken. So each one is either
 | Parallel | One `Send` per branch and a join node; the join is decided as soon as its outcome is known and the branches still running are cancelled | It reuses the map's fan-out and per-task checkpoints. Deciding early spends no tokens on branches that cannot change the outcome. Cancelling is only an optimisation inside one attempt: the join decides from the checkpointed outcomes, so a resumed run joins correctly. Branches hold no gates or writers until several gates can wait at once and parallel writers have an integration branch (6.3). |
 | Audit log | An append-only `audit_events` table written in each change's transaction | It records settings changes no other table keeps, and its rows never change, unlike `runs`. Writing it with the change means no row is missing or invented. Who acted is a nullable `actor_id` until users exist. |
 | Run durations (11.2) | Active time, waiting time and wall clock kept apart; "Duration" means active time | A run that waited a weekend for approval is not a 60-hour run. Mixing the two makes every duration in the product untrustworthy. |
+| Run time projection (11.2) | Active and waiting time kept on the `runs` row by the event sink, with the open stretch's start; not durations in event payloads, not computed from the log on read | The same pattern as the other summary columns: listing never scans the log and no event changes shape. The wall-time limit reads the same columns, so the limit and the UI share one definition of active time. Only runs live at the migration are backfilled. |
 | Approval expiry (11.3) | A gate's time to live cancels the run with a reason; no new run status | Stale gates stop shouting in every waiting count, and the six statuses (and every filter and badge built on them) stay as they are. The reason keeps the history truthful. |
 | Where approvals happen (11.5) | An Inbox beside the console's dock, both on the same review components | An approver works through what waits on them in one place; the dock still serves someone already watching the run. One set of review components means the two never disagree. |
 | UI rules for agents (11.1) | Rules in `CLAUDE.md`, backed by ESLint and the e2e layout and axe checks | Coding agents follow what they read at the start of every task and what CI rejects. A prompt pasted once drifts by the next session. |

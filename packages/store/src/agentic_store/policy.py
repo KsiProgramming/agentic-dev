@@ -9,7 +9,6 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_engine.events import GATE_WAITING, RUN_RESUMED, RUN_STARTED
 from agentic_engine.policy import Policy, PolicyOverrides, effective_policy, with_budget
 from agentic_engine.spec import (
     ValidationIssue,
@@ -22,7 +21,7 @@ from agentic_engine.spec import (
 from agentic_runtime.claude import DEFAULT_MODEL
 from agentic_store.audit import audit
 from agentic_store.connections import WorkspaceNotFoundError
-from agentic_store.models import RunEventRow, Workspace, WorkspacePolicy
+from agentic_store.models import Run, RunEventRow, Workspace, WorkspacePolicy
 from agentic_store.pricing import price_table
 
 
@@ -118,43 +117,26 @@ async def check_workflow(
 
 
 async def active_seconds(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> float:
-    """How long the run has spent executing so far, for its `wall_time_s` limit, from its event
-    log: each stretch from `run_started` or `run_resumed` to `gate_waiting` or the attempt's last
-    event. Time paused at a gate, and the gap between a crashed attempt's last event and the next
-    attempt, do not count."""
-    events = (
-        select(
-            RunEventRow.type,
-            RunEventRow.created_at,
-            func.lag(RunEventRow.created_at).over(order_by=RunEventRow.seq).label("before"),
-        )
+    """How long the run has spent executing so far, for its `wall_time_s` limit: its `active_ms`
+    (see `sink.time_values`), plus a stretch still open up to the run's last event. Time paused
+    at a gate, and the gap between a cut-off attempt's last event and the next attempt, do not
+    count."""
+    last = (
+        select(func.max(RunEventRow.created_at))
         .where(RunEventRow.run_id == run_id)
-        .subquery()
+        .scalar_subquery()
     )
     async with sessions() as session:
-        boundaries = (
+        row = (
             await session.execute(
-                select(events.c.type, events.c.created_at, events.c.before).where(
-                    events.c.type.in_((RUN_STARTED, RUN_RESUMED, GATE_WAITING))
-                )
+                select(Run.active_ms, Run.active_since, last.label("last")).where(Run.id == run_id)
             )
-        ).all()
-        last = await session.scalar(
-            select(func.max(RunEventRow.created_at)).where(RunEventRow.run_id == run_id)
-        )
-    total, start = 0.0, None
-    for type, at, before in boundaries:
-        if type == GATE_WAITING:
-            if start is not None:
-                total += (at - start).total_seconds()
-            start = None
-        else:
-            if start is not None and before is not None:
-                # The earlier attempt was cut off: it ran until its last event.
-                total += (before - start).total_seconds()
-            start = at
-    if start is not None and last is not None:
-        total += (last - start).total_seconds()
+        ).one_or_none()
+    if row is None:
+        return 0.0
+    total = (row.active_ms or 0) / 1000
+    if row.active_since is not None and row.last is not None:
+        total += (row.last - row.active_since).total_seconds()
     return total
 
 
