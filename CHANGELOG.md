@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 11.1 UI v2 foundations:
+- Phase 11.1 UI v2 foundations ([#129](https://github.com/KsiProgramming/agentic-dev/pull/129)):
   - **Display components.** `RelativeTime`, `Duration`, `Money`, `TokenCount`, `IdChip` and `StatTile` (`@/components/display`) show every time, duration, cost, token count and id in the app; ids copy on click or link to their run.
   - **Locale.** Dates and numbers follow the browser's locale and time zone (24-hour where the locale is) through one module, `@/lib/locale`, instead of hard-coded `en-US` or the default `toLocaleString()`; unit tests and Playwright pin `en-US` and UTC.
   - **Tokens.** A type scale (`text-caption` … `text-stat`), a row-height token with a compact mode (32 px rows) toggled from the top bar and kept per browser, and `--shadow-dock`.
@@ -192,7 +192,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
-- Pages use the full content width up to 1600 px instead of centred columns, and agent output is capped at 72 characters a line. The brand accent stays indigo. The dialog overlay uses the `--overlay` token. `CLAUDE.md` and `specs/tech-stack.md` (Look, Layout, a new Display values section, decisions log) carry the new rules, and the UI v2 Foundations section moved into them (phase 11.1).
+- Pages use the full content width up to 1600 px instead of centred columns, and agent output is capped at 72 characters a line. The brand accent stays indigo. The dialog overlay uses the `--overlay` token. `CLAUDE.md` and `specs/tech-stack.md` (Look, Layout, a new Display values section, decisions log) carry the new rules, and the UI v2 Foundations section moved into them (phase 11.1, [#129](https://github.com/KsiProgramming/agentic-dev/pull/129)).
 - The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)).
 - Phase 2.5 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
   - The engine writes at most one `text_delta` per node (and map item) every 250 ms (`agentic_engine.graph.deltas.DeltaBuffer`). The first chunk of a burst is written at once and the rest are joined. Any other event of the node, its end and cancellation write the pending text first, so order and the joined text are unchanged.
