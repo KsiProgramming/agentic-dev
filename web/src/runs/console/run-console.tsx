@@ -8,6 +8,7 @@ import {
   NetworkIcon,
   RadioIcon,
   TableIcon,
+  TimerOffIcon,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -68,10 +69,15 @@ export function headerFacts(
   prUrl: string | null,
   now: number,
 ): HeaderFacts {
-  const status =
+  const shown =
     run && events.length === 0 && (stream === "connecting" || stream === "live")
       ? { status: badgeStatus(run.status), label: statusLabel(run.status) }
       : displayStatus(stream, gate !== null);
+  // A run whose gate expired is cancelled, worded "Expired" (in Cancelled's grey).
+  const status =
+    shown.status === "cancelled" && (timeline.expired || run?.expired)
+      ? { ...shown, label: "Expired" }
+      : shown;
   const startedAt = timeline.startedAt ?? run?.started_at ?? null;
   const endedAt = timeline.endedAt ?? run?.finished_at ?? null;
   // Active and waiting time from the events once the run's start is among them, the summary's
@@ -206,6 +212,11 @@ function Console({
   const facts = headerFacts(status, events, gate, run, timeline, prUrl, now);
   const activity = status === "live" && !gate ? currentActivity(timeline) : null;
   const failure = run?.status === "failed" ? run.failure_reason : null;
+  // Why an expired run ended; a user's cancel needs no explanation.
+  const expired =
+    facts.status.label === "Expired"
+      ? (timeline.cancelReason ?? run?.cancel_reason ?? "Approval expired")
+      : null;
 
   return (
     <section className="flex flex-col gap-6">
@@ -247,6 +258,14 @@ function Console({
           {failure ? (
             <Alert variant="destructive">
               <AlertDescription className="break-words">{failure}</AlertDescription>
+            </Alert>
+          ) : null}
+          {expired ? (
+            <Alert>
+              <TimerOffIcon aria-hidden="true" />
+              <AlertDescription className="break-words">
+                {expired}: nobody approved or rejected the gate before its time to live ran out.
+              </AlertDescription>
             </Alert>
           ) : null}
           {timeline.steps.length === 0 ? (

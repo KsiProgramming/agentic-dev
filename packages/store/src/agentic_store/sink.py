@@ -26,6 +26,7 @@ from agentic_engine.events import (
     NODE_FAILED,
     PR_OPENED,
     REPO_CREATED,
+    RUN_CANCELLED,
     RUN_END_STATUS,
     RUN_FAILED,
     RUN_RESUMED,
@@ -56,12 +57,14 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     | Event | Sets |
     |---|---|
     | `run_started` | `status=running`, `started_at` (the first start only) |
-    | `run_resumed` | `status=running`, `waiting_gate=null` |
-    | `gate_waiting` | `status=waiting`, `waiting_gate={node_id, title}` |
-    | `gate_decided` | `waiting_gate=null` |
+    | `run_resumed` | `status=running`, `waiting_gate=null`, `gate_expires_at=null` |
+    | `gate_waiting` | `status=waiting`, `waiting_gate={node_id, title, expires_at}`, |
+    |   | `gate_expires_at` (from `expires_at`) |
+    | `gate_decided` | `waiting_gate=null`, `gate_expires_at=null` |
     | `pr_opened` | `pr_url` (the last one wins) |
     | `node_failed` with an `error` | `failure_reason="node <id>: <error>"` |
     | `run_completed`, `run_cancelled` | end status, `finished_at`; clears the gate and reason |
+    | `run_cancelled` with a `reason` | `cancel_reason` |
     | `run_failed` | `failed`, `finished_at`, clears `waiting_gate`; `failure_reason` = `error` |
     | `usage` | adds its tokens and `estimated_usd`; `cost_complete=false` if it has no price |
 
@@ -78,12 +81,16 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
         values["started_at"] = func.coalesce(Run.started_at, event.created_at)
     elif event.type in (RUN_RESUMED, GATE_DECIDED):
         values["waiting_gate"] = null()  # SQL NULL, not JSON null
+        values["gate_expires_at"] = None
     elif event.type == GATE_WAITING:
         title = payload.get("title")
+        expires_at = _datetime(payload.get("expires_at"))
         values["waiting_gate"] = {
             "node_id": event.node_id,
             "title": title if isinstance(title, str) else None,
+            "expires_at": None if expires_at is None else expires_at.isoformat(),
         }
+        values["gate_expires_at"] = expires_at
     elif event.type == PR_OPENED and isinstance(url := payload.get("url"), str):
         values["pr_url"] = url
     elif (
@@ -95,12 +102,25 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     if event.type in RUN_END_STATUS:
         values["finished_at"] = event.created_at
         values["waiting_gate"] = null()  # SQL NULL, not JSON null
+        values["gate_expires_at"] = None
         if event.type == RUN_FAILED:
             if isinstance(error := payload.get("error"), str):
                 values["failure_reason"] = error
         else:
             values["failure_reason"] = None
+        if event.type == RUN_CANCELLED and isinstance(reason := payload.get("reason"), str):
+            values["cancel_reason"] = reason
     return values
+
+
+def _datetime(value: object) -> datetime | None:
+    """An ISO timestamp from an event payload; `None` if it is missing or not one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def time_values(event: RunEvent) -> dict[str, Any]:
@@ -225,6 +245,7 @@ async def _audit_end(session: AsyncSession, event: RunEvent) -> None:
         details={
             "status": run.status,
             "failure_reason": run.failure_reason,
+            "cancel_reason": run.cancel_reason,
             "pr_url": run.pr_url,
             "estimated_usd": usd(run.estimated_usd),
             "cost_complete": run.cost_complete,

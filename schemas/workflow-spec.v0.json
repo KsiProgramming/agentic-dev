@@ -96,6 +96,20 @@
           "title": "Title",
           "type": "string"
         },
+        "ttl_s": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset.",
+          "title": "Ttl S"
+        },
         "type": {
           "const": "gate",
           "title": "Type",

@@ -134,6 +134,25 @@ async def test_the_workspace_limits_apply(
     )
 
 
+async def test_a_gate_waiting_longer_than_the_workspace_allows_is_an_issue(
+    client: AsyncClient, workspace: UUID, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    await replace_policy_overrides(sessions, workspace, PolicyOverrides(approval_ttl_s=3600))
+    spec = spec_json("valid/gate-approval.json")
+    spec["root"]["steps"][1]["ttl_s"] = 7200
+
+    body = await validate(client, spec, workspace)
+
+    assert (body["valid"], body["policy"]["approval_ttl_s"]) == (False, 3600)
+    [issue] = body["issues"]
+    assert (issue["code"], issue["node_id"], issue["limit"], issue["observed"]) == (
+        "policy_limit",
+        "gate",
+        "approval_ttl_s",
+        7200,
+    )
+
+
 async def test_a_budget_needs_every_model_priced(client: AsyncClient, workspace: UUID) -> None:
     workflow = spec_json("valid/single-agent.json")
     workflow["root"]["model"] = "no-such-model"

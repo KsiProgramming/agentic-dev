@@ -1,5 +1,6 @@
 // One component per kind of value (tech-stack.md → UI design system → Display values).
 export { Duration } from "./duration";
+export { ExpiresIn } from "./expires-in";
 export { IdChip } from "./id-chip";
 export { Money } from "./money";
 export { RelativeTime } from "./relative-time";

@@ -165,7 +165,7 @@ export interface paths {
          * @description Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
          *     `cancelled`. An approval may edit the files the gate showed as editable; the gate commits
          *     the edits on the writers' branches before the run goes on. The run is queued again; its
-         *     stream carries on with `gate_decided`.
+         *     stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision.
          */
         post: operations["approveRun"];
         delete?: never;
@@ -609,7 +609,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -797,6 +797,11 @@ export interface components {
              * @description More guidance for the approver, shown with the input.
              */
             prompt?: string | null;
+            /**
+             * Ttl S
+             * @description Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset.
+             */
+            ttl_s?: number | null;
         };
         /**
          * GithubErrorDetail
@@ -1005,7 +1010,7 @@ export interface components {
             quorum?: number | null;
         };
         /** @enum {string} */
-        PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "budget_usd";
+        PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "approval_ttl_s" | "budget_usd";
         /**
          * Price
          * @description USD per million tokens.
@@ -1200,6 +1205,16 @@ export interface components {
             /** @description Set while the run waits at a gate. */
             waiting_gate: components["schemas"]["WaitingGate"] | null;
             /**
+             * Cancel Reason
+             * @description Why a cancelled run was cancelled: `cancelled by user`, or `Approval expired` when its gate waited past its time to live.
+             */
+            cancel_reason: string | null;
+            /**
+             * Expired
+             * @description True for a run cancelled because its gate expired: shown as "Expired".
+             */
+            expired: boolean;
+            /**
              * Rerun Of
              * @description The run this one repeats.
              */
@@ -1269,6 +1284,11 @@ export interface components {
              */
             wall_time_s?: number | null;
             /**
+             * Approval Ttl S
+             * @description Seconds a gate waits for a decision before it expires. At most 259200, the platform's limit; unset keeps it.
+             */
+            approval_ttl_s?: number | null;
+            /**
              * Budget Usd
              * @description The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget.
              */
@@ -1304,6 +1324,11 @@ export interface components {
              * @description Seconds a run may spend executing; time waiting at a gate does not count.
              */
             wall_time_s: number;
+            /**
+             * Approval Ttl S
+             * @description Seconds a gate waits for a decision before its run is cancelled ("Approval expired"); a gate may set a shorter time of its own.
+             */
+            approval_ttl_s: number;
             /**
              * Budget Usd
              * @description USD a run may spend, a hard stop once reached; unset is no cost cap.
@@ -1352,6 +1377,16 @@ export interface components {
             pr_url: string | null;
             /** @description Set while the run waits at a gate. */
             waiting_gate: components["schemas"]["WaitingGate"] | null;
+            /**
+             * Cancel Reason
+             * @description Why a cancelled run was cancelled: `cancelled by user`, or `Approval expired` when its gate waited past its time to live.
+             */
+            cancel_reason: string | null;
+            /**
+             * Expired
+             * @description True for a run cancelled because its gate expired: shown as "Expired".
+             */
+            expired: boolean;
             /**
              * Rerun Of
              * @description The run this one repeats.
@@ -1606,6 +1641,11 @@ export interface components {
             node_id: string;
             /** Title */
             title?: string | null;
+            /**
+             * Expires At
+             * @description When the gate expires: the run is then cancelled ("Approval expired").
+             */
+            expires_at?: string | null;
         };
         /** WorkflowRef */
         WorkflowRef: {
@@ -2024,7 +2064,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The run is not waiting at this gate, or it was already decided */
+            /** @description The run is not waiting at this gate, the gate was already decided, or its approval expired */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2442,7 +2482,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

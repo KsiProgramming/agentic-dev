@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 import { apiBaseUrl } from "@/api/client";
 import { NO_FILTERS } from "@/runs/filters";
+import { gateExpired } from "@/runs/summaries";
 import { useRunList } from "@/runs/use-run-summaries";
 import { useRunsStream } from "@/runs/use-runs-stream";
 import { DEFAULT_WORKSPACE_ID } from "@/workspace";
@@ -71,11 +72,31 @@ export function AttentionProvider({
     { workspaceId, baseUrl, limit: WAITING_LIMIT },
   );
   useRunsStream({ workspaceId, baseUrl });
-  const waiting = waitingRuns.data?.pages[0]?.items.length ?? 0;
+  // A gate past its time to live no longer waits, even before the worker has cancelled its run.
+  const now = useClientNow(30_000);
+  const waiting = (waitingRuns.data?.pages[0]?.items ?? []).filter(
+    (run) => now === null || !gateExpired(run, now),
+  ).length;
   const [consoleWaiting, setConsoleWaiting] = useState(false);
   useAttentionTitle(waiting, consoleWaiting);
   const value = useMemo(() => ({ waiting, setConsoleWaiting }), [waiting]);
   return <AttentionContext.Provider value={value}>{children}</AttentionContext.Provider>;
+}
+
+/** The time every `intervalMs`, read only in the browser: `null` while the shell prerenders,
+ * which may not read the clock. */
+function useClientNow(intervalMs: number): number | null {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const id = setInterval(tick, intervalMs);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, [intervalMs]);
+  return now;
 }
 
 /** How many runs of the workspace wait at a gate. */

@@ -4,13 +4,15 @@ A run paused at a gate is `waiting` and no worker holds it. Recording the decisi
 to `queued` with no lease, so `claim_run` takes it like a new run once it is enqueued again; the
 worker then continues it with `pending_decision`. Its `attempt` count starts again, so the time
 a run spends at gates never uses up its retries. The gate a run waits at is the node of its last
-`gate_waiting` event, whose `changes` are the files an approval may edit.
+`gate_waiting` event, whose `changes` are the files an approval may edit. A gate past its
+`gate_expires_at` takes no decision: the run is being cancelled (`agentic_store.expiry`).
 """
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -30,6 +32,10 @@ class RunNotFoundError(ApprovalError):
 
 class RunNotWaitingError(ApprovalError):
     pass
+
+
+class GateExpiredError(RunNotWaitingError):
+    """The gate's time to live has passed: the run is being cancelled (`agentic_store.expiry`)."""
 
 
 class WrongGateError(ApprovalError):
@@ -71,6 +77,8 @@ async def record_approval(
                 raise RunNotFoundError(f"run {run_id} not found")
             if run.status != "waiting":
                 raise RunNotWaitingError(f"run {run_id} is {run.status}, not waiting at a gate")
+            if run.gate_expires_at is not None and run.gate_expires_at <= await _now(session):
+                raise GateExpiredError(f"the approval of run {run_id} expired")
             gate, changes = await _waiting_gate_changes(session, run_id)
             if gate != node_id:
                 raise WrongGateError(f"run {run_id} is waiting at gate {gate!r}, not {node_id!r}")
@@ -155,6 +163,13 @@ async def _waiting_gate_changes(
         return row.node_id, _CHANGES.validate_python(shown)
     except ValidationError:
         return row.node_id, []
+
+
+async def _now(session: AsyncSession) -> datetime:
+    """The database's time, the clock `expire_gates` compares against."""
+    now = await session.scalar(select(func.now()))
+    assert now is not None
+    return now
 
 
 async def _waiting_gate(session: AsyncSession, run_id: UUID) -> str | None:

@@ -90,6 +90,8 @@ export function runSummary(overrides: Partial<RunSummary> = {}): RunSummary {
     measured_at: "2026-10-22T10:02:05Z",
     pr_url: null,
     waiting_gate: null,
+    cancel_reason: null,
+    expired: false,
     rerun_of: null,
     usage: {
       input_tokens: 12_000,

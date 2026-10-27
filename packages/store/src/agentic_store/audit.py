@@ -23,6 +23,7 @@ AuditAction = Literal[
     "repo.created",
     "gate.approved",
     "gate.rejected",
+    "gate.expired",
     "connection.added",
     "connection.removed",
     "policy.updated",

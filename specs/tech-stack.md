@@ -99,6 +99,7 @@ Each kind of value has one component (`@/components/display`), used everywhere a
 | A moment | `RelativeTime` | Relative ("5 min ago") in a `<time dateTime>`, the exact date and time in a tooltip; `clock` shows the time of day for a log line |
 | A duration | `Duration` | "2m 05s", "—" before it started |
 | Time waited at gates | `WaitingTime` | "waiting 12m 04s" while the run waits, "waited 1h 00m" after; nothing if it never waited |
+| When something runs out | `ExpiresIn` | "Expires in 2 d", "Expires in 3 h", "Expires in 12 min", then "Expired" (rounded down, ticking), the exact time in a tooltip |
 | Money | `Money` | A cost from usage ("$0.042", "≥ $x" or "—" when unpriced, every count and the reason in a tooltip, "of $x" with a budget), or a plain amount as a cost or a `price` ("$3.00") |
 | Tokens | `TokenCount` | "12.3K in", the exact counts in a tooltip |
 | An id | `IdChip` | The short id (8 characters, mono), the full id in a tooltip; copies on click, or links with `href` |
@@ -141,7 +142,7 @@ Each kind of value has one component (`@/components/display`), used everywhere a
   - Nothing moves, connects or is deleted; the graph pans and zooms inside its own box (`min(70svh, 720px)`), so the page never scrolls sideways.
   - Each node is a button (one tab stop, Enter or Space opens it) with an accessible name ("worker, agent, Done"). It opens a sheet (side sheet 480 px from 768 px, bottom sheet below) with the timeline's step view; a node inside a map or a loop shows one entry per item or iteration. The dock's `A` / `R` shortcuts work while a node has focus, not while the sheet is open.
 - **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport with:
-  - the gate title;
+  - the gate title, and when it expires (`ExpiresIn`, when the gate has an expiry);
   - a one-line summary: the gate's prompt, else the first line of its artifact;
   - "Review details", which opens a sheet with the full summary or diff (side sheet from 768 px, bottom sheet below);
   - Approve and Reject buttons.
@@ -153,7 +154,8 @@ Each kind of value has one component (`@/components/display`), used everywhere a
   - The diff is a Monaco `DiffEditor`, bundled and loaded only when the sheet opens: side by side from 1024 px, inline below. The original side is read-only; the changed side is editable for editable files. Its theme follows the app's.
   - Each edited file has "Discard edits". With edits, Approve reads "Approve with N edits" (dock and sheet footer), and Reject says the edits will be dropped. `Esc` closes the sheet and keeps the edits; leaving the page with edits asks first.
   - The decided step reads "Approved with edits to N files", and each edited file opens as a read-only diff.
-- **Waiting signals:** while a gate is waiting, the run's tab title is "● Needs approval · Run <id8>". While any run in the workspace waits, every other page's title gets an "(N) ● Needs approval · " prefix, and "Runs" in the sidebar (and the mobile menu button) shows a count badge. Approvals are made on the console only: the runs list links waiting runs to it with "Review".
+- **Waiting signals:** while a gate is waiting, the run's tab title is "● Needs approval · Run <id8>". While any run in the workspace waits, every other page's title gets an "(N) ● Needs approval · " prefix, and "Runs" in the sidebar (and the mobile menu button) shows a count badge. Approvals are made on the console only: the runs list links waiting runs to it with "Review". A gate past its `expires_at` is not counted anywhere, even in the seconds before the worker cancels its run.
+- **Expired runs:** a run whose gate expired is `cancelled`, not a status of its own. Its badge has Cancelled's grey and icon with the label "Expired" (runs list, console header), and the console shows the reason above the timeline in a neutral alert ("Approval expired: nobody approved or rejected the gate before its time to live ran out"). A run its user cancelled stays "Cancelled".
 - **Live updates:** while a run executes, a live line at the end of the timeline says where it is and what it is doing ("writer · Reading `src/app.ts`…"). The page opens at the top; auto-scroll follows new content only once the user is at the bottom. Otherwise a "Jump to latest" pill appears.
 
 ### Audit log
@@ -171,9 +173,8 @@ Each kind of value has one component (`@/components/display`), used everywhere a
 
 ### UI v2 (Milestone 11)
 
-Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here. Foundations (11.1) shipped: brand accent, type scale, density, width and display values are in Look, Layout and Display values above. Time (11.2) shipped: it is in Display values above and in the run history contract below.
+Planned changes to the rules above, from a review of the shipped screens. Until a phase ships, the rules above stay in force; the phase's PR moves its part into them and removes it from here. Foundations (11.1) shipped: brand accent, type scale, density, width and display values are in Look, Layout and Display values above. Time (11.2) shipped: it is in Display values above and in the run history contract below. Approval expiry (11.3) shipped: it is in Display values and Run console above, and in the run history, gate review, audit log and security sections below.
 
-- **Approval expiry (11.3):** a waiting gate expires after its time to live (workspace default 72 h; a gate may set its own). Expiry cancels the run with the reason "Approval expired"; it is not a new status. The badge shows Cancelled's grey with the label "Expired", and expired runs never count as waiting.
 - **Runs list (11.4)**, replacing "Needs approval first" from 2.4:
   - Saved views as tabs, each with a count: All, Running, Needs approval, Failed. The view and filters live in the URL. Nothing is pinned above the list.
   - Columns: Status, Run (workflow name; under it the short id and the trigger), Repository (with the branch under it), Started, Duration (active, plus the waiting chip), Cost, Pull request, actions. A waiting row's status badge links to its review, replacing the separate "Review" button.
@@ -225,6 +226,12 @@ A rule an agent can break without noticing will be broken. So each one is either
 - **Run time (11.2):** each summary has `active_ms` (time executing; `null` until the run started, and for runs that ended before 11.2) and `waiting_ms` (time paused at gates), each counting its open stretch up to `measured_at`, from which a client keeps a running run's active time or a waiting run's waiting time growing. Active runs from `run_started` or `run_resumed` to `gate_waiting` or the end; waiting from `gate_waiting` to `run_resumed` or the end (a cancel while waiting). An attempt that was cut off counts until its last event, and the gap before the next attempt is neither. The sink keeps both in the `runs` row (`active_ms`, `waiting_ms` and the open stretch's `active_since` or `waiting_since`) as it writes the boundary events. `duration_ms` (wall clock) is deprecated.
 - `POST /runs/{id}/rerun`: creates a **new** run with the same workflow spec, input, repo and workspace. It sets `rerun_of` and returns `CreateRunResponse`. The original run is never changed (the log is append-only). Resuming a failed run from its last completed node, which the checkpointer would allow, is a later option and not part of rerun.
 - `POST /runs/{id}/cancel`: sets `runs.cancel_requested_at` and returns `202`. Only workers write events, so the worker running the run ends it (it checks every second); a queued run, or one waiting at a gate (queued again), is ended by the worker that claims it. The run ends `cancelled` with reason `cancelled by user`. An ended run answers `409`.
+- **Approval expiry (11.3):** a run waiting past its gate's expiry is cancelled the same way, by the workers rather than the API.
+  - The sink keeps the waiting gate's `expires_at` in `runs.gate_expires_at` (and in `waiting_gate`), cleared on resume, decision and end.
+  - Every worker runs `agentic_store.expire_gates` every `GATE_SWEEP_S` (default 30 s): each waiting run past its expiry with no decision recorded is locked (`SKIP LOCKED`), set `queued` with `cancel_requested_at` and `cancel_reason = "Approval expired"`, given a `gate.expired` audit entry, and enqueued. The worker that claims it removes its sandbox and writes `run_cancelled` `{reason: "Approval expired", expired: true}`.
+  - `runs.cancel_reason` keeps the first reason a run was cancelled for (`cancelled by user` from `POST /runs/{id}/cancel`), and the sink sets it from `run_cancelled`'s `reason`.
+  - Each summary has `cancel_reason` (for a cancelled run, else `null`) and `expired` (`true` when that reason is "Approval expired"); `waiting_gate` has `expires_at`.
+  - Gates already waiting when 11.3 shipped were given 72 h from when they paused (Alembic `0021_approval_expiry`), so the first sweep expired the stale ones.
 - **Delta volume:** the Claude adapter keeps streaming `text_delta`. The engine buffers deltas per node and writes at most one merged `text_delta` event every 250 ms. This keeps the log small and the stream live, while the client still merges what it receives.
 
 ## Workflow validation (API contract)
@@ -242,7 +249,7 @@ A rule an agent can break without noticing will be broken. So each one is either
 
 ## Gate review (API contract)
 
-- A gate shows the files changed on the branches of the writer nodes that completed before it, in its `gate_waiting` payload: `changes`, next to `title`, `prompt` and `artifact`.
+- A gate shows the files changed on the branches of the writer nodes that completed before it, in its `gate_waiting` payload: `changes`, next to `title`, `prompt`, `artifact`, `ttl_s` (how long it waits: the gate's own `ttl_s`, else the run's `approval_ttl_s`) and `expires_at` (ISO, the pause plus `ttl_s`).
   - Each entry: `node_id` (the writer), `path`, `old_path` (renames), `status` (`added`, `modified`, `deleted`, `renamed`), `editable`, `reason`, `before` and `after`.
   - Only an editable file has contents: `before` at the branch's base (the clone's `HEAD`; `null` for an added file) and `after` at its tip. A file is editable when it is added or modified, UTF-8 text with no NUL byte, and at most 256 KB on either side.
   - Other files are listed with a `reason`: `binary`, `too_large`, `deleted`, `renamed`, or `over_limit` past the first 50 files or 512 KB of text.
@@ -252,6 +259,7 @@ A rule an agent can break without noticing will be broken. So each one is either
   - Each must name an editable file of the gate's last `gate_waiting`. An edit equal to `after` is dropped.
   - `422` with `detail: {code, message, path}`: `edit_not_allowed`, `edits_with_reject`, `edit_too_large` (a file over 256 KB, or edits over 512 KB in all), `duplicate_edit`.
   - The edits are stored with the approval (`approvals.edits`), and the answer says how many files they change (`edited_files`).
+  - A decision on a gate past its `expires_at` answers `409`, even before the sweep has cancelled the run: what the dock says expired is expired.
 - On approve, the gate commits the edits in each writer's worktree before it completes: one commit per writer, `Edit at gate <id>` with an `Edited-by: reviewer` trailer, by the agent identity, of only the edited files. `gate_decided` adds `edits` and `commits` (each writer's new tip).
   - It is idempotent: a gate that runs again after a crash finds the files already edited and makes no second commit.
   - Edits that cannot be committed fail the gate node, and so the run. A run is never approved without its edits.
@@ -277,9 +285,10 @@ A rule an agent can break without noticing will be broken. So each one is either
   | `run.created` | `create_run` | `template_id`, `repo_url`, `budget_usd` |
   | `run.rerun` | `create_rerun` | `rerun_of`, `budget_usd` |
   | `run.cancel_requested` | `request_cancel`, first request only | `status` (before) |
-  | `run.ended` | the event sink, on the run's end event; actor `system` | `status`, `failure_reason`, `pr_url`, `estimated_usd` |
+  | `run.ended` | the event sink, on the run's end event; actor `system` | `status`, `failure_reason`, `cancel_reason`, `pr_url`, `estimated_usd` |
   | `repo.created` | the event sink, on the run's first `repo_created`; actor `system` | `full_name`, `private` |
   | `gate.approved`, `gate.rejected` | `record_approval` | `comment`, `edited_files`, `edited_paths` |
+  | `gate.expired` | `expire_gates`, in the worker's sweep; actor `system` | `title`, `expires_at` |
   | `connection.added`, `connection.removed` | the connection writers | `provider`, `key_hint` or `account_login` |
   | `policy.updated` | `replace_policy_overrides` | `before`, `after` (the workspace's overrides) |
   | `pricing.updated` | `replace_price_overrides` | `added`, `changed`, `removed` (model names) |
@@ -296,10 +305,10 @@ A rule an agent can break without noticing will be broken. So each one is either
     - A workspace may set a default budget (the "Budget" field of the "Run limits" card), and a run may set its own when it starts (`budget_usd` on `POST /runs` and rerun), which replaces it. It has no platform ceiling. From $0.01 to $1,000,000.
     - The run's budget is frozen in `runs.policy` with its other limits. With a budget, every agent's model must have a price in the workspace, or the run is refused with `422`: a cap that cannot be measured is not a cap.
     - The engine meters it: the worker seeds a meter with the run's spend so far (`runs.estimated_usd`, so earlier attempts and the time before a gate count), and each `usage` event adds its `estimated_usd`. Once the spend reaches the budget, or a usage has no price, the running nodes end `node_cancelled` and the run ends like any other limit (`policy_limit_exceeded` with `limit: "budget_usd"` and USD amounts as decimal strings). The call that crossed the budget is already paid, so it is counted in full.
-  - Agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h, gates before push/PR/repo creation/Jira status change.
+  - Agents alive 8, agents spawned 40, nesting depth 2, loop iterations 5, wall time 2 h, approval time to live 72 h (`approval_ttl_s`), gates before push/PR/repo creation/Jira status change.
   - These defaults (`agentic_engine.policy.PLATFORM_POLICY`) are also the ceilings. A workspace may lower each one (`GET`/`PUT /workspaces/{id}/policy`, the "Run limits" card in Settings), never raise it.
   - A run gets the workspace's effective limits when it is created (`runs.policy`) and keeps them, resumes included. A rerun gets the limits as they are then.
-  - Checked before the run (`POST /runs` and rerun answer `422`): loop `max_iterations`, map `max_concurrency` and a parallel's branches against agents alive, and nesting depth (loops, maps and parallels). Checked while it runs: agents spawned (every agent start, a map's items all at once when it starts) and agents alive (extra agents wait for a slot). The worker checks wall time, which counts only time spent executing, not time waiting at a gate: the run's active time (above), read from its `runs` row.
+  - Checked before the run (`POST /runs` and rerun answer `422`): loop `max_iterations`, map `max_concurrency` and a parallel's branches against agents alive, nesting depth (loops, maps and parallels), and a gate's `ttl_s` against the approval time to live. Checked while it runs: agents spawned (every agent start, a map's items all at once when it starts) and agents alive (extra agents wait for a slot). The worker checks wall time, which counts only time spent executing, not time waiting at a gate: the run's active time (above), read from its `runs` row.
   - A run over a limit ends `failed`: a `policy_limit_exceeded` event (`limit`, `value`, `observed`), then the failure with a readable reason.
 
 ## Observability
@@ -349,6 +358,7 @@ A rule an agent can break without noticing will be broken. So each one is either
 | Run durations (11.2) | Active time, waiting time and wall clock kept apart; "Duration" means active time | A run that waited a weekend for approval is not a 60-hour run. Mixing the two makes every duration in the product untrustworthy. |
 | Run time projection (11.2) | Active and waiting time kept on the `runs` row by the event sink, with the open stretch's start; not durations in event payloads, not computed from the log on read | The same pattern as the other summary columns: listing never scans the log and no event changes shape. The wall-time limit reads the same columns, so the limit and the UI share one definition of active time. Only runs live at the migration are backfilled. |
 | Approval expiry (11.3) | A gate's time to live cancels the run with a reason; no new run status | Stale gates stop shouting in every waiting count, and the six statuses (and every filter and badge built on them) stay as they are. The reason keeps the history truthful. |
+| Expiry mechanics (11.3) | The time to live is a policy limit (72 h ceiling) with an optional shorter `ttl_s` per gate; `expires_at` is fixed in `gate_waiting`; a sweep in every worker turns expiry into a cancel request (not lazy expiry on read) | The same model as the other limits, so a stop is explained by the limits the run was given, and a later policy change never moves a gate already waiting. Only workers write events, and the cancel path already removes the sandbox and writes the end; a run nobody opens still expires. |
 | Where approvals happen (11.5) | An Inbox beside the console's dock, both on the same review components | An approver works through what waits on them in one place; the dock still serves someone already watching the run. One set of review components means the two never disagree. |
 | UI rules for agents (11.1) | Rules in `CLAUDE.md`, backed by ESLint and the e2e layout and axe checks | Coding agents follow what they read at the start of every task and what CI rejects. A prompt pasted once drifts by the next session. |
 | Specs govern the work | `specs/mission.md`, `specs/roadmap.md` and `specs/tech-stack.md` are the repo's constitution; `CLAUDE.md` points agents to them and repeats only the rules they must not miss | An agent or a person reads one place to know what to build and how. A decision kept only in code, a chat or `CLAUDE.md` is lost by the next task, so every decision, phase and rule change lands in these files first, in the same PR. |

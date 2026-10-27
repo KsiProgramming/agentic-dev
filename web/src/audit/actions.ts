@@ -9,6 +9,7 @@ import {
   PlayIcon,
   PlugIcon,
   RotateCcwIcon,
+  TimerOffIcon,
   UnplugIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -17,7 +18,7 @@ import { shortId } from "@/components/display/short-id";
 import { formatPrice, formatUsd } from "@/runs/cost";
 
 import type { components } from "@/api/schema";
-import { repoLabel } from "@/runs/summaries";
+import { formatAbsolute, repoLabel } from "@/runs/summaries";
 
 /** One entry of `GET /workspaces/{id}/audit`. */
 export type AuditEvent = components["schemas"]["AuditEventOut"];
@@ -41,6 +42,7 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "repo.created": { label: "Repo created", icon: FolderPlusIcon, category: "runs" },
   "gate.approved": { label: "Gate approved", icon: CircleCheckIcon, category: "approvals" },
   "gate.rejected": { label: "Gate rejected", icon: CircleXIcon, category: "approvals" },
+  "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
   "connection.added": { label: "Connection added", icon: PlugIcon, category: "settings" },
   "connection.removed": { label: "Connection removed", icon: UnplugIcon, category: "settings" },
   "policy.updated": { label: "Run limits changed", icon: GaugeIcon, category: "settings" },
@@ -97,6 +99,7 @@ const LIMITS: [key: string, label: string][] = [
   ["max_depth", "nesting depth"],
   ["loop_iterations", "loop iterations"],
   ["wall_time_s", "wall time (s)"],
+  ["approval_ttl_s", "approval time to live (s)"],
   ["budget_usd", "budget"],
 ];
 
@@ -157,6 +160,7 @@ export function describe(event: AuditEvent): string {
       return join(
         status ? (END_STATUS[status] ?? status) : "Ended",
         status === "failed" && text(d, "failure_reason"),
+        status === "cancelled" && text(d, "cancel_reason"),
         cost && `${d.cost_complete === false ? "≥ " : ""}${cost}`,
         text(d, "pr_url"),
       );
@@ -174,6 +178,13 @@ export function describe(event: AuditEvent): string {
         `${event.action === "gate.approved" ? "Approved" : "Rejected"} ${event.node_id ?? "a gate"}` +
           (edited > 0 ? ` with edits to ${plural(edited, "file")}` : ""),
         comment && `“${comment}”`,
+      );
+    }
+    case "gate.expired": {
+      const at = text(d, "expires_at");
+      return join(
+        `${event.node_id ?? "A gate"} expired with no decision; the run was cancelled`,
+        at && `due ${formatAbsolute(at)}`,
       );
     }
     case "connection.added":

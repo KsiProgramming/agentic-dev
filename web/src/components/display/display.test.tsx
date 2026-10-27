@@ -3,7 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TokenUsage } from "@/runs/cost";
 
-import { Duration, IdChip, Money, RelativeTime, StatTile, TokenCount, WaitingTime } from ".";
+import {
+  Duration,
+  ExpiresIn,
+  IdChip,
+  Money,
+  RelativeTime,
+  StatTile,
+  TokenCount,
+  WaitingTime,
+} from ".";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
@@ -75,6 +84,28 @@ describe("Duration", () => {
     expect(screen.getByTestId("took").textContent).toBe("2m 05s");
     expect(screen.getByTestId("took").className).toContain("tabular-nums");
     expect(screen.getByTestId("none").textContent).toBe("—");
+  });
+});
+
+describe("ExpiresIn", () => {
+  it("counts down to the moment, then says Expired, with the moment in a time element", () => {
+    render(
+      <>
+        <ExpiresIn iso="2026-10-24T12:00:00Z" now={NOW} />
+        <ExpiresIn iso="2026-10-22T12:05:00Z" now={NOW} />
+        <ExpiresIn iso="2026-10-22T11:00:00Z" now={NOW} focusable={false} />
+      </>,
+    );
+
+    const times = [...document.querySelectorAll("time")];
+    expect(times.map((t) => t.textContent)).toEqual([
+      "Expires in 2 d",
+      "Expires in 5 min",
+      "Expired",
+    ]);
+    expect(times[0]!.getAttribute("dateTime")).toBe("2026-10-24T12:00:00Z");
+    expect(times[0]!.tabIndex).toBe(0);
+    expect(times[2]!.hasAttribute("tabindex")).toBe(false);
   });
 });
 

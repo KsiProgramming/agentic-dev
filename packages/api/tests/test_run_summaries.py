@@ -114,7 +114,11 @@ async def test_done_when_the_api_lists_past_runs_with_status_from_the_log(
     ]
     assert page["next_cursor"] is None
     by_id = {item["id"]: item for item in page["items"]}
-    assert by_id[str(waiting)]["waiting_gate"] == {"node_id": "gate", "title": "Approve the notes"}
+    assert by_id[str(waiting)]["waiting_gate"] == {
+        "node_id": "gate",
+        "title": "Approve the notes",
+        "expires_at": None,
+    }
     done = by_id[str(completed)]
     assert done["repo"] == {"url": DOCS.url, "ref": None}
     assert done["workflow"] == {"id": two_step_spec().id, "name": two_step_spec().name}
@@ -268,3 +272,44 @@ async def test_a_runs_active_and_waiting_time_are_apart(
     for run in (detail, item):
         assert (run["active_ms"], run["waiting_ms"]) == (120_000, 3_600_000)
         assert run["duration_ms"] == 3_720_000  # wall clock, deprecated
+
+
+async def test_a_waiting_run_says_when_its_gate_expires(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    expires_at = "2026-10-30T12:00:00+00:00"
+    gate = {"title": "Approve the notes", "ttl_s": 259_200, "expires_at": expires_at}
+    run_id = await add_run(sessions, workspace, ("run_started", {}), ("gate_waiting", gate))
+
+    run = (await client.get(f"/runs/{run_id}")).json()
+
+    assert run["waiting_gate"]["expires_at"] == "2026-10-30T12:00:00Z"
+    assert (run["status"], run["expired"], run["cancel_reason"]) == ("waiting", False, None)
+
+
+async def test_an_expired_run_is_cancelled_with_the_reason_and_no_longer_waits(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    """Done when (11.3): an expired gate drops out of the waiting runs and says why."""
+    expired = await add_run(
+        sessions,
+        workspace,
+        *WAITING,
+        ("run_cancelled", {"reason": "Approval expired", "expired": True}),
+    )
+    by_user = await add_run(
+        sessions, workspace, *WAITING, ("run_cancelled", {"reason": "cancelled by user"})
+    )
+
+    page = await list_runs(client, workspace)
+    waiting = await list_runs(client, workspace, status="waiting")
+
+    by_id = {item["id"]: item for item in page["items"]}
+    assert (by_id[str(expired)]["status"], by_id[str(expired)]["expired"]) == ("cancelled", True)
+    assert by_id[str(expired)]["cancel_reason"] == "Approval expired"
+    assert by_id[str(expired)]["waiting_gate"] is None
+    assert (by_id[str(by_user)]["expired"], by_id[str(by_user)]["cancel_reason"]) == (
+        False,
+        "cancelled by user",
+    )
+    assert ids(waiting) == []

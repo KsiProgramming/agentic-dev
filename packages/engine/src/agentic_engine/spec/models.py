@@ -59,6 +59,12 @@ class GateNode(_Base):
     prompt: str | None = Field(
         default=None, description="More guidance for the approver, shown with the input."
     )
+    ttl_s: int | None = Field(
+        default=None,
+        ge=1,
+        description="Seconds the gate waits for a decision before the run is cancelled; at most "
+        "the run's `approval_ttl_s`, which applies when this is unset.",
+    )
 
 
 class SequenceNode(_Base):
@@ -602,8 +608,9 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
     """Why the spec under `root` cannot run under `policy`, in run order (depth first); empty if
     it can. A loop's `max_iterations` must be within `loop_iterations`, a map's
     `max_concurrency` and a parallel's branches within `agents_alive`, and loops, maps and
-    parallels must not nest deeper than `max_depth`. Agents spawned and wall time are only known
-    at runtime, where the engine checks them."""
+    parallels must not nest deeper than `max_depth`, and a gate's `ttl_s` must be within
+    `approval_ttl_s`. Agents spawned and wall time are only known at runtime, where the engine
+    checks them."""
     issues: list[ValidationIssue] = []
 
     def over(
@@ -643,6 +650,12 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
                     f"{policy.agents_alive} agents alive"
                 )
                 over(node, path, "agents_alive", policy.agents_alive, len(node.branches), why)
+            case GateNode() if node.ttl_s is not None and node.ttl_s > policy.approval_ttl_s:
+                why = (
+                    f"ttl_s {node.ttl_s} is above the workspace limit of "
+                    f"{policy.approval_ttl_s} seconds"
+                )
+                over(node, path, "approval_ttl_s", policy.approval_ttl_s, node.ttl_s, why)
             case _:
                 pass
         match node:

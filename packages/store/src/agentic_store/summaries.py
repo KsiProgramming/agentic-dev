@@ -38,11 +38,13 @@ class RunSummaryRow:
     started_at: datetime | None
     finished_at: datetime | None
     pr_url: str | None
-    # `{node_id, title}` of the gate the run is paused at.
+    # `{node_id, title, expires_at}` of the gate the run is paused at.
     waiting_gate: dict[str, Any] | None
     rerun_of: UUID | None
     input: str
     failure_reason: str | None
+    # Why a cancelled run was cancelled: by its user, or its approval expired.
+    cancel_reason: str | None
     usage: "RunUsageRow"
     times: "RunTimesRow"
     # The workflow spec the run was created with; read only for one run's detail.
@@ -120,6 +122,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.rerun_of,
         Run.input,
         Run.failure_reason,
+        Run.cancel_reason,
         Run.input_tokens,
         Run.output_tokens,
         Run.cache_read_tokens,
@@ -151,6 +154,7 @@ def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
         rerun_of=row.rerun_of,
         input=row.input,
         failure_reason=row.failure_reason,
+        cancel_reason=row.cancel_reason,
         usage=RunUsageRow(
             input_tokens=row.input_tokens,
             output_tokens=row.output_tokens,

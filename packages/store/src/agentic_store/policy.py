@@ -152,5 +152,6 @@ async def _overrides(session: AsyncSession, workspace_id: UUID) -> PolicyOverrid
         max_depth=row.max_depth,
         loop_iterations=row.loop_iterations,
         wall_time_s=row.wall_time_s,
+        approval_ttl_s=row.approval_ttl_s,
         budget_usd=row.budget_usd,
     )

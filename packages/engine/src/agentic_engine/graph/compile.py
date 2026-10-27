@@ -394,7 +394,9 @@ async def _run_step(
             case ToolNode():
                 return await run_tool_node(node, tools, on_event)
             case GateNode():
-                return await run_gate_node(node, input, log, limits.review)
+                return await run_gate_node(
+                    node, input, log, limits.review, limits.policy.approval_ttl_s
+                )
             case AgentNode():
                 async with limits.alive:
                     return await run_agent_node(node, runtime, input, on_event)

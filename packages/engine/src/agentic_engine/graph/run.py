@@ -3,6 +3,7 @@ paused at a gate."""
 
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
@@ -70,9 +71,10 @@ async def run_workflow(
     spent `spent`; once its spend reaches the budget it ends `failed` the same way, and the
     result says so.
     A gate pauses the run: it ends `waiting`, after `node_started` and `gate_waiting` (payload
-    `title`, `prompt`, `artifact`, `changes`) for the gate, and `resume_workflow` continues it
-    with the decision. `changes` are the files the writers that ran before the gate changed, from
-    `review` (none without one), and an approval's edits are committed through it.
+    `title`, `prompt`, `artifact`, `ttl_s`, `expires_at`, `changes`) for the gate, and
+    `resume_workflow` continues it with the decision. `changes` are the files the writers that
+    ran before the gate changed, from `review` (none without one), and an approval's edits are
+    committed through it. The gate expires `ttl_s` after it paused (`expires_at`).
     A run that created its repo ends the attempt `suspended`, with no event: `resume_workflow`
     continues it, in an attempt that has the repo cloned.
 
@@ -241,8 +243,8 @@ async def _wait(
     review: GateReview | None,
 ) -> WorkflowRunResult:
     """Announce the pause at `gate_id`, with the files the writers that completed before it
-    changed. If they cannot be read, the gate pauses without them and says why
-    (`changes_error`)."""
+    changed, and when the gate expires (`expires_at`, its `ttl_s` from now). If the files cannot
+    be read, the gate pauses without them and says why (`changes_error`)."""
     ran = [n for n in dict.fromkeys(state["order"]) if state["results"][n].status == "completed"]
     changes: list[FileChange] = []
     error: str | None = None
@@ -255,6 +257,8 @@ async def _wait(
     payload: dict[str, JsonValue] = {**request, "changes": shown}
     if error is not None:
         payload["changes_error"] = error
+    if isinstance(ttl := request.get("ttl_s"), int):
+        payload["expires_at"] = (datetime.now(UTC) + timedelta(seconds=ttl)).isoformat()
     await log.emit(NODE_STARTED, node_id=gate_id)
     await log.emit(GATE_WAITING, node_id=gate_id, payload=payload)
     return _result(log, state, "waiting", waiting_at=gate_id)

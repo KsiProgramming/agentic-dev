@@ -104,6 +104,8 @@ jobs:
           # The e2e journey runs on the fake GitHub App and Claude key check (phase 2.6).
           echo "AGENTIC_GITHUB=fake" >> .env
           echo "CLAUDE_KEY_CHECK=fake" >> .env
+          # The approval expiry e2e test waits for a gate with a 2 s time to live (phase 11.3).
+          echo "GATE_SWEEP_S=1" >> .env
       - name: Start stack
         run: docker compose up -d --build --wait --wait-timeout 180
       - name: Probe endpoints

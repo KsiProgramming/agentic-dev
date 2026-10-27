@@ -116,6 +116,9 @@ export interface Timeline {
   startedAt: string | null;
   endedAt: string | null;
   clock: RunClock;
+  /** Why the run was cancelled (`run_cancelled`'s `reason`), and whether its gate expired. */
+  cancelReason: string | null;
+  expired: boolean;
 }
 
 /**
@@ -217,6 +220,8 @@ class Builder {
     startedAt: null,
     endedAt: null,
     clock: { activeMs: null, waitingMs: 0, activeSince: null, waitingSince: null },
+    cancelReason: null,
+    expired: false,
   };
   /** When the event before the current one was written. */
   private lastAt: string | null = null;
@@ -240,6 +245,10 @@ class Builder {
       case "run_completed":
       case "run_failed":
       case "run_cancelled":
+        if (event.type === "run_cancelled") {
+          this.timeline.cancelReason = str(payload.reason);
+          this.timeline.expired = payload.expired === true;
+        }
         this.timeline.endedAt = at;
         this.endUnfinished(RUN_END[event.type] ?? "cancelled", at);
         return;

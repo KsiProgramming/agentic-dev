@@ -44,6 +44,10 @@ A user can cancel a run (`POST /runs/{id}/cancel`): the worker running it checks
 `CANCEL_POLL_S`, cancels its graph and writes `run_cancelled`; a cancelled run that is claimed
 (queued, or paused at a gate) is ended at once, and a sandbox it kept is removed.
 
+A gate waits at most its time to live (phase 11.3). Every `GATE_SWEEP_S`, each worker cancels
+the runs whose gate has expired (`agentic_store.expire_gates`) and queues them; they are ended
+like a cancelled run, with `run_cancelled` `{reason: "Approval expired", expired: true}`.
+
 A run executes under the policy it was created with (`StoredRun.policy`). The worker enforces its
 wall time: the run's time spent executing so far (`agentic_store.active_seconds`, which leaves out
 time paused at a gate) plus this attempt's must stay within `wall_time_s`. Past it, the worker
@@ -67,7 +71,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 import anthropic
-from pydantic import Field, SecretStr
+from pydantic import Field, JsonValue, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -119,13 +123,16 @@ from agentic_secrets import (
     registered,
 )
 from agentic_store import (
-    USER_CANCEL_REASON,
+    APPROVAL_EXPIRED_REASON,
     PostgresEventSink,
     StoredRun,
     active_seconds,
+    cancel_reason,
     cancel_requested,
     claim_run,
     dequeue_run,
+    enqueue_run,
+    expire_gates,
     get_github_installation,
     leased_run_ids,
     load_secret,
@@ -185,6 +192,8 @@ class WorkerSettings(BaseSettings):
     lease_heartbeat_s: float = Field(default=10.0, gt=0)
     # How often a running run is checked for a user's cancel request.
     cancel_poll_s: float = Field(default=1.0, gt=0)
+    # How often waiting runs are checked for a gate past its time to live (`expire_gates`).
+    gate_sweep_s: float = Field(default=30.0, gt=0)
     # Claims of one run before it fails instead of being resumed again (a run that kills workers).
     max_attempts: int = Field(default=3, ge=1)
     # The platform's GitHub App (the same settings as the API's). Unset, runs clone GitHub repos
@@ -434,7 +443,7 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
             return
         if cancel.done() and not attempt.done():
             # The sink stays attached, so the graph writes `node_cancelled` and `run_cancelled`.
-            attempt.cancel(USER_CANCEL_REASON)
+            attempt.cancel(await cancel_reason(worker.sessions, run.id))
             with contextlib.suppress(asyncio.CancelledError):
                 await attempt
             await _end_cancelled(worker, run, sink)
@@ -489,12 +498,14 @@ async def _watch_cancel(worker: Worker, run_id: UUID) -> None:
 
 
 async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> None:
-    """End a run its user cancelled, unless its graph already wrote its end: `run_cancelled`
-    after its last event (a run that never started gets `run_started` first). A sandbox the run
-    kept at a gate is removed first, so a run that reads `cancelled` has none left."""
+    """End a run its user cancelled, or whose gate expired, unless its graph already wrote its
+    end: `run_cancelled` with the reason after its last event (a run that never started gets
+    `run_started` first), and `expired: true` for an expired gate. A sandbox the run kept at a
+    gate is removed first, so a run that reads `cancelled` has none left."""
     if run.repo is not None:
         await worker.sandboxes.discard(run.id)
     if not await run_ended(worker.sessions, run.id):
+        reason = await cancel_reason(worker.sessions, run.id)
         last_seq = await max_event_seq(worker.sessions, run.id)
         if last_seq == 0:
             await record_unstarted_run(
@@ -503,12 +514,28 @@ async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> Non
                 run_id=run.id,
                 sink=sink,
                 status="cancelled",
-                reason=USER_CANCEL_REASON,
+                reason=reason,
             )
         else:
+            payload: dict[str, JsonValue] = {"reason": reason}
+            if reason == APPROVAL_EXPIRED_REASON:
+                payload["expired"] = True
             await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
-                RUN_CANCELLED, payload={"reason": USER_CANCEL_REASON}
+                RUN_CANCELLED, payload=payload
             )
+
+
+async def _sweep_gates(worker: Worker, redis: Redis) -> None:
+    """Every `gate_sweep_s`, cancel the runs whose gate has expired and queue them, so a worker
+    ends them (`_end_cancelled`). Runs as long as the worker does, beside the runs it works."""
+    while True:
+        try:
+            for run_id in await expire_gates(worker.sessions):
+                await enqueue_run(redis, run_id)
+                log.info("run %s: its approval expired", run_id)
+        except Exception:
+            log.warning("could not expire waiting gates", exc_info=True)
+        await asyncio.sleep(worker.settings.gate_sweep_s)
 
 
 async def _end_over_limit(
@@ -793,6 +820,8 @@ async def run(
                 settings.ready_file.touch()
             if ready is not None:
                 ready.set()
+            sweep = asyncio.create_task(_sweep_gates(worker, redis))
+            stack.push_async_callback(_stop_task, sweep)
             while not stop.is_set():
                 run = await _next_run(worker, redis)
                 if run is not None:
@@ -803,6 +832,12 @@ async def run(
             settings.ready_file.unlink(missing_ok=True)
         await redis.aclose()
         await db.dispose()
+
+
+async def _stop_task(task: asyncio.Task[None]) -> None:
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
 
 
 async def _until_stopped(work: Coroutine[Any, Any, None], stop: asyncio.Event) -> None:

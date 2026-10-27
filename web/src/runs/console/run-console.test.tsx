@@ -272,6 +272,48 @@ function waitAtGate(source: FakeEventSource, prompt?: string) {
   });
 }
 
+test("the dock says when the gate expires", async () => {
+  api(detail({ status: "waiting" }));
+  const source = show();
+  const expiresAt = new Date(Date.now() + 2 * 86_400_000 + 60_000).toISOString();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({
+      ...runEvent(2, "gate_waiting", { title: "Open a PR?", expires_at: expiresAt }),
+      node_id: "gate",
+    });
+  });
+
+  const dock = screen.getByRole("region", { name: "Approval needed" });
+  expect(within(dock).getByText("Expires in 2 d").getAttribute("dateTime")).toBe(expiresAt);
+});
+
+test("Done when (11.3): an expired run shows Expired with the reason", async () => {
+  api(detail({ status: "cancelled", expired: true, cancel_reason: "Approval expired" }));
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({ ...runEvent(2, "gate_waiting", { title: "Open a PR?" }), node_id: "gate" });
+    source.emit(runEvent(3, "run_cancelled", { reason: "Approval expired", expired: true }));
+  });
+
+  await waitFor(() => expectStatus("cancelled", "Expired"));
+  expect(screen.getByText(/Approval expired: nobody approved or rejected the gate/)).toBeDefined();
+  expect(screen.queryByRole("region", { name: "Approval needed" })).toBeNull();
+});
+
+test("a run its user cancelled says Cancelled and gives no expiry reason", async () => {
+  api(detail({ status: "cancelled", cancel_reason: "cancelled by user" }));
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit(runEvent(2, "run_cancelled", { reason: "cancelled by user" }));
+  });
+
+  await waitFor(() => expectStatus("cancelled", "Cancelled"));
+  expect(screen.queryByText(/Approval expired/)).toBeNull();
+});
+
 const APPROVED = json(
   { run_id: RUN_ID, node_id: "gate", decision: "approve", status: "queued" },
   202,

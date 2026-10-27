@@ -39,6 +39,7 @@ from agentic_engine.templates import wrap_with_create_repo
 from agentic_github import GithubApiError, github_remote
 from agentic_sandbox import RepoSource
 from agentic_store import (
+    APPROVAL_EXPIRED_REASON,
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
     InvalidCursorError,
@@ -129,6 +130,7 @@ async def existing_workspace(
 def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
     now = datetime.now(UTC)
     active_ms, waiting_ms = row.times.at(now)
+    cancel_reason = row.cancel_reason if row.status == "cancelled" else None
     return {
         "id": row.id,
         "workspace_id": row.workspace_id,
@@ -141,6 +143,8 @@ def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
         "finished_at": row.finished_at,
         "pr_url": row.pr_url,
         "waiting_gate": WaitingGate.model_validate(row.waiting_gate) if row.waiting_gate else None,
+        "cancel_reason": cancel_reason,
+        "expired": cancel_reason == APPROVAL_EXPIRED_REASON,
         "rerun_of": row.rerun_of,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
         "active_ms": active_ms,
@@ -422,7 +426,10 @@ async def rerun(
     operation_id="approveRun",
     responses={
         404: {"description": "No run with this id"},
-        409: {"description": "The run is not waiting at this gate, or it was already decided"},
+        409: {
+            "description": "The run is not waiting at this gate, the gate was already decided, "
+            "or its approval expired"
+        },
         422: {
             "description": "The edits do not fit the files the gate showed",
             "model": EditErrorDetail,
@@ -433,7 +440,7 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
     """Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
     `cancelled`. An approval may edit the files the gate showed as editable; the gate commits
     the edits on the writers' branches before the run goes on. The run is queued again; its
-    stream carries on with `gate_decided`."""
+    stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision."""
     decision = GateDecision(decision=body.decision, comment=body.comment, edits=body.edits)
     try:
         recorded = await record_approval(_sessions(request), run_id, body.node_id, decision)

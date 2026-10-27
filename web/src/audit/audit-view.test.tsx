@@ -132,7 +132,7 @@ test("filters from the URL narrow the query, and Load more fetches the next page
 
   await screen.findByRole("table", { name: "Audit log" });
   const first = new URL(fetch.mock.calls[0]![0].url).searchParams;
-  expect(first.getAll("action")).toEqual(["gate.approved", "gate.rejected"]);
+  expect(first.getAll("action")).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
   expect(first.get("run_id")).toBe(RUN);
 
   fireEvent.click(screen.getByRole("button", { name: "Load more" }));

@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 11.3 approval expiry ([#131](https://github.com/KsiProgramming/agentic-dev/pull/131)):
+  - **Time to live.** A gate waits at most `approval_ttl_s`, a new run limit (72 h, the platform's default and ceiling; a workspace may lower it in the "Run limits" card, in hours), frozen on the run with its other limits. A gate may set a shorter `ttl_s` of its own; a longer one is a `policy_limit` issue. `gate_waiting` carries `ttl_s` and `expires_at`, and `GET /runs` shows it on `waiting_gate.expires_at`.
+  - **Expiry.** Every worker sweeps every `GATE_SWEEP_S` (30 s): a run waiting past its gate's expiry, with no decision, is cancelled like a user's cancel. It ends `run_cancelled` `{reason: "Approval expired", expired: true}` and its kept sandbox is removed; nothing is approved or rejected. A decision sent after the expiry is refused with `409`. The audit log records `gate.expired`, and `run.ended` carries the `cancel_reason`.
+  - **Old gates.** Alembic `0021_approval_expiry` adds `runs.gate_expires_at`, `runs.cancel_reason` and `workspace_policies.approval_ttl_s`, and gives every gate already waiting 72 h from when it paused, so stale ones expire on the first sweep after the deploy.
+  - **API.** Run summaries add `cancel_reason` and `expired`; the policy endpoints add `approval_ttl_s`. The JSON Schema, OpenAPI spec and web client are regenerated.
+  - **UI.** An expired run shows "Expired" in Cancelled's grey in the runs list and the console, with the reason; it no longer counts as waiting in the sidebar, the page title or "Needs approval", even in the seconds before the sweep. The approval dock says when the gate expires ("Expires in 2 d") through a new `ExpiresIn` display component.
 - Phase 11.2 active and waiting time ([#130](https://github.com/KsiProgramming/agentic-dev/pull/130)):
   - **Recorded.** The event sink keeps each run's time executing and time paused at gates on its `runs` row (`active_ms`, `waiting_ms`, and when the open stretch began), so listing still never scans the log. Alembic `0020_active_waiting_time` fills runs that are live when it ships from their events; runs that ended before keep no active time and show "—". The wall-time limit reads the same columns instead of scanning the log.
   - **API.** `GET /runs`, `GET /runs/{id}` and the summaries stream return `active_ms`, `waiting_ms` and `measured_at`; `duration_ms` (wall clock) is deprecated.

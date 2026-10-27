@@ -91,6 +91,15 @@ def test_no_overrides_is_the_platform_policy() -> None:
     )
 
 
+def test_a_policy_frozen_before_approval_expiry_waits_72_hours() -> None:
+    """A run created before phase 11.3 has no `approval_ttl_s` in its stored policy."""
+    frozen = {"agents_alive": 8, "agents_spawned": 40, "max_depth": 2, "loop_iterations": 5}
+
+    assert Policy.model_validate({**frozen, "wall_time_s": 7200}).approval_ttl_s == 72 * 3600
+    assert policy(approval_ttl_s=3600).approval_ttl_s == 3600
+    assert policy(approval_ttl_s=100 * 3600).approval_ttl_s == 72 * 3600
+
+
 def test_a_workspace_can_lower_a_limit_but_never_raise_it() -> None:
     lowered = policy(agents_spawned=10, wall_time_s=60_000)
 
@@ -159,6 +168,16 @@ def test_a_map_above_the_alive_limit_is_rejected() -> None:
     assert policy_errors(root, policy(agents_alive=2)) == [
         "map 'each' at root.steps[1]: max_concurrency 4 is above the workspace limit of 2 "
         "agents alive",
+    ]
+
+
+def test_a_gate_waiting_longer_than_the_limit_is_rejected() -> None:
+    gate = {"type": "gate", "id": "approve", "title": "Ship it?", "ttl_s": 7200}
+    root = spec({"type": "sequence", "id": "main", "steps": [agent("first"), gate]}).root
+
+    assert policy_errors(root, policy(approval_ttl_s=7200)) == []
+    assert policy_errors(root, policy(approval_ttl_s=3600)) == [
+        "gate 'approve' at root.steps[1]: ttl_s 7200 is above the workspace limit of 3600 seconds",
     ]
 
 

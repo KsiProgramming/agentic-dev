@@ -222,6 +222,10 @@ class WorkflowRef(BaseModel):
 class WaitingGate(BaseModel):
     node_id: str = Field(description="The gate node the run is paused at.")
     title: str | None = None
+    expires_at: datetime | None = Field(
+        default=None,
+        description='When the gate expires: the run is then cancelled ("Approval expired").',
+    )
 
 
 class RunUsage(BaseModel):
@@ -257,6 +261,13 @@ class RunSummary(BaseModel):
     finished_at: datetime | None
     pr_url: str | None = Field(description="The last pull request the run opened.")
     waiting_gate: WaitingGate | None = Field(description="Set while the run waits at a gate.")
+    cancel_reason: str | None = Field(
+        description="Why a cancelled run was cancelled: `cancelled by user`, or `Approval "
+        "expired` when its gate waited past its time to live."
+    )
+    expired: bool = Field(
+        description='True for a run cancelled because its gate expired: shown as "Expired".'
+    )
     rerun_of: UUID | None = Field(description="The run this one repeats.")
     usage: RunUsage
     active_ms: int | None = Field(

@@ -3,7 +3,9 @@
 Only workers write a run's events, so the API never ends a run itself: it sets
 `cancel_requested_at` and the worker ends the run `cancelled`. A running run's worker sees the
 request within `cancel_poll_s`; a queued run is ended by the worker that claims it. A run paused
-at a gate has no worker, so it is queued again (like a decision) and the API enqueues it.
+at a gate has no worker, so it is queued again (like a decision) and the API enqueues it. A gate
+that expires is cancelled the same way, by the worker's sweep (`agentic_store.expiry`); the run
+keeps the first reason it was cancelled for (`cancel_reason`).
 """
 
 from typing import Final
@@ -43,7 +45,8 @@ async def request_cancel(sessions: async_sessionmaker[AsyncSession], run_id: UUI
         if before in ENDED_STATUSES:
             raise RunEndedError(f"run {run_id} has already ended ({before})")
         values: dict[str, object] = {
-            "cancel_requested_at": func.coalesce(Run.cancel_requested_at, func.now())
+            "cancel_requested_at": func.coalesce(Run.cancel_requested_at, func.now()),
+            "cancel_reason": func.coalesce(Run.cancel_reason, USER_CANCEL_REASON),
         }
         if before == "waiting":
             values |= {
@@ -65,10 +68,18 @@ async def request_cancel(sessions: async_sessionmaker[AsyncSession], run_id: UUI
 
 
 async def cancel_requested(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> bool:
-    """Whether a user asked to cancel the run."""
+    """Whether a user asked to cancel the run, or its gate expired."""
     async with sessions() as session:
         at = await session.scalar(select(Run.cancel_requested_at).where(Run.id == run_id))
     return at is not None
+
+
+async def cancel_reason(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> str:
+    """Why the run is being cancelled: `USER_CANCEL_REASON` unless its gate expired
+    (`agentic_store.expiry.APPROVAL_EXPIRED_REASON`)."""
+    async with sessions() as session:
+        reason = await session.scalar(select(Run.cancel_reason).where(Run.id == run_id))
+    return reason or USER_CANCEL_REASON
 
 
 async def run_ended(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> bool:

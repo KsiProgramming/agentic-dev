@@ -15,7 +15,7 @@ import { NewRunSheet } from "./new-run/new-run-sheet";
 import { filtersToQuery, isFiltered, NO_FILTERS, parseFilters, type RunFilters } from "./filters";
 import { RunFiltersBar } from "./run-filters";
 import { RunsList } from "./runs-list";
-import { isLive, statusLabel } from "./summaries";
+import { gateExpired, isLive, runStatusLabel } from "./summaries";
 import { useNow } from "./use-now";
 import { useRunList } from "./use-run-summaries";
 import { useRunsStream } from "./use-runs-stream";
@@ -60,17 +60,19 @@ export function RunsView({
     baseUrl,
     onChange: (run, previous) => {
       if (previous && previous.status !== run.status) {
-        setAnnouncement(`Run ${run.workflow.name} is now ${statusLabel(run.status)}.`);
+        setAnnouncement(`Run ${run.workflow.name} is now ${runStatusLabel(run)}.`);
       }
     },
   });
 
   const runs = all.data?.pages.flatMap((page) => page.items) ?? [];
-  const waitingRuns = showWaiting ? (waiting.data?.pages.flatMap((page) => page.items) ?? []) : [];
+  const waitingPages = showWaiting ? (waiting.data?.pages.flatMap((page) => page.items) ?? []) : [];
   const now = useNow(
     1000,
-    [...runs, ...waitingRuns].some((run) => isLive(run.status)),
+    [...runs, ...waitingPages].some((run) => isLive(run.status)),
   );
+  // A gate past its time to live no longer needs approval, even before its run is cancelled.
+  const waitingRuns = waitingPages.filter((run) => !gateExpired(run, now));
   const waitingHeading = useId();
   const allHeading = useId();
 

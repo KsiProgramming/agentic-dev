@@ -53,6 +53,7 @@ from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
 from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_secrets import LocalKeyProvider, generate_key_file, install_redaction
 from agentic_store import (
+    DEFAULT_WORKSPACE_ID,
     Workspace,
     active_seconds,
     create_run,
@@ -838,6 +839,55 @@ async def test_cancelling_a_run_at_a_gate_removes_the_sandbox_it_kept(
     assert events[-1].type == "run_cancelled"
     assert events[-1].payload == {"reason": "cancelled by user"}
     assert "gate_decided" not in {e.type for e in events}
+
+
+async def test_done_when_a_gate_past_its_time_to_live_cancels_its_run_cleanly(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """Done when (11.3): the run ends `cancelled` through the cancel path, its kept sandbox is
+    removed, the reason is kept, and nobody approved or rejected anything."""
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos, base_dir=boxes))
+    data = json.loads((SPECS / "gate-approval.json").read_text(encoding="utf-8"))
+    data["root"]["steps"][1]["ttl_s"] = 1
+    spec = parse_spec(data)
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=fake_with_tools,
+        sandboxes=sandboxes,
+        gate_sweep_s=0.2,
+    ):
+        run_id = await submit(sessions, redis_url, spec, RepoSource(url=str(repos / "hello")))
+        await wait_for_status(sessions, run_id, "waiting")
+        await wait_for_status(sessions, run_id, "cancelled")
+
+    assert list(boxes.iterdir()) == []
+    events = await list_run_events(sessions, run_id)
+    assert events[-1].type == "run_cancelled"
+    assert events[-1].payload == {"reason": "Approval expired", "expired": True}
+    assert "gate_decided" not in {e.type for e in events}
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None
+    assert (summary.cancel_reason, summary.waiting_gate) == ("Approval expired", None)
+    entries, _ = await list_audit_events(sessions, DEFAULT_WORKSPACE_ID, run_id=run_id)
+    assert [e.action for e in entries][:2] == ["run.ended", "gate.expired"]
+
+
+async def test_a_workspace_s_approval_time_to_live_applies_to_its_gates(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url, gate_sweep_s=0.2):
+        run_id = await submit_limited(sessions, redis_url, gated_spec(), approval_ttl_s=1)
+        await wait_for_status(sessions, run_id, "cancelled")
+
+    events = await list_run_events(sessions, run_id)
+    waiting = next(e for e in events if e.type == "gate_waiting")
+    assert waiting.payload["ttl_s"] == 1
+    assert events[-1].payload == {"reason": "Approval expired", "expired": True}
 
 
 GITHUB_URL = "https://github.com/acme/hello"

@@ -27,6 +27,7 @@ import { usageOfRun } from "./cost";
 import { canRerun, RerunOf, useRerun } from "./rerun";
 import {
   badgeStatus,
+  expiredLabel,
   isLive,
   repoLabel,
   runTimes,
@@ -185,7 +186,7 @@ export function RunsTable({
           <TableRow key={run.id} data-run-id={run.id} className="relative">
             <TableCell>
               <div className="flex items-center gap-2">
-                <StatusBadge status={badgeStatus(run.status)} />
+                <StatusBadge status={badgeStatus(run.status)} label={expiredLabel(run)} />
                 <ReviewLink run={run} />
               </div>
             </TableCell>
@@ -235,7 +236,7 @@ export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; b
           {run.workflow.name}
         </Link>
         <div className="flex shrink-0 items-center gap-1">
-          <StatusBadge status={badgeStatus(run.status)} />
+          <StatusBadge status={badgeStatus(run.status)} label={expiredLabel(run)} />
           <RunMenu run={run} baseUrl={baseUrl} />
         </div>
       </div>
