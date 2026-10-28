@@ -91,16 +91,29 @@ INVALID: dict[str, Rejection] = {
         (), "value_error", "map 'outer' at root: map 'inner' at root.body cannot be inside"
     ),
     "reduce-unknown-from": Rejection(
-        (), "value_error", "reduce 'join' at root.steps[1]: `from` 'eaches' is not a map that runs"
+        (),
+        "value_error",
+        "reduce 'join' at root.steps[1]: `from` 'eaches' is not a map or parallel",
     ),
     "reduce-from-non-map": Rejection(
-        (), "value_error", "reduce 'join' at root.steps[1]: `from` 'writer' is not a map that runs"
+        (),
+        "value_error",
+        "reduce 'join' at root.steps[1]: `from` 'writer' is not a map or parallel",
     ),
     "reduce-before-map": Rejection(
-        (), "value_error", "reduce 'join' at root.steps[0]: `from` 'each' is not a map that runs"
+        (), "value_error", "reduce 'join' at root.steps[0]: `from` 'each' is not a map or parallel"
     ),
     "reduce-agent-missing": Rejection(
         ("root", "sequence", "steps", 1, "reduce"), "value_error", "the agent strategy needs"
+    ),
+    "reduce-min-votes-on-dedupe": Rejection(
+        ("root", "sequence", "steps", 1, "reduce"), "value_error", "`min_votes` is only used"
+    ),
+    "reduce-vote-unreachable": Rejection(
+        (), "value_error", "`min_votes` 3 is more than the 2 branches the quorum join"
+    ),
+    "reduce-merge-not-findings": Rejection(
+        (), "value_error", "reduce 'merge' merges its output as a findings report"
     ),
     "parallel-one-branch": Rejection(("root", "parallel", "branches"), "too_short"),
     "parallel-too-many-branches": Rejection(("root", "parallel", "branches"), "too_long"),
@@ -202,7 +215,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
     assert (concurrency["minimum"], concurrency["maximum"]) == (1, 8)
     reduce = schema["$defs"]["ReduceNode"]
     assert "from" in reduce["required"]
-    assert reduce["properties"]["strategy"]["enum"] == ["concat", "agent"]
+    assert reduce["properties"]["strategy"]["enum"] == ["concat", "agent", "dedupe", "vote"]
     parallel = schema["$defs"]["ParallelNode"]["properties"]
     assert (parallel["branches"]["minItems"], parallel["branches"]["maxItems"]) == (2, 8)
     assert parallel["join"]["enum"] == ["all", "any", "quorum"]

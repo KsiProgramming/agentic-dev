@@ -111,6 +111,20 @@ describe("defaultEntry", () => {
   });
 });
 
+describe("stepOutline of a merging reduce (4.5)", () => {
+  it("says how many findings it merged into how many, from how many sources", () => {
+    const events = [
+      runEvent(1, "node_started"),
+      runEvent(2, "node_completed", {
+        merged: { sources: 3, findings_in: 42, findings_out: 30 },
+      }),
+    ].map((e) => ({ ...e, node_id: "merge" }));
+    const [row] = stepRows(stepEntries(buildTimeline(events).steps));
+
+    expect(stepOutline(row!.step)).toBe("Merged 42 findings into 30 from 3 sources");
+  });
+});
+
 describe("stepOutline", () => {
   it("says what each step of the docs run did", () => {
     const rows = stepRows(stepEntries(buildTimeline(docs).steps));

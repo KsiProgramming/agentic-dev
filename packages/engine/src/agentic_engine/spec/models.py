@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from agentic_engine.expr import ExpressionError, compile_condition, compile_list
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimit
 from agentic_engine.ports import schema_problem
+from agentic_runtime.findings import FindingsReport
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
 """Slug used in branch names (`agent/<run>/<node>`), so it must be path- and ref-safe."""
@@ -208,10 +209,14 @@ class ReduceAgent(_Base):
 
 
 class ReduceNode(_Base):
-    """Combines the outputs of the map `from`, which runs before it, in item order.
+    """Combines the outputs of the map or parallel `from`, which runs before it: a map's items in
+    item order, a parallel's completed branches in branch order.
 
     `concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON
-    array `[{"item": …, "output": …}]` (data, never instructions)."""
+    array `[{"item": …, "output": …}]` (data, never instructions; a branch's item is its id).
+    `dedupe` and `vote` (4.5) merge findings reports with no model: one finding per issue, with
+    the highest severity, the sources that reported it and a confidence; `vote` keeps only the
+    issues `min_votes` sources reported. Their output is a findings report."""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -223,13 +228,26 @@ class ReduceNode(_Base):
 
     type: Literal["reduce"]
     id: NodeId
-    from_: NodeId = Field(alias="from", description="The map whose outputs are combined.")
-    strategy: Literal["concat", "agent"]
+    from_: NodeId = Field(
+        alias="from", description="The map or parallel whose outputs are combined."
+    )
+    strategy: Literal["concat", "agent", "dedupe", "vote"]
     separator: str | None = Field(
         default=None, description="`concat` only: what goes between outputs (default two newlines)."
     )
     agent: ReduceAgent | None = Field(default=None, description="`agent` only, and required.")
+    min_votes: int | None = Field(
+        default=None,
+        ge=1,
+        description="`vote` only: how many sources must report an issue to keep it (default a "
+        "majority of the sources that completed).",
+    )
     writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
+
+    @property
+    def merges(self) -> bool:
+        """Whether it merges findings reports (`dedupe`, `vote`)."""
+        return self.strategy in ("dedupe", "vote")
 
     @model_validator(mode="after")
     def _strategy_fields(self) -> Self:
@@ -239,6 +257,8 @@ class ReduceNode(_Base):
             raise ValueError("`agent` is only used by the agent strategy")
         if self.strategy != "concat" and self.separator is not None:
             raise ValueError("`separator` is only used by the concat strategy")
+        if self.strategy != "vote" and self.min_votes is not None:
+            raise ValueError("`min_votes` is only used by the vote strategy")
         return self
 
 
@@ -331,7 +351,7 @@ ARTIFACT_TOOLS = frozenset({"artifacts.list", "artifacts.read"})
 
 SCAN_TOOLS = frozenset({"scan.lint", "scan.secrets", "scan.dependencies"})
 """Deterministic scanners over the run's repo in the sandbox (4.4): read-only, so allowed
-everywhere. Each returns a findings report (`agentic_tools.scan.FindingsReport`)."""
+everywhere. Each returns a findings report (`agentic_runtime.findings.FindingsReport`)."""
 
 PLATFORM_TOOLS = (
     READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS | CREATE_TOOLS | ARTIFACT_TOOLS | SCAN_TOOLS
@@ -359,6 +379,7 @@ type IssueCode = Literal[
     "port_mismatch",
     "artifact_unknown",
     "artifact_conflict",
+    "invalid_vote",
 ]
 
 
@@ -592,9 +613,10 @@ def map_issues(root: Node) -> list[ValidationIssue]:
     """Why the maps and reduces under `root` cannot run, in run order (depth first); empty if
     they can. A map's `over` must be a valid list expression, and its body must hold only agent,
     tool and sequence nodes, none of them a writer or a publisher. A reduce's `from` must name a
-    map that runs before it."""
+    map or a parallel that runs before it, and a vote's `min_votes` must be reachable by that
+    parallel's join (`invalid_vote`; a map's item count is only known when it runs)."""
     issues: list[ValidationIssue] = []
-    maps: set[str] = set()
+    sources: dict[str, MapNode | ParallelNode] = {}
     for path, node in iter_nodes(root):
         match node:
             case MapNode():
@@ -621,18 +643,46 @@ def map_issues(root: Node) -> list[ValidationIssue]:
                                 message=message,
                             )
                         )
-                maps.add(node.id)
-            case ReduceNode() if node.from_ not in maps:
+                sources[node.id] = node
+            case ParallelNode():
+                sources[node.id] = node
+            case ReduceNode() if node.from_ not in sources:
                 message = (
-                    f"reduce {node.id!r} at {path}: `from` {node.from_!r} is not a map that runs "
-                    "before it"
+                    f"reduce {node.id!r} at {path}: `from` {node.from_!r} is not a map or "
+                    "parallel that runs before it"
                 )
                 issues.append(
                     ValidationIssue(code="reference", path=path, node_id=node.id, message=message)
                 )
+            case ReduceNode() if node.min_votes is not None:
+                source = sources[node.from_]
+                if isinstance(source, ParallelNode) and (why := _votes_unreachable(node, source)):
+                    issues.append(
+                        ValidationIssue(
+                            code="invalid_vote",
+                            path=path,
+                            node_id=node.id,
+                            message=f"reduce {node.id!r} at {path}: {why}",
+                        )
+                    )
             case _:
                 pass
     return issues
+
+
+def _votes_unreachable(reduce: ReduceNode, parallel: ParallelNode) -> str | None:
+    """Why `reduce`'s `min_votes` can never be met by the branches of `parallel` that complete."""
+    votes, branches = reduce.min_votes or 0, len(parallel.branches)
+    if votes > branches:
+        return f"`min_votes` {votes} is more than the {branches} branches of {parallel.id!r}"
+    if parallel.join == "any" and votes > 1:
+        return f"`min_votes` {votes} needs more than the one branch an `any` join waits for"
+    if parallel.join == "quorum" and votes > (parallel.quorum or 0):
+        return (
+            f"`min_votes` {votes} is more than the {parallel.quorum} branches the quorum join "
+            "waits for"
+        )
+    return None
 
 
 def map_errors(root: Node) -> list[str]:
@@ -819,6 +869,20 @@ def budget_errors(
 type PortNode = AgentNode | ToolNode
 """A node that may declare typed ports."""
 
+type PortProducer = AgentNode | ToolNode | ReduceNode
+"""A node whose output may be typed: a port node, or a reduce that merges findings."""
+
+FINDINGS_SCHEMA: dict[str, JsonValue] = FindingsReport.model_json_schema()
+"""The output schema of a `dedupe` or `vote` reduce: a findings report."""
+
+
+def output_schema(node: PortProducer) -> dict[str, JsonValue] | None:
+    """The schema `node`'s output is typed with, if any."""
+    if isinstance(node, ReduceNode):
+        return FINDINGS_SCHEMA if node.merges else None
+    return node.output_schema
+
+
 type ArtifactWriter = AgentNode | ToolNode | ReduceNode
 """A node that may write a run artifact."""
 
@@ -929,14 +993,15 @@ def artifact_writers(root: Node) -> dict[str, dict[str, ArtifactWriter]]:
     return _walk_artifacts(root).writers
 
 
-def port_edges(root: Node) -> list[tuple[PortNode, PortNode, str]]:
-    """Each place under `root` where one agent or tool node's output is the next one's input, as
+def port_edges(root: Node) -> list[tuple[PortProducer, PortNode, str]]:
+    """Each place under `root` where one node's output is the next agent or tool node's input, as
     `(producer, consumer, consumer's path)` in run order: consecutive steps of a sequence (nested
-    sequences flattened), looking through gates, which pass their input on unchanged. A loop, map,
-    parallel or reduce between two steps breaks the edge: its output is not typed. A node that
-    reads one run artifact takes it from the artifact's last writer instead (if that is an agent or
-    tool node), and one that reads several has no producer."""
-    edges: list[tuple[PortNode, PortNode, str]] = []
+    sequences flattened), looking through gates, which pass their input on unchanged. The producer
+    is an agent or tool node, or a reduce that merges findings (its output is a findings report).
+    A loop, map, parallel or other reduce between two steps breaks the edge: its output is not
+    typed. A node that reads one run artifact takes it from the artifact's last writer instead (if
+    that is a producer), and one that reads several has no producer."""
+    edges: list[tuple[PortProducer, PortNode, str]] = []
     writers = artifact_writers(root)
 
     def steps(node: Node, path: str) -> Iterator[tuple[str, Node]]:
@@ -947,14 +1012,16 @@ def port_edges(root: Node) -> list[tuple[PortNode, PortNode, str]]:
             yield path, node
 
     def visit(node: Node, path: str) -> None:
-        previous: PortNode | None = None
+        previous: PortProducer | None = None
         for step_path, step in steps(node, path):
             match step:
                 case AgentNode() | ToolNode():
                     if step.reads:
                         read = writers.get(step.id, {})
                         source = read.get(step.reads[0]) if len(step.reads) == 1 else None
-                        if isinstance(source, AgentNode | ToolNode):
+                        if isinstance(source, AgentNode | ToolNode) or (
+                            isinstance(source, ReduceNode) and source.merges
+                        ):
                             edges.append((source, step, step_path))
                     elif previous is not None:
                         edges.append((previous, step, step_path))
@@ -968,11 +1035,51 @@ def port_edges(root: Node) -> list[tuple[PortNode, PortNode, str]]:
                     previous = None
                     for i, branch in enumerate(step.branches):
                         visit(branch, f"{step_path}.branches[{i}]")
-                case ReduceNode() | SequenceNode():
+                case ReduceNode():
+                    previous = step if step.merges else None
+                case SequenceNode():
                     previous = None
 
     visit(root, "root")
     return edges
+
+
+def merge_sources(root: Node) -> list[tuple[ReduceNode, PortNode, str]]:
+    """Each node whose output a `dedupe` or `vote` reduce under `root` merges, as
+    `(reduce, source, source's path)`: the last step of a map's body or of each parallel branch
+    (gates looked through), when it is an agent or tool node."""
+    containers: dict[str, tuple[str, MapNode | ParallelNode]] = {}
+    found: list[tuple[ReduceNode, PortNode, str]] = []
+    for path, node in iter_nodes(root):
+        match node:
+            case MapNode() | ParallelNode():
+                containers[node.id] = (path, node)
+            case ReduceNode() if node.merges and node.from_ in containers:
+                at, source = containers[node.from_]
+                if isinstance(source, MapNode):
+                    outputs = [(f"{at}.body", source.body)]
+                else:
+                    outputs = [(f"{at}.branches[{i}]", b) for i, b in enumerate(source.branches)]
+                for out_path, out in outputs:
+                    if last := _last_step(out, out_path):
+                        found.append((node, last[1], last[0]))
+            case _:
+                pass
+    return found
+
+
+def _last_step(node: Node, path: str) -> tuple[str, PortNode] | None:
+    """The agent or tool node whose output is `node`'s output, if there is one."""
+    match node:
+        case AgentNode() | ToolNode():
+            return path, node
+        case SequenceNode():
+            for i in reversed(range(len(node.steps))):
+                if not isinstance(node.steps[i], GateNode):
+                    return _last_step(node.steps[i], f"{path}.steps[{i}]")
+            return None
+        case _:
+            return None
 
 
 def port_issues(root: Node) -> list[ValidationIssue]:
@@ -998,7 +1105,7 @@ def port_issues(root: Node) -> list[ValidationIssue]:
                 )
             )
     for producer, consumer, path in port_edges(root):
-        out, wanted = producer.output_schema, consumer.input_schema
+        out, wanted = output_schema(producer), consumer.input_schema
         if out is None or wanted is None or {producer.id, consumer.id} & broken:
             continue
         if why := _port_mismatch(out, wanted, producer.id):
@@ -1008,7 +1115,19 @@ def port_issues(root: Node) -> list[ValidationIssue]:
                     code="port_mismatch", path=path, node_id=consumer.id, message=message
                 )
             )
-    return issues
+    for reduce, source, path in merge_sources(root):
+        if source.output_schema is None or source.id in broken:
+            continue
+        findings = _properties(source.output_schema).get("findings")
+        if findings is None or (_types(findings) and "array" not in _types(findings)):
+            message = (
+                f"{source.type} {source.id!r} at {path}: reduce {reduce.id!r} merges its output "
+                "as a findings report, but its output_schema has no `findings` array"
+            )
+            issues.append(
+                ValidationIssue(code="port_mismatch", path=path, node_id=source.id, message=message)
+            )
+    return in_run_order(root, issues)
 
 
 def _port_mismatch(

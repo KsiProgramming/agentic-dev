@@ -1,0 +1,68 @@
+{
+  "spec_version": "0",
+  "id": "findings-merge-scans",
+  "name": "Merge overlapping scans",
+  "description": "Lint and secret scans of the whole repo and of one folder run side by side; the findings both found are merged once, and a vote keeps what two scans agree on. No model is called.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "scans",
+        "join": "all",
+        "branches": [
+          {
+            "type": "tool",
+            "id": "lint_repo",
+            "tool": "scan.lint",
+            "args": {
+              "linters": "auto",
+              "path": "."
+            }
+          },
+          {
+            "type": "tool",
+            "id": "lint_packages",
+            "tool": "scan.lint",
+            "args": {
+              "linters": "auto",
+              "path": "packages"
+            }
+          },
+          {
+            "type": "tool",
+            "id": "secrets_repo",
+            "tool": "scan.secrets",
+            "args": {
+              "path": "."
+            }
+          },
+          {
+            "type": "tool",
+            "id": "secrets_packages",
+            "tool": "scan.secrets",
+            "args": {
+              "path": "packages"
+            }
+          }
+        ]
+      },
+      {
+        "type": "reduce",
+        "id": "merge",
+        "from": "scans",
+        "strategy": "dedupe",
+        "writes": "findings.json"
+      },
+      {
+        "type": "reduce",
+        "id": "agreed",
+        "from": "scans",
+        "strategy": "vote",
+        "min_votes": 2,
+        "writes": "agreed.json"
+      }
+    ]
+  }
+}

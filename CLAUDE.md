@@ -33,6 +33,7 @@ Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design sy
    | When something expires | `ExpiresIn` |
    | Cost and prices | `Money` (`usage={…}`, or `usd={…}` with `kind="price"` for a list price or limit) |
    | Tokens | `TokenCount` |
+   | Shares (confidence) | `Percent` |
    | Ids | `IdChip` (copies, or links with `href`) |
    | A figure with its label | `StatTile` |
    | Repos | `repoLabel` (`@/runs/summaries`) in the mono font |

@@ -236,6 +236,10 @@ export function stepOutline(step: Step): string | null {
     return `${done} of ${count(step.branches.length, "branch", "branches")}`;
   }
   if (step.iterations) return count(step.iterations.length, "iteration");
+  if (step.merged) {
+    const { sources, findingsIn, findingsOut } = step.merged;
+    return `Merged ${count(findingsIn, "finding")} into ${findingsOut} from ${count(sources, "source")}`;
+  }
   if (step.prUrl) return `Opened pull request #${step.prUrl.split("/").at(-1)}`;
   if (step.createdRepo) return `Created ${step.createdRepo.fullName}`;
   const message = lastMessage(step);

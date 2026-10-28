@@ -294,3 +294,81 @@ describe("the step panel", () => {
     expect(screen.getByText("Writes")).toBeTruthy();
   });
 });
+
+describe("a merging reduce's output (4.5)", () => {
+  const REPORT = {
+    scanner: "merged",
+    checks: [],
+    findings: [
+      {
+        fingerprint: "f",
+        tool: "ruff",
+        rule: "F401",
+        severity: "medium",
+        category: "lint",
+        path: "app.py",
+        line: 1,
+        message: "unused import",
+        confidence: 0.5,
+        sources: ["lint_repo", "lint_packages"],
+      },
+    ],
+    counts: { medium: 1 },
+    truncated: false,
+    sources: [
+      { id: "lint_repo", scanner: "lint", findings: 1 },
+      { id: "lint_packages", scanner: "lint", findings: 1 },
+    ],
+  };
+
+  function merged(written: boolean) {
+    const events = [
+      runEvent(1, "node_started"),
+      ...(written
+        ? [
+            runEvent(2, "artifact_written", {
+              name: "findings.json",
+              version: 1,
+              media_type: "application/json",
+              size: 10,
+              sha256: "x",
+            }),
+          ]
+        : []),
+      runEvent(3, "node_completed", { merged: { sources: 2, findings_in: 2, findings_out: 1 } }),
+    ].map((e) => ({ ...e, node_id: "merge" }));
+    const entries = stepEntries(buildTimeline(events).steps);
+    const [row] = stepRows(entries);
+    if (!row) throw new Error("no row");
+    return withQueries(
+      <StepOutput
+        runId={RUN}
+        baseUrl={BASE}
+        step={row.step}
+        row={row}
+        kind="reduce"
+        entries={entries}
+        onSelect={() => undefined}
+      />,
+    );
+  }
+
+  test("shows the findings report it wrote", async () => {
+    api([], { "findings.json": JSON.stringify(REPORT) });
+
+    render(merged(true));
+
+    expect(await screen.findByTestId("merged-from")).toBeTruthy();
+    expect(screen.getAllByTestId("finding-sources")[0]!.textContent).toContain(
+      "Found by 2 of 2: lint_repo, lint_packages",
+    );
+  });
+
+  test("without an artifact, says what it merged and how to see it", () => {
+    render(merged(false));
+
+    expect(
+      screen.getByText(/Merged 2 findings into 1 from 2 sources\. Give the reduce/),
+    ).toBeTruthy();
+  });
+});

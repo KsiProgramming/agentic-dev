@@ -102,14 +102,15 @@ export function ArtifactContent({ artifact, text }: { artifact: ArtifactVersion;
   return <TextView text={text} label={artifact.name} />;
 }
 
-function ArtifactBody({
+/** One version of an artifact, loaded and shown by its kind (a findings report as findings). */
+export function ArtifactBody({
   runId,
   artifact,
-  baseUrl,
+  baseUrl = apiBaseUrl(),
 }: {
   runId: string;
   artifact: ArtifactVersion;
-  baseUrl: string;
+  baseUrl?: string;
 }) {
   const query = useRunArtifact(runId, artifact.name, artifact.version, { baseUrl });
   if (query.isPending) return <LoadingState rows={4} label="Loading the artifact…" />;

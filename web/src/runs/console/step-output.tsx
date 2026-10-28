@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 
-import { ArtifactCards } from "../artifacts/artifact-cards";
+import { ArtifactBody, ArtifactCards } from "../artifacts/artifact-cards";
 import { isFindingsReport } from "../findings/findings";
 import { FindingsView } from "../findings/findings-view";
 import type { NodeKind } from "../graph/spec-graph";
@@ -26,7 +26,7 @@ import { GateDecision } from "./gate-decision";
 import { isLongOutput } from "./long-output";
 import { PortErrors } from "./port-errors";
 import { StatusMarker } from "./rail";
-import { lastMessage, type StepEntry, type StepRow } from "./step-entries";
+import { lastMessage, stepOutline, type StepEntry, type StepRow } from "./step-entries";
 import { ErrorLine } from "./step-view";
 import { WorkBlock } from "./work-block";
 import { agentTurns, mapTotals, workStart } from "./work-blocks";
@@ -253,6 +253,20 @@ export function StepOutput({
         <FindingsView key="tool" report={value} label={`Findings of ${step.id}`} />
       ) : (
         <OutputView key="tool" text={tool.output} label={`Output of ${step.id}`} />
+      ),
+    );
+  }
+  if (step.merged) {
+    // A `dedupe` or `vote` reduce (4.5) logs no output: its report is the artifact it wrote.
+    const report = step.artifactsWritten.at(-1);
+    parts.push(
+      report ? (
+        <ArtifactBody key="merged" runId={runId} artifact={report} baseUrl={baseUrl} />
+      ) : (
+        <p key="merged" className="text-meta text-muted-foreground">
+          {stepOutline(step)}. Give the reduce <span className="font-mono">writes</span> to see
+          the findings here.
+        </p>
       ),
     );
   }

@@ -1032,7 +1032,7 @@ export interface components {
             install_url: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1297,10 +1297,14 @@ export interface components {
         };
         /**
          * ReduceNode
-         * @description Combines the outputs of the map `from`, which runs before it, in item order.
+         * @description Combines the outputs of the map or parallel `from`, which runs before it: a map's items in
+         *     item order, a parallel's completed branches in branch order.
          *
          *     `concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON
-         *     array `[{"item": …, "output": …}]` (data, never instructions).
+         *     array `[{"item": …, "output": …}]` (data, never instructions; a branch's item is its id).
+         *     `dedupe` and `vote` (4.5) merge findings reports with no model: one finding per issue, with
+         *     the highest severity, the sources that reported it and a confidence; `vote` keeps only the
+         *     issues `min_votes` sources reported. Their output is a findings report.
          */
         ReduceNode: {
             /**
@@ -1312,14 +1316,14 @@ export interface components {
             id: string;
             /**
              * From
-             * @description The map whose outputs are combined.
+             * @description The map or parallel whose outputs are combined.
              */
             from: string;
             /**
              * Strategy
              * @enum {string}
              */
-            strategy: "concat" | "agent";
+            strategy: "concat" | "agent" | "dedupe" | "vote";
             /**
              * Separator
              * @description `concat` only: what goes between outputs (default two newlines).
@@ -1327,6 +1331,11 @@ export interface components {
             separator?: string | null;
             /** @description `agent` only, and required. */
             agent?: components["schemas"]["ReduceAgent"] | null;
+            /**
+             * Min Votes
+             * @description `vote` only: how many sources must report an issue to keep it (default a majority of the sources that completed).
+             */
+            min_votes?: number | null;
             /**
              * Writes
              * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.

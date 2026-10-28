@@ -123,6 +123,11 @@ export function formatTokens(n: number): string {
   return numberFormat({ notation: "compact", maximumFractionDigits: 1 }).format(n);
 }
 
+/** A share from 0 to 1 as a whole percentage ("67%"). */
+export function formatPercent(share: number): string {
+  return numberFormat({ style: "percent", maximumFractionDigits: 0 }).format(share);
+}
+
 /** A count in full ("12,345"). */
 export function formatCount(n: number): string {
   return numberFormat().format(n);
