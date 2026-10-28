@@ -54,7 +54,7 @@ Tech-stack choices that apply: FastAPI + Pydantic v2 (template parameters export
 - Approval cards with editable artifacts: 2.6. This phase only adds approve/reject buttons.
 - A full start screen with provider picker and blank canvas: 4.8.
 - Writers inside `map` (one branch per module): needs the integration branch from 5.3. One writer after the reduce commits all pages.
-- Saved user templates and template versioning: 4.7 / 8.9. Templates here are code.
+- Saved user templates and template versioning: 5.7 / 9.9. Templates here are code.
 - Regenerating or updating existing docs incrementally: later, if needed.
 
 ## Decisions

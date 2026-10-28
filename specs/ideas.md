@@ -49,11 +49,11 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 - **Status:** 💡 Raw
 - **Added:** 2026-10-23
-- **Problem:** Repos drift: dependencies get outdated, security advisories pile up, deprecated APIs and syntax remain, lint debt grows. The audit template (4.7) reports once, but nothing keeps a repo healthy over time.
+- **Problem:** Repos drift: dependencies get outdated, security advisories pile up, deprecated APIs and syntax remain, lint debt grows. The audit template (4.6) reports once, but nothing keeps a repo healthy over time.
 - **Idea:** A "Heal repo" template, or an agent run on a schedule. It scans for package updates, vulnerabilities (CVEs, secrets) and outdated or deprecated syntax. It groups and ranks the findings, then opens issues for things that need a human decision and fix PRs (behind a gate) for safe fixes, such as a dependency bump with passing tests or an automated syntax migration. It avoids duplicate issues and PRs across runs.
-- **Already covered:** 4.4 deterministic tool nodes (linter, dependency scanner, secret scanner), 4.7 the read-only "Audit codebase" template, and 6.7 turning selected audit findings into fix PRs. Missing: scheduled or recurring triggers (today runs start only manually or from a Jira or GitHub webhook), a `github` tool to create issues, package-update detection and fixes, and dedupe against existing issues and PRs or Dependabot.
+- **Already covered:** 4.4 deterministic tool nodes (linter, dependency scanner, secret scanner), 4.6 the read-only "Audit codebase" template, and 6.7 turning selected audit findings into fix PRs. Missing: scheduled or recurring triggers (today runs start only manually or from a Jira or GitHub webhook), a `github` tool to create issues, package-update detection and fixes, and dedupe against existing issues and PRs or Dependabot.
 - **Open questions:** A schedule trigger (cron per repo) as its own phase? Does creating an issue go through a gate (the mission lists push, PR, repo creation and Jira changes)? Should it work alongside Dependabot/Renovate or replace them? How do we keep it from flooding a repo with PRs (batching, budget, max open PRs)?
-- **Links:** roadmap 4.4, 4.7, 6.7, 7.3, 7.6
+- **Links:** roadmap 4.4, 4.6, 6.7, 7.3, 7.6
 
 ### Upload a Markdown file instead of writing definitions by hand
 

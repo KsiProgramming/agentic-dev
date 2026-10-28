@@ -1,0 +1,21 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Bad CEL",
+  "root": {
+    "type": "router",
+    "id": "kind",
+    "routes": [
+      {
+        "id": "bug",
+        "when": "last ==",
+        "then": {
+          "type": "agent",
+          "id": "fix_plan",
+          "role": "Writer",
+          "instructions": "Go."
+        }
+      }
+    ]
+  }
+}

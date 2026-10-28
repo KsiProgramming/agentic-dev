@@ -4,8 +4,9 @@
  * kind of option shows an error instead of a form that silently drops it.
  *
  * Form values are strings and booleans (what inputs hold). `toZod` checks them against the
- * schema's limits and turns them into the template's `parameters`: a list is one item per line,
- * and an empty optional field is left out, so the server applies its default.
+ * schema's limits and turns them into the template's `parameters`: a list is one item per line
+ * (a list of choices too, one checked option per line), a whole number is a number, and an empty
+ * optional field is left out, so the server applies its default.
  */
 import { z } from "zod";
 
@@ -34,10 +35,19 @@ export type FieldSpec =
       itemMaxLength?: number;
     })
   | (Common & { kind: "enum"; default?: string; options: string[] })
+  /** A list of choices (`array` of `enum`): one checkbox per option. */
+  | (Common & {
+      kind: "enum-list";
+      default?: string[];
+      options: string[];
+      minItems?: number;
+      maxItems?: number;
+    })
+  | (Common & { kind: "integer"; default?: number; minimum?: number; maximum?: number })
   | (Common & { kind: "boolean"; default?: boolean });
 
 export type FormValues = Record<string, string | boolean>;
-export type Parameters = Record<string, string | string[] | boolean>;
+export type Parameters = Record<string, string | string[] | number | boolean>;
 
 /** Above this many characters a string option is edited in a textarea. */
 const MULTILINE_FROM = 200;
@@ -108,10 +118,32 @@ function field(name: string, raw: unknown, required: boolean): FieldSpec | strin
         kind: "boolean",
         default: typeof fallback === "boolean" ? fallback : undefined,
       };
+    case "integer":
+      return {
+        ...common,
+        kind: "integer",
+        default: typeof fallback === "number" ? fallback : undefined,
+        minimum: num(property.minimum),
+        maximum: num(property.maximum),
+      };
     case "array": {
       const items = property.items;
       if (!isObject(items) || items.type !== "string")
         return `option ${name} is not a list of text`;
+      if (Array.isArray(items.enum)) {
+        const options = items.enum.filter((o): o is string => typeof o === "string");
+        if (options.length !== items.enum.length) return `option ${name} has non-text choices`;
+        return {
+          ...common,
+          kind: "enum-list",
+          options,
+          default: Array.isArray(fallback)
+            ? fallback.filter((v): v is string => typeof v === "string")
+            : undefined,
+          minItems: num(property.minItems),
+          maxItems: num(property.maxItems),
+        };
+      }
       return {
         ...common,
         kind: "string-list",
@@ -151,7 +183,10 @@ export function defaultValues(fields: FieldSpec[]): FormValues {
         case "boolean":
           return [f.name, f.default ?? false];
         case "string-list":
+        case "enum-list":
           return [f.name, (f.default ?? []).join("\n")];
+        case "integer":
+          return [f.name, f.default === undefined ? "" : String(f.default)];
         default:
           return [f.name, f.default ?? ""];
       }
@@ -213,6 +248,43 @@ function listField(f: Extract<FieldSpec, { kind: "string-list" }>) {
   });
 }
 
+function enumListField(f: Extract<FieldSpec, { kind: "enum-list" }>) {
+  return z.string().superRefine((value, ctx) => {
+    const picked = listItems(value);
+    const min = f.minItems ?? (f.required ? 1 : 0);
+    if (picked.length < min) {
+      ctx.addIssue({
+        code: "custom",
+        message: min === 1 ? "Pick at least one." : `Pick at least ${min}.`,
+      });
+    }
+    if (f.maxItems !== undefined && picked.length > f.maxItems) {
+      ctx.addIssue({ code: "custom", message: `Pick at most ${f.maxItems}.` });
+    }
+  });
+}
+
+function integerField(f: Extract<FieldSpec, { kind: "integer" }>) {
+  return z.string().superRefine((value, ctx) => {
+    const text = value.trim();
+    if (text === "") {
+      if (f.required) ctx.addIssue({ code: "custom", message: `${f.label} is required.` });
+      return;
+    }
+    const n = Number(text);
+    if (!/^-?\d+$/.test(text) || !Number.isSafeInteger(n)) {
+      ctx.addIssue({ code: "custom", message: "Enter a whole number." });
+      return;
+    }
+    if (f.minimum !== undefined && n < f.minimum) {
+      ctx.addIssue({ code: "custom", message: `Use ${f.minimum} or more.` });
+    }
+    if (f.maximum !== undefined && n > f.maximum) {
+      ctx.addIssue({ code: "custom", message: `Use ${f.maximum} or less.` });
+    }
+  });
+}
+
 /** Checks the form's values against the schema's limits (`toParameters` then turns them into
  * the template's `parameters`). */
 export function toZod(fields: FieldSpec[]) {
@@ -224,6 +296,12 @@ export function toZod(fields: FieldSpec[]) {
         break;
       case "string-list":
         shape[f.name] = listField(f);
+        break;
+      case "enum-list":
+        shape[f.name] = enumListField(f);
+        break;
+      case "integer":
+        shape[f.name] = integerField(f);
         break;
       case "enum":
         shape[f.name] = f.required
@@ -251,6 +329,13 @@ export function toParameters(fields: FieldSpec[], values: FormValues): Parameter
     } else if (f.kind === "string-list") {
       const items = listItems(String(value ?? ""));
       if (items.length > 0) parameters[f.name] = items;
+    } else if (f.kind === "enum-list") {
+      // Every option a template offers, in its order: unchecking them all is a choice too.
+      const picked = new Set(listItems(String(value ?? "")));
+      parameters[f.name] = f.options.filter((o) => picked.has(o));
+    } else if (f.kind === "integer") {
+      const text = String(value ?? "").trim();
+      if (text !== "") parameters[f.name] = Number(text);
     } else {
       const text = String(value ?? "").trim();
       if (text !== "") parameters[f.name] = text;

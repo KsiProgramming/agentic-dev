@@ -5,7 +5,7 @@ Branch: plan/4.4-deterministic-tool-nodes
 
 ## Context
 
-The audit flow (4.7) needs facts an agent cannot be trusted to invent: lint errors, known-vulnerable dependencies and leaked secrets. Deterministic scanners produce them cheaply and the same way every time; specialist agents then judge, explain and prioritise them. 4.4 adds those scanners as platform tools, so a `tool` node (no model) runs one and its output feeds an agent.
+The audit flow (4.6) needs facts an agent cannot be trusted to invent: lint errors, known-vulnerable dependencies and leaked secrets. Deterministic scanners produce them cheaply and the same way every time; specialist agents then judge, explain and prioritise them. 4.4 adds those scanners as platform tools, so a `tool` node (no model) runs one and its output feeds an agent.
 
 It builds on what is done:
 
@@ -14,7 +14,7 @@ It builds on what is done:
 - 4.2 typed ports: the findings shape is a JSON Schema the agent's `input_schema` can require.
 - 4.3 run artifacts: a scan `writes: lint.json`, a specialist agent `reads` it.
 
-It unblocks 4.5 (`reduce` dedupe and vote need one findings shape with a stable fingerprint), 4.7 (the "Audit codebase" template) and 6.7 (fix selected findings).
+It unblocks 4.5 (`reduce` dedupe and vote need one findings shape with a stable fingerprint), 4.6 (the "Audit codebase" template) and 6.7 (fix selected findings).
 
 Principles that drive it (mission):
 
@@ -73,7 +73,7 @@ Principles that drive it (mission):
 ### Out of scope
 
 - Merging duplicate findings across scanners, voting and confidence: 4.5.
-- The "Audit codebase" template and its readable report: 4.7. Choosing the checks when a run starts (a "which checks" input in the New run sheet) needs template inputs and comes with it. Until then, the choice lives in the workflow.
+- The "Audit codebase" template and its readable report: 4.6. Choosing the checks when a run starts (a "which checks" input in the New run sheet) needs template inputs and comes with it. Until then, the choice lives in the workflow.
 - Picking checks by drag and drop: the canvas palette (5.3). The Architect choosing checks from a repo profile: 9.1 and 9.2.
 - Fixing findings or opening PRs from them: 6.7.
 - Running the repo's own linter when we do not ship it: ESLint with the repo's plugins (it needs `node_modules`), golangci-lint, Checkstyle, Semgrep, hadolint and type checkers. Such a module is reported as skipped, not linted generically. A team's own linter comes as a plugin node: 10.1.
@@ -88,7 +88,7 @@ Principles that drive it (mission):
 | Secret scanner | gitleaks, with `--redact`, working tree only | A single binary with a maintained rule set. Redacting in the tool and again in our normaliser keeps the value out of events, artifacts and logs (principle 5). |
 | Dependency scanner | osv-scanner, offline, with its database baked into the sandbox image | The sandbox has no network at run time (1.1). OSV covers many ecosystems from lockfiles. The database age is shown (`db_as_of`), as with `PRICES_AS_OF`. |
 | Where they run | In the run's sandbox, by the new `scan` MCP server through `sandbox.exec` | The same isolation and routing as `repo.*`, with no new sandbox plumbing. Separate sidecar images wait for plugin nodes (10.1). |
-| Output | One normalised `FindingsReport` as the tool's structured `data`, with a stable `fingerprint` | Typed ports, artifacts, 4.5 dedupe and 4.7 all read one shape. Each tool's own JSON stays inside the server. |
+| Output | One normalised `FindingsReport` as the tool's structured `data`, with a stable `fingerprint` | Typed ports, artifacts, 4.5 dedupe and 4.6 all read one shape. Each tool's own JSON stays inside the server. |
 | Severity in the UI | An icon and a text label in neutral colours, never a status colour | Colour means status only (design system rule 2). |
 | Who chooses the checks | The workflow's author: one tool per kind of check, and `linters` is an explicit list or `"auto"` | Orchestration is open, never a fixed menu (mission). A run does only what its spec says. |
 | What `auto` runs | The linter each module's stack and config call for. A linter we cannot run offline is reported as skipped, never replaced | A generic linter on a repo that chose another one gives findings against rules the team never chose. The report's `checks` say what was detected and why. |

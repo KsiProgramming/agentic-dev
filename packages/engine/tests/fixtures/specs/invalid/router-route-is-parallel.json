@@ -1,0 +1,34 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Route is a parallel",
+  "root": {
+    "type": "router",
+    "id": "kind",
+    "routes": [
+      {
+        "id": "both",
+        "when": "true",
+        "then": {
+          "type": "parallel",
+          "id": "review",
+          "join": "all",
+          "branches": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "Writer",
+              "instructions": "Go."
+            },
+            {
+              "type": "agent",
+              "id": "b",
+              "role": "Writer",
+              "instructions": "Go."
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -32,6 +32,25 @@ INVALID: dict[str, Rejection] = {
         (), "value_error", "writes 'findings.json' inside map 'each'"
     ),
     "unknown-node-type": Rejection(("root",), "union_tag_invalid"),
+    "router-mixed-modes": Rejection(
+        ("root", "router"), "value_error", "route 'bug' has `when`, but a classifier chooses"
+    ),
+    "router-bad-cel": Rejection((), "value_error", "route 'bug': invalid when: syntax error"),
+    "router-route-is-parallel": Rejection(
+        (), "value_error", "route 'both' is parallel 'review'; a route is one agent, tool or"
+    ),
+    "router-artifact-one-route": Rejection(
+        (), "value_error", "reads 'report.md', which no node writes before it"
+    ),
+    "router-writer-in-map": Rejection(
+        (), "value_error", "writer 'writer' at root.body.routes[0].then cannot be inside a map"
+    ),
+    "parallel-reduce-writes": Rejection(
+        (), "value_error", "writing reduce 'inner_merge' at root.branches[1].steps[1] cannot be"
+    ),
+    "reduce-from-inside-branch": Rejection(
+        (), "value_error", "`from` 'inner' runs inside root.steps[0].branches[1], which the reduce"
+    ),
     "missing-instructions": Rejection(("root", "agent", "instructions"), "missing"),
     "extra-key": Rejection(("root", "agent", "temprature"), "extra_forbidden"),
     "duplicate-node-id": Rejection((), "value_error", "'writer' at root.steps[1].steps[0]"),
@@ -198,6 +217,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "map",
         "reduce",
         "parallel",
+        "router",
     }
     assert {ref["$ref"] for ref in root["oneOf"]} == {
         "#/$defs/AgentNode",
@@ -208,6 +228,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "#/$defs/MapNode",
         "#/$defs/ReduceNode",
         "#/$defs/ParallelNode",
+        "#/$defs/RouterNode",
     }
     loop = schema["$defs"]["LoopNode"]["properties"]["max_iterations"]
     assert (loop["minimum"], loop["maximum"]) == (1, 5)

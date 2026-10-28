@@ -1,13 +1,14 @@
 import { parseArtifact, parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
 import { parseChanges, parseEdits, type FileChange, type FileEdit } from "./gates";
+import type { SpecParent } from "./spec-parents";
 import type { RunEvent } from "./types";
 
 export type { TokenUsage } from "./cost";
 
 /**
- * The run as a story: one step per node in run order, map items, parallel branches and loop
- * iterations nested inside their node, and inside each step its turns. Streamed `text_delta` chunks are merged into
+ * The run as a story: one step per node in run order, map items, parallel branches, loop
+ * iterations and a router's route nested inside their node, and inside each step its turns. Streamed `text_delta` chunks are merged into
  * one growing message per agent turn, and `reasoning_delta` chunks into one reasoning turn; a tool
  * call and its result form one tool turn. Payloads are data: nothing here is ever rendered as HTML.
  */
@@ -93,6 +94,20 @@ export interface Step {
   artifactsRead: ArtifactVersion[];
   /** What a `dedupe` or `vote` reduce merged (4.5): its `node_completed`'s `merged`. */
   merged: MergeCounts | null;
+  /** Set for a router node (4.6): its routes, the one it took and why, and that route's steps. */
+  router: RouterInfo | null;
+}
+
+export interface RouterInfo {
+  /** The route ids it could take, `default` last when it has one (its `node_started`). */
+  routes: string[];
+  mode: "rule" | "classifier";
+  /** The route it took (`route_chosen`), or `null` while it chooses or if it could not. */
+  chosen: string | null;
+  /** Why: the condition that held, `no route matched`, or the classifier's reason. */
+  reason: string | null;
+  /** The steps of the route it took. */
+  steps: Step[];
 }
 
 export interface MergeCounts {
@@ -256,6 +271,7 @@ function newStep(id: string, at: string): Step {
     artifactsWritten: [],
     artifactsRead: [],
     merged: null,
+    router: null,
   };
 }
 
@@ -273,8 +289,8 @@ export function safePullRequestUrl(url: unknown): string | null {
   return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(url) ? url : null;
 }
 
-/** Where the events of one level go: the run's top level, a loop iteration, a map item or a
- * parallel branch. */
+/** Where the events of one level go: the run's top level, a loop iteration, a map item, a
+ * parallel branch or a router's route. */
 interface Scope {
   steps: Step[];
 }
@@ -291,9 +307,16 @@ class Builder {
   };
   /** When the event before the current one was written. */
   private lastAt: string | null = null;
-  /** The loops, maps and parallels that have started and not ended yet, innermost last. */
+  /** The loops, maps, parallels and routers that have started and not ended yet, innermost
+   * last. */
   private open: Step[] = [];
   private seen = new Set<number>();
+  /** The `item` and `branch` tags each step's events carry: a router in a map runs once per
+   * item, under the same id. */
+  private tags = new WeakMap<Step, { item: number | null; branch: number | null }>();
+
+  /** `parents`: each node's container from the run's spec (`specParents`), when it is known. */
+  constructor(private readonly parents: ReadonlyMap<string, SpecParent> | null = null) {}
 
   add(event: RunEvent) {
     if (this.seen.has(event.seq)) return;
@@ -328,7 +351,7 @@ class Builder {
     // Events a loop, map or parallel writes about itself.
     switch (event.type) {
       case "loop_iteration_started": {
-        const loop = this.container(nodeId, at);
+        const loop = this.container(nodeId, at, item, branch);
         loop.iterations ??= [];
         loop.iterations.push({
           index: num(payload.iteration) ?? loop.iterations.length + 1,
@@ -338,14 +361,14 @@ class Builder {
         return;
       }
       case "loop_condition_evaluated": {
-        const loop = this.container(nodeId, at);
+        const loop = this.container(nodeId, at, item, branch);
         const iteration = loop.iterations?.at(-1);
         if (iteration && typeof payload.result === "boolean")
           iteration.conditionMet = payload.result;
         return;
       }
       case "map_item_started": {
-        const map = this.container(nodeId, at);
+        const map = this.container(nodeId, at, item, branch);
         map.items ??= [];
         const index = num(payload.index) ?? map.items.length;
         const existing = map.items.find((i) => i.index === index);
@@ -367,7 +390,7 @@ class Builder {
         return;
       }
       case "map_item_completed": {
-        const map = this.container(nodeId, at);
+        const map = this.container(nodeId, at, item, branch);
         const entry = map.items?.find((i) => i.index === num(payload.index));
         if (entry) {
           entry.status = (str(payload.status) as StepStatus | null) ?? "completed";
@@ -377,7 +400,7 @@ class Builder {
         return;
       }
       case "parallel_branch_started": {
-        const parallel = this.container(nodeId, at);
+        const parallel = this.container(nodeId, at, item, branch);
         parallel.branches ??= [];
         const index = num(payload.index) ?? parallel.branches.length;
         const existing = parallel.branches.find((b) => b.index === index);
@@ -399,7 +422,7 @@ class Builder {
         return;
       }
       case "parallel_branch_completed": {
-        const parallel = this.container(nodeId, at);
+        const parallel = this.container(nodeId, at, item, branch);
         const entry = parallel.branches?.find((b) => b.index === num(payload.index));
         if (entry) {
           entry.status = (str(payload.status) as StepStatus | null) ?? "completed";
@@ -421,12 +444,24 @@ class Builder {
       } else {
         step = newStep(nodeId, at);
         scope.steps.push(step);
+        this.tags.set(step, { item, branch });
       }
       if (payload.items !== undefined) {
         step.items ??= [];
         step.itemCount = num(payload.items);
       }
       if (payload.branches !== undefined) step.branches ??= [];
+      if (Array.isArray(payload.routes)) {
+        // A router: the route it takes runs inside it. Run again, it chooses afresh.
+        step.router = {
+          routes: payload.routes.filter((r): r is string => typeof r === "string"),
+          mode: payload.mode === "classifier" ? "classifier" : "rule",
+          chosen: null,
+          reason: null,
+          steps: [],
+        };
+        if (!this.open.includes(step)) this.open.push(step);
+      }
       // A step run again reads (and writes) afresh.
       step.artifactsRead = parseArtifacts(payload.reads);
       step.artifactsWritten = [];
@@ -436,6 +471,7 @@ class Builder {
     step ??= (() => {
       const created = newStep(nodeId, at);
       scope.steps.push(created);
+      this.tags.set(created, { item, branch });
       return created;
     })();
 
@@ -449,7 +485,14 @@ class Builder {
         step.stopReason = str(payload.stop_reason);
         step.port = parsePort(payload.port);
         step.merged = parseMerged(payload.merged);
+        if (step.router) step.router.chosen ??= str(payload.route);
         this.open = this.open.filter((s) => s !== step);
+        return;
+      case "route_chosen":
+        if (step.router) {
+          step.router.chosen = str(payload.route);
+          step.router.reason = str(payload.reason);
+        }
         return;
       case "gate_waiting":
         step.status = "waiting";
@@ -545,29 +588,60 @@ class Builder {
     }
   }
 
-  /** The loop or map `nodeId` at the current level, opened if it is not open yet. */
-  private container(nodeId: string, at: string): Step {
-    const open = this.open.find((s) => s.id === nodeId);
+  /** The loop, map or parallel `nodeId` whose events carry `item` and `branch`, opened if it
+   * is not open yet. */
+  private container(nodeId: string, at: string, item: number | null, branch: number | null): Step {
+    const open = this.findOpen(nodeId, item);
     if (open) return open;
-    const scope = this.scopeFor(nodeId, null, null);
+    const scope = this.scopeFor(nodeId, item, branch);
     let step = scope.steps.find((s) => s.id === nodeId);
     if (!step) {
       step = newStep(nodeId, at);
       scope.steps.push(step);
+      this.tags.set(step, { item, branch });
     }
     this.open.push(step);
     return step;
   }
 
+  /** The innermost open container `nodeId` whose events carry `item` (any, without one). */
+  private findOpen(nodeId: string, item: number | null): Step | undefined {
+    return this.open.findLast(
+      (s) => s.id === nodeId && (item === null || (this.tags.get(s)?.item ?? null) === item),
+    );
+  }
+
   /**
-   * Where a node's events go. Events tagged with a map `item` go to that item of the innermost
-   * open map, those tagged with a `branch` to that branch of the innermost open parallel; others
-   * go to the current iteration of the innermost open loop, or the top level.
+   * Where a node's events go. With the spec, into the branch, item, iteration or route its node
+   * is in. Without it (or before that container started), events tagged with a map `item` go to
+   * that item of the innermost open map, those tagged with a `branch` to that branch of the
+   * innermost open parallel, those carrying the innermost open router's own tags to its route;
+   * others go to the current iteration of the innermost open loop, or the top level.
    */
   private scopeFor(nodeId: string, item: number | null, branch: number | null): Scope {
+    const parent = this.parents?.get(nodeId);
+    const known = parent ? this.findOpen(parent.container, item) : undefined;
+    if (parent && known) {
+      const scope =
+        parent.kind === "parallel"
+          ? known.branches?.find((e) => e.index === parent.branch)
+          : parent.kind === "map"
+            ? known.items?.find((e) => e.index === item)
+            : parent.kind === "loop"
+              ? known.iterations?.at(-1)
+              : known.router;
+      if (scope) return scope;
+    }
     for (let i = this.open.length - 1; i >= 0; i--) {
       const container = this.open[i]!;
       if (container.id === nodeId) continue;
+      if (container.router) {
+        const tags = this.tags.get(container);
+        if ((tags?.item ?? null) === item && (tags?.branch ?? null) === branch) {
+          return container.router;
+        }
+        continue;
+      }
       if (item !== null && container.items) {
         const entry = container.items.find((e) => e.index === item);
         if (entry) return entry;
@@ -621,6 +695,7 @@ class Builder {
           step.endedAt ??= at;
         }
         for (const iteration of step.iterations ?? []) visit(iteration.steps);
+        if (step.router) visit(step.router.steps);
         for (const entry of [...(step.items ?? []), ...(step.branches ?? [])]) {
           if (entry.status === "running") {
             entry.status = status;
@@ -635,7 +710,6 @@ class Builder {
   }
 }
 
-/** The timeline of a run's events, given in `seq` order. Duplicate `seq`s are ignored. */
 /** The call's `description` argument, trimmed to one line; `null` when there is none. */
 function intentOf(args: unknown): string | null {
   if (typeof args !== "object" || args === null || Array.isArray(args)) return null;
@@ -645,8 +719,13 @@ function intentOf(args: unknown): string | null {
   return line || null;
 }
 
-export function buildTimeline(events: readonly RunEvent[]): Timeline {
-  const builder = new Builder();
+/** The timeline of a run's events, given in `seq` order. Duplicate `seq`s are ignored. With
+ * `parents` (from the run's spec, `specParents`), nested nodes are placed by their spec. */
+export function buildTimeline(
+  events: readonly RunEvent[],
+  parents: ReadonlyMap<string, SpecParent> | null = null,
+): Timeline {
+  const builder = new Builder(parents);
   for (const event of events) builder.add(event);
   return builder.timeline;
 }
@@ -702,9 +781,11 @@ export function foldDeltas<E extends RunEvent>(events: readonly E[]): RawRow<E>[
   return rows;
 }
 
-/** A step's usage with that of its map items, branches and loop iterations: what the node cost. */
+/** A step's usage with that of its map items, branches, loop iterations and route: what the
+ * node cost. */
 export function stepUsage(step: Step): TokenUsage | null {
   let total = step.usage;
+  if (step.router) total = addUsage(total, stepsUsage(step.router.steps));
   for (const item of step.items ?? []) total = addUsage(total, stepsUsage(item.steps));
   for (const branch of step.branches ?? []) total = addUsage(total, stepsUsage(branch.steps));
   for (const iteration of step.iterations ?? []) {

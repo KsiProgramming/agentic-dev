@@ -226,6 +226,7 @@
               "map": "#/$defs/MapNode",
               "parallel": "#/$defs/ParallelNode",
               "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
               "sequence": "#/$defs/SequenceNode",
               "tool": "#/$defs/ToolNode"
             },
@@ -255,6 +256,9 @@
             },
             {
               "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
             }
           ],
           "title": "Body"
@@ -308,6 +312,7 @@
               "map": "#/$defs/MapNode",
               "parallel": "#/$defs/ParallelNode",
               "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
               "sequence": "#/$defs/SequenceNode",
               "tool": "#/$defs/ToolNode"
             },
@@ -337,6 +342,9 @@
             },
             {
               "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
             }
           ],
           "title": "Body"
@@ -379,7 +387,7 @@
     },
     "ParallelNode": {
       "additionalProperties": false,
-      "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. Its output is the completed branches'\noutputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the\nbranch, and it holds no gate, writer or publisher. Every agent in the branches counts toward\nthe run's `agents_spawned` limit when the parallel starts.",
+      "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. `settled` (4.6) never decides early: it\nwaits for every branch to end and completes if at least one completed, so one failed branch\ndoes not cancel the others. Its output is the completed branches' outputs in branch order.\nA branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a\nreduce that writes nothing), its id names the branch, and it holds no gate, writer or\npublisher. Every agent in the branches counts toward the run's `agents_spawned` limit when\nthe parallel starts.",
       "properties": {
         "branches": {
           "items": {
@@ -391,6 +399,7 @@
                 "map": "#/$defs/MapNode",
                 "parallel": "#/$defs/ParallelNode",
                 "reduce": "#/$defs/ReduceNode",
+                "router": "#/$defs/RouterNode",
                 "sequence": "#/$defs/SequenceNode",
                 "tool": "#/$defs/ToolNode"
               },
@@ -420,6 +429,9 @@
               },
               {
                 "$ref": "#/$defs/ParallelNode"
+              },
+              {
+                "$ref": "#/$defs/RouterNode"
               }
             ]
           },
@@ -437,7 +449,8 @@
           "enum": [
             "all",
             "any",
-            "quorum"
+            "quorum",
+            "settled"
           ],
           "title": "Join",
           "type": "string"
@@ -616,6 +629,244 @@
       "title": "ReduceNode",
       "type": "object"
     },
+    "Route": {
+      "additionalProperties": false,
+      "description": "One way a router can go: `then` runs when this route is chosen.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the route is for; a classifier is shown it to choose.",
+          "title": "Description"
+        },
+        "id": {
+          "description": "The route's name, shown in the console and the events.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "then": {
+          "description": "What runs on this route: one agent, tool or sequence node.",
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentNode",
+              "gate": "#/$defs/GateNode",
+              "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "parallel": "#/$defs/ParallelNode",
+              "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
+              "sequence": "#/$defs/SequenceNode",
+              "tool": "#/$defs/ToolNode"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentNode"
+            },
+            {
+              "$ref": "#/$defs/ToolNode"
+            },
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/SequenceNode"
+            },
+            {
+              "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
+            }
+          ],
+          "title": "Then"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rule mode, and required there: the CEL condition that picks this route.",
+          "examples": [
+            "artifacts[\"findings.json\"].findings.size() == 0"
+          ],
+          "title": "When"
+        }
+      },
+      "required": [
+        "id",
+        "then"
+      ],
+      "title": "Route",
+      "type": "object"
+    },
+    "RouterClassifier": {
+      "additionalProperties": false,
+      "description": "The agent that chooses a router's route (classifier mode), as for an `agent` node. It\nanswers with one of the router's route ids and a reason, through a typed output the engine\nmakes (`classifier_schema`).",
+      "properties": {
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        }
+      },
+      "required": [
+        "instructions"
+      ],
+      "title": "RouterClassifier",
+      "type": "object"
+    },
+    "RouterNode": {
+      "additionalProperties": false,
+      "description": "Runs exactly one of its routes, on the router's input, and outputs what that route outputs.\n\nIn rule mode every route has `when`, a CEL condition over `last` (the router's input),\n`results` and `artifacts` (as for a loop's `until`); the first route whose condition is true\nruns, else `default`. In classifier mode no route has `when`: one agent (`classifier`)\nchooses a route id, `default` included when there is one, and says why. A router with no\nmatching route and no `default` fails. The routes not taken never start. A route is one\n`agent`, `tool` or `sequence` node, and it may hold what the router's own place allows.",
+      "properties": {
+        "classifier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RouterClassifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Classifier mode: the agent that chooses the route."
+        },
+        "default": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "agent": "#/$defs/AgentNode",
+                  "gate": "#/$defs/GateNode",
+                  "loop": "#/$defs/LoopNode",
+                  "map": "#/$defs/MapNode",
+                  "parallel": "#/$defs/ParallelNode",
+                  "reduce": "#/$defs/ReduceNode",
+                  "router": "#/$defs/RouterNode",
+                  "sequence": "#/$defs/SequenceNode",
+                  "tool": "#/$defs/ToolNode"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AgentNode"
+                },
+                {
+                  "$ref": "#/$defs/ToolNode"
+                },
+                {
+                  "$ref": "#/$defs/GateNode"
+                },
+                {
+                  "$ref": "#/$defs/SequenceNode"
+                },
+                {
+                  "$ref": "#/$defs/LoopNode"
+                },
+                {
+                  "$ref": "#/$defs/MapNode"
+                },
+                {
+                  "$ref": "#/$defs/ReduceNode"
+                },
+                {
+                  "$ref": "#/$defs/ParallelNode"
+                },
+                {
+                  "$ref": "#/$defs/RouterNode"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What runs when no route is chosen.",
+          "title": "Default"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Routes",
+          "type": "array"
+        },
+        "type": {
+          "const": "router",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "routes"
+      ],
+      "title": "RouterNode",
+      "type": "object"
+    },
     "SequenceNode": {
       "additionalProperties": false,
       "description": "Runs its steps in order.",
@@ -635,6 +886,7 @@
                 "map": "#/$defs/MapNode",
                 "parallel": "#/$defs/ParallelNode",
                 "reduce": "#/$defs/ReduceNode",
+                "router": "#/$defs/RouterNode",
                 "sequence": "#/$defs/SequenceNode",
                 "tool": "#/$defs/ToolNode"
               },
@@ -664,6 +916,9 @@
               },
               {
                 "$ref": "#/$defs/ParallelNode"
+              },
+              {
+                "$ref": "#/$defs/RouterNode"
               }
             ]
           },
@@ -847,6 +1102,7 @@
           "map": "#/$defs/MapNode",
           "parallel": "#/$defs/ParallelNode",
           "reduce": "#/$defs/ReduceNode",
+          "router": "#/$defs/RouterNode",
           "sequence": "#/$defs/SequenceNode",
           "tool": "#/$defs/ToolNode"
         },
@@ -876,6 +1132,9 @@
         },
         {
           "$ref": "#/$defs/ParallelNode"
+        },
+        {
+          "$ref": "#/$defs/RouterNode"
         }
       ],
       "title": "Root"

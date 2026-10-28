@@ -29,8 +29,11 @@ function runningSteps(steps: Step[], where: (step: Step) => string, out: Running
     }
     for (const branch of step.branches ?? []) runningSteps(branch.steps, where, out);
     for (const iteration of step.iterations ?? []) runningSteps(iteration.steps, where, out);
-    // A map, parallel or loop is running while its children are; only leaf steps do the work.
-    if (step.status === "running" && !step.items && !step.branches && !step.iterations) {
+    if (step.router) runningSteps(step.router.steps, where, out);
+    // A map, parallel or loop is running while its children are; only leaf steps do the work. A
+    // router works itself while it chooses (its classifier), then its route does.
+    const container = step.items || step.branches || step.iterations || step.router?.chosen;
+    if (step.status === "running" && !container) {
       out.push({ step, where: where(step) });
     }
   }

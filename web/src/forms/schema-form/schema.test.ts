@@ -89,7 +89,7 @@ test("enums, booleans and required fields are supported", () => {
 });
 
 test.each([
-  [{ type: "object", properties: { n: { type: "integer" } } }, "unsupported type"],
+  [{ type: "object", properties: { n: { type: "number" } } }, "unsupported type"],
   [
     { type: "object", properties: { n: { anyOf: [{ type: "string" }, { type: "integer" }] } } },
     "several kinds",
@@ -163,4 +163,66 @@ test("a refused run's option errors are read by option name", () => {
     byField: {},
     rest: "unknown template 'x'",
   });
+});
+
+/** The parts of the audit template's options (`AuditParams`) that use a list of choices and a
+ * whole number. */
+const AUDIT = {
+  type: "object",
+  properties: {
+    checks: {
+      default: ["lint", "secrets", "security"],
+      items: { enum: ["lint", "secrets", "security"], type: "string" },
+      maxItems: 3,
+      minItems: 1,
+      title: "Checks",
+      type: "array",
+    },
+    reviewers: { default: 1, maximum: 3, minimum: 1, title: "Reviewers", type: "integer" },
+    report_model: {
+      anyOf: [{ enum: ["claude-opus-5-5", "claude-haiku-5-5"], type: "string" }, { type: "null" }],
+      default: null,
+      title: "Report Model",
+    },
+  },
+};
+
+test("a list of choices is checkboxes and a whole number is a number field", () => {
+  const fields = fieldsOf(AUDIT);
+
+  expect(fields.map((f) => [f.name, f.kind, f.required])).toEqual([
+    ["checks", "enum-list", false],
+    ["reviewers", "integer", false],
+    ["report_model", "enum", false],
+  ]);
+  expect(defaultValues(fields)).toEqual({
+    checks: "lint\nsecrets\nsecurity",
+    reviewers: "1",
+    report_model: "",
+  });
+});
+
+test("choices and whole numbers are checked and sent as a list and a number", () => {
+  const fields = fieldsOf(AUDIT);
+  const schema = toZod(fields);
+  const errors = (values: Record<string, string>) => {
+    const result = schema.safeParse({
+      checks: "lint",
+      reviewers: "1",
+      report_model: "",
+      ...values,
+    });
+    return result.success
+      ? []
+      : result.error.issues.map((i) => `${String(i.path[0])}: ${i.message}`);
+  };
+
+  expect(errors({})).toEqual([]);
+  expect(errors({ checks: "" })).toEqual(["checks: Pick at least one."]);
+  expect(errors({ reviewers: "4" })).toEqual(["reviewers: Use 3 or less."]);
+  expect(errors({ reviewers: "0" })).toEqual(["reviewers: Use 1 or more."]);
+  expect(errors({ reviewers: "1.5" })).toEqual(["reviewers: Enter a whole number."]);
+  expect(
+    toParameters(fields, { checks: "security\nlint", reviewers: " 2 ", report_model: "" }),
+  ).toEqual({ checks: ["lint", "security"], reviewers: 2 });
 });

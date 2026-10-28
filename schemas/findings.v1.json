@@ -4,7 +4,10 @@
       "enum": [
         "lint",
         "secret",
-        "dependency"
+        "dependency",
+        "security",
+        "tests",
+        "architecture"
       ],
       "type": "string"
     },
@@ -294,6 +297,7 @@
         "lint",
         "secrets",
         "dependencies",
+        "agent",
         "merged"
       ],
       "type": "string"

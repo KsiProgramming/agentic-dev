@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import docsRun from "../fixtures/docs-run.json";
 import docsSpec from "../fixtures/docs-run-spec.json";
 import { runEvent } from "../testing";
-import { buildTimeline } from "../timeline";
+import { buildTimeline, type Step } from "../timeline";
 import type { RunEvent } from "../types";
-import { focusStep, nodeStatuses } from "./node-status";
-import type { WorkflowSpec } from "./spec-graph";
+import { focusStep, nodeStatuses, routeStates } from "./node-status";
+import { routeNodeId, type WorkflowSpec } from "./spec-graph";
 
 const spec = docsSpec as WorkflowSpec;
 const events = docsRun as RunEvent[];
@@ -203,5 +203,91 @@ describe("a parallel", () => {
     expect(focused?.id).toBe("review");
     expect(focused?.branches?.map((b) => b.id)).toEqual(["slow"]);
     expect(focused?.branches?.[0]!.steps.map((s) => s.id)).toEqual(["slow"]);
+  });
+});
+
+describe("router statuses (4.6)", () => {
+  const agent = (id: string): WorkflowSpec["root"] => ({
+    type: "agent",
+    id,
+    role: "R",
+    instructions: "go",
+    tools: [],
+  });
+  const routed: WorkflowSpec = {
+    spec_version: "0",
+    id: "w",
+    name: "W",
+    root: {
+      type: "router",
+      id: "report_path",
+      routes: [
+        { id: "clean", when: "true", then: agent("clean_report") },
+        {
+          id: "fix_first",
+          when: "true",
+          then: { type: "sequence", id: "fix", steps: [agent("plan"), agent("fix_report")] },
+        },
+      ],
+      default: agent("standard_report"),
+    },
+  };
+
+  /** The router's step: started, with `chosen` and the steps of its route. */
+  function routerStep(chosen: string | null, routeSteps: RunEvent[] = []): Step {
+    const [step] = buildTimeline([event(1, "node_started", "report_path")]).steps;
+    const inner = buildTimeline(routeSteps).steps;
+    return {
+      ...step!,
+      router: {
+        routes: ["clean", "fix_first", "default"],
+        mode: "rule",
+        chosen,
+        reason: null,
+        steps: inner,
+      },
+    };
+  }
+
+  it("says the router is choosing until it chose, and nothing is skipped yet", () => {
+    const states = nodeStatuses(routed, [routerStep(null)]);
+    expect(states.get("report_path")).toEqual({ status: "running", summary: "Choosing a route" });
+    expect(states.get("plan")?.status).toBe("not_started");
+    expect([...routeStates(routed, [routerStep(null)]).values()].map((s) => s.status)).toEqual([
+      "not_started",
+      "not_started",
+      "not_started",
+    ]);
+  });
+
+  it("skips the routes not taken, and the taken route's nodes follow their steps", () => {
+    const steps = [routerStep("fix_first", [event(2, "node_started", "plan")])];
+    const states = nodeStatuses(routed, steps);
+    expect(states.get("report_path")?.summary).toBe("Routed to fix_first");
+    expect(states.get("plan")?.status).toBe("running");
+    expect(states.get("fix_report")?.status).toBe("not_started");
+    expect(states.get("clean_report")?.status).toBe("skipped");
+    expect(states.get("standard_report")?.status).toBe("skipped");
+    expect(states.has(routeNodeId("report_path", "clean"))).toBe(false);
+    const routes = routeStates(routed, steps);
+    expect(routes.get(routeNodeId("report_path", "clean"))?.status).toBe("skipped");
+    expect(routes.get(routeNodeId("report_path", "fix_first"))?.status).toBe("not_started");
+    expect(routes.get(routeNodeId("report_path", "default"))?.status).toBe("skipped");
+  });
+
+  it("keeps a route that any run took (a router in a map)", () => {
+    const steps = [routerStep("clean"), routerStep("default")];
+    const states = nodeStatuses(routed, steps);
+    expect(states.get("report_path")?.summary).toBe("Routed to clean, default");
+    expect(states.get("plan")?.status).toBe("skipped");
+    expect(states.get("standard_report")?.status).toBe("not_started");
+  });
+
+  it("finds a step that ran on a route", () => {
+    const steps = [routerStep("fix_first", [event(2, "node_started", "plan")])];
+    const focused = focusStep(steps, "plan");
+    expect(focused?.id).toBe("report_path");
+    expect(focused?.router?.steps.map((s) => s.id)).toEqual(["plan"]);
+    expect(focused?.turns).toEqual([]);
   });
 });

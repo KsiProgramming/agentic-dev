@@ -10,6 +10,7 @@ JSON pointers of what is wrong (`PortFailure`).
 import json
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from functools import lru_cache
 from typing import Literal, cast
 
 from jsonschema import Draft202012Validator
@@ -29,6 +30,7 @@ MAX_ERROR_TEXT = 500
 _MAX_MESSAGE = 200
 _DIALECT = "https://json-schema.org/draft/2020-12/schema"
 _FENCED = re.compile(r"```[a-zA-Z]*[ \t]*\r?\n(.*?)```", re.DOTALL)
+_LINE_OBJECT = re.compile(r"(?:^|\n)[ \t]*(\{)")
 
 type PortSide = Literal["input", "output"]
 
@@ -67,8 +69,17 @@ class PortFailure(BaseModel):
 
 def schema_problem(schema: Mapping[str, JsonValue]) -> str | None:
     """Why `schema` cannot be a port's schema; `None` if it can."""
-    if len(json.dumps(schema, separators=(",", ":"))) > MAX_SCHEMA_BYTES:
+    text = json.dumps(schema, separators=(",", ":"), sort_keys=True)
+    if len(text) > MAX_SCHEMA_BYTES:
         return f"it is larger than {MAX_SCHEMA_BYTES // 1024} KB"
+    return _schema_problem(text)
+
+
+@lru_cache(maxsize=256)
+def _schema_problem(text: str) -> str | None:
+    """`schema_problem` for a schema as JSON text. Checking a schema against the meta-schema is
+    slow, and the same schema (the findings report's) is on many nodes, so the answer is kept."""
+    schema = cast(dict[str, JsonValue], json.loads(text))
     dialect = schema.get("$schema")
     if dialect is not None and dialect != _DIALECT:
         return f"only JSON Schema 2020-12 is supported (`$schema` {_DIALECT!r})"
@@ -99,8 +110,10 @@ def check_value(schema: Mapping[str, JsonValue], value: JsonValue) -> list[PortE
 
 
 def parse_value(text: str) -> JsonValue:
-    """`text` as JSON, or the one fenced code block it holds as JSON (agents often fence their
-    answer). Raises `json.JSONDecodeError` for the text itself when neither parses."""
+    """`text` as JSON, the one fenced code block it holds as JSON (agents often fence their
+    answer), or the JSON object it ends with (`OUTPUT_SCHEMA_INSTRUCTION` asks an agent to end its
+    answer with one, and some say a sentence first). Raises `json.JSONDecodeError` for the text
+    itself when none parses."""
     try:
         return cast(JsonValue, json.loads(text))
     except json.JSONDecodeError as e:
@@ -110,7 +123,26 @@ def parse_value(text: str) -> JsonValue:
                 return cast(JsonValue, json.loads(blocks[0]))
             except json.JSONDecodeError:
                 pass
+        if (ending := _ending_object(text)) is not None:
+            return ending
         raise e
+
+
+def _ending_object(text: str) -> JsonValue | None:
+    """The JSON object `text` ends with, after other text: the first `{` starting a line that
+    decodes to the end of the text."""
+    body = text.rstrip()
+    if not body.endswith("}"):
+        return None
+    decoder = json.JSONDecoder()
+    for match in _LINE_OBJECT.finditer(body):
+        try:
+            value, end = decoder.raw_decode(body, match.start(1))
+        except json.JSONDecodeError:
+            continue
+        if end == len(body) and isinstance(value, dict):
+            return cast(JsonValue, value)
+    return None
 
 
 def check_port(

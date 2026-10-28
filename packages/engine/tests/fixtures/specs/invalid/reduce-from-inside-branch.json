@@ -1,0 +1,49 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Reduce outside the branch",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "checks",
+        "join": "all",
+        "branches": [
+          {
+            "type": "agent",
+            "id": "a",
+            "role": "Writer",
+            "instructions": "Go."
+          },
+          {
+            "type": "parallel",
+            "id": "inner",
+            "join": "all",
+            "branches": [
+              {
+                "type": "agent",
+                "id": "b",
+                "role": "Writer",
+                "instructions": "Go."
+              },
+              {
+                "type": "agent",
+                "id": "c",
+                "role": "Writer",
+                "instructions": "Go."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "reduce",
+        "id": "merge",
+        "from": "inner",
+        "strategy": "concat"
+      }
+    ]
+  }
+}

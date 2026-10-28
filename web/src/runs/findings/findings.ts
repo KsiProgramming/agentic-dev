@@ -22,7 +22,8 @@ export interface Finding {
   tool: string;
   rule: string;
   severity: Severity;
-  category: "lint" | "secret" | "dependency";
+  /** The scanners' kinds, then the agent reviews' (4.6). */
+  category: "lint" | "secret" | "dependency" | "security" | "tests" | "architecture";
   path: string;
   line?: number | null;
   end_line?: number | null;
@@ -59,7 +60,8 @@ export interface Check {
 }
 
 export interface FindingsReport {
-  scanner: "lint" | "secrets" | "dependencies" | "merged";
+  /** A `scan` tool, an agent's review (4.6), or a merge of several. */
+  scanner: "lint" | "secrets" | "dependencies" | "agent" | "merged";
   checks: Check[];
   findings: Finding[];
   counts: Partial<Record<Severity, number>>;
@@ -69,7 +71,7 @@ export interface FindingsReport {
   sources?: Source[] | null;
 }
 
-const SCANNERS = new Set(["lint", "secrets", "dependencies", "merged"]);
+const SCANNERS = new Set(["lint", "secrets", "dependencies", "agent", "merged"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -140,6 +142,7 @@ export const SCANNER_LABEL: Record<FindingsReport["scanner"], string> = {
   lint: "Lint",
   secrets: "Secrets",
   dependencies: "Dependencies",
+  agent: "Agent review",
   merged: "Merged",
 };
 

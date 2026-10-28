@@ -2,12 +2,43 @@
 
 import { Controls, ReactFlow } from "@xyflow/react";
 import { useTheme } from "next-themes";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { ErrorState, LoadingState } from "@/components/states";
 
 import type { Step } from "../timeline";
 import { GraphContext, NODE_TYPES } from "./graph-nodes";
-import { nodeStatuses } from "./node-status";
-import { specToGraph, type WorkflowSpec } from "./spec-graph";
+import { nodeStatuses, routeStates } from "./node-status";
+import { layoutSpec, type SpecGraph, type WorkflowSpec } from "./spec-graph";
+
+type Layout =
+  | { spec: WorkflowSpec; graph: SpecGraph; error: null }
+  | { spec: WorkflowSpec; graph: null; error: string };
+
+/** `spec` laid out by ELK (async), or why it could not be; `null` while it runs. `retry` lays
+ * it out again. */
+function useLayout(spec: WorkflowSpec): { layout: Layout | null; retry: () => void } {
+  const [layout, setLayout] = useState<Layout | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    layoutSpec(spec).then(
+      (graph) => live && setLayout({ spec, graph, error: null }),
+      (error: unknown) => live && setLayout({ spec, graph: null, error: String(error) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [spec, attempt]);
+  // A layout of an earlier spec is not this one's.
+  return {
+    layout: layout?.spec === spec ? layout : null,
+    retry: () => {
+      setLayout(null);
+      setAttempt((n) => n + 1);
+    },
+  };
+}
 
 /**
  * The run's workflow drawn read-only, each node coloured by its live status. Clicking a node (or
@@ -26,18 +57,28 @@ export function RunGraph({
   onOpen: (nodeId: string) => void;
 }) {
   // Laid out once per spec; new events only change the states the nodes read.
+  const { layout, retry } = useLayout(spec);
   const graph = useMemo(() => {
-    const { nodes, edges } = specToGraph(spec);
+    if (!layout?.graph) return null;
+    const { nodes, edges } = layout.graph;
     // React Flow turns pointer events off on a node that is neither selectable nor draggable:
     // the pane under it would take the click. Each node is a button of its own, so keep them.
     return {
       nodes: nodes.map((node) => ({ ...node, style: { pointerEvents: "all" as const } })),
       edges,
     };
-  }, [spec]);
-  const states = useMemo(() => nodeStatuses(spec, steps), [spec, steps]);
+  }, [layout]);
+  const states = useMemo(
+    () => new Map([...nodeStatuses(spec, steps), ...routeStates(spec, steps)]),
+    [spec, steps],
+  );
   const context = useMemo(() => ({ states, selected, open: onOpen }), [states, selected, onOpen]);
   const { resolvedTheme } = useTheme();
+
+  if (layout?.error) {
+    return <ErrorState message="Could not draw the workflow graph." onRetry={retry} />;
+  }
+  if (!graph) return <LoadingState label="Drawing the workflow graph…" />;
 
   return (
     <GraphContext value={context}>

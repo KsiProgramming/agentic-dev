@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLinkIcon, FileIcon, InboxIcon } from "lucide-react";
+import { CircleDashedIcon, ExternalLinkIcon, FileIcon, InboxIcon } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
 import { Duration } from "@/components/display";
@@ -20,7 +20,7 @@ import { ArtifactBody, ArtifactCards } from "../artifacts/artifact-cards";
 import { isFindingsReport } from "../findings/findings";
 import { FindingsView } from "../findings/findings-view";
 import type { NodeKind } from "../graph/spec-graph";
-import type { Step } from "../timeline";
+import type { RouterInfo, Step } from "../timeline";
 import { AgentMessage } from "./agent-message";
 import { GateDecision } from "./gate-decision";
 import { isLongOutput } from "./long-output";
@@ -159,6 +159,56 @@ function Children({
   );
 }
 
+/** The router's choice (4.6): the route it took and why, then every route, those not taken
+ * marked Skipped. Reasons are data: a rule's condition in mono, a classifier's words as text. */
+function RouteChoice({ step, router }: { step: Step; router: RouterInfo }) {
+  const { chosen, reason } = router;
+  return (
+    <section aria-label="Route" data-testid="route-choice" className="flex flex-col gap-2">
+      {chosen ? (
+        <p className="text-body">
+          Took route <span className="font-mono">{chosen}</span>
+        </p>
+      ) : (
+        <p className="text-body text-muted-foreground">
+          {step.status === "running" ? "Choosing a route…" : "No route was taken."}
+        </p>
+      )}
+      {chosen && reason ? (
+        router.mode === "classifier" ? (
+          <p className="text-meta text-muted-foreground">Why: {reason}</p>
+        ) : reason === "no route matched" ? (
+          <p className="text-meta text-muted-foreground">
+            No route&apos;s condition held, so it took the default.
+          </p>
+        ) : (
+          <p className="text-meta text-muted-foreground">
+            Its condition held: <span className="font-mono break-all">{reason}</span>
+          </p>
+        )
+      ) : null}
+      <ul aria-label="Routes" className="flex flex-col gap-1">
+        {router.routes.map((route) => (
+          <li key={route} className="flex min-w-0 items-center gap-2 px-2 py-1">
+            {route === chosen ? (
+              <StatusMarker status={step.status} small />
+            ) : (
+              <CircleDashedIcon
+                aria-hidden="true"
+                className="size-4 shrink-0 text-muted-foreground"
+              />
+            )}
+            <span className="min-w-0 truncate font-mono text-meta">{route}</span>
+            {route !== chosen && chosen ? (
+              <span className="text-caption text-muted-foreground">Skipped</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** A map's items added up: "3 items · 9 tool calls · 21s". */
 function MapTotals({ step }: { step: Step }) {
   const totals = mapTotals(step);
@@ -226,7 +276,10 @@ export function StepOutput({
   else if (step.error) parts.push(<ErrorLine key="error" error={step.error} />);
   if (step.gate) parts.push(<GateDecision key="gate" gate={step.gate} />);
   if (extra) parts.push(<div key="extra">{extra}</div>);
-  if (final && final.work.length > 0) {
+  if (step.router) parts.push(<RouteChoice key="route" step={step} router={step.router} />);
+  // A router's own turns are its classifier's: its answer is the choice above, its work is in
+  // the Activity tab.
+  if (final && final.work.length > 0 && !step.router) {
     // The work behind the answer, folded: one line above it.
     parts.push(
       <WorkBlock
@@ -237,7 +290,7 @@ export function StepOutput({
       />,
     );
   }
-  if (message && message.text.trim()) {
+  if (message && message.text.trim() && !step.router) {
     parts.push(
       <Answer
         key="answer"
@@ -264,8 +317,8 @@ export function StepOutput({
         <ArtifactBody key="merged" runId={runId} artifact={report} baseUrl={baseUrl} />
       ) : (
         <p key="merged" className="text-meta text-muted-foreground">
-          {stepOutline(step)}. Give the reduce <span className="font-mono">writes</span> to see
-          the findings here.
+          {stepOutline(step)}. Give the reduce <span className="font-mono">writes</span> to see the
+          findings here.
         </p>
       ),
     );

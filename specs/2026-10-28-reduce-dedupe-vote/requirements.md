@@ -5,7 +5,7 @@ Branch: plan/4.5-reduce-dedupe-vote
 
 ## Context
 
-The audit flow (4.7) gets findings from several sources: the 4.4 scanners (`scan.lint`, `scan.secrets`, `scan.dependencies`), often run as branches of a `parallel`, and specialist agents that restate or add findings. Today a `reduce` can only `concat` a map's outputs or hand them to an agent. Concatenating gives duplicates, and asking an agent to merge 1,000 findings costs tokens and is not reproducible. 4.5 adds two deterministic strategies that merge findings with no model call:
+The audit flow (4.6) gets findings from several sources: the 4.4 scanners (`scan.lint`, `scan.secrets`, `scan.dependencies`), often run as branches of a `parallel`, and specialist agents that restate or add findings. Today a `reduce` can only `concat` a map's outputs or hand them to an agent. Concatenating gives duplicates, and asking an agent to merge 1,000 findings costs tokens and is not reproducible. 4.5 adds two deterministic strategies that merge findings with no model call:
 
 - `dedupe`: one finding per issue, with the highest severity and a confidence.
 - `vote`: the same merge, keeping only the issues that enough sources reported.
@@ -18,7 +18,7 @@ It builds on what is done:
 - 4.3 run artifacts: a reduce already takes `writes` (`findings.json`).
 - 4.4 `FindingsReport` (`schemas/findings.v1.json`) with a stable `fingerprint`, which was made for this phase.
 
-It unblocks 4.7 (the "Audit codebase" template: findings.json plus report) and 6.7 (fix selected findings).
+It unblocks 4.6 (the "Audit codebase" template: findings.json plus report) and 6.7 (fix selected findings).
 
 Principles that drive it (mission):
 
@@ -60,7 +60,7 @@ Principles that drive it (mission):
 - Fuzzy matching (nearby lines, similar messages, different rule ids for the same issue): only the fingerprint or the exact fallback key groups findings. Later, if the audit shows it is needed.
 - Generic JSON dedupe with a CEL key, or reducing any other shape than findings.
 - `reduce` with `reads` (merging artifacts written anywhere in the run): sources are only the map or parallel in `from`.
-- New finding categories for agent findings (architecture, security review, tests): 4.7, with the audit template.
+- New finding categories for agent findings (architecture, security review, tests): 4.6, with the audit template.
 - Merging against findings of earlier runs, issues or PRs: later (see `specs/ideas.md`).
 - Weighting sources (a scanner counting more than an agent) and severity by vote: everyone counts once, the highest severity wins.
 

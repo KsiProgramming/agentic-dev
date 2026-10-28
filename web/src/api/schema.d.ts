@@ -1032,7 +1032,7 @@ export interface components {
             install_url: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1063,7 +1063,7 @@ export interface components {
             /** Id */
             id: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
             /**
              * Until
              * @description CEL condition checked after each iteration; true stops the loop.
@@ -1099,7 +1099,7 @@ export interface components {
              */
             over: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
             /** Max Concurrency */
             max_concurrency: number;
         };
@@ -1184,10 +1184,13 @@ export interface components {
          *     `join` says when the parallel is done: `all` once every branch completed, `any` once one
          *     did, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on
          *     the first branch that does not complete, the others once the join can no longer be met) and
-         *     the branches still running end `node_cancelled`. Its output is the completed branches'
-         *     outputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the
-         *     branch, and it holds no gate, writer or publisher. Every agent in the branches counts toward
-         *     the run's `agents_spawned` limit when the parallel starts.
+         *     the branches still running end `node_cancelled`. `settled` (4.6) never decides early: it
+         *     waits for every branch to end and completes if at least one completed, so one failed branch
+         *     does not cancel the others. Its output is the completed branches' outputs in branch order.
+         *     A branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a
+         *     reduce that writes nothing), its id names the branch, and it holds no gate, writer or
+         *     publisher. Every agent in the branches counts toward the run's `agents_spawned` limit when
+         *     the parallel starts.
          */
         ParallelNode: {
             /**
@@ -1198,12 +1201,12 @@ export interface components {
             /** Id */
             id: string;
             /** Branches */
-            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"])[];
+            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"])[];
             /**
              * Join
              * @enum {string}
              */
-            join: "all" | "any" | "quorum";
+            join: "all" | "any" | "quorum" | "settled";
             /**
              * Quorum
              * @description `quorum` only, and required: how many branches must complete.
@@ -1382,6 +1385,79 @@ export interface components {
              * @description USD the new run may spend. Unset: the workspace's default budget as it is now. From $0.01 to $1,000,000; unset is no budget.
              */
             budget_usd?: number | null;
+        };
+        /**
+         * Route
+         * @description One way a router can go: `then` runs when this route is chosen.
+         */
+        Route: {
+            /**
+             * Id
+             * @description The route's name, shown in the console and the events.
+             */
+            id: string;
+            /**
+             * When
+             * @description Rule mode, and required there: the CEL condition that picks this route.
+             * @example artifacts["findings.json"].findings.size() == 0
+             */
+            when?: string | null;
+            /**
+             * Description
+             * @description What the route is for; a classifier is shown it to choose.
+             */
+            description?: string | null;
+            /**
+             * Then
+             * @description What runs on this route: one agent, tool or sequence node.
+             */
+            then: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+        };
+        /**
+         * RouterClassifier
+         * @description The agent that chooses a router's route (classifier mode), as for an `agent` node. It
+         *     answers with one of the router's route ids and a reason, through a typed output the engine
+         *     makes (`classifier_schema`).
+         */
+        RouterClassifier: {
+            /** Instructions */
+            instructions: string;
+            /**
+             * Provider
+             * @description Unset means the workspace default.
+             */
+            provider?: "claude" | null;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * RouterNode
+         * @description Runs exactly one of its routes, on the router's input, and outputs what that route outputs.
+         *
+         *     In rule mode every route has `when`, a CEL condition over `last` (the router's input),
+         *     `results` and `artifacts` (as for a loop's `until`); the first route whose condition is true
+         *     runs, else `default`. In classifier mode no route has `when`: one agent (`classifier`)
+         *     chooses a route id, `default` included when there is one, and says why. A router with no
+         *     matching route and no `default` fails. The routes not taken never start. A route is one
+         *     `agent`, `tool` or `sequence` node, and it may hold what the router's own place allows.
+         */
+        RouterNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "router";
+            /** Id */
+            id: string;
+            /** Routes */
+            routes: components["schemas"]["Route"][];
+            /**
+             * Default
+             * @description What runs when no route is chosen.
+             */
+            default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"]) | null;
+            /** @description Classifier mode: the agent that chooses the route. */
+            classifier?: components["schemas"]["RouterClassifier"] | null;
         };
         /**
          * RunArtifact
@@ -1865,7 +1941,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"])[];
         };
         /** StartInstall */
         StartInstall: {
@@ -2088,7 +2164,7 @@ export interface components {
             /** Description */
             description?: string | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
         };
         /** WorkspaceOut */
         WorkspaceOut: {
