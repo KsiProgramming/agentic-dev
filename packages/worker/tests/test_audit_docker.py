@@ -27,14 +27,12 @@ from agentic_tools.scan import open_scan_tools
 
 pytestmark = pytest.mark.integration
 
+PYPROJECT = '[project]\nname = "app"\nversion = "0"\n\n[tool.ruff.lint]\nselect = ["F"]\n'
 PLANTED = {
-    "pyproject.toml": '[project]\nname = "app"\nversion = "0"\n\n[tool.ruff.lint]\nselect = ["F"]\n',
+    "pyproject.toml": PYPROJECT,
     "app.py": "import os\n\n\ndef f():\n    return undefined_name\n",
 }
-CLEAN = {
-    "pyproject.toml": '[project]\nname = "app"\nversion = "0"\n\n[tool.ruff.lint]\nselect = ["F"]\n',
-    "app.py": "def f() -> int:\n    return 1\n",
-}
+CLEAN = {"pyproject.toml": PYPROJECT, "app.py": "def f() -> int:\n    return 1\n"}
 
 
 class Writers:
