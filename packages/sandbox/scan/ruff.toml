@@ -1,0 +1,4 @@
+# The platform's ruff rules for a Python module whose repo configures no linter (4.4): likely bugs
+# only (pyflakes and syntax errors), no style. Findings from it are marked `platform-default`.
+[lint]
+select = ["F", "E9"]
