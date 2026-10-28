@@ -10,6 +10,7 @@ JSON pointers of what is wrong (`PortFailure`).
 import json
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from functools import lru_cache
 from typing import Literal, cast
 
 from jsonschema import Draft202012Validator
@@ -67,8 +68,17 @@ class PortFailure(BaseModel):
 
 def schema_problem(schema: Mapping[str, JsonValue]) -> str | None:
     """Why `schema` cannot be a port's schema; `None` if it can."""
-    if len(json.dumps(schema, separators=(",", ":"))) > MAX_SCHEMA_BYTES:
+    text = json.dumps(schema, separators=(",", ":"), sort_keys=True)
+    if len(text) > MAX_SCHEMA_BYTES:
         return f"it is larger than {MAX_SCHEMA_BYTES // 1024} KB"
+    return _schema_problem(text)
+
+
+@lru_cache(maxsize=256)
+def _schema_problem(text: str) -> str | None:
+    """`schema_problem` for a schema as JSON text. Checking a schema against the meta-schema is
+    slow, and the same schema (the findings report's) is on many nodes, so the answer is kept."""
+    schema = cast(dict[str, JsonValue], json.loads(text))
     dialect = schema.get("$schema")
     if dialect is not None and dialect != _DIALECT:
         return f"only JSON Schema 2020-12 is supported (`$schema` {_DIALECT!r})"

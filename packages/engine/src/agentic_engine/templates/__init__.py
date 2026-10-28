@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, JsonValue
 
 from agentic_engine.spec import WorkflowSpec
+from agentic_engine.templates.audit import AuditParams, build_audit_spec
 from agentic_engine.templates.docs import DocsParams, build_docs_spec
 from agentic_engine.templates.new_repo import (
     APPROVE_NODE_ID,
@@ -55,6 +56,16 @@ TEMPLATES: tuple[Template[Any], ...] = (
         build=build_docs_spec,
         requires=("claude", "github"),
     ),
+    Template(
+        id="audit-codebase",
+        name="Audit codebase",
+        description="Checks the repository with scanners and reviewer agents, then writes "
+        "findings.json and a readable report. Read-only: it changes nothing and opens no pull "
+        "request.",
+        params=AuditParams,
+        build=build_audit_spec,
+        requires=("claude", "github"),
+    ),
 )
 
 
@@ -66,12 +77,14 @@ __all__ = [
     "APPROVE_NODE_ID",
     "CREATE_NODE_ID",
     "TEMPLATES",
+    "AuditParams",
     "DocsParams",
     "Gitignore",
     "License",
     "NewRepo",
     "Requirement",
     "Template",
+    "build_audit_spec",
     "build_docs_spec",
     "get_template",
     "wrap_with_create_repo",

@@ -16,8 +16,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-type Scanner = Literal["lint", "secrets", "dependencies", "merged"]
-type Category = Literal["lint", "secret", "dependency"]
+type Scanner = Literal["lint", "secrets", "dependencies", "agent", "merged"]
+"""What made a report: a `scan` tool, an agent's review (4.6), or a merge of several (4.5)."""
+type Category = Literal["lint", "secret", "dependency", "security", "tests", "architecture"]
+"""What a finding is about: the scanners' `lint`, `secret` and `dependency`, and the agent
+reviews' `security`, `tests` and `architecture` (4.6)."""
 type Severity = Literal["info", "low", "medium", "high", "critical"]
 type ConfigSource = Literal["repo", "platform-default"]
 type CheckStatus = Literal["ran", "skipped", "failed"]
