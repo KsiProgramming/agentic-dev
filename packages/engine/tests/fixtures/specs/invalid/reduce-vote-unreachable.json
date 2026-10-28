@@ -1,0 +1,44 @@
+{
+  "spec_version": "0",
+  "id": "reduce-vote-unreachable",
+  "name": "A vote no join can meet",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "reviews",
+        "join": "quorum",
+        "quorum": 2,
+        "branches": [
+          {
+            "type": "agent",
+            "id": "first",
+            "role": "Reviewer",
+            "instructions": "Report findings as a findings report."
+          },
+          {
+            "type": "agent",
+            "id": "second",
+            "role": "Reviewer",
+            "instructions": "Report findings as a findings report."
+          },
+          {
+            "type": "agent",
+            "id": "third",
+            "role": "Reviewer",
+            "instructions": "Report findings as a findings report."
+          }
+        ]
+      },
+      {
+        "type": "reduce",
+        "id": "merge",
+        "from": "reviews",
+        "strategy": "vote",
+        "min_votes": 3
+      }
+    ]
+  }
+}

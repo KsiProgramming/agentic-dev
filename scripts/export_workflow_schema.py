@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from agentic_engine.spec import WorkflowSpec
-from agentic_tools.scan import FindingsReport
+from agentic_runtime.findings import FindingsReport
 
 SCHEMAS = Path(__file__).resolve().parents[1] / "schemas"
 SCHEMA_BASE = "https://github.com/KsiProgramming/agentic-dev/schemas"

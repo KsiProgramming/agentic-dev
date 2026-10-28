@@ -91,6 +91,14 @@ export interface Step {
   artifactsWritten: ArtifactVersion[];
   /** The versions of run artifacts the step read, from its `node_started`'s `reads`. */
   artifactsRead: ArtifactVersion[];
+  /** What a `dedupe` or `vote` reduce merged (4.5): its `node_completed`'s `merged`. */
+  merged: MergeCounts | null;
+}
+
+export interface MergeCounts {
+  sources: number;
+  findingsIn: number;
+  findingsOut: number;
 }
 
 /** A value that did not match a node's input or output schema, and where it went wrong. */
@@ -215,6 +223,18 @@ function num(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function parseMerged(value: unknown): MergeCounts | null {
+  if (typeof value !== "object" || value === null) return null;
+  const merged = value as Record<string, unknown>;
+  const [sources, findingsIn, findingsOut] = [
+    num(merged.sources),
+    num(merged.findings_in),
+    num(merged.findings_out),
+  ];
+  if (sources === null || findingsIn === null || findingsOut === null) return null;
+  return { sources, findingsIn, findingsOut };
+}
+
 function newStep(id: string, at: string): Step {
   return {
     id,
@@ -235,6 +255,7 @@ function newStep(id: string, at: string): Step {
     port: null,
     artifactsWritten: [],
     artifactsRead: [],
+    merged: null,
   };
 }
 
@@ -427,6 +448,7 @@ class Builder {
         step.error = str(payload.error) ?? step.error;
         step.stopReason = str(payload.stop_reason);
         step.port = parsePort(payload.port);
+        step.merged = parseMerged(payload.merged);
         this.open = this.open.filter((s) => s !== step);
         return;
       case "gate_waiting":

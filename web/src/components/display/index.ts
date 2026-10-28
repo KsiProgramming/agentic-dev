@@ -3,6 +3,7 @@ export { Duration } from "./duration";
 export { ExpiresIn } from "./expires-in";
 export { IdChip } from "./id-chip";
 export { Money } from "./money";
+export { Percent } from "./percent";
 export { RelativeTime } from "./relative-time";
 export { shortId } from "./short-id";
 export { StatTile } from "./stat-tile";

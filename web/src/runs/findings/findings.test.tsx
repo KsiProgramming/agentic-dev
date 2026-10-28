@@ -162,6 +162,60 @@ describe("FindingsView", () => {
   });
 });
 
+const MERGED = {
+  scanner: "merged" as const,
+  checks: LINT.checks,
+  findings: [
+    finding({ fingerprint: "one", sources: ["lint"], confidence: 0.33 }),
+    finding({ fingerprint: "both", sources: ["lint", "reviewer"], confidence: 0.67, line: 7 }),
+  ],
+  counts: { medium: 2 },
+  truncated: false,
+  sources: [
+    { id: "lint", scanner: "lint" as const, findings: 2 },
+    { id: "reviewer", scanner: "lint" as const, findings: 1 },
+    { id: "secrets", scanner: "secrets" as const, findings: 0 },
+  ],
+};
+
+describe("a merged findings report (4.5)", () => {
+  it("is recognised, and an agent's finding may leave out its fingerprint", () => {
+    expect(isFindingsReport(MERGED)).toBe(true);
+    const noFingerprint = { ...finding(), fingerprint: undefined };
+    expect(isFindingsReport({ ...LINT, findings: [noFingerprint] })).toBe(true);
+    expect(isFindingsReport({ ...MERGED, findings: [finding({ sources: [1] as never })] })).toBe(
+      false,
+    );
+  });
+
+  it("puts the more confident finding first within a severity", () => {
+    expect(sortFindings(MERGED.findings).map((f) => f.fingerprint)).toEqual(["both", "one"]);
+  });
+
+  it("shows its sources, each finding's confidence and who found it", () => {
+    render(<FindingsView report={MERGED} label="Findings" />);
+
+    expect(screen.getByTestId("merged-from").textContent).toBe(
+      "Merged from 3 sources: lint (2), reviewer (1), secrets (0)",
+    );
+    const table = screen.getByRole("table", { name: "Findings" });
+    expect(within(table).getByRole("columnheader", { name: "Confidence" })).toBeTruthy();
+    const [first, second] = within(table).getAllByTestId("finding-row");
+    expect(first!.textContent).toContain("67%");
+    expect(first!.textContent).toContain("Found by 2 of 3: lint, reviewer");
+    expect(second!.textContent).toContain("33%");
+    expect(screen.getAllByTestId("finding-card")[0]!.textContent).toContain("67% confidence");
+  });
+
+  it("shows a scanner's report without the merge columns", () => {
+    render(<FindingsView report={LINT} label="Findings" />);
+
+    expect(screen.queryByRole("columnheader", { name: "Confidence" })).toBeNull();
+    expect(screen.queryByTestId("merged-from")).toBeNull();
+    expect(screen.queryByTestId("finding-sources")).toBeNull();
+  });
+});
+
 describe("a scan step's output", () => {
   it("shows its report as findings, not raw JSON", () => {
     const events = [

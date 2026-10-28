@@ -115,6 +115,21 @@
         "category": {
           "$ref": "#/$defs/Category"
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How sure the source is, from 0 to 1 (none means certain). In a merged report: the share of sources that reported it, times the mean of their own.",
+          "title": "Confidence"
+        },
         "config": {
           "anyOf": [
             {
@@ -153,9 +168,17 @@
           "title": "End Line"
         },
         "fingerprint": {
-          "description": "sha256 of the tool, rule, path and the line's text (dependencies: the package and version): the same issue has the same fingerprint across runs.",
-          "title": "Fingerprint",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "sha256 of the tool, rule, path and the line's text (dependencies: the package and version): the same issue has the same fingerprint across runs. Scanners always set it. A finding restated from a scanner keeps its fingerprint; one without is merged by its category, path, line and rule.",
+          "title": "Fingerprint"
         },
         "fixed_versions": {
           "description": "Dependencies only: versions with the fix.",
@@ -220,6 +243,22 @@
         "severity": {
           "$ref": "#/$defs/Severity"
         },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Merged reports only: the sources that reported it, in order.",
+          "title": "Sources"
+        },
         "tool": {
           "description": "The engine that found it, e.g. `ruff`, `gitleaks`.",
           "title": "Tool",
@@ -240,7 +279,6 @@
         }
       },
       "required": [
-        "fingerprint",
         "tool",
         "rule",
         "severity",
@@ -255,7 +293,8 @@
       "enum": [
         "lint",
         "secrets",
-        "dependencies"
+        "dependencies",
+        "merged"
       ],
       "type": "string"
     },
@@ -268,6 +307,31 @@
         "critical"
       ],
       "type": "string"
+    },
+    "Source": {
+      "description": "One report a merged report was made from.",
+      "properties": {
+        "findings": {
+          "description": "How many findings it gave.",
+          "title": "Findings",
+          "type": "integer"
+        },
+        "id": {
+          "description": "The map item's index or the parallel branch's id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "scanner": {
+          "$ref": "#/$defs/Scanner"
+        }
+      },
+      "required": [
+        "id",
+        "scanner",
+        "findings"
+      ],
+      "title": "Source",
+      "type": "object"
     }
   },
   "$id": "https://github.com/KsiProgramming/agentic-dev/schemas/findings.v1.json",
@@ -314,6 +378,22 @@
     },
     "scanner": {
       "$ref": "#/$defs/Scanner"
+    },
+    "sources": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/Source"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Merged reports only: the reports it was made from, in order.",
+      "title": "Sources"
     },
     "truncated": {
       "description": "Whether findings past 1000 were dropped.",

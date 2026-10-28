@@ -51,6 +51,13 @@ interface Block {
   exit: string;
 }
 
+const REDUCE_LABEL: Record<Extract<SpecNode, { type: "reduce" }>["strategy"], string> = {
+  agent: "Agent",
+  concat: "Concat",
+  dedupe: "Dedupe",
+  vote: "Vote",
+};
+
 function detail(node: SpecNode): string {
   switch (node.type) {
     case "agent":
@@ -60,7 +67,7 @@ function detail(node: SpecNode): string {
     case "gate":
       return node.title;
     case "reduce":
-      return `${node.strategy === "agent" ? "Agent" : "Concat"} of ${node.from}`;
+      return `${REDUCE_LABEL[node.strategy]} of ${node.from}`;
     case "loop":
       return `Up to ${node.max_iterations} iterations`;
     case "map":

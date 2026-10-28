@@ -1,0 +1,37 @@
+{
+  "spec_version": "0",
+  "id": "reduce-min-votes-on-dedupe",
+  "name": "min_votes without a vote",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "reviews",
+        "join": "all",
+        "branches": [
+          {
+            "type": "agent",
+            "id": "first",
+            "role": "Reviewer",
+            "instructions": "Report findings as a findings report."
+          },
+          {
+            "type": "agent",
+            "id": "second",
+            "role": "Reviewer",
+            "instructions": "Report findings as a findings report."
+          }
+        ]
+      },
+      {
+        "type": "reduce",
+        "id": "merge",
+        "from": "reviews",
+        "strategy": "dedupe",
+        "min_votes": 2
+      }
+    ]
+  }
+}

@@ -23,7 +23,8 @@ writes `node_started` once, `loop_iteration_started` before and `loop_condition_
 each iteration, then `node_completed` (payload `stop_reason`,
 `iterations`) when it stops, or `node_failed` if its condition cannot be evaluated. A map writes
 `node_started` (payload `items`), `map_item_started` and `map_item_completed` around each item's
-body, whose events carry `item`, then its end; a reduce writes the events of an agent node. A
+body, whose events carry `item`, then its end; a reduce writes the events of an agent node (a
+`dedupe` or `vote` reduce: `node_started`, then its end, `node_completed` with `merged`). A
 parallel writes `node_started` (payload `branches`, `join`, `quorum`),
 `parallel_branch_started` and `parallel_branch_completed` around each branch, whose events carry
 `branch`, then its end (payload `completed`, `failed`, `cancelled`: branch ids). Once its join is
@@ -103,6 +104,7 @@ from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
 from agentic_engine.spec import (
     CREATE_TOOLS,
+    FINDINGS_SCHEMA,
     PUBLISH_TOOLS,
     AgentNode,
     GateNode,
@@ -119,6 +121,7 @@ from agentic_engine.spec import (
 )
 from agentic_engine.tool import run_tool_node
 from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor, Usage
+from agentic_runtime.findings import FindingsReport, VoteError, merge_reports
 
 type CompiledWorkflow = CompiledStateGraph[RunState]
 type StepNode = AgentNode | ToolNode | GateNode
@@ -1002,13 +1005,16 @@ def _reduce(
     log: RunEventLog,
     limits: _Limits,
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
-    """Combines the outputs of the map `reduce.from_`, in item order: `concat` joins them, and
-    `agent` runs an agent turn on them as a JSON array of `{item, output}`."""
+    """Combines the outputs of the map or parallel `reduce.from_` (a map's items in item order,
+    a parallel's completed branches in branch order): `concat` joins them, `agent` runs an agent
+    turn on them as a JSON array of `{item, output}` (a branch's item is its id), and `dedupe` and
+    `vote` merge them as findings reports."""
 
     async def combine(state: RunState) -> RunUpdate:
-        source = state["results"][reduce.from_].data or {}
-        items, outputs = source.get("items"), source.get("outputs")
-        assert isinstance(items, list) and isinstance(outputs, list)
+        sources = _reduce_sources(state["results"][reduce.from_].data or {})
+        if reduce.merges:
+            return await _merge(reduce, sources, limits, log)
+        outputs = [output for _, _, output in sources]
         if reduce.agent is None:
             await log.emit(NODE_STARTED, node_id=reduce.id)
             separator = "\n\n" if reduce.separator is None else reduce.separator
@@ -1028,9 +1034,7 @@ def _reduce(
             model=reduce.agent.model,
             writes=reduce.writes,
         )
-        pairs: list[JsonValue] = [
-            {"item": item, "output": output} for item, output in zip(items, outputs, strict=True)
-        ]
+        pairs: list[JsonValue] = [{"item": item, "output": output} for _, item, output in sources]
         input = json.dumps(pairs, ensure_ascii=False, indent=2)
         return await _spawn(
             reduce.id,
@@ -1041,6 +1045,69 @@ def _reduce(
         )
 
     return combine
+
+
+def _reduce_sources(data: dict[str, JsonValue]) -> list[tuple[str, JsonValue, JsonValue]]:
+    """What a reduce combines, from its map's or parallel's `data`, as `(source id, item,
+    output)`: a map item is named by its index, a parallel branch by its id (also its item)."""
+    match data:
+        case {"items": list() as items, "outputs": list() as outputs}:
+            return [
+                (str(i), item, output)
+                for i, (item, output) in enumerate(zip(items, outputs, strict=True))
+            ]
+        case {"outputs": dict() as outputs}:
+            return [(branch, branch, output) for branch, output in outputs.items()]
+        case _:
+            raise AssertionError(f"not a map's or parallel's output: {sorted(data)}")
+
+
+async def _merge(
+    reduce: ReduceNode,
+    sources: list[tuple[str, JsonValue, JsonValue]],
+    limits: _Limits,
+    log: RunEventLog,
+) -> RunUpdate:
+    """A `dedupe` or `vote` reduce (4.5): each source's output checked as a findings report, then
+    merged with no model. A source that is not a report, or too few sources for the vote, fails
+    the reduce."""
+    await log.emit(NODE_STARTED, node_id=reduce.id)
+    reports: list[tuple[str, FindingsReport]] = []
+    port: PortFailure | None = None
+    error: str | None = None
+    for source_id, _, output in sources:
+        text = output if isinstance(output, str) else json.dumps(output)
+        checked = check_port("input", reduce.id, FINDINGS_SCHEMA, text, source_id)
+        if isinstance(checked, PortFailure):
+            port, error = checked, checked.error
+            break
+        reports.append((source_id, FindingsReport.model_validate(checked)))
+    merged = None
+    if error is None:
+        votes = (reduce.min_votes or len(reports) // 2 + 1) if reduce.strategy == "vote" else None
+        try:
+            merged = merge_reports(reports, min_votes=votes)
+        except VoteError as e:
+            error = f"vote {reduce.id!r} {e}"
+    if merged is None:
+        result = AgentNodeResult(status="failed", text="", usage=None, error=error)
+    else:
+        data: dict[str, JsonValue] = merged.report.model_dump(mode="json")
+        text = json.dumps(data, indent=2, ensure_ascii=False)
+        result = AgentNodeResult(status="completed", text=text, usage=None, data=data)
+        if reduce.writes:
+            result = await _write(reduce.id, reduce.writes, FINDINGS_SCHEMA, result, limits, log)
+    end: dict[str, JsonValue] = {"error": result.error} if result.error else {}
+    if port is not None:
+        end["port"] = port.payload()
+    if merged is not None and result.status == "completed":
+        end["merged"] = {
+            "sources": len(reports),
+            "findings_in": merged.findings_in,
+            "findings_out": len(merged.report.findings),
+        }
+    await log.emit(NODE_END[result.status], node_id=reduce.id, payload=end)
+    return _update(reduce.id, result)
 
 
 _PULL_REQUEST_FIELDS = ("url", "number", "head", "base", "commit")

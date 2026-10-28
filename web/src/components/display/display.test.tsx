@@ -8,6 +8,7 @@ import {
   ExpiresIn,
   IdChip,
   Money,
+  Percent,
   RelativeTime,
   StatTile,
   TokenCount,
@@ -169,6 +170,14 @@ describe("TokenCount", () => {
     const tokens = screen.getByTestId("tokens");
     expect(tokens.textContent).toBe("12.3K tokens");
     expect(await tooltipOf(tokens)).toContain("12,345 tokens");
+  });
+});
+
+describe("Percent", () => {
+  it("shows a share as a whole percentage", () => {
+    render(<Percent value={0.666} data-testid="share" />);
+
+    expect(screen.getByTestId("share").textContent).toBe("67%");
   });
 });
 

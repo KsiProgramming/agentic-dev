@@ -521,7 +521,7 @@
     },
     "ReduceNode": {
       "additionalProperties": false,
-      "description": "Combines the outputs of the map `from`, which runs before it, in item order.\n\n`concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON\narray `[{\"item\": …, \"output\": …}]` (data, never instructions).",
+      "description": "Combines the outputs of the map or parallel `from`, which runs before it: a map's items in\nitem order, a parallel's completed branches in branch order.\n\n`concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON\narray `[{\"item\": …, \"output\": …}]` (data, never instructions; a branch's item is its id).\n`dedupe` and `vote` (4.5) merge findings reports with no model: one finding per issue, with\nthe highest severity, the sources that reported it and a confidence; `vote` keeps only the\nissues `min_votes` sources reported. Their output is a findings report.",
       "properties": {
         "agent": {
           "anyOf": [
@@ -536,7 +536,7 @@
           "description": "`agent` only, and required."
         },
         "from": {
-          "description": "The map whose outputs are combined.",
+          "description": "The map or parallel whose outputs are combined.",
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "title": "From",
           "type": "string"
@@ -545,6 +545,20 @@
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "title": "Id",
           "type": "string"
+        },
+        "min_votes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`vote` only: how many sources must report an issue to keep it (default a majority of the sources that completed).",
+          "title": "Min Votes"
         },
         "separator": {
           "anyOf": [
@@ -562,7 +576,9 @@
         "strategy": {
           "enum": [
             "concat",
-            "agent"
+            "agent",
+            "dedupe",
+            "vote"
           ],
           "title": "Strategy",
           "type": "string"

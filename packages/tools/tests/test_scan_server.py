@@ -351,6 +351,8 @@ async def test_dependencies_become_findings_per_advisory() -> None:
         "version": "2.10",
         "fixed_versions": ["2.10.1"],
         "aliases": ["CVE-2019-10906"],
+        "confidence": None,
+        "sources": None,
     }
     assert unknown["severity"] == "medium"
     assert unknown["message"] == "jinja2 2.10: a known vulnerability"

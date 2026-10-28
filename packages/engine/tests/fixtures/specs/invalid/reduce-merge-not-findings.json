@@ -1,0 +1,47 @@
+{
+  "spec_version": "0",
+  "id": "reduce-merge-not-findings",
+  "name": "Merging a source that is not a findings report",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "reviews",
+        "join": "all",
+        "branches": [
+          {
+            "type": "agent",
+            "id": "first",
+            "role": "Reviewer",
+            "instructions": "Report findings as a findings report."
+          },
+          {
+            "type": "agent",
+            "id": "second",
+            "role": "Reviewer",
+            "instructions": "Summarise the repo.",
+            "output_schema": {
+              "type": "object",
+              "required": [
+                "summary"
+              ],
+              "properties": {
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "reduce",
+        "id": "merge",
+        "from": "reviews",
+        "strategy": "dedupe"
+      }
+    ]
+  }
+}
