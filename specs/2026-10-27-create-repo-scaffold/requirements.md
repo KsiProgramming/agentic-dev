@@ -14,7 +14,7 @@ It depends on these phases, all done:
 - 3.4: the one validator (`validate_workflow`) with stable issue codes.
 - 3.7: the audit log, which records the creation.
 
-It unblocks 4.7 (audit on a new repo makes no sense, but the mechanism is template-agnostic) and 7.5 (SDD on a greenfield repo).
+It unblocks 4.6 (audit on a new repo makes no sense, but the mechanism is template-agnostic) and 7.5 (SDD on a greenfield repo).
 
 Principles and stack choices that apply:
 - **Humans approve irreversible actions (3):** repo creation is named there explicitly. The create node always has a gate before it, enforced by the validator, not by the template.

@@ -12,7 +12,7 @@ It depends on these phases, all done:
 - 11.6 and 11.8: the run console's step panel and failure banner, which already name the failing step and its error.
 
 It unblocks:
-- 4.3, 4.4, 4.5 and 4.7: `findings.json` gets a schema that every audit node is checked against.
+- 4.3, 4.4, 4.5 and 4.6: `findings.json` gets a schema that every audit node is checked against.
 - 5.6: live validation on the canvas, which marks incompatible ports and starts from `port_mismatch`.
 - 6.1: an orchestrator's plan, which is a typed output.
 

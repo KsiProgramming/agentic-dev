@@ -6,7 +6,7 @@ Status: `—` not started, `✅ Done (#PR)` merged. The PR that implements a pha
 
 Strategy: **walking skeleton first**, then grow outward. The milestones follow the stakeholder plan: fixed flows first, then parallel, then dynamic, then the Architect. Milestone 2 sets the product UI foundation (design system, app shell, run history, run console) that every later screen builds on. Milestone 11 (UI v2) reworks those screens once the engine has grown, before the canvas adds many more.
 
-**Next up: Milestone 11 (UI v2).** The `plan-feature` skill plans the first unplanned phase of this milestone before any other. Milestone 4 resumes at 4.2 after it. Change this line, in its own PR with a changelog entry, when the priority changes.
+**Next up: Milestone 4 (Parallel and Audit), at 4.6.** The `plan-feature` skill plans the first unplanned phase of this milestone before any other. Milestone 11 (UI v2) is done. Change this line, in its own PR with a changelog entry, when the priority changes.
 
 ---
 
@@ -74,12 +74,13 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 | 4.3 | Shared run context: named artifacts in the run workspace | Nodes exchange `findings.json` through artifacts | ✅ Done ([#139](https://github.com/KsiProgramming/agentic-dev/pull/139)) |
 | 4.4 | Deterministic tool nodes: linter, dependency scanner, secret scanner | Tool outputs feed specialist agents | ✅ Done ([#140](https://github.com/KsiProgramming/agentic-dev/pull/140)) |
 | 4.5 | `reduce` strategies: dedupe, vote | Duplicate findings are merged with severity and confidence | ✅ Done ([#141](https://github.com/KsiProgramming/agentic-dev/pull/141)) |
-| 4.6 | `router` primitive (rule + classifier agent) | A run branches on a condition | — |
-| 4.7 | "Audit codebase" template (read-only, report only) | Audit run produces findings.json + readable report | — |
+| 4.6 | `router` primitive (CEL rule + classifier agent) and the "Audit codebase" template (read-only, report only) | An audit run branches on a condition and produces findings.json + a readable report | — |
+
+4.6 merges the former 4.7 ("Audit codebase" template) into the `router` phase: the template is the router's first real use, and its report path is the branch that proves it. The number 4.7 is retired and not reused.
 
 ## Milestone 11: Product UI v2
 
-Listed here, after Milestone 4, because it is worked next (see "Next up" above).
+Listed here, after Milestone 4, because it was worked before Milestone 4 finished.
 
 A review of the screens shipped in Milestones 2 and 3 found that they work but read as unfinished. Waiting time is counted as run time, stale approvals pile up above real work, test runs mix with real ones, the run console shows agent output as one long wall of text and raw JSON in table cells, and settings is one long page. UI v2 fixes the information design first and the look second. Its rules are in [tech-stack.md → UI v2](tech-stack.md#ui-v2-milestone-11). Each phase moves its part into the main design-system rules when it ships. 11.1 comes first; 11.2 and 11.3 change the API and can run beside it; the screens (11.4–11.8) build on all three. Everything it builds on (Milestones 2 and 3) is done.
 

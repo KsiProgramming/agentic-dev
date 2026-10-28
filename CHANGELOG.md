@@ -264,6 +264,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- Roadmap: phase 4.7 ("Audit codebase" template) is merged into 4.6 (`router` primitive), which now reads "An audit run branches on a condition and produces findings.json + a readable report". The number 4.7 is retired, and every reference to it in `specs/` and the code points to 4.6. "Next up" moves to Milestone 4 at 4.6, since Milestone 11 is done. The plan is in `specs/2026-10-28-router-audit-template/`.
 - Pages use the full content width up to 1600 px instead of centred columns, and agent output is capped at 72 characters a line. The brand accent stays indigo. The dialog overlay uses the `--overlay` token. `CLAUDE.md` and `specs/tech-stack.md` (Look, Layout, a new Display values section, decisions log) carry the new rules, and the UI v2 Foundations section moved into them (phase 11.1, [#129](https://github.com/KsiProgramming/agentic-dev/pull/129)).
 - The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)).
 - Phase 2.5 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):

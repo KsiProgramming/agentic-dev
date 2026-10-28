@@ -8,7 +8,7 @@ Today a node receives only the previous node's output (`RunState.last_text`). Th
 - A scanner's `findings.json` must reach a triage agent several steps later, past a gate or an unrelated step.
 - Tool outputs must feed specialist agents (4.4).
 - Reduces must merge findings (4.5).
-- The audit template must end with `findings.json` and a report (4.7).
+- The audit template must end with `findings.json` and a report (4.6).
 
 Named artifacts give a run a small shared context. A node writes its output under a name, and any later node reads it by that name, whatever ran in between.
 
@@ -18,7 +18,7 @@ It depends on these phases, all done:
 - 3.4: the one validator behind `/validate` and `POST /runs`. The new issue codes go there.
 - 11.5, 11.6 and 11.8: the Inbox review, the console's step panel and its "files a step wrote" cards, which the artifact cards follow.
 
-It unblocks 4.4 (tool outputs as files in the sandbox), 4.5 (reduce strategies over `findings.json`), 4.7 (the audit's `findings.json` plus its report) and 6.x (an orchestrator's shared plan).
+It unblocks 4.4 (tool outputs as files in the sandbox), 4.5 (reduce strategies over `findings.json`), 4.6 (the audit's `findings.json` plus its report) and 6.x (an orchestrator's shared plan).
 
 Principles that apply:
 - **One spec, many views (1):** reads and writes are spec fields. The validator, canvas and Architect see the data flow without running anything.
@@ -93,7 +93,7 @@ Tech-stack choices that apply:
 ### Out of scope
 - **Writes from agent tools** (`artifacts.write`). Writes stay declarative so the validator can see them. This may return with the orchestrator (6.x).
 - **Binary artifacts and other extensions** (images, SARIF, archives). These can come with 4.4 if a scanner needs them.
-- **Templates that use artifacts.** The audit template is 4.7, and the docs template is unchanged.
+- **Templates that use artifacts.** The audit template is 4.6, and the docs template is unchanged.
 - **Reduce strategies over artifacts** (dedupe and vote on findings), which is 4.5.
 - **Editing an artifact at a gate.** Gate edits stay on repo files (3.6).
 - **Artifacts kept after the run for reuse by other runs, or a retention policy.** They live as long as the run's row.
@@ -102,7 +102,7 @@ Tech-stack choices that apply:
 ## Decisions
 | Decision | Choice | Rationale |
 |---|---|---|
-| Scope | Core read/write, console, agent read tools, gate display and sandbox mirror | User choice. It covers "Done when" and what 4.4 and 4.7 need right after, so they can build on it without reopening it. |
+| Scope | Core read/write, console, agent read tools, gate display and sandbox mirror | User choice. It covers "Done when" and what 4.4 and 4.6 need right after, so they can build on it without reopening it. |
 | Where artifacts live | Engine-owned: refs in checkpointed `RunState`, content in an append-only `run_artifacts` table behind an `ArtifactStore` protocol, mirrored into the sandbox as a read-only copy | User choice. Durable across worker restarts and sandbox loss (principle 9, AC-8). The engine stays database-free. The event log stays small (metadata only). |
 | How nodes use them | Declarative `writes`/`reads` in the spec, with read-only tools for on-demand reads | Validation can prove read-after-write and find races before a run spends tokens (principle 2). Agents still look things up as they need them. |
 | A reader's input | The artifact replaces the previous output (one read: its content; several: an object by name) | One clear input that typed ports check, and no hidden concatenation. A node that also needs the previous output reads it as an artifact. |

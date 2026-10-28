@@ -1,5 +1,5 @@
 """The findings report every `scan` tool returns (4.4): one shape for lint, secret and dependency
-findings, so typed ports, artifacts, `reduce` dedupe and vote (4.5) and the audit (4.7) read it
+findings, so typed ports, artifacts, `reduce` dedupe and vote (4.5) and the audit (4.6) read it
 alike.
 
 A finding's `fingerprint` is stable across runs for the same issue, so findings from several

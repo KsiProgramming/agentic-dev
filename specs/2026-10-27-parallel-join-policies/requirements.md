@@ -16,7 +16,7 @@ It depends on these phases, all done:
 - 3.5: the graph tab. Its decision log said ELK (`elkjs`) would replace the hand-written layout when branches arrive (4.1 or 4.6). See the layout decision below.
 
 It unblocks:
-- 4.4 and 4.7: deterministic tool nodes and specialist agents running side by side in the audit template.
+- 4.4 and 4.6: deterministic tool nodes and specialist agents running side by side in the audit template.
 - 4.5: the `dedupe` and `vote` reduce strategies over several sources.
 - 5.5: container nodes on the canvas.
 - 6.8: AC-2 (a canvas flow with `parallel`).

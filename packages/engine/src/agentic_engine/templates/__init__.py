@@ -2,7 +2,7 @@
 
 A template turns a small set of options (a Pydantic model, exported as JSON Schema for forms)
 into an ordinary `WorkflowSpec`, which is validated and run like any other. Templates are code
-for now; saved and versioned templates come later (4.7, 8.9).
+for now; saved and versioned templates come later (5.7, 9.9).
 """
 
 from collections.abc import Callable, Mapping
