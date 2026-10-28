@@ -157,6 +157,7 @@ from agentic_tools.artifacts import open_artifact_tools
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
+from agentic_tools.scan import open_scan_tools
 from agentic_worker.artifacts import MirroredArtifactStore
 from agentic_worker.review import SandboxGateReview
 
@@ -629,6 +630,8 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             tools = await stack.enter_async_context(
                 open_repo_tools(sandbox, run_id=run.id, writers=writers)
             )
+            scanning = await stack.enter_async_context(open_scan_tools(sandbox))
+            tools = RunTools([tools, scanning])
             if target is not None and uses_github(run.spec):
                 assert worker.github is not None  # `_github_target` checked it
                 publishing = await stack.enter_async_context(

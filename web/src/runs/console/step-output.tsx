@@ -4,7 +4,7 @@ import { ExternalLinkIcon, FileIcon, InboxIcon } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
 import { Duration } from "@/components/display";
-import { OutputView } from "@/components/json-view";
+import { OutputView, parseJson } from "@/components/json-view";
 import { EmptyState } from "@/components/states";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,8 @@ import {
 import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 
 import { ArtifactCards } from "../artifacts/artifact-cards";
+import { isFindingsReport } from "../findings/findings";
+import { FindingsView } from "../findings/findings-view";
 import type { NodeKind } from "../graph/spec-graph";
 import type { Step } from "../timeline";
 import { AgentMessage } from "./agent-message";
@@ -245,7 +247,14 @@ export function StepOutput({
     );
   }
   if (tool?.output != null) {
-    parts.push(<OutputView key="tool" text={tool.output} label={`Output of ${step.id}`} />);
+    const value = parseJson(tool.output);
+    parts.push(
+      isFindingsReport(value) ? (
+        <FindingsView key="tool" report={value} label={`Findings of ${step.id}`} />
+      ) : (
+        <OutputView key="tool" text={tool.output} label={`Output of ${step.id}`} />
+      ),
+    );
   }
   if (step.items) parts.push(<MapTotals key="totals" step={step} />);
   if (children.length > 0) {

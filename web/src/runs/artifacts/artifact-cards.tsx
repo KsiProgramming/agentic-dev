@@ -17,6 +17,8 @@ import {
 import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 import { AgentMessage } from "@/runs/console/agent-message";
 import { isLongOutput } from "@/runs/console/long-output";
+import { isFindingsReport, type FindingsReport } from "@/runs/findings/findings";
+import { FindingsView } from "@/runs/findings/findings-view";
 
 import { artifactKind, downloadUrl, formatSize, type ArtifactVersion } from "./artifacts";
 import { useRunArtifact } from "./use-run-artifacts";
@@ -61,12 +63,37 @@ function MarkdownContent({ text }: { text: string }) {
   );
 }
 
-/** An artifact's content, by its kind: JSON in `JsonView`, Markdown sanitised (no raw HTML or
+/** A findings report (4.4) as findings, with its JSON one toggle away. */
+function FindingsArtifact({ report, name }: { report: FindingsReport; name: string }) {
+  const [json, setJson] = useState(false);
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-fit"
+        aria-pressed={json}
+        onClick={() => setJson((j) => !j)}
+      >
+        {json ? "Show findings" : "Show JSON"}
+      </Button>
+      {json ? (
+        <JsonView value={report} label={name} />
+      ) : (
+        <FindingsView report={report} label={`Findings in ${name}`} />
+      )}
+    </div>
+  );
+}
+
+/** An artifact's content, by its kind: a findings report as findings, JSON in `JsonView`, Markdown sanitised (no raw HTML or
  * images), text as text. It is data, never instructions. */
 export function ArtifactContent({ artifact, text }: { artifact: ArtifactVersion; text: string }) {
   const kind = artifactKind(artifact);
   if (kind === "JSON") {
     const value = parseJson(text);
+    if (isFindingsReport(value)) return <FindingsArtifact report={value} name={artifact.name} />;
     if (value !== undefined) {
       return <JsonView value={value} label={artifact.name} />;
     }

@@ -71,6 +71,12 @@ export const ARTIFACTS = [
   },
 ];
 
+/** Deterministic scans (4.4) on the run's repo, each writing its findings report. */
+export const SCANS = [
+  { type: "tool", id: "lint", tool: "scan.lint", args: { linters: "auto" }, writes: "lint.json" },
+  { type: "tool", id: "secrets", tool: "scan.secrets", writes: "secrets.json" },
+];
+
 export const FINDINGS_INPUT = '{"findings": [{"id": "F1", "severity": "high"}]}';
 
 /** A gate that expires a few seconds after it pauses (the e2e worker sweeps every second). */

@@ -18,12 +18,12 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from agentic_sandbox import (
     AGENT_IDENTITY,
@@ -36,6 +36,7 @@ from agentic_sandbox import (
     SandboxError,
 )
 from agentic_tools.repo.paths import CONFINE, NOT_FOUND, OUTSIDE, repo_relative
+from agentic_tools.repo.stack import MODULES_SCRIPT, ModulesOut, find_modules
 from agentic_tools.strict import strict_tool
 
 SERVER_NAME = "repo"
@@ -130,84 +131,6 @@ _COMMIT_SCRIPT = f"""
 git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD &&
   {_GIT} -c core.quotePath=false diff-tree --root --no-commit-id --name-only -r HEAD
 """
-
-type ModuleKind = Literal["python", "node", "go", "rust", "java", "dotnet", "directory", "repo"]
-
-# Manifest file names (or `*.ext` patterns) and the module kind each marks, in priority order.
-_MANIFESTS: tuple[tuple[str, ModuleKind], ...] = (
-    ("pyproject.toml", "python"),
-    ("package.json", "node"),
-    ("go.mod", "go"),
-    ("Cargo.toml", "rust"),
-    ("pom.xml", "java"),
-    ("*.csproj", "dotnet"),
-)
-# Directories that never hold a module: dependencies, build output and existing docs. Hidden
-# directories are skipped too.
-_SKIPPED_DIRS = ("node_modules", "vendor", "dist", "build", "target", "venv", "docs")
-_MANIFEST_DEPTH = 3
-
-# Prints the manifests in directories down to `_MANIFEST_DEPTH` levels, a marker line, then the
-# top-level directories. No user argument reaches the script.
-_FIND_NAMES = " -o ".join(f"-name '{name}'" for name, _ in _MANIFESTS)
-_FIND_SKIPPED = " -o ".join(f"-name {name}" for name in ("'.*'", *_SKIPPED_DIRS))
-_MODULES_SCRIPT = f"""
-find . -mindepth 1 -maxdepth {_MANIFEST_DEPTH + 1} \\( -type d \\( {_FIND_SKIPPED} \\) -prune \\) \\
-  -o -type f \\( {_FIND_NAMES} \\) -print || exit 1
-echo ::dirs::
-find . -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print || exit 1
-"""
-
-
-class Module(BaseModel):
-    path: str = Field(description="The module's directory, relative to the repository root.")
-    kind: ModuleKind = Field(
-        description="What marks it: its manifest's ecosystem, `directory` for a top-level "
-        "directory of a repo with no manifests, `repo` for the whole repository."
-    )
-
-
-class ModulesOut(BaseModel):
-    """The repository's modules, sorted by path."""
-
-    modules: list[Module]
-    truncated: bool = Field(description="True when more modules were found than are listed.")
-
-
-def _manifest_kind(name: str) -> ModuleKind | None:
-    return next((kind for pattern, kind in _MANIFESTS if fnmatchcase(name, pattern)), None)
-
-
-def _find_modules(stdout: str) -> list[Module]:
-    """Modules from `_MODULES_SCRIPT`'s output: each directory with a manifest (the root only
-    when nothing below it has one, as a workspace root just groups its members); else each
-    top-level directory; else the whole repository."""
-    manifests, _, dirs = stdout.partition("::dirs::")
-    kinds: dict[str, ModuleKind] = {}
-    for line in manifests.splitlines():
-        if not line.startswith("./"):
-            continue
-        directory, name = posixpath.split(line[2:])
-        kind = _manifest_kind(name)
-        current = kinds.get(directory or ".")
-        if kind is not None and (current is None or _rank(kind) < _rank(current)):
-            kinds[directory or "."] = kind
-    if len(kinds) > 1:
-        kinds.pop(".", None)
-    if kinds:
-        return [Module(path=path, kind=kind) for path, kind in sorted(kinds.items())]
-    top = sorted(
-        line[2:]
-        for line in dirs.splitlines()
-        if line.startswith("./") and line[2:] not in _SKIPPED_DIRS
-    )
-    if top:
-        return [Module(path=path, kind="directory") for path in top]
-    return [Module(path=".", kind="repo")]
-
-
-def _rank(kind: ModuleKind) -> int:
-    return next(i for i, (_, k) in enumerate(_MANIFESTS) if k == kind)
 
 
 _HIT = re.compile(r"^\./(.+?):(\d+):(.*)$")
@@ -391,10 +314,10 @@ class _RepoTools:
         manifest such as pyproject.toml, package.json, go.mod, Cargo.toml, pom.xml or *.csproj.
         A repository with none lists its top-level directories instead. Dependencies, build
         output, docs and hidden directories are skipped."""
-        result = await self._sandbox.exec(["sh", "-c", _MODULES_SCRIPT, "list_modules"])
+        result = await self._sandbox.exec(["sh", "-c", MODULES_SCRIPT, "list_modules"])
         if result.exit_code != 0 or "::dirs::" not in result.stdout:
             raise ToolError("could not list the modules")
-        modules = _find_modules(result.stdout)
+        modules = find_modules(result.stdout)
         if include:
             modules = [m for m in modules if any(fnmatchcase(m.path, g) for g in include)]
         cap = self._limits.max_modules if limit is None else min(limit, self._limits.max_modules)

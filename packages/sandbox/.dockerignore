@@ -1,3 +1,4 @@
-# The sandbox image needs only its Dockerfile.
+# The sandbox image needs only its Dockerfile and the scanners' platform configs.
 *
 !Dockerfile
+!scan
