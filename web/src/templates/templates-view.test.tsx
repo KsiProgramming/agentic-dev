@@ -353,7 +353,7 @@ test("a template whose options cannot be shown says so instead of a partial form
         json(200, [
           {
             ...DOCS_TEMPLATE,
-            parameters: { type: "object", properties: { depth: { type: "integer" } } },
+            parameters: { type: "object", properties: { depth: { type: "number" } } },
           },
         ]),
     }),

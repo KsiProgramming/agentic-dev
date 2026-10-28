@@ -76,7 +76,7 @@ class AuditParams(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     checks: Annotated[list[Check], Field(min_length=1, max_length=6)] = Field(
-        default_factory=lambda: [*SCANS, *REVIEWS],
+        default=[*SCANS, *REVIEWS],  # A plain default (copied per model), so the form shows it.
         description="What to check: the scanners (lint, secrets, dependencies) and the agent "
         "reviews (security, tests, architecture).",
     )

@@ -5,7 +5,14 @@ import { useId, type ReactNode } from "react";
 import { Controller, type Control, type FieldValues, type Path } from "react-hook-form";
 
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
@@ -81,6 +88,46 @@ function OneField<T extends FieldValues>({
         }
 
         const value = typeof field.value === "string" ? field.value : "";
+        if (spec.kind === "enum-list") {
+          // One checkbox per option; the value holds the checked ones, one per line.
+          const picked = new Set(value.split("\n").filter(Boolean));
+          const toggle = (option: string, on: boolean) => {
+            const next = new Set(picked);
+            if (on) next.add(option);
+            else next.delete(option);
+            field.onChange(spec.options.filter((o) => next.has(o)).join("\n"));
+          };
+          return (
+            <FieldSet
+              data-invalid={invalid || undefined}
+              aria-describedby={describedBy || undefined}
+            >
+              <FieldLegend variant="label">{label}</FieldLegend>
+              {help ? <FieldDescription id={helpId}>{help}</FieldDescription> : null}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {spec.options.map((option) => {
+                  const optionId = `${id}-${option}`;
+                  return (
+                    <Field key={option} orientation="horizontal">
+                      <Checkbox
+                        id={optionId}
+                        name={field.name}
+                        checked={picked.has(option)}
+                        onCheckedChange={(checked) => toggle(option, checked === true)}
+                        onBlur={field.onBlur}
+                        disabled={disabled}
+                      />
+                      <FieldLabel htmlFor={optionId} className="font-normal">
+                        {option}
+                      </FieldLabel>
+                    </Field>
+                  );
+                })}
+              </div>
+              {error}
+            </FieldSet>
+          );
+        }
         let control: ReactNode;
         if (spec.kind === "enum") {
           control = (
@@ -100,7 +147,7 @@ function OneField<T extends FieldValues>({
               ))}
             </NativeSelect>
           );
-        } else if (spec.kind === "string-list" || spec.multiline) {
+        } else if (spec.kind === "string-list" || (spec.kind === "string" && spec.multiline)) {
           control = (
             <Textarea
               {...aria}
@@ -111,6 +158,23 @@ function OneField<T extends FieldValues>({
               disabled={disabled}
               rows={3}
               className={spec.kind === "string-list" ? "font-mono" : undefined}
+            />
+          );
+        } else if (spec.kind === "integer") {
+          control = (
+            <Input
+              {...aria}
+              type="number"
+              inputMode="numeric"
+              step={1}
+              min={spec.minimum}
+              max={spec.maximum}
+              name={field.name}
+              value={value}
+              onChange={(e) => field.onChange(e.target.value)}
+              onBlur={field.onBlur}
+              disabled={disabled}
+              className="w-32"
             />
           );
         } else {

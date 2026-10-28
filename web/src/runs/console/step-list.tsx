@@ -29,6 +29,7 @@ export function guessKind(step: Step): NodeKind {
   if (step.items) return "map";
   if (step.branches) return "parallel";
   if (step.iterations) return "loop";
+  if (step.router) return "router";
   if (step.gate) return "gate";
   return step.turns.some((t) => t.kind === "message") ? "agent" : "tool";
 }

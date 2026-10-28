@@ -14,6 +14,8 @@ export interface StepsProgress {
 export function stepsProgress(spec: WorkflowSpec, steps: Step[]): StepsProgress {
   const progress = { done: 0, total: 0, failed: 0, running: 0 };
   for (const state of nodeStatuses(spec, steps).values()) {
+    // A node on a route its router did not take will never run: it is not part of the work.
+    if (state.status === "skipped") continue;
     progress.total += 1;
     if (state.status === "completed") progress.done += 1;
     else if (state.status === "failed") progress.failed += 1;

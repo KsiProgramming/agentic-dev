@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import docsRun from "./fixtures/docs-run.json";
+import type { WorkflowSpec } from "./graph/spec-graph";
+import { specParents } from "./spec-parents";
 import { runEvent } from "./testing";
 import {
   buildTimeline,
@@ -373,5 +375,182 @@ describe("the run's clock", () => {
 
   it("has no active time before the run starts", () => {
     expect(clockAt(buildTimeline([]).clock, T0)).toEqual({ activeMs: null, waitingMs: 0 });
+  });
+});
+
+describe("buildTimeline with routers (4.6)", () => {
+  const ROUTER_SPEC: WorkflowSpec = {
+    spec_version: "0",
+    id: "audit",
+    name: "Audit",
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [
+        {
+          type: "parallel",
+          id: "checks",
+          join: "all",
+          branches: [
+            {
+              type: "sequence",
+              id: "security",
+              steps: [
+                {
+                  type: "parallel",
+                  id: "security_reviewers",
+                  join: "all",
+                  branches: [
+                    { type: "agent", id: "security_1", role: "R", instructions: "Go." },
+                    { type: "agent", id: "security_2", role: "R", instructions: "Go." },
+                  ],
+                },
+                {
+                  type: "reduce",
+                  id: "security_vote",
+                  from: "security_reviewers",
+                  strategy: "vote",
+                },
+              ],
+            },
+            {
+              type: "sequence",
+              id: "tests",
+              steps: [
+                {
+                  type: "parallel",
+                  id: "tests_reviewers",
+                  join: "all",
+                  branches: [
+                    { type: "agent", id: "tests_1", role: "R", instructions: "Go." },
+                    { type: "agent", id: "tests_2", role: "R", instructions: "Go." },
+                  ],
+                },
+                { type: "reduce", id: "tests_vote", from: "tests_reviewers", strategy: "vote" },
+              ],
+            },
+          ],
+        },
+        {
+          type: "router",
+          id: "report_path",
+          routes: [
+            {
+              id: "clean",
+              when: "false",
+              then: { type: "agent", id: "clean_report", role: "W", instructions: "Go." },
+            },
+          ],
+          default: { type: "agent", id: "standard_report", role: "W", instructions: "Go." },
+        },
+      ],
+    },
+  };
+
+  it("nests the route the router took under it, with its choice and reason", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "report_path", { routes: ["clean", "default"], mode: "rule" }),
+      event(2, "route_chosen", "report_path", {
+        route: "default",
+        mode: "rule",
+        reason: "no route matched",
+      }),
+      event(3, "node_started", "standard_report"),
+      event(4, "message", "standard_report", { text: "# Audit" }),
+      event(5, "node_completed", "standard_report"),
+      event(6, "node_completed", "report_path", { route: "default" }),
+    ]);
+
+    expect(timeline.steps.map((s) => s.id)).toEqual(["report_path"]);
+    const router = timeline.steps[0]!;
+    expect(router.status).toBe("completed");
+    expect(router.router).toMatchObject({
+      routes: ["clean", "default"],
+      mode: "rule",
+      chosen: "default",
+      reason: "no route matched",
+    });
+    expect(router.router?.steps.map((s) => [s.id, s.status])).toEqual([
+      ["standard_report", "completed"],
+    ]);
+  });
+
+  it("places nested parallels by the spec when their branch tags repeat", () => {
+    // Both inner parallels run at once, inside branches 0 and 1 of `checks`: their reviewers'
+    // events carry branch 0 or 1 too, which alone would put them in the wrong parallel.
+    const timeline = buildTimeline(
+      [
+        event(1, "node_started", "checks", { branches: 2, join: "all" }),
+        event(2, "parallel_branch_started", "checks", { index: 0, branch_id: "security" }),
+        event(3, "parallel_branch_started", "checks", { index: 1, branch_id: "tests" }),
+        event(4, "node_started", "security_reviewers", { branches: 2, join: "all", branch: 0 }),
+        event(5, "node_started", "tests_reviewers", { branches: 2, join: "all", branch: 1 }),
+        event(6, "parallel_branch_started", "security_reviewers", {
+          index: 0,
+          branch_id: "security_1",
+          branch: 0,
+        }),
+        event(7, "parallel_branch_started", "tests_reviewers", {
+          index: 0,
+          branch_id: "tests_1",
+          branch: 1,
+        }),
+        event(8, "node_started", "security_1", { branch: 0 }),
+        event(9, "node_started", "tests_1", { branch: 0 }),
+        event(10, "node_completed", "security_1", { branch: 0 }),
+        event(11, "node_completed", "tests_1", { branch: 0 }),
+      ],
+      specParents(ROUTER_SPEC.root),
+    );
+
+    const checks = timeline.steps[0]!;
+    const [security, tests] = checks.branches!;
+    expect(security!.steps.map((s) => s.id)).toEqual(["security_reviewers"]);
+    expect(tests!.steps.map((s) => s.id)).toEqual(["tests_reviewers"]);
+    expect(security!.steps[0]!.branches![0]!.steps.map((s) => s.id)).toEqual(["security_1"]);
+    expect(tests!.steps[0]!.branches![0]!.steps.map((s) => s.id)).toEqual(["tests_1"]);
+  });
+
+  it("keeps a router in each map item apart", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "each", { items: 2 }),
+      event(2, "map_item_started", "each", { index: 0, item: "api" }),
+      event(3, "map_item_started", "each", { index: 1, item: "web" }),
+      event(4, "node_started", "by_kind", {
+        routes: ["frontend", "default"],
+        mode: "rule",
+        item: 0,
+      }),
+      event(5, "node_started", "by_kind", {
+        routes: ["frontend", "default"],
+        mode: "rule",
+        item: 1,
+      }),
+      event(6, "route_chosen", "by_kind", { route: "frontend", reason: "x", item: 1 }),
+      event(7, "route_chosen", "by_kind", { route: "default", reason: "y", item: 0 }),
+      event(8, "node_started", "ui_review", { item: 1 }),
+      event(9, "node_started", "code_review", { item: 0 }),
+    ]);
+
+    const [api, web] = timeline.steps[0]!.items!;
+    expect(api!.steps[0]!.router?.chosen).toBe("default");
+    expect(api!.steps[0]!.router?.steps.map((s) => s.id)).toEqual(["code_review"]);
+    expect(web!.steps[0]!.router?.chosen).toBe("frontend");
+    expect(web!.steps[0]!.router?.steps.map((s) => s.id)).toEqual(["ui_review"]);
+  });
+
+  it("ends a router cut off by the run's end with the run, and its route too", () => {
+    const timeline = buildTimeline([
+      event(1, "node_started", "report_path", { routes: ["clean"], mode: "classifier" }),
+      event(2, "route_chosen", "report_path", { route: "clean", reason: "Nothing found." }),
+      event(3, "node_started", "clean_report"),
+      event(4, "node_failed", "clean_report", { error: "model refused" }),
+      event(5, "run_failed", null),
+    ]);
+
+    const router = timeline.steps[0]!;
+    expect(router.status).toBe("failed");
+    expect(router.router?.mode).toBe("classifier");
+    expect(router.router?.steps[0]?.error).toBe("model refused");
   });
 });

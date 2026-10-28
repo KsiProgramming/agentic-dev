@@ -4,7 +4,7 @@ import { describeTool } from "./tool-describe";
 
 /**
  * The run's steps as the console's step list shows them: one row per step in run order, map
- * items, parallel branches and loop iterations nested under their node. A scope (item, branch,
+ * items, parallel branches, loop iterations and a router's route nested under their node. A scope (item, branch,
  * iteration) that holds one step is that step's row, named by the scope; one that holds several
  * is a heading row with its steps under it.
  */
@@ -13,7 +13,8 @@ export type StepEntry = StepRow | ScopeRow;
 export interface StepRow {
   kind: "step";
   /** Unique in the run, stable while it grows, and readable in a link: the node id with its
-   * scope (`document[2]/writer`, `revise#2/reviewer`, `checks:lint/scan`). */
+   * scope (`document[2]/writer`, `revise#2/reviewer`, `checks:lint/scan`,
+   * `report_path>fix_first/fix_first_report`). */
   key: string;
   step: Step;
   /** The node id, or the name of the scope the step is alone in. */
@@ -114,6 +115,10 @@ function visit(
       out,
     );
   }
+  // A router's route: its steps under it, by their own names (a route is one node).
+  for (const routed of step.router?.steps ?? []) {
+    visit(routed, { ...inner, prefix: `${key}>${step.router?.chosen ?? "route"}` }, out);
+  }
   for (const iteration of step.iterations ?? []) {
     const last = iteration.steps.at(-1);
     visitScope(
@@ -148,9 +153,14 @@ export function findEntry(entries: StepEntry[], key: string | null): StepRow | n
   return stepRows(entries).find((e) => e.key === key) ?? null;
 }
 
-/** A map, a parallel or a loop: its children do the work. */
+/** A map, a parallel, a loop or a router: its children do the work. */
 export function isContainer(step: Step): boolean {
-  return step.items !== null || step.branches !== null || step.iterations !== null;
+  return (
+    step.items !== null ||
+    step.branches !== null ||
+    step.iterations !== null ||
+    step.router !== null
+  );
 }
 
 /** The agent's answer: its last final message, or the text the step ends on. Text followed by
@@ -236,6 +246,10 @@ export function stepOutline(step: Step): string | null {
     return `${done} of ${count(step.branches.length, "branch", "branches")}`;
   }
   if (step.iterations) return count(step.iterations.length, "iteration");
+  if (step.router) {
+    if (step.router.chosen) return `Routed to ${step.router.chosen}`;
+    return step.status === "running" ? "Choosing a route" : null;
+  }
   if (step.merged) {
     const { sources, findingsIn, findingsOut } = step.merged;
     return `Merged ${count(findingsIn, "finding")} into ${findingsOut} from ${count(sources, "source")}`;

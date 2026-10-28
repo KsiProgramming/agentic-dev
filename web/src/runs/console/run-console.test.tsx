@@ -856,7 +856,10 @@ test("?tab=graph opens the graph of the run's workflow", async () => {
   });
 
   expect(screen.getByRole("tab", { name: "Graph" }).getAttribute("aria-selected")).toBe("true");
-  await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7));
+  // The graph is laid out by ELK, loaded on first use: allow it more than the default second.
+  await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7), {
+    timeout: 10_000,
+  });
   const reviewer = screen.getAllByTestId("graph-node").find((n) => n.dataset.nodeId === "reviewer");
   expect(reviewer?.dataset.status).toBe("completed");
 });

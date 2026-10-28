@@ -125,6 +125,7 @@ export function mapTotals(step: Step): { items: number; toolCalls: number; ms: n
       for (const item of s.items ?? []) visit(item.steps);
       for (const branch of s.branches ?? []) visit(branch.steps);
       for (const iteration of s.iterations ?? []) visit(iteration.steps);
+      visit(s.router?.steps ?? []);
     }
   };
   for (const item of items) visit(item.steps);

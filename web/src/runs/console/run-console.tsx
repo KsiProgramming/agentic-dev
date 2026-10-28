@@ -26,6 +26,7 @@ import { allSpecNodes, type NodeKind } from "../graph/spec-graph";
 import { displayStatus } from "../status";
 import { badgeStatus, runTimes, statusLabel, wallClockLine } from "../summaries";
 import { usageOfRun } from "../cost";
+import { specParents } from "../spec-parents";
 import { buildTimeline, clockAt, stepsUsage, type Step, type Timeline } from "../timeline";
 import type { ReceivedRunEvent, StreamStatus } from "../types";
 import { useFollowScroll } from "../use-follow-scroll";
@@ -132,6 +133,7 @@ function lastPullRequest(steps: Step[]): string | null {
       for (const iteration of step.iterations ?? []) visit(iteration.steps);
       for (const item of step.items ?? []) visit(item.steps);
       for (const branch of step.branches ?? []) visit(branch.steps);
+      visit(step.router?.steps ?? []);
     }
   };
   visit(steps);
@@ -229,7 +231,10 @@ function Console({
   const { events, status } = useRunEvents(runId, baseUrl);
   const detail = useRunDetail(runId, baseUrl);
   const client = useQueryClient();
-  const timeline = useMemo(() => buildTimeline(events), [events]);
+  const spec = detail.data?.spec ?? null;
+  // Nested nodes are placed by the spec once it loaded (4.6): their tags alone are ambiguous.
+  const parents = useMemo(() => (spec ? specParents(spec.root) : null), [spec]);
+  const timeline = useMemo(() => buildTimeline(events, parents), [events, parents]);
   const entries = useMemo(() => stepEntries(timeline.steps), [timeline]);
   const rows = useMemo(() => stepRows(entries), [entries]);
   const gate = status === "live" ? pendingGate(events) : null;
@@ -246,7 +251,6 @@ function Console({
     void client.invalidateQueries({ queryKey: runDetailKey(runId) });
   }, [client, runId, status, gate?.nodeId, prUrl]);
 
-  const spec = detail.data?.spec ?? null;
   const kinds = useMemo(
     () => new Map<string, NodeKind>(spec ? allSpecNodes(spec).map((n) => [n.id, n.type]) : []),
     [spec],

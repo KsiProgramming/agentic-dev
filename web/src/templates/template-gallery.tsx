@@ -7,6 +7,7 @@ import {
   FileTextIcon,
   LayoutTemplateIcon,
   PlayIcon,
+  ScanSearchIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -20,7 +21,10 @@ import { cn } from "@/lib/utils";
 import { REQUIREMENT_LABEL, type ConnectionState, type Readiness } from "@/runs/new-run/readiness";
 
 /** Icons for the templates we know; others get a generic one. */
-const ICONS: Record<string, LucideIcon> = { "generate-docs": FileTextIcon };
+const ICONS: Record<string, LucideIcon> = {
+  "generate-docs": FileTextIcon,
+  "audit-codebase": ScanSearchIcon,
+};
 
 function RequirementChip({ label, state }: { label: string; state: ConnectionState }) {
   const ok = state === "ready";

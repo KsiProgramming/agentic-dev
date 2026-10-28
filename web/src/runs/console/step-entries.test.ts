@@ -193,3 +193,61 @@ describe("event rows", () => {
     expect(rowOffsetMs(rows[2]!, runEvent(1, "x").created_at)).toBe(3000);
   });
 });
+
+describe("routers (4.6)", () => {
+  const ROUTED: WorkflowSpec = {
+    spec_version: "0",
+    id: "routed",
+    name: "Routed",
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [
+        {
+          type: "router",
+          id: "report_path",
+          routes: [
+            {
+              id: "clean",
+              when: "false",
+              then: { type: "agent", id: "clean_report", role: "W", instructions: "Go." },
+            },
+          ],
+          default: { type: "agent", id: "standard_report", role: "W", instructions: "Go." },
+        },
+        { type: "agent", id: "after", role: "W", instructions: "Go." },
+      ],
+    },
+  } as WorkflowSpec;
+  const events = [
+    on("report_path", runEvent(1, "node_started", { routes: ["clean", "default"], mode: "rule" })),
+    on(
+      "report_path",
+      runEvent(2, "route_chosen", { route: "default", reason: "no route matched" }),
+    ),
+    on("standard_report", runEvent(3, "node_started")),
+    on("standard_report", runEvent(4, "message", { text: "# Audit\n\nAll good." })),
+    on("standard_report", runEvent(5, "node_completed")),
+    on("report_path", runEvent(6, "node_completed", { route: "default" })),
+  ];
+
+  it("nests the route's steps under the router and says where it went", () => {
+    const steps = buildTimeline(events).steps;
+    const entries = stepEntries(steps);
+
+    expect(stepRows(entries).map((r) => [r.key, r.depth])).toEqual([
+      ["report_path", 0],
+      ["report_path>default/standard_report", 1],
+    ]);
+    expect(stepOutline(steps[0]!)).toBe("Routed to default");
+    expect(stepOutline(buildTimeline(events.slice(0, 1)).steps[0]!)).toBe("Choosing a route");
+    // The router is a container: the step that did the work is its route's.
+    expect(defaultEntry(entries, false)?.key).toBe("report_path>default/standard_report");
+  });
+
+  it("leaves the routes not taken out of the run's progress", () => {
+    const progress = stepsProgress(ROUTED, buildTimeline(events).steps);
+
+    expect(progress).toMatchObject({ total: 3, done: 2, running: 0 });
+  });
+});

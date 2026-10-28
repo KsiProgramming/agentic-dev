@@ -243,3 +243,21 @@ describe("a scan step's output", () => {
     expect(screen.getByRole("table", { name: "Findings of lint" })).toBeTruthy();
   });
 });
+
+describe("an agent review's findings (4.6)", () => {
+  const REVIEW = {
+    ...LINT,
+    scanner: "agent",
+    checks: [{ path: ".", kind: "repo", tool: "agent", status: "ran" }],
+    findings: [
+      { ...LINT.findings[0]!, tool: "agent", rule: "sql-injection", category: "security" },
+    ],
+  };
+
+  it("is a findings report, shown under its own label", () => {
+    expect(isFindingsReport(REVIEW)).toBe(true);
+    render(<FindingsView report={REVIEW as never} label="Findings of security" />);
+
+    expect(screen.getAllByText("sql-injection", { exact: false }).length).toBeGreaterThan(0);
+  });
+});
