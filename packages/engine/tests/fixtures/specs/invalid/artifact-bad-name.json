@@ -1,0 +1,12 @@
+{
+  "spec_version": "0",
+  "id": "artifact-bad-name",
+  "name": "An artifact name with an extension that is not allowed",
+  "root": {
+    "type": "agent",
+    "id": "scan",
+    "role": "Reviewer",
+    "instructions": "List the findings.",
+    "writes": "findings.xml"
+  }
+}

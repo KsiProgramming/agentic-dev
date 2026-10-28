@@ -227,6 +227,26 @@ class RunEventRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class RunArtifact(Base):
+    """One version of a run artifact (4.3), append only: `(run_id, name, version)` is its key, and
+    versions are numbered per name from 1. The run's state names the versions it uses; the
+    content is only here."""
+
+    __tablename__ = "run_artifacts"
+
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[str] = mapped_column(String(64))
+    media_type: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    content: Mapped[str] = mapped_column(Text)
+    # The writer's `output_schema`, if it had one.
+    output_schema: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Approval(Base):
     """A human decision at a gate of a run, `approve` or `reject`; the paused run continues with
     it. One per gate and run: gates inside loops and maps will need an iteration key."""

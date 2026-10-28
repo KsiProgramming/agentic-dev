@@ -41,6 +41,7 @@ export const EVENT_TYPES = [
   "parallel_branch_completed",
   "pr_opened",
   "repo_created",
+  "artifact_written",
   "policy_limit_exceeded",
   "text_delta",
   "reasoning_delta",

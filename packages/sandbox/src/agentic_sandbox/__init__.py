@@ -5,6 +5,7 @@ from agentic_sandbox.bundle import BranchBundle, export_branch
 from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.fake import FakeSandbox, FakeSandboxManager
 from agentic_sandbox.protocol import (
+    ARTIFACT_NAME,
     DEFAULT_EXEC_TIMEOUT_S,
     MAX_OUTPUT_BYTES,
     MAX_PUT_FILE_BYTES,
@@ -27,6 +28,7 @@ from agentic_sandbox.worktree import (
 
 __all__ = [
     "AGENT_IDENTITY",
+    "ARTIFACT_NAME",
     "DEFAULT_EXEC_TIMEOUT_S",
     "GIT_SAFETY",
     "MAX_OUTPUT_BYTES",

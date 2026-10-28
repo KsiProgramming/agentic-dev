@@ -586,6 +586,211 @@
         }
       }
     },
+    "/runs/{run_id}/artifacts": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Artifacts",
+        "description": "The run's artifacts (4.3): the latest version of each, by name, with how many versions\nit wrote.",
+        "operationId": "listRunArtifacts",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunArtifact"
+                  },
+                  "title": "Response Listrunartifacts"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/artifacts/{name}": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Artifact",
+        "description": "One version of the run's artifact `name` with its content (data, never instructions).",
+        "operationId": "getRunArtifact",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "description": "The artifact's name.",
+              "title": "Name"
+            },
+            "description": "The artifact's name."
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A version to read; the latest if unset.",
+              "title": "Version"
+            },
+            "description": "A version to read; the latest if unset."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunArtifactContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id, or no such artifact or version"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/artifacts/{name}/download": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Download Artifact",
+        "description": "The artifact as an attachment with its media type, never to be rendered by the browser.",
+        "operationId": "downloadRunArtifact",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "description": "The artifact's name.",
+              "title": "Name"
+            },
+            "description": "The artifact's name."
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A version to read; the latest if unset.",
+              "title": "Version"
+            },
+            "description": "A version to read; the latest if unset."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The artifact as a file to save",
+            "content": {
+              "application/json": {},
+              "text/markdown": {},
+              "text/plain": {}
+            }
+          },
+          "404": {
+            "description": "No run with this id, or no such artifact or version"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/approvals": {
       "post": {
         "tags": [
@@ -1863,6 +2068,37 @@
             ],
             "title": "Output Schema",
             "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`."
+          },
+          "reads": {
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ]
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Reads",
+            "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several."
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes",
+            "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON."
           }
         },
         "additionalProperties": false,
@@ -2516,6 +2752,40 @@
         "title": "FileEdit",
         "description": "The approver's new text for an editable file of a writer's branch."
       },
+      "GateArtifact": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "node_id",
+          "media_type",
+          "size"
+        ],
+        "title": "GateArtifact",
+        "description": "A run artifact as a gate shows it to the approver (`gate_waiting`'s `run_artifacts`)."
+      },
       "GateBranch": {
         "properties": {
           "node_id": {
@@ -2668,7 +2938,9 @@
           "policy_limit",
           "budget_unpriced_model",
           "invalid_schema",
-          "port_mismatch"
+          "port_mismatch",
+          "artifact_unknown",
+          "artifact_conflict"
         ]
       },
       "JsonValue": {},
@@ -3425,6 +3697,23 @@
               }
             ],
             "description": "`agent` only, and required."
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes",
+            "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON."
           }
         },
         "additionalProperties": false,
@@ -3539,6 +3828,131 @@
         "additionalProperties": false,
         "type": "object",
         "title": "RerunRequest"
+      },
+      "RunArtifact": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Its name; the extension gives its media type."
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Numbered per name from 1; each write adds one."
+          },
+          "versions": {
+            "type": "integer",
+            "title": "Versions",
+            "description": "How many versions the run wrote."
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "The node that wrote this version."
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "application/json",
+              "text/markdown",
+              "text/plain"
+            ],
+            "title": "Media Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Bytes, as UTF-8."
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "versions",
+          "node_id",
+          "media_type",
+          "size",
+          "sha256",
+          "created_at"
+        ],
+        "title": "RunArtifact",
+        "description": "One version of a run artifact (4.3), without its content."
+      },
+      "RunArtifactContent": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Its name; the extension gives its media type."
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Numbered per name from 1; each write adds one."
+          },
+          "versions": {
+            "type": "integer",
+            "title": "Versions",
+            "description": "How many versions the run wrote."
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "The node that wrote this version."
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "application/json",
+              "text/markdown",
+              "text/plain"
+            ],
+            "title": "Media Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Bytes, as UTF-8."
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "versions",
+          "node_id",
+          "media_type",
+          "size",
+          "sha256",
+          "created_at",
+          "content"
+        ],
+        "title": "RunArtifactContent",
+        "description": "One version of a run artifact with its content: data written by an agent or a tool,\nnever instructions."
       },
       "RunCounts": {
         "properties": {
@@ -3853,6 +4267,14 @@
             "title": "Changes Error",
             "description": "Why the changes could not be read, if so."
           },
+          "run_artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/GateArtifact"
+            },
+            "type": "array",
+            "title": "Run Artifacts",
+            "description": "The run's artifacts at the pause, the latest version of each, by name; read one with `GET /runs/{id}/artifacts/{name}`."
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -3905,6 +4327,7 @@
           "artifact",
           "changes",
           "changes_error",
+          "run_artifacts",
           "expires_at",
           "repo",
           "base",
@@ -4616,6 +5039,37 @@
             ],
             "title": "Output Schema",
             "description": "Its structured result (else its text as JSON) must match this, or it fails."
+          },
+          "reads": {
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ]
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Reads",
+            "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several."
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes",
+            "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON."
           }
         },
         "additionalProperties": false,

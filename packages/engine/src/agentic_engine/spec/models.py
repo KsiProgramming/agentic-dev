@@ -4,6 +4,7 @@ New primitives are added as members of the `Node` union; existing specs keep val
 """
 
 from collections.abc import Callable, Collection, Iterator
+from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -25,6 +26,26 @@ PortSchema = Annotated[
     ),
 ]
 """A typed port (4.2): checked against the value that crosses it, at runtime."""
+
+ArtifactName = Annotated[
+    str,
+    Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\.(json|md|txt)$",
+        description="A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, "
+        "`.md` or `.txt`, which give its media type.",
+        examples=["findings.json"],
+    ),
+]
+"""The name of a run artifact (4.3), shared by the nodes of one run."""
+
+_WRITES_DESCRIPTION = (
+    "Write the node's output as this run artifact (a new version each time it runs); a `.json` "
+    "artifact must be JSON."
+)
+_READS_DESCRIPTION = (
+    "Take these run artifacts as input, instead of the previous output: one artifact's content, "
+    "or an object by name for several."
+)
 
 
 class _Base(BaseModel):
@@ -53,6 +74,14 @@ class AgentNode(_Base):
         description="It is asked to answer with JSON that matches this, and fails if it does not; "
         "the parsed object is its `data`.",
     )
+    reads: list[ArtifactName] = Field(
+        default_factory=list[str], max_length=8, description=_READS_DESCRIPTION
+    )
+    writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
+
+    @model_validator(mode="after")
+    def _unique_reads(self) -> Self:
+        return _check_unique_reads(self)
 
 
 class ToolNode(_Base):
@@ -72,6 +101,20 @@ class ToolNode(_Base):
         default=None,
         description="Its structured result (else its text as JSON) must match this, or it fails.",
     )
+    reads: list[ArtifactName] = Field(
+        default_factory=list[str], max_length=8, description=_READS_DESCRIPTION
+    )
+    writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
+
+    @model_validator(mode="after")
+    def _unique_reads(self) -> Self:
+        return _check_unique_reads(self)
+
+
+def _check_unique_reads[N: AgentNode | ToolNode](node: N) -> N:
+    if len(set(node.reads)) != len(node.reads):
+        raise ValueError(f"node {node.id!r}: `reads` names an artifact twice")
+    return node
 
 
 class GateNode(_Base):
@@ -186,6 +229,7 @@ class ReduceNode(_Base):
         default=None, description="`concat` only: what goes between outputs (default two newlines)."
     )
     agent: ReduceAgent | None = Field(default=None, description="`agent` only, and required.")
+    writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
 
     @model_validator(mode="after")
     def _strategy_fields(self) -> Self:
@@ -282,7 +326,10 @@ CREATE_TOOLS = frozenset({"github.createRepo"})
 """Tools that create the run's repo on GitHub. Irreversible, so only a tool node may call one,
 after a gate, as a step of the root sequence before anything uses the repo."""
 
-PLATFORM_TOOLS = READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS | CREATE_TOOLS
+ARTIFACT_TOOLS = frozenset({"artifacts.list", "artifacts.read"})
+"""Tools that read the run's artifacts (4.3). Every run has them, with or without a repo."""
+
+PLATFORM_TOOLS = READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS | CREATE_TOOLS | ARTIFACT_TOOLS
 """Every tool a node may name. The tool servers register exactly these (checked in tests)."""
 
 type IssueCode = Literal[
@@ -304,6 +351,8 @@ type IssueCode = Literal[
     "budget_unpriced_model",
     "invalid_schema",
     "port_mismatch",
+    "artifact_unknown",
+    "artifact_conflict",
 ]
 
 
@@ -759,13 +808,125 @@ def budget_errors(
 type PortNode = AgentNode | ToolNode
 """A node that may declare typed ports."""
 
+type ArtifactWriter = AgentNode | ToolNode | ReduceNode
+"""A node that may write a run artifact."""
+
+
+@dataclass
+class _ArtifactFlow:
+    """What `_walk_artifacts` finds: each reader's writers, by artifact name, and the issues."""
+
+    writers: dict[str, dict[str, ArtifactWriter]] = field(
+        default_factory=dict[str, dict[str, ArtifactWriter]]
+    )
+    issues: list[ValidationIssue] = field(default_factory=list[ValidationIssue])
+
+
+def _walk_artifacts(root: Node) -> _ArtifactFlow:
+    """Follow the run artifacts under `root` in run order. A read must have a writer that has
+    always run before it: an earlier step, not a sibling branch of the same parallel, and not a
+    later step of the same loop body (its first iteration would not have it). A map's body may not
+    write (its ids repeat for every item), and two branches of one parallel may not write the same
+    name. After a parallel, what its branches wrote is visible."""
+    flow = _ArtifactFlow()
+
+    def conflict(node: Node, path: str, why: str) -> None:
+        message = f"{node.type} {node.id!r} at {path}: {why}"
+        flow.issues.append(
+            ValidationIssue(code="artifact_conflict", path=path, node_id=node.id, message=message)
+        )
+
+    def visit(node: Node, path: str, seen: dict[str, ArtifactWriter]) -> dict[str, ArtifactWriter]:
+        match node:
+            case AgentNode() | ToolNode():
+                found: dict[str, ArtifactWriter] = {}
+                for i, name in enumerate(node.reads):
+                    if name in seen:
+                        found[name] = seen[name]
+                        continue
+                    message = (
+                        f"{node.type} {node.id!r} at {path}: reads {name!r}, which no node writes "
+                        "before it; write it in an earlier step"
+                    )
+                    flow.issues.append(
+                        ValidationIssue(
+                            code="artifact_unknown",
+                            path=f"{path}.reads[{i}]",
+                            node_id=node.id,
+                            message=message,
+                        )
+                    )
+                if node.reads:
+                    flow.writers[node.id] = found
+                return {**seen, node.writes: node} if node.writes else seen
+            case ReduceNode():
+                return {**seen, node.writes: node} if node.writes else seen
+            case GateNode():
+                return seen
+            case SequenceNode():
+                for i, step in enumerate(node.steps):
+                    seen = visit(step, f"{path}.steps[{i}]", seen)
+                return seen
+            case LoopNode():
+                return visit(node.body, f"{path}.body", seen)
+            case MapNode():
+                for inner_path, inner in iter_nodes(node.body, f"{path}.body"):
+                    if isinstance(inner, AgentNode | ToolNode | ReduceNode) and inner.writes:
+                        conflict(
+                            inner,
+                            inner_path,
+                            f"writes {inner.writes!r} inside map {node.id!r}, which runs it once "
+                            "per item; write it after the map (e.g. from a reduce)",
+                        )
+                visit(node.body, f"{path}.body", seen)
+                return seen
+            case ParallelNode():
+                after = dict(seen)
+                by_branch: dict[str, str] = {}
+                for i, branch in enumerate(node.branches):
+                    branch_path = f"{path}.branches[{i}]"
+                    wrote = visit(branch, branch_path, seen)
+                    for name, writer in wrote.items():
+                        if seen.get(name) is writer:
+                            continue
+                        if name in by_branch:
+                            conflict(
+                                writer,
+                                branch_path,
+                                f"writes {name!r}, which branch {by_branch[name]!r} of parallel "
+                                f"{node.id!r} also writes; branches run at the same time",
+                            )
+                            continue
+                        by_branch[name] = branch.id
+                        after[name] = writer
+                return after
+
+    visit(root, "root", {})
+    return flow
+
+
+def artifact_issues(root: Node) -> list[ValidationIssue]:
+    """Why the run artifacts under `root` cannot be exchanged, in run order: a read with no
+    earlier writer (`artifact_unknown`, on the read), and a write that races
+    (`artifact_conflict`, on the writer)."""
+    return _walk_artifacts(root).issues
+
+
+def artifact_writers(root: Node) -> dict[str, dict[str, ArtifactWriter]]:
+    """For each node under `root` that reads run artifacts, the node that last wrote each of
+    them before it (names with no earlier writer left out)."""
+    return _walk_artifacts(root).writers
+
 
 def port_edges(root: Node) -> list[tuple[PortNode, PortNode, str]]:
     """Each place under `root` where one agent or tool node's output is the next one's input, as
     `(producer, consumer, consumer's path)` in run order: consecutive steps of a sequence (nested
     sequences flattened), looking through gates, which pass their input on unchanged. A loop, map,
-    parallel or reduce between two steps breaks the edge: its output is not typed."""
+    parallel or reduce between two steps breaks the edge: its output is not typed. A node that
+    reads one run artifact takes it from the artifact's last writer instead (if that is an agent or
+    tool node), and one that reads several has no producer."""
     edges: list[tuple[PortNode, PortNode, str]] = []
+    writers = artifact_writers(root)
 
     def steps(node: Node, path: str) -> Iterator[tuple[str, Node]]:
         if isinstance(node, SequenceNode):
@@ -779,7 +940,12 @@ def port_edges(root: Node) -> list[tuple[PortNode, PortNode, str]]:
         for step_path, step in steps(node, path):
             match step:
                 case AgentNode() | ToolNode():
-                    if previous is not None:
+                    if step.reads:
+                        read = writers.get(step.id, {})
+                        source = read.get(step.reads[0]) if len(step.reads) == 1 else None
+                        if isinstance(source, AgentNode | ToolNode):
+                            edges.append((source, step, step_path))
+                    elif previous is not None:
                         edges.append((previous, step, step_path))
                     previous = step
                 case GateNode():
@@ -877,11 +1043,11 @@ def _types(schema: JsonValue) -> set[str]:
 def structure_issues(root: Node) -> list[ValidationIssue]:
     """Why the spec under `root` cannot run anywhere, in run order: duplicate node ids, the loop,
     map and parallel rules, references to other nodes, a gate before every publisher, the rules
-    for creating the repo, and typed ports."""
+    for creating the repo, typed ports and run artifacts."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root)
-    issues += port_issues(root)
+    issues += port_issues(root) + artifact_issues(root)
     return in_run_order(root, issues)
 
 

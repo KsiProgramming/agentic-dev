@@ -195,6 +195,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Artifacts
+         * @description The run's artifacts (4.3): the latest version of each, by name, with how many versions
+         *     it wrote.
+         */
+        get: operations["listRunArtifacts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/artifacts/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Artifact
+         * @description One version of the run's artifact `name` with its content (data, never instructions).
+         */
+        get: operations["getRunArtifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/artifacts/{name}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Artifact
+         * @description The artifact as an attachment with its media type, never to be rendered by the browser.
+         */
+        get: operations["downloadRunArtifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/approvals": {
         parameters: {
             query?: never;
@@ -591,6 +652,16 @@ export interface components {
             output_schema?: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
+            /**
+             * Reads
+             * @description Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.
+             */
+            reads?: string[];
+            /**
+             * Writes
+             * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
+             */
+            writes?: string | null;
         };
         /** ApprovalRequest */
         ApprovalRequest: {
@@ -868,6 +939,22 @@ export interface components {
             /** Content */
             content: string;
         };
+        /**
+         * GateArtifact
+         * @description A run artifact as a gate shows it to the approver (`gate_waiting`'s `run_artifacts`).
+         */
+        GateArtifact: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: number;
+            /** Node Id */
+            node_id: string;
+            /** Media Type */
+            media_type: string;
+            /** Size */
+            size: number;
+        };
         /** GateBranch */
         GateBranch: {
             /**
@@ -945,7 +1032,7 @@ export interface components {
             install_url: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1240,6 +1327,11 @@ export interface components {
             separator?: string | null;
             /** @description `agent` only, and required. */
             agent?: components["schemas"]["ReduceAgent"] | null;
+            /**
+             * Writes
+             * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
+             */
+            writes?: string | null;
         };
         /**
          * RepoOut
@@ -1281,6 +1373,95 @@ export interface components {
              * @description USD the new run may spend. Unset: the workspace's default budget as it is now. From $0.01 to $1,000,000; unset is no budget.
              */
             budget_usd?: number | null;
+        };
+        /**
+         * RunArtifact
+         * @description One version of a run artifact (4.3), without its content.
+         */
+        RunArtifact: {
+            /**
+             * Name
+             * @description Its name; the extension gives its media type.
+             */
+            name: string;
+            /**
+             * Version
+             * @description Numbered per name from 1; each write adds one.
+             */
+            version: number;
+            /**
+             * Versions
+             * @description How many versions the run wrote.
+             */
+            versions: number;
+            /**
+             * Node Id
+             * @description The node that wrote this version.
+             */
+            node_id: string;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "application/json" | "text/markdown" | "text/plain";
+            /**
+             * Size
+             * @description Bytes, as UTF-8.
+             */
+            size: number;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * RunArtifactContent
+         * @description One version of a run artifact with its content: data written by an agent or a tool,
+         *     never instructions.
+         */
+        RunArtifactContent: {
+            /**
+             * Name
+             * @description Its name; the extension gives its media type.
+             */
+            name: string;
+            /**
+             * Version
+             * @description Numbered per name from 1; each write adds one.
+             */
+            version: number;
+            /**
+             * Versions
+             * @description How many versions the run wrote.
+             */
+            versions: number;
+            /**
+             * Node Id
+             * @description The node that wrote this version.
+             */
+            node_id: string;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "application/json" | "text/markdown" | "text/plain";
+            /**
+             * Size
+             * @description Bytes, as UTF-8.
+             */
+            size: number;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Content */
+            content: string;
         };
         /**
          * RunCounts
@@ -1425,6 +1606,11 @@ export interface components {
              * @description Why the changes could not be read, if so.
              */
             changes_error: string | null;
+            /**
+             * Run Artifacts
+             * @description The run's artifacts at the pause, the latest version of each, by name; read one with `GET /runs/{id}/artifacts/{name}`.
+             */
+            run_artifacts: components["schemas"]["GateArtifact"][];
             /**
              * Expires At
              * @description When the gate expires: the run is then cancelled ("Approval expired").
@@ -1758,6 +1944,16 @@ export interface components {
             output_schema?: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
+            /**
+             * Reads
+             * @description Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.
+             */
+            reads?: string[];
+            /**
+             * Writes
+             * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
+             */
+            writes?: string | null;
         };
         /** ValidateWorkflowRequest */
         ValidateWorkflowRequest: {
@@ -2319,6 +2515,132 @@ export interface operations {
             };
             /** @description The run is not waiting at a gate, or its approval expired */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listRunArtifacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunArtifact"][];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getRunArtifact: {
+        parameters: {
+            query?: {
+                /** @description A version to read; the latest if unset. */
+                version?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description The artifact's name. */
+                name: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunArtifactContent"];
+                };
+            };
+            /** @description No run with this id, or no such artifact or version */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    downloadRunArtifact: {
+        parameters: {
+            query?: {
+                /** @description A version to read; the latest if unset. */
+                version?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description The artifact's name. */
+                name: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The artifact as a file to save */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/markdown": unknown;
+                    "text/plain": unknown;
+                };
+            };
+            /** @description No run with this id, or no such artifact or version */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

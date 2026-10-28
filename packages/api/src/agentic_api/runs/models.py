@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from agentic_api.workspaces.models import budget_field
+from agentic_engine.artifacts import GateArtifact
 from agentic_engine.gate import MAX_REVIEW_FILES, EditErrorCode, FileChange, FileEdit
 from agentic_engine.spec import (
     ValidationIssue,
@@ -253,6 +254,10 @@ class RunGate(BaseModel):
         description="The files the writers before the gate changed; editable ones have contents."
     )
     changes_error: str | None = Field(description="Why the changes could not be read, if so.")
+    run_artifacts: list[GateArtifact] = Field(
+        description="The run's artifacts at the pause, the latest version of each, by name; read "
+        "one with `GET /runs/{id}/artifacts/{name}`."
+    )
     expires_at: datetime | None = Field(
         description='When the gate expires: the run is then cancelled ("Approval expired").'
     )
@@ -339,6 +344,26 @@ class RunSummary(BaseModel):
         if self.started_at is None or self.finished_at is None:
             return None
         return round((self.finished_at - self.started_at).total_seconds() * 1000)
+
+
+class RunArtifact(BaseModel):
+    """One version of a run artifact (4.3), without its content."""
+
+    name: str = Field(description="Its name; the extension gives its media type.")
+    version: int = Field(description="Numbered per name from 1; each write adds one.")
+    versions: int = Field(description="How many versions the run wrote.")
+    node_id: str = Field(description="The node that wrote this version.")
+    media_type: Literal["application/json", "text/markdown", "text/plain"]
+    size: int = Field(description="Bytes, as UTF-8.")
+    sha256: str
+    created_at: datetime
+
+
+class RunArtifactContent(RunArtifact):
+    """One version of a run artifact with its content: data written by an agent or a tool,
+    never instructions."""
+
+    content: str
 
 
 class RunDetail(RunSummary):

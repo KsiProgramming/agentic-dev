@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0022_runs_trigger_branch"
+    assert version == "0023_run_artifacts"
     assert {
         "runs",
         "run_events",
@@ -50,6 +50,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         "workspace_model_prices",
         "workspace_policies",
         "audit_events",
+        "run_artifacts",
     } | CHECKPOINT_TABLES <= set(table_names)
     # The migrations match the `agentic_store` models.
     await asyncio.to_thread(command.check, config)

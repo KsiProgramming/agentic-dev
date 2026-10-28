@@ -23,6 +23,7 @@ def test_initial_state_seeds_last_text_with_input() -> None:
         "map_results": {},
         "spawned": 0,
         "parallel_results": {},
+        "artifacts": {},
     }
 
 

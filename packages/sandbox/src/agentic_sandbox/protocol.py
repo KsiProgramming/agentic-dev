@@ -3,17 +3,19 @@
 A sandbox holds a clone of the run's repo at `workdir`, which the sandbox user can read but not
 change. Writer nodes get their own git worktree under `worktrees_dir` (`agentic_sandbox.worktree`),
 and file contents reach the sandbox through `put_file` (and leave it through `take_file`, e.g. a
-writer's branch as a git bundle). Commands run with `workdir`, or a worktree,
-as their current directory. The manager owns the lifecycle: `open()` creates the sandbox and
-clones the repo, and leaving the context destroys it, whether the run succeeded, failed or was
-cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and the attempt that
-continues it opens it again (`open(..., reuse=True)`).
+writer's branch as a git bundle). The run's artifacts are copied to `artifacts_dir`
+(`put_artifact`), where the sandbox user can read them but not change them. Commands run with
+`workdir`, or a worktree, as their current directory. The manager owns the lifecycle: `open()`
+creates the sandbox and clones the repo, and leaving the context destroys it, whether the run
+succeeded, failed or was cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and
+the attempt that continues it opens it again (`open(..., reuse=True)`).
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Final, Protocol
 from uuid import UUID
 
 from agentic_sandbox.source import RepoSource
@@ -25,6 +27,16 @@ DEFAULT_EXEC_TIMEOUT_S = 30.0
 MAX_PUT_FILE_BYTES = 1024 * 1024
 # The largest file `take_file` hands out (a writer's branch, bundled).
 MAX_TAKE_FILE_BYTES = 64 * 1024 * 1024
+
+
+ARTIFACT_NAME: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\.(json|md|txt)$")
+"""A run artifact's name, as the workflow spec allows it (`agentic_engine.spec.ArtifactName`)."""
+
+
+def check_artifact_name(name: str) -> None:
+    """Raises `ValueError` unless `name` is a run artifact's name, so it is one file name."""
+    if not ARTIFACT_NAME.match(name):
+        raise ValueError(f"not an artifact name: {name!r}")
 
 
 @dataclass(frozen=True)
@@ -74,6 +86,17 @@ class Sandbox(Protocol):
         """The bytes of the file `path`, directly in `staging_dir`, which is then removed.
         Raises `ValueError` for any other path, and `SandboxError` if the file is missing or over
         `MAX_TAKE_FILE_BYTES`."""
+        ...
+
+    @property
+    def artifacts_dir(self) -> str:
+        """Where the run's artifacts are copied: readable by the sandbox user, not writable."""
+        ...
+
+    async def put_artifact(self, name: str, data: bytes) -> str:
+        """Copy the run artifact `name` to `artifacts_dir`, replacing an older version, and
+        return its path. Raises `ValueError` if `name` is not an artifact's name, and
+        `SandboxError` if `data` is over `MAX_PUT_FILE_BYTES` or cannot be copied."""
         ...
 
 

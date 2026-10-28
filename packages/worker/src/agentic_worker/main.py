@@ -32,6 +32,10 @@ A run that creates its repo (`github.createRepo`, phase 1.12) has its repo's URL
 but no sandbox until the repo exists: its attempts get only the `github` server, without
 `openPR`. Once `github.createRepo` has run, the graph stops (`suspended`) and the worker starts a
 new attempt of the run at once, which clones the new repo and goes on.
+
+Every run gets the `artifacts.*` tools, which read its artifacts (4.3). They are stored in
+Postgres (`PostgresArtifactStore`), and a run with a sandbox also gets a read-only copy of each
+in its `artifacts_dir`, copied again into a fresh sandbox when an attempt starts.
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
 this host (no isolation).
 
@@ -76,6 +80,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from agentic_engine.artifacts import ArtifactStore
 from agentic_engine.events import RUN_CANCELLED, RUN_FAILED, EventSink, RunEvent, RunEventLog
 from agentic_engine.gate import GateDecision, GateReview
 from agentic_engine.graph import (
@@ -124,6 +129,7 @@ from agentic_secrets import (
 )
 from agentic_store import (
     APPROVAL_EXPIRED_REASON,
+    PostgresArtifactStore,
     PostgresEventSink,
     StoredRun,
     active_seconds,
@@ -147,9 +153,11 @@ from agentic_store import (
     waiting_run_ids,
     workspace_price_table,
 )
+from agentic_tools.artifacts import open_artifact_tools
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
+from agentic_worker.artifacts import MirroredArtifactStore
 from agentic_worker.review import SandboxGateReview
 
 log = logging.getLogger("agentic_worker")
@@ -589,6 +597,8 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
     async with contextlib.AsyncExitStack() as stack:
         tools: ToolExecutor | None = None
         review: SandboxGateReview | None = None
+        artifacts: ArtifactStore = PostgresArtifactStore(worker.sessions, run.id)
+        mirror_dir: str | None = None
         if to_create and target is not None:
             assert worker.github is not None  # `_github_target` checked it
             tools = await stack.enter_async_context(
@@ -610,6 +620,9 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
                 log.warning("run %s has no sandbox: %s", run.id, e)
                 await _fail(run, sink, last_seq, str(e))
                 return "failed"
+            mirrored = MirroredArtifactStore(artifacts, sandbox)
+            await mirrored.mirror_all()
+            artifacts, mirror_dir = mirrored, sandbox.artifacts_dir
             # Entered after the sandbox, so the MCP clients close before the sandbox is destroyed.
             writers = writer_node_ids(run.spec.root, WRITE_TOOL_NAMES)
             review = SandboxGateReview(sandbox, run.id, writers)
@@ -624,13 +637,19 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
                     )
                 )
                 tools = RunTools([tools, publishing])
+        reading = await stack.enter_async_context(
+            open_artifact_tools(artifacts, mirror_dir=mirror_dir)
+        )
+        tools = RunTools([tools, reading]) if tools is not None else reading
         try:
             runtime = await stack.enter_async_context(worker.open_runtime(run, tools))
         except RunSetupError as e:
             log.warning("run %s cannot start: %s", run.id, e)
             await _fail(run, sink, last_seq, str(e))
             return "failed"
-        result = await _workflow(worker, run, sink, last_seq, runtime, tools, decision, review)
+        result = await _workflow(
+            worker, run, sink, last_seq, runtime, tools, decision, review, artifacts
+        )
         if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
         return result.status
@@ -694,11 +713,12 @@ async def _workflow(
     tools: ToolExecutor | None,
     decision: GateDecision | None = None,
     review: GateReview | None = None,
+    artifacts: ArtifactStore | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
     run paused at a gate continues with `decision`, and its gates show and edit the writers'
-    branches through `review`. A run with a budget counts what its earlier
-    attempts spent (`runs.estimated_usd` when it was claimed)."""
+    branches through `review`. Its artifacts go to `artifacts`. A run with a budget counts what
+    its earlier attempts spent (`runs.estimated_usd` when it was claimed)."""
     if last_seq == 0:
         log.info("run %s started", run.id)
         return await run_workflow(
@@ -712,6 +732,7 @@ async def _workflow(
             policy=run.policy,
             spent=run.spent,
             review=review,
+            artifacts=artifacts,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -728,6 +749,7 @@ async def _workflow(
         policy=run.policy,
         spent=run.spent,
         review=review,
+        artifacts=artifacts,
     )
 
 

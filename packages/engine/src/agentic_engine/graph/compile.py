@@ -34,6 +34,15 @@ output once it completes: a value that does not match fails the node, whose `nod
 the `port` that refused it. A typed output becomes the node's `data`, and its text the JSON the
 next node receives.
 
+Run artifacts (4.3): a node with `writes` stores its output under that name once it completes
+(after its output port check) in the run's `ArtifactStore` and writes `artifact_written` before
+its end; one that cannot be written (a `.json` artifact that is not JSON, or one over the size
+limits) fails the node. A node with `reads` takes the versions the run had when it started as its
+input, instead of the previous output; its `node_started` names them (`reads`), and a name not
+written yet fails it before it runs. A map's items and a parallel's branches get the run's
+artifacts from when it started; a branch's writes are the run's once it ends. Loop conditions and
+a map's `over` read them as `artifacts`.
+
 The run's `Policy` is enforced as it goes: at most `agents_alive` agents run at once across the
 whole run, and an agent node (or a map, for all its items' agents) that would take the run past
 `agents_spawned` does not start. It writes `node_started`, `policy_limit_exceeded` and
@@ -45,7 +54,7 @@ end the run.
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
@@ -56,8 +65,19 @@ from langgraph.types import Send, interrupt
 from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, AgentNodeStatus, run_agent_node, sum_usage
+from agentic_engine.artifacts import (
+    ArtifactError,
+    ArtifactRef,
+    ArtifactStore,
+    InMemoryArtifactStore,
+    artifact_content,
+    artifact_values,
+    reader_input,
+    write_artifact,
+)
 from agentic_engine.budget import BudgetMeter
 from agentic_engine.events import (
+    ARTIFACT_WRITTEN,
     LOOP_CONDITION_EVALUATED,
     LOOP_ITERATION_STARTED,
     MAP_ITEM_COMPLETED,
@@ -111,14 +131,15 @@ class CompileError(ValueError):
 @dataclass
 class _Limits:
     """A run's policy, the slots of its `agents_alive` limit, its budget meter if it has a
-    budget, the review its gates show and edit branches through, and the node each typed input
-    comes from (consumer id → producer id, `port_edges`), shared by all its nodes for one
-    attempt."""
+    budget, the review its gates show and edit branches through, the node each typed input
+    comes from (consumer id → producer id, `port_edges`) and the store of its artifacts, shared
+    by all its nodes for one attempt."""
 
     policy: Policy
     budget: BudgetMeter | None = None
     review: GateReview | None = None
     sources: dict[str, str] = field(default_factory=dict[str, str])
+    artifacts: ArtifactStore = field(default_factory=InMemoryArtifactStore)
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -227,9 +248,11 @@ def compile_workflow(
     policy: Policy = PLATFORM_POLICY,
     budget: BudgetMeter | None = None,
     review: GateReview | None = None,
+    artifacts: ArtifactStore | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
-    commit their edits through `review`, and all write to `log`, if given. With `checkpointer`,
+    commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
+    one), and all write to `log`, if given. With `checkpointer`,
     the state is saved after each node, in the run's thread; a spec with a gate needs one, since
     a paused run continues from it. The run's agents are held to `policy`'s `agents_alive` and
     `agents_spawned`, and their usage to `budget`; the spec itself is checked against it before
@@ -241,7 +264,7 @@ def compile_workflow(
         raise CompileError(f"gate {gate.id!r} needs a checkpointer to pause the run")
     builder = StateGraph(RunState)
     sources = {consumer.id: producer.id for producer, consumer, _ in port_edges(spec.root)}
-    limits = _Limits(policy, budget, review, sources)
+    limits = _Limits(policy, budget, review, sources, artifacts or InMemoryArtifactStore())
 
     def add(node: Node, then: str) -> str:
         """Add `node`, going on to `then` once it completes (to `END` otherwise), and return the
@@ -255,7 +278,7 @@ def compile_workflow(
                 check = check_node_id(node)
                 builder.add_node(node.id, _loop_entry(node, log))
                 builder.add_edge(node.id, add(node.body, check))
-                builder.add_node(check, _loop_check(node, log))
+                builder.add_node(check, _loop_check(node, log, limits))
                 builder.add_conditional_edges(
                     check, _after_check(node, then), list(dict.fromkeys([node.id, then, END]))
                 )
@@ -263,8 +286,11 @@ def compile_workflow(
             case MapNode():
                 over = compile_list(node.over)
                 worker, join = item_node_id(node), join_node_id(node)
-                builder.add_node(node.id, _map_entry(node, over, log, limits))
-                builder.add_conditional_edges(node.id, _fan_out(node, over), [worker, join, END])
+                items: dict[str, list[JsonValue]] = {}
+                builder.add_node(node.id, _map_entry(node, over, log, limits, items))
+                builder.add_conditional_edges(
+                    node.id, _fan_out(node, over, items), [worker, join, END]
+                )
                 builder.add_node(
                     worker, _map_item(node, runtime, tools, log, limits), input_schema=MapItem
                 )
@@ -331,7 +357,8 @@ def _step(
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     async def step(state: RunState) -> RunUpdate:
         def run() -> Awaitable[AgentNodeResult]:
-            return _run_step(node, runtime, tools, log, limits, state["last_text"])
+            refs = state.get("artifacts", {})
+            return _run_step(node, runtime, tools, log, limits, state["last_text"], refs)
 
         if isinstance(node, AgentNode):
             return await _spawn(node.id, state, limits, log, run)
@@ -382,13 +409,16 @@ async def _run_step(
     log: RunEventLog,
     limits: _Limits,
     input: str,
+    refs: Mapping[str, ArtifactRef],
     item: int | None = None,
     branch: int | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
-    a map, `branch` inside a parallel). An agent waits for one of the run's `agents_alive` slots
-    before it starts, and its usage is counted on the run's budget: once that is spent, the node
-    ends `node_cancelled` and `PolicyLimitExceeded` is raised."""
+    a map, `branch` inside a parallel). A node that reads run artifacts runs on the versions in
+    `refs` instead, and one that writes one stores its output once it completes. An agent waits
+    for one of the run's `agents_alive` slots before it starts, and its usage is counted on the
+    run's budget: once that is spent, the node ends `node_cancelled` and `PolicyLimitExceeded` is
+    raised."""
 
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item, branch)
@@ -411,9 +441,23 @@ async def _run_step(
                 async with limits.alive:
                     return await run_agent_node(node, runtime, input, on_event)
 
+    reads = [] if isinstance(node, GateNode) else node.reads
     # A gate runs again from its start when the run continues; the runner logs its start.
     if not isinstance(node, GateNode):
-        await log.emit(NODE_STARTED, node_id=node.id, item=item, branch=branch)
+        started: dict[str, JsonValue] | None = None
+        if reads:
+            read: list[JsonValue] = [
+                {"name": name, "version": refs[name].version} for name in reads if name in refs
+            ]
+            started = {"reads": read}
+        await log.emit(NODE_STARTED, node_id=node.id, payload=started, item=item, branch=branch)
+    if reads:
+        try:
+            input = await reader_input(limits.artifacts, reads, refs)
+        except ArtifactError as e:
+            missing: dict[str, JsonValue] = {"error": str(e)}
+            await log.emit(NODE_FAILED, node_id=node.id, payload=missing, item=item, branch=branch)
+            return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
     if not isinstance(node, GateNode) and node.input_schema is not None:
         source = limits.sources.get(node.id)
         checked = check_port("input", node.id, node.input_schema, input, source)
@@ -432,6 +476,8 @@ async def _run_step(
     port: PortFailure | None = None
     if not isinstance(node, GateNode) and node.output_schema is not None:
         result, port = _check_output(node, result)
+    if not isinstance(node, GateNode) and node.writes and result.status == "completed":
+        result = await _write(node.id, node.writes, node.output_schema, result, limits, log, branch)
     if (pull := _pull_request(node, result)) is not None:
         await log.emit(PR_OPENED, node_id=node.id, payload=pull, item=item, branch=branch)
     if (repo := _created_repo(node, result)) is not None:
@@ -464,12 +510,39 @@ def _check_output(
 
 def _update(node_id: str, result: AgentNodeResult) -> RunUpdate:
     """The state update of a node that ran once and produced `result`."""
-    return {
+    update: RunUpdate = {
         "last_text": result.text,
         "results": {node_id: result},
         "order": [node_id],
         "usage": [result.usage] if result.usage else [],
     }
+    if result.artifact is not None:
+        update["artifacts"] = {result.artifact.name: result.artifact}
+    return update
+
+
+async def _write(
+    node_id: str,
+    name: str,
+    output_schema: Mapping[str, JsonValue] | None,
+    result: AgentNodeResult,
+    limits: _Limits,
+    log: RunEventLog,
+    branch: int | None = None,
+) -> AgentNodeResult:
+    """Store the completed `result` of `node_id` as the next version of the run artifact `name`
+    and log it (`artifact_written`): the result with its `artifact`, or failed with why it could
+    not be written."""
+    try:
+        content = artifact_content(name, node_id, result.text, result.data)
+        ref = await write_artifact(limits.artifacts, name, node_id, content, output_schema)
+    except ArtifactError as e:
+        return result.model_copy(update={"status": "failed", "error": str(e)})
+    payload: dict[str, JsonValue] = ref.model_dump(
+        mode="json", include={"name", "version", "media_type", "size", "sha256"}
+    )
+    await log.emit(ARTIFACT_WRITTEN, node_id=node_id, payload=payload, branch=branch)
+    return result.model_copy(update={"artifact": ref})
 
 
 def _loop_entry(loop: LoopNode, log: RunEventLog) -> Callable[[RunState], Awaitable[RunUpdate]]:
@@ -486,7 +559,9 @@ def _loop_entry(loop: LoopNode, log: RunEventLog) -> Callable[[RunState], Awaita
     return enter
 
 
-def _loop_check(loop: LoopNode, log: RunEventLog) -> Callable[[RunState], Awaitable[RunUpdate]]:
+def _loop_check(
+    loop: LoopNode, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
     """Ends an iteration: evaluates `until`, and records the loop's result once it stops. Until
     then the loop has no result, which sends the run back to the entry."""
     condition = compile_condition(loop.until)
@@ -494,8 +569,11 @@ def _loop_check(loop: LoopNode, log: RunEventLog) -> Callable[[RunState], Awaita
     async def check(state: RunState) -> RunUpdate:
         iteration = state["iterations"][loop.id]
         results = _results_context(state)
+        artifacts = await _artifacts_context(loop.until, state, limits)
         try:
-            met = condition.evaluate(last=state["last_text"], iteration=iteration, results=results)
+            met = condition.evaluate(
+                last=state["last_text"], iteration=iteration, results=results, artifacts=artifacts
+            )
         except ExpressionError as e:
             error = f"until failed in iteration {iteration}: {e}"
             await log.emit(NODE_FAILED, node_id=loop.id, payload={"error": error})
@@ -542,22 +620,34 @@ def _results_context(state: RunState) -> dict[str, JsonValue]:
     }
 
 
-def _map_items(map: MapNode, over: CompiledList, state: RunState) -> list[JsonValue]:
-    """The items `map` runs its body for. Raises `ExpressionError` if `over` fails."""
-    return over.evaluate(last=state["last_text"], results=_results_context(state))
+async def _artifacts_context(source: str, state: RunState, limits: _Limits) -> dict[str, JsonValue]:
+    """`artifacts` as the CEL expression `source` sees it: name → content (parsed for JSON). Read
+    from the store only when the expression names it."""
+    if "artifacts" not in source:
+        return {}
+    return await artifact_values(limits.artifacts, state.get("artifacts", {}))
 
 
 def _map_entry(
-    map: MapNode, over: CompiledList, log: RunEventLog, limits: _Limits
+    map: MapNode,
+    over: CompiledList,
+    log: RunEventLog,
+    limits: _Limits,
+    evaluated: dict[str, list[JsonValue]],
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     """Starts the map, counting all its items' agents as spawned, or fails it if its items cannot
     be had or their agents would take the run past its `agents_spawned` limit; `_fan_out` then
-    sends them. The items run in one LangGraph step, so they cannot count themselves."""
+    sends them, from `evaluated` (filled here, in the same LangGraph task). The items run in one
+    LangGraph step, so they cannot count themselves."""
     agents_per_item = sum(isinstance(n, AgentNode) for n in step_nodes(map.body))
 
     async def enter(state: RunState) -> RunUpdate:
         try:
-            items = _map_items(map, over, state)
+            artifacts = await _artifacts_context(map.over, state, limits)
+            items = over.evaluate(
+                last=state["last_text"], results=_results_context(state), artifacts=artifacts
+            )
+            evaluated[map.id] = items
         except ExpressionError as e:
             await log.emit(NODE_STARTED, node_id=map.id)
             error = f"over failed: {e}"
@@ -576,18 +666,30 @@ def _map_entry(
     return enter
 
 
-def _fan_out(map: MapNode, over: CompiledList) -> Callable[[RunState], Sequence[Send] | str]:
-    """One `Send` to the worker per item; to the join if there are none; to `END` if the map
-    failed. `over` is evaluated again: the entry left the state it reads unchanged."""
+def _fan_out(
+    map: MapNode, over: CompiledList, evaluated: dict[str, list[JsonValue]]
+) -> Callable[[RunState], Sequence[Send] | str]:
+    """One `Send` to the worker per item, with the run's artifacts; to the join if there are
+    none; to `END` if the map failed. The items are those the entry evaluated in the same task
+    (`over` is evaluated again if they are missing: the entry left the state it reads
+    unchanged)."""
 
     def route(state: RunState) -> Sequence[Send] | str:
         if map.id in state["results"]:
             return END
-        items = _map_items(map, over, state)
+        items = evaluated.pop(map.id, None)
+        if items is None:
+            items = over.evaluate(last=state["last_text"], results=_results_context(state))
         if not items:
             return join_node_id(map)
+        refs = state.get("artifacts", {})
         return [
-            Send(item_node_id(map), MapItem(index=i, item=item, item_input=_item_input(item)))
+            Send(
+                item_node_id(map),
+                MapItem(
+                    index=i, item=item, item_input=_item_input(item), item_artifacts=dict(refs)
+                ),
+            )
             for i, item in enumerate(items)
         ]
 
@@ -618,9 +720,10 @@ def _map_item(
                 MAP_ITEM_STARTED, node_id=map.id, payload={"index": index, "item": task["item"]}
             )
             text, usage, error = task["item_input"], list[Usage](), None
+            refs = task.get("item_artifacts", {})
             result = AgentNodeResult(status="completed", text=text, usage=None)
             for step in steps:
-                result = await _run_step(step, runtime, tools, log, limits, text, index)
+                result = await _run_step(step, runtime, tools, log, limits, text, refs, index)
                 if result.usage:
                     usage.append(result.usage)
                 if result.status != "completed":
@@ -759,8 +862,14 @@ def _fan_out_branches(parallel: ParallelNode) -> Callable[[RunState], Sequence[S
         if parallel.id in state["results"]:
             return END
         worker = branch_node_id(parallel)
+        refs = state.get("artifacts", {})
         return [
-            Send(worker, ParallelBranch(index=i, branch_input=state["last_text"]))
+            Send(
+                worker,
+                ParallelBranch(
+                    index=i, branch_input=state["last_text"], branch_artifacts=dict(refs)
+                ),
+            )
             for i in range(len(parallel.branches))
         ]
 
@@ -777,7 +886,9 @@ def _parallel_branch(
     """Runs one of `parallel`'s branches, each step on the previous one's output, stopping at the
     first step that does not complete; or ends it `cancelled` once the other branches decided
     the join. Its nodes' results go into `results` (not `order`, the run's path, which a branch
-    that fails under a join that is met does not stop), its outcome into `parallel_results`."""
+    that fails under a join that is met does not stop), its outcome into `parallel_results`, and
+    the run artifacts it wrote into `artifacts`; its later steps read what its earlier ones
+    wrote."""
     join = _BranchJoin(parallel)
     steps = [step_nodes(branch) for branch in parallel.branches]
 
@@ -788,6 +899,8 @@ def _parallel_branch(
         await log.emit(PARALLEL_BRANCH_STARTED, node_id=parallel.id, payload=marker)
         ran: dict[str, AgentNodeResult] = {}
         error: str | None = None
+        refs = dict(task.get("branch_artifacts", {}))
+        wrote: dict[str, ArtifactRef] = {}
 
         async def run() -> AgentNodeResult:
             nonlocal error
@@ -796,8 +909,12 @@ def _parallel_branch(
             for step in steps[index]:
                 # Stays `cancelled` if the branch is cancelled while the step runs.
                 ran[step.id] = AgentNodeResult(status="cancelled", text=output, usage=None)
-                result = await _run_step(step, runtime, tools, log, limits, output, branch=index)
+                result = await _run_step(
+                    step, runtime, tools, log, limits, output, refs, branch=index
+                )
                 ran[step.id] = result
+                if result.artifact is not None:
+                    refs[result.artifact.name] = wrote[result.artifact.name] = result.artifact
                 if result.status != "completed":
                     error = f"{step.id} {result.status}: {result.error or 'no error given'}"
                     break
@@ -836,6 +953,7 @@ def _parallel_branch(
             "results": ran,
             "usage": usage,
             "parallel_results": {parallel.id: {branch_id: outcome}},
+            "artifacts": wrote,
         }
 
     return work
@@ -895,8 +1013,12 @@ def _reduce(
             await log.emit(NODE_STARTED, node_id=reduce.id)
             separator = "\n\n" if reduce.separator is None else reduce.separator
             text = separator.join(str(o) for o in outputs)
-            await log.emit(NODE_COMPLETED, node_id=reduce.id)
-            return _update(reduce.id, AgentNodeResult(status="completed", text=text, usage=None))
+            result = AgentNodeResult(status="completed", text=text, usage=None)
+            if reduce.writes:
+                result = await _write(reduce.id, reduce.writes, None, result, limits, log)
+            end: dict[str, JsonValue] = {"error": result.error} if result.error else {}
+            await log.emit(NODE_END[result.status], node_id=reduce.id, payload=end)
+            return _update(reduce.id, result)
         agent = AgentNode(
             type="agent",
             id=reduce.id,
@@ -904,6 +1026,7 @@ def _reduce(
             instructions=reduce.agent.instructions,
             provider=reduce.agent.provider,
             model=reduce.agent.model,
+            writes=reduce.writes,
         )
         pairs: list[JsonValue] = [
             {"item": item, "output": output} for item, output in zip(items, outputs, strict=True)
@@ -914,7 +1037,7 @@ def _reduce(
             state,
             limits,
             log,
-            lambda: _run_step(agent, runtime, tools, log, limits, input),
+            lambda: _run_step(agent, runtime, tools, log, limits, input, {}),
         )
 
     return combine

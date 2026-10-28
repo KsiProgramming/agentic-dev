@@ -125,6 +125,7 @@ describe("StepOutput and StepInput for a typed step", () => {
     if (!row) throw new Error("no row");
     render(
       <StepOutput
+        runId="run-1"
         step={row.step}
         row={row}
         kind="agent"
@@ -153,7 +154,7 @@ describe("StepOutput and StepInput for a typed step", () => {
         output_schema: { type: "object", required: ["findings"] },
       },
     };
-    render(<StepInput row={row} spec={spec} runInput={null} first={false} />);
+    render(<StepInput runId="run-1" row={row} spec={spec} runInput={null} first={false} />);
     expect(screen.getByText("Input schema")).toBeTruthy();
     expect(screen.getByText("Output schema")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Copy Output schema of summarizer" })).toBeTruthy();

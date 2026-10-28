@@ -25,14 +25,15 @@ type _Ast = lark.Tree[lark.Token]
 
 MAX_EXPRESSION_LENGTH: Final = 1000
 
-CONDITION_VARIABLES: Final = frozenset({"last", "iteration", "results"})
+CONDITION_VARIABLES: Final = frozenset({"last", "iteration", "results", "artifacts"})
 """What a loop condition can read: `last` (string, the body's output for the iteration that just
-ran), `iteration` (int, iterations completed, from 1) and `results` (map: node id → `{status,
-text, data}`, the latest result of each node run so far)."""
+ran), `iteration` (int, iterations completed, from 1), `results` (map: node id → `{status,
+text, data}`, the latest result of each node run so far) and `artifacts` (map: run artifact name
+→ its latest content, parsed for a `.json` artifact, else a string)."""
 
-LIST_VARIABLES: Final = frozenset({"last", "results"})
-"""What a map's `over` can read: `last` (string, the map's input) and `results` (as for a
-condition)."""
+LIST_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
+"""What a map's `over` can read: `last` (string, the map's input), `results` and `artifacts` (as
+for a condition)."""
 
 _MACROS: Final = frozenset({"has", "all", "exists", "exists_one", "map", "filter"})
 _FUNCTIONS: Final = frozenset(n for n in base_functions if not n.startswith("_") and n != "!_")
@@ -72,7 +73,14 @@ class CompiledExpression:
 class CompiledCondition(CompiledExpression):
     """A condition: an expression that must evaluate to a bool."""
 
-    def evaluate(self, *, last: str, iteration: int, results: Mapping[str, JsonValue]) -> bool:
+    def evaluate(
+        self,
+        *,
+        last: str,
+        iteration: int,
+        results: Mapping[str, JsonValue],
+        artifacts: Mapping[str, JsonValue] | None = None,
+    ) -> bool:
         """Evaluate against the loop's state. Raises `ExpressionError` if evaluation fails or the
         result is not a bool."""
         value = self._evaluate(
@@ -80,6 +88,7 @@ class CompiledCondition(CompiledExpression):
                 "last": celtypes.StringType(last),
                 "iteration": celtypes.IntType(iteration),
                 "results": json_to_cel(dict(results)),
+                "artifacts": json_to_cel(dict(artifacts or {})),
             }
         )
         if not isinstance(value, celtypes.BoolType):
@@ -92,11 +101,21 @@ class CompiledCondition(CompiledExpression):
 class CompiledList(CompiledExpression):
     """A list expression: one that must evaluate to a list, whose items are returned as JSON."""
 
-    def evaluate(self, *, last: str, results: Mapping[str, JsonValue]) -> list[JsonValue]:
+    def evaluate(
+        self,
+        *,
+        last: str,
+        results: Mapping[str, JsonValue],
+        artifacts: Mapping[str, JsonValue] | None = None,
+    ) -> list[JsonValue]:
         """Evaluate against the run's state. Raises `ExpressionError` if evaluation fails or the
         result is not a list."""
         value = self._evaluate(
-            {"last": celtypes.StringType(last), "results": json_to_cel(dict(results))}
+            {
+                "last": celtypes.StringType(last),
+                "results": json_to_cel(dict(results)),
+                "artifacts": json_to_cel(dict(artifacts or {})),
+            }
         )
         if not isinstance(value, celtypes.ListType):
             raise ExpressionError(self.source, f"must be a list, got {type(value).__name__}")

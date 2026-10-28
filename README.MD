@@ -763,6 +763,23 @@ An `agent` or `tool` node may declare the JSON its input and its output must mat
 - **Validation.** `POST /workflows/{id}/validate` and `POST /runs` refuse a schema a port cannot take (`invalid_schema`, on the field), and a consumer whose `input_schema` requires a property the previous step's `output_schema` does not declare, or declares with another type (`port_mismatch`, looking through gates). That check is deliberately light: anything deeper is caught at runtime.
 - **Console.** A step failed by a port shows "Wrong shape" in its Output, with each JSON pointer and message. Its Input tab shows both schemas.
 
+## Run artifacts
+Nodes of one run can share named artifacts, whatever runs between them (phase 4.3). A node with `writes` stores its output under that name; a node with `reads` takes those artifacts as its input instead of the previous output. [artifacts-findings.json](packages/engine/tests/fixtures/specs/valid/artifacts-findings.json) has a scanner write `findings.json`, runs an unrelated step and a gate, then hands the findings to a reporter that writes `report.md`:
+
+```json
+{ "type": "agent", "id": "scan", "...": "...", "output_schema": { "...": "..." }, "writes": "findings.json" },
+{ "type": "agent", "id": "summary", "...": "..." },
+{ "type": "gate", "id": "approve", "title": "Approve the findings" },
+{ "type": "agent", "id": "report", "...": "...", "tools": ["artifacts.list", "artifacts.read"],
+  "reads": ["findings.json"], "writes": "report.md" }
+```
+
+- **Names.** Letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give the media type. A `.json` artifact must be JSON (the node's typed `data`, else its answer parsed as typed ports parse it). At most 1 MB each and 8 MB per run.
+- **Versions.** Each write is a new version (1, 2, …), and every version is kept. A reader gets the versions the run had when it started: one artifact's content, or a JSON object by name for several. Loop conditions and a map's `over` read `artifacts['plan.json']` in CEL.
+- **Validation.** `artifact_unknown` for a read that no earlier step always writes (a sibling branch or a later step of the loop body does not count), `artifact_conflict` for a write inside a map or two parallel branches writing one name. A reader's `input_schema` is checked against its writer's `output_schema` (`port_mismatch`).
+- **Agents and tools.** Every run has the read-only `artifacts.list` and `artifacts.read` tools. A run with a sandbox also gets a read-only copy of each artifact in `/workspace/artifacts`, copied again if the worker restarts.
+- **Where they live.** In Postgres (`run_artifacts`), not in the sandbox: `GET /runs/{id}/artifacts`, `GET /runs/{id}/artifacts/{name}?version=` and `.../download`. The console shows them on each step (Artifacts written, Artifacts read), in an Artifacts view beside Steps and Graph, and at a gate (Run artifacts).
+
 ## Generate docs
 The "Generate docs" template documents each module of a repo and opens a pull request after you approve (phase 1.11, AC-1). A template is a named builder of an ordinary workflow spec (`agentic_engine.templates`): the API builds the spec from the template's options and runs it like any other.
 

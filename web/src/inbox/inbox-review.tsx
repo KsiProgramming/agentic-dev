@@ -20,6 +20,7 @@ import {
   ApproveButton,
   GateArtifact,
   GateDecisionDialogs,
+  GateRunArtifacts,
   plural,
   RejectButton,
 } from "@/runs/console/decision-controls";
@@ -155,6 +156,8 @@ function GateReview({
           <GateArtifact gate={gate} />
         </div>
       )}
+
+      <GateRunArtifacts runId={run.id} gate={gate} baseUrl={baseUrl} />
 
       {decision.error && !decision.rejecting ? (
         <Alert variant="destructive">

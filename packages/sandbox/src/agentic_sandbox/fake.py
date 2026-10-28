@@ -2,7 +2,8 @@
 
 It isolates nothing: commands run on the host with the clone as their current directory. Use it
 where Docker is unavailable and the repo is trusted. The temp directory has the layout of the
-Docker sandbox's `/workspace`: `repo/` (the clone), `worktrees/` and `.incoming/`. Like the
+Docker sandbox's `/workspace`: `repo/` (the clone), `worktrees/`, `.incoming/` and `artifacts/`
+(read-only files, as far as the host allows). Like the
 sandbox image, commands read no system or user git config.
 """
 
@@ -23,6 +24,7 @@ from agentic_sandbox.protocol import (
     MAX_PUT_FILE_BYTES,
     MAX_TAKE_FILE_BYTES,
     ExecResult,
+    check_artifact_name,
     decode_capped,
 )
 from agentic_sandbox.source import RepoSource, clone_shallow
@@ -106,6 +108,18 @@ class FakeSandbox:
         finally:
             file.unlink(missing_ok=True)
 
+    @property
+    def artifacts_dir(self) -> str:
+        return (self._root / "artifacts").as_posix()
+
+    async def put_artifact(self, name: str, data: bytes) -> str:
+        check_artifact_name(name)
+        if len(data) > MAX_PUT_FILE_BYTES:
+            raise SandboxError(f"artifact too large for the sandbox: {len(data)} bytes")
+        path = self._root / "artifacts" / name
+        await asyncio.to_thread(_write_read_only, path, data)
+        return path.as_posix()
+
     def _checked_cwd(self, cwd: str | None) -> Path:
         """`cwd` (default the clone) if it is the clone or a directory under the worktrees."""
         if cwd is None:
@@ -157,12 +171,21 @@ class FakeSandboxManager:
                 )
                 (root / "worktrees").mkdir()
                 (root / ".incoming").mkdir()
+                (root / "artifacts").mkdir()
             yield FakeSandbox(root)
         finally:
             if run_id in self._kept:
                 self._kept.discard(run_id)
             else:
                 await asyncio.to_thread(_remove_dir, root)
+
+
+def _write_read_only(path: Path, data: bytes) -> None:
+    path.parent.mkdir(exist_ok=True)
+    if path.exists():
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    path.write_bytes(data)
+    os.chmod(path, stat.S_IREAD)
 
 
 def _remove_dir(root: Path) -> None:

@@ -2,6 +2,7 @@
 `parallel`), and `validate_workflow`, which reports every reason a spec cannot run."""
 
 from agentic_engine.spec.models import (
+    ARTIFACT_TOOLS,
     CREATE_TOOLS,
     MAX_AGENTS_ALIVE,
     MAX_AGENTS_SPAWNED,
@@ -11,6 +12,8 @@ from agentic_engine.spec.models import (
     READ_TOOLS,
     WRITE_TOOLS,
     AgentNode,
+    ArtifactName,
+    ArtifactWriter,
     GateNode,
     IssueCode,
     LoopNode,
@@ -25,6 +28,8 @@ from agentic_engine.spec.models import (
     ToolNode,
     ValidationIssue,
     WorkflowSpec,
+    artifact_issues,
+    artifact_writers,
     budget_errors,
     budget_issues,
     create_repo_issues,
@@ -46,6 +51,7 @@ from agentic_engine.spec.models import (
 from agentic_engine.spec.validate import validate_workflow
 
 __all__ = [
+    "ARTIFACT_TOOLS",
     "CREATE_TOOLS",
     "MAX_AGENTS_ALIVE",
     "MAX_AGENTS_SPAWNED",
@@ -55,6 +61,8 @@ __all__ = [
     "READ_TOOLS",
     "WRITE_TOOLS",
     "AgentNode",
+    "ArtifactName",
+    "ArtifactWriter",
     "GateNode",
     "IssueCode",
     "LoopNode",
@@ -69,6 +77,8 @@ __all__ = [
     "ToolNode",
     "ValidationIssue",
     "WorkflowSpec",
+    "artifact_issues",
+    "artifact_writers",
     "budget_errors",
     "budget_issues",
     "create_repo_issues",

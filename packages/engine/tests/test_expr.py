@@ -120,7 +120,9 @@ def test_list_must_be_a_list() -> None:
 
 
 def test_list_cannot_read_iteration() -> None:
-    with pytest.raises(ExpressionError, match=r"unknown variable 'iteration' \(known: last, re"):
+    with pytest.raises(
+        ExpressionError, match=r"unknown variable 'iteration' \(known: artifacts, last, re"
+    ):
         compile_list("[iteration]")
 
 

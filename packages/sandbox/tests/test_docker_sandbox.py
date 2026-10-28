@@ -166,3 +166,19 @@ async def test_a_kept_sandbox_is_reopened_as_it_was(
     async with manager.open(run_id, repo, reuse=True) as box:
         assert (await box.exec(["cat", "/workspace/worktrees/marker"])).stdout == "before\n"
     assert labelled(client, run_id) == []
+
+
+async def test_artifacts_are_readable_but_not_writable_by_the_sandbox_user(
+    manager: DockerSandboxManager, repos: Path
+) -> None:
+    async with manager.open(uuid4(), RepoSource(url=str(repos / "hello"))) as box:
+        path = await box.put_artifact("findings.json", b'{"findings": []}')
+        await box.put_artifact("findings.json", b'{"findings": [1]}')
+        read = await box.exec(["cat", path])
+        write = await box.exec(["sh", "-c", f"echo x > {path}"])
+        create = await box.exec(["touch", f"{box.artifacts_dir}/other.json"])
+
+    assert path == "/workspace/artifacts/findings.json"
+    assert read.stdout == '{"findings": [1]}'
+    assert write.exit_code != 0
+    assert create.exit_code != 0
