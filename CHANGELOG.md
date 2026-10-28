@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 4.6 `router` primitive and the "Audit codebase" template:
+- Phase 4.6 `router` primitive and the "Audit codebase" template ([#142](https://github.com/KsiProgramming/agentic-dev/pull/142)):
   - **Spec.** A `router` node runs one of its routes: the first whose CEL `when` holds (`last`, `results`, `artifacts`), or the one its `classifier` agent picks, else `default`; no match and no default fails it. New issue code `invalid_router` (a route that is not an agent, tool or sequence node). An artifact is written after a router only when every route writes it.
   - **Engine.** The classifier answers through a typed output the engine makes (an enum of the route ids and a reason), so it cannot invent a route. A new `route_chosen` event (`route`, `mode`, `reason`). At the top of a run the choice is checkpointed (`RunState.routes`), so a resumed run goes on in its route without asking again.
   - **Nesting.** Map items and parallel branches now run through one in-process runner, so a branch may hold a router, a nested parallel and a reduce that writes nothing. Agents over `agents_alive` there wait for a slot. A reduce's `from` must be in its own branch, route or body, or around it.
@@ -20,6 +20,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - **Settled join.** A `parallel` may take `join: "settled"`: it waits for every branch and completes if one did, cancelling none. The audit's checks use it, so a failed check no longer fails the audit; the merged report lists it as a failed check with the reason.
   - **Typed outputs.** An agent's answer that ends with its JSON object after a sentence is now parsed (a real audit's test review was refused for it).
   - **Roadmap.** New phase 4.8, .NET analyzers in the sandbox, after a test audit of a .NET repo was not linted at all.
+  - **Roadmap and board, done by hand.** GitHub Actions cannot run on this repo (no credits left), so CI could not run. Phase 4.6 was marked done in `specs/roadmap.md` with `scripts/check_roadmap.py --mark-done`, and the board synced with `scripts/sync_roadmap_board.py`; #69 (the retired 4.7) was closed as merged into #68.
   - Sample specs: `router-rule`, `router-classifier`, `router-in-map` and `parallel-nested-vote`.
 - Phase 4.5 `reduce` strategies, dedupe and vote ([#141](https://github.com/KsiProgramming/agentic-dev/pull/141)):
   - **Spec.** `reduce` takes `strategy: "dedupe"` or `"vote"` (with optional `min_votes`, default a majority of the sources that completed), and `from` may name a `parallel` as well as a map, for every strategy.
@@ -276,7 +277,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
-- Roadmap: phase 4.7 ("Audit codebase" template) is merged into 4.6 (`router` primitive), which now reads "An audit run branches on a condition and produces findings.json + a readable report". The number 4.7 is retired, and every reference to it in `specs/` and the code points to 4.6. "Next up" moves to Milestone 4 at 4.6, since Milestone 11 is done. The plan is in `specs/2026-10-28-router-audit-template/`.
+- Roadmap: phase 4.7 ("Audit codebase" template) is merged into 4.6 (`router` primitive), which now reads "An audit run branches on a condition and produces findings.json + a readable report". The number 4.7 is retired, and every reference to it in `specs/` and the code points to 4.6. "Next up" moves to Milestone 4 at 4.6, since Milestone 11 is done. The plan is in `specs/2026-10-28-router-audit-template/` ([#142](https://github.com/KsiProgramming/agentic-dev/pull/142)).
 - Pages use the full content width up to 1600 px instead of centred columns, and agent output is capped at 72 characters a line. The brand accent stays indigo. The dialog overlay uses the `--overlay` token. `CLAUDE.md` and `specs/tech-stack.md` (Look, Layout, a new Display values section, decisions log) carry the new rules, and the UI v2 Foundations section moved into them (phase 11.1, [#129](https://github.com/KsiProgramming/agentic-dev/pull/129)).
 - The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)).
 - Phase 2.5 ([#27](https://github.com/KsiProgramming/agentic-dev/pull/27)):
