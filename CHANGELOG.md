@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 4.2 typed ports:
+- Phase 4.2 typed ports ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)):
   - **Spec.** `agent` and `tool` nodes take optional `input_schema` and `output_schema`: JSON Schema 2020-12 with an object root, only local `$ref`s, at most 16 KB.
   - **Engine.** A node's input is checked before it starts and its output once it completes. A value of the wrong shape fails the node with one line naming the node, the side and the JSON pointer, and `node_failed` carries a structured `port`. An agent with an `output_schema` is asked for JSON and its answer is parsed (one fenced block allowed). A typed output becomes the node's `data` and reaches the next node as JSON.
   - **Validation.** New issue codes `invalid_schema` and `port_mismatch` (required properties the previous step does not declare, or declares with another type), from `/validate` and `POST /runs`.
@@ -262,7 +262,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
-- Accessibility of the 11.7 shell, found by the axe checks while building 4.2. CI never ran them on `main`, because the jobs were not started:
+- Accessibility of the 11.7 shell ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)), found by the axe checks while building 4.2. CI never ran them on `main`, because the jobs were not started:
   - **Search button.** Its accessible name ("Search runs and commands") now starts with its visible text (WCAG 2.5.3). The ellipsis and the `⌘K` hint are drawn by CSS and hidden from the name, and the shortcut stays in `aria-keyshortcuts`.
   - **Preferences menu.** It is no longer modal, so it does not hide the page with `aria-hidden` while scroll areas behind it stay focusable. Escape and a click outside still close it.
 - CI is green again on `main` ([#132](https://github.com/KsiProgramming/agentic-dev/pull/132)):
