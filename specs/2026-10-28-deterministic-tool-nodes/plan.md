@@ -35,7 +35,7 @@ The work goes contract first: the findings shape and the spec rules, then the se
     - `skipped: <linter> is not supported` (a foreign linter we cannot run);
     - `skipped: no supported linter for <kind>` (Go, Rust, Java, .NET).
   - With an explicit `linters` list, only those linters run, on the modules of their language. A linter with no matching module is skipped with its reason.
-  - The plan becomes the report's `stack`.
+  - The plan becomes the report's `checks`.
   - Reading config files is a fixed `find`/`cat` in the sandbox. No repo content is run.
 - [ ] Each linter run is one `sandbox.exec` (no shell) with `timeout_s=120`, once per module that gets it:
   - ruff: `ruff check --output-format json --no-cache --exit-zero <module>`, with `--config /opt/scan/ruff.toml` when the module uses the platform default.
@@ -71,7 +71,7 @@ The work goes contract first: the findings shape and the spec rules, then the se
 - [ ] `packages/sandbox/Dockerfile`:
   - A multi-stage build. The download stage fetches pinned releases with sha256 checks (ruff, Biome, ShellCheck, gitleaks and osv-scanner, musl and static builds for alpine).
   - It fetches the osv offline database for `OSV_ECOSYSTEMS` into `/opt/osv`.
-  - The final stage copies the binaries to `/usr/local/bin` and the database (read-only), and sets `OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY=/opt/osv` and `OSV_DB_AS_OF` (build date, plus a label).
+  - The final stage copies the binaries to `/usr/local/bin` and the database (read-only), and sets `OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY=/opt/osv`. The build date goes in `/opt/osv/as-of`.
   - Platform default configs in `/opt/scan/` (`ruff.toml`, `biome.json`).
 - [ ] Check the image size and record it. If the database is too large, cut the ecosystems (the open question) and write it down.
 - [ ] Check `/tmp` (64 MB, noexec) is enough with caches off.
@@ -106,7 +106,7 @@ The work goes contract first: the findings shape and the spec rules, then the se
   - `findings.ts`: a type guard for a findings report (from the exported schema), sorting, and the severity label and icon map.
   - `findings-view.tsx`:
     - `StatTile`s for the counts by severity.
-    - A "Checked" line per module from `stack`: its path (mono), kind, linter, and "repo config" or "platform default". Skipped modules show their reason as text.
+    - A "Checked" line per check from `checks`: its path (mono), kind, linter, and "repo config" or "platform default". Skipped modules show their reason as text.
     - A table from `md` and cards below: severity (lucide icon + label in a neutral `Badge`), rule (mono, a link to `help_url` when there is one), `path:line` (mono), and the message as text.
     - Dependencies also show the package, version and fixed versions.
     - 50 rows, then "Show all". `EmptyState` for "No findings".
@@ -124,7 +124,7 @@ The work goes contract first: the findings shape and the spec rules, then the se
   - Tool layer → "Scanners (4.4)":
     - The author chooses the checks, and `auto` follows the repo's stack: the per-module rules, skipped and never replaced, and platform defaults marked as such.
     - The tools, their arguments, the report shape, caps, redaction and the severity map.
-  - Sandbox → the image's tools and the offline database with `OSV_DB_AS_OF`.
+  - Sandbox → the image's tools and the offline database and its date.
   - UI design system → Run console → "Findings": the severity rule.
   - Decisions log rows: who chooses the checks, stack-scoped `auto`, platform defaults, the linters, the secret scanner, the offline dependency scanner, the findings shape and severity in the UI.
 - [ ] `CHANGELOG.md` `[Unreleased]` entry. The roadmap 4.4 status is set by CI or `complete-phase`.

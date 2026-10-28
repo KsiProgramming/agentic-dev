@@ -25,7 +25,7 @@ Checkable form: a run of `valid/scan-specialists.json` runs `scan.lint`, `scan.s
   - The secret value from the recorded gitleaks output is absent from the serialized result.
 - [ ] **Docker sandbox on the fixture repo** (`test_scan_docker.py`, docker marker, runs in CI):
   - ruff (`py/`), Biome (`web/`) and ShellCheck (`scripts/`) each report their planted finding with `config: "repo"`.
-  - `legacy/` (ESLint) is in `stack` as skipped, with no findings.
+  - `legacy/` (ESLint) is in `checks` as skipped, with no findings.
   - gitleaks reports the planted key with no value.
   - osv-scanner reports the planted advisory offline, with `db_as_of` set.
   - Each finishes within its timeout. The container still has `network_mode=none`.
@@ -43,7 +43,7 @@ Checkable form: a run of `valid/scan-specialists.json` runs `scan.lint`, `scan.s
 
 ## Manual / demo checks
 
-- [ ] Rebuild the image with `docker build -t agentic-dev/sandbox:dev packages/sandbox`, then record its size and `OSV_DB_AS_OF` in the PR.
+- [ ] Rebuild the image with `docker build -t agentic-dev/sandbox:dev packages/sandbox`, then record its size and the database date (`/opt/osv/as-of`) in the PR.
 - [ ] With `docker compose up`, a Claude key and a GitHub repo connected, start a run of the sample workflow on a real repo (Python and JS):
   - The step list shows `lint`, `secrets` and `deps` running in parallel, then `triage`.
   - Each scan step's Output shows the findings view (counts, rows, `path:line`), and the Artifacts tab lists three `.json` artifacts.

@@ -16,6 +16,7 @@ from agentic_api.workspaces.models import budget_field
 from agentic_engine.artifacts import GateArtifact
 from agentic_engine.gate import MAX_REVIEW_FILES, EditErrorCode, FileChange, FileEdit
 from agentic_engine.spec import (
+    REPO_TOOL_PREFIXES,
     ValidationIssue,
     WorkflowSpec,
     iter_nodes,
@@ -26,10 +27,6 @@ from agentic_engine.spec import (
 from agentic_engine.templates import NewRepo, get_template
 from agentic_github import repo_full_name
 from agentic_sandbox import RepoSource
-
-# Tools that work on the run's repo, so the run needs one: `repo.*` in its sandbox, and
-# `github.*` on its GitHub remote.
-_REPO_TOOL_PREFIXES = ("repo.", "github.")
 
 
 class TemplateRun(BaseModel):
@@ -129,7 +126,7 @@ class CreateRunRequest(BaseModel):
     def _repo_for_repo_tools(self) -> Self:
         for _, node in iter_nodes(self.spec().root):
             tools = node_tools(node)
-            repo_tools = [t for t in tools if t.startswith(_REPO_TOOL_PREFIXES)]
+            repo_tools = [t for t in tools if t.startswith(REPO_TOOL_PREFIXES)]
             if repo_tools and self.repo is None and self.new_repo is None:
                 raise ValueError(
                     f"node {node.id!r} uses {', '.join(repo_tools)}, which need a `repo`"

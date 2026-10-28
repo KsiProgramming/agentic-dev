@@ -11,6 +11,7 @@ import {
   startRun,
   GATE,
   MAP,
+  SCANS,
   TYPED_WRITER,
   WRITER,
 } from "./runs";
@@ -259,6 +260,15 @@ test("a run's artifacts, and one open in its sheet", async ({ page, request }) =
     .click();
   await expect(page.getByTestId("artifact-sheet").getByRole("group")).toBeVisible();
   await screenshot(page, "run-artifact-sheet");
+});
+
+test("a scan step's findings", async ({ page, request }) => {
+  const runId = await startRun(request, SCANS, "E2E scan layout", DOCS_DEMO_URL);
+  await page.goto(`/runs/${runId}?step=lint`);
+  await expect(page.getByTestId("step-panel").getByTestId("findings-view")).toBeVisible({
+    timeout: 60_000,
+  });
+  await checkPage(page, "run-scan-findings");
 });
 
 test("runs, with a run's menu open", async ({ page, request }) => {

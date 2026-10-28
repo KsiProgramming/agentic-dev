@@ -31,6 +31,7 @@ from agentic_engine.spec import (
     CREATE_TOOLS,
     PUBLISH_TOOLS,
     READ_TOOLS,
+    SCAN_TOOLS,
     WRITE_TOOLS,
     WorkflowSpec,
     parse_spec,
@@ -60,6 +61,7 @@ from agentic_store import (
     create_run,
     enqueue_run,
     get_run,
+    get_run_artifact,
     get_run_summary,
     list_audit_events,
     list_run_artifacts,
@@ -75,6 +77,7 @@ from agentic_store import (
 from agentic_tools.artifacts import ARTIFACT_TOOL_NAMES
 from agentic_tools.github import CREATE_TOOL_NAMES, PUBLISH_TOOL_NAMES, GithubPublisher
 from agentic_tools.repo import COMMIT_AUTHOR, READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
+from agentic_tools.scan import SCAN_TOOL_NAMES
 from agentic_tools.testing import FakeGithub, bare_remote
 from agentic_worker.main import RuntimeFactory, WorkerSettings, run
 
@@ -1193,6 +1196,7 @@ def test_the_engine_and_the_tool_servers_agree_on_tool_names() -> None:
     assert PUBLISH_TOOLS == PUBLISH_TOOL_NAMES
     assert CREATE_TOOLS == CREATE_TOOL_NAMES
     assert ARTIFACT_TOOLS == ARTIFACT_TOOL_NAMES
+    assert SCAN_TOOLS == SCAN_TOOL_NAMES
 
 
 async def test_the_fake_github_app_clones_and_publishes_local_fixture_repos(
@@ -1663,3 +1667,42 @@ async def test_artifacts_are_mirrored_into_the_sandbox_and_again_into_a_fresh_on
     events = await list_run_events(sessions, run_id)
     calls = [e.payload["name"] for e in events if e.type == "tool_call" and e.node_id == "report"]
     assert calls == ["artifacts.list", "artifacts.read"]
+
+
+async def test_a_run_with_a_sandbox_offers_the_scan_tools(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """A `scan.lint` tool node reaches the run's `scan` server and writes its report. The repo
+    has nothing to lint, so no scanner is needed on the host."""
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "notes", {"README.md": "# Notes\n"})
+    boxes.mkdir()
+    spec = parse_spec(
+        {
+            "spec_version": "0",
+            "id": "lint-only",
+            "name": "Lint only",
+            "root": {
+                "type": "tool",
+                "id": "lint",
+                "tool": "scan.lint",
+                "args": {"linters": "auto"},
+                "writes": "lint.json",
+            },
+        }
+    )
+    sandboxes = FakeSandboxManager(local_root=repos, base_dir=boxes)
+
+    async with worker(postgres_url, redis_url, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, spec, RepoSource(url=str(repos / "notes")))
+        await wait_for_status(sessions, run_id, "completed")
+
+    [listed] = await list_run_artifacts(sessions, run_id)
+    assert listed.name == "lint.json"
+    events = await list_run_events(sessions, run_id)
+    [written] = [e for e in events if e.type == "artifact_written"]
+    assert written.node_id == "lint"
+    stored = await get_run_artifact(sessions, run_id, "lint.json")
+    assert stored is not None
+    report = json.loads(stored[0].content)
+    assert (report["scanner"], report["checks"], report["findings"]) == ("lint", [], [])

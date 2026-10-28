@@ -4,8 +4,11 @@ import {
   FolderTreeIcon,
   GitCommitHorizontalIcon,
   GitPullRequestIcon,
+  KeyRoundIcon,
   PackageIcon,
+  ScanSearchIcon,
   SearchIcon,
+  ShieldAlertIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -114,6 +117,41 @@ export function describeTool(name: string, args: unknown): ToolDescription {
         verb: "opened",
         noun: ["pull request", "pull requests"],
       };
+    case "scan.lint": {
+      const linters = (args as { linters?: unknown } | null)?.linters;
+      const named = Array.isArray(linters) ? linters.filter((l) => typeof l === "string") : [];
+      const path = arg(args, "path");
+      return {
+        icon: ScanSearchIcon,
+        done: named.length > 0 ? `Linted with ${named.join(", ")}` : "Linted",
+        doing: named.length > 0 ? `Linting with ${named.join(", ")}` : "Linting",
+        target: !path || path === "." ? "the repository" : path,
+        verb: "ran",
+        noun: ["lint", "lints"],
+      };
+    }
+    case "scan.secrets": {
+      const path = arg(args, "path");
+      return {
+        icon: KeyRoundIcon,
+        done: "Scanned for secrets in",
+        doing: "Scanning for secrets in",
+        target: !path || path === "." ? "the repository" : path,
+        verb: "ran",
+        noun: ["secret scan", "secret scans"],
+      };
+    }
+    case "scan.dependencies": {
+      const path = arg(args, "path");
+      return {
+        icon: ShieldAlertIcon,
+        done: "Checked the dependencies of",
+        doing: "Checking the dependencies of",
+        target: !path || path === "." ? "the repository" : path,
+        verb: "ran",
+        noun: ["dependency scan", "dependency scans"],
+      };
+    }
     default:
       return {
         icon: WrenchIcon,

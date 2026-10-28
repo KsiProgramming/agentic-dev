@@ -329,7 +329,13 @@ after a gate, as a step of the root sequence before anything uses the repo."""
 ARTIFACT_TOOLS = frozenset({"artifacts.list", "artifacts.read"})
 """Tools that read the run's artifacts (4.3). Every run has them, with or without a repo."""
 
-PLATFORM_TOOLS = READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS | CREATE_TOOLS | ARTIFACT_TOOLS
+SCAN_TOOLS = frozenset({"scan.lint", "scan.secrets", "scan.dependencies"})
+"""Deterministic scanners over the run's repo in the sandbox (4.4): read-only, so allowed
+everywhere. Each returns a findings report (`agentic_tools.scan.FindingsReport`)."""
+
+PLATFORM_TOOLS = (
+    READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS | CREATE_TOOLS | ARTIFACT_TOOLS | SCAN_TOOLS
+)
 """Every tool a node may name. The tool servers register exactly these (checked in tests)."""
 
 type IssueCode = Literal[
@@ -512,8 +518,13 @@ def creates_repo(root: Node) -> bool:
     return any(CREATE_TOOLS.intersection(node_tools(node)) for _, node in iter_nodes(root))
 
 
+REPO_TOOL_PREFIXES = ("repo.", "github.", "scan.")
+"""Tools that work on the run's repo, so a run naming one needs a repo: `repo.*` and `scan.*` in
+its sandbox, `github.*` on its GitHub remote."""
+
+
 def _uses_repo(node: Node) -> bool:
-    return any(tool.startswith(("repo.", "github.")) for tool in node_tools(node))
+    return any(tool.startswith(REPO_TOOL_PREFIXES) for tool in node_tools(node))
 
 
 def loop_issues(root: Node) -> list[ValidationIssue]:

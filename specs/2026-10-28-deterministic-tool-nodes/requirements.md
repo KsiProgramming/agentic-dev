@@ -32,18 +32,17 @@ Principles that drive it (mission):
   - `scan.lint`: `linters` is either a list naming exactly what to run (`["ruff", "biome", "shellcheck"]`, any subset) or `"auto"` (the default). Optional `path` (a directory in the repo).
     - **`auto` follows the repo's own stack, never a generic set.** It detects the modules and their stack from their manifests, the same way `repo.list_modules` does (shared code, not a copy). Each module then gets its own linter:
       - **The repo configures a linter we run:** use it with the repo's config (`[tool.ruff]` or `ruff.toml` → ruff; `biome.json` → Biome; `.shellcheckrc` or shell files → ShellCheck).
-      - **The repo configures a linter we cannot run offline** (ESLint, Prettier, golangci-lint, Checkstyle, …): `skipped: eslint is not supported` for that module. We never put a different linter in its place.
+      - **The repo configures a linter we cannot run offline** (ESLint, flake8, pylint): `skipped: eslint is not supported` for that module. We never put a different linter in its place.
       - **A language we support with no linter configured:** our linter with a small, conservative platform rule set (likely bugs, no style). Each of its findings is marked `config: "platform-default"`, so agents and users weigh it lower.
       - **A stack we have no linter for** (Go, Rust, Java, .NET): `skipped: no supported linter for go`.
     - With an explicit list, each named linter runs on the modules of its language, with the repo's config or the platform default. A linter named for a stack the repo does not have is skipped with its reason.
-    - The report carries the detected `stack` (`[{path, kind, linter, config}]`) and the reason for every skip, so the author sees why each check ran.
+    - The report's `checks` say what was detected and run where (`[{path, kind, tool, config, status, reason}]`), with the reason for every skip, so the author sees why each check ran.
   - `scan.secrets`: runs gitleaks on the working tree (no git history in a shallow clone) with `--redact`. Optional `path`.
   - `scan.dependencies`: runs osv-scanner over the lockfiles the repo actually has, offline, against a vulnerability database baked into the sandbox image. So it follows the stack by construction, and a repo with no lockfile reports `skipped: no lockfiles`. Optional `path`.
   - They take the optional `description` (tool intent, 11.8) through `strict_tool`. Agents may call them too, as they are read-only, and they are allowed in loops, maps and parallels.
 - **One normalised findings shape** (`agentic_tools.scan.FindingsReport`, exported as JSON Schema in `schemas/findings.v1.json`). It is the tool's structured `data`, so `output_schema` and `writes: *.json` work unchanged:
   - `scanner` (`lint` | `secrets` | `dependencies`).
-  - `stack` for lint: what was detected and which linter and config each module got.
-  - `tools`: each engine that ran, with its version, or why it was skipped (`not supported`, `no supported linter`, `no lockfiles`, `timeout`, `error: …`).
+  - `checks`: each engine on each module, with its config and version, or why it was skipped or failed (`… is not supported`, `no supported linter for go`, `no lockfiles`, `… exited with 2: …`).
   - `findings[]`, each with:
     - `fingerprint`: a sha256 of the tool, rule, path and the line's normalised content. Stable across runs, used by 4.5.
     - `tool`, `rule`, `severity` (`info` | `low` | `medium` | `high` | `critical`), `category` (`lint` | `secret` | `dependency`), `path`, `line`, `end_line`, `message` and `help_url`.
@@ -58,7 +57,7 @@ Principles that drive it (mission):
   - Each tool's severity is mapped to ours through one documented table.
 - **Sandbox image:**
   - Pinned binaries (ruff, Biome, ShellCheck, gitleaks, osv-scanner) with checksums.
-  - The osv offline database for `OSV_ECOSYSTEMS` (PyPI, npm, Go, crates.io, Maven, NuGet, RubyGems, Packagist), fetched at image build. `OSV_DB_AS_OF` is an image label and env var, reported in `db_as_of`.
+  - The osv offline database for `OSV_ECOSYSTEMS` (PyPI, npm, Go, crates.io, Maven, NuGet, RubyGems, Packagist), fetched at image build into `/opt/osv/osv-scalibr/` (the layout osv-scanner 2 reads), dated in `/opt/osv/as-of` and reported in `db_as_of`.
   - Still no network at run time. Caches are off or go to `/tmp`.
 - **Console:**
   - A tool step whose `data` is a findings report shows a findings view in its Output tab instead of raw JSON: counts as `StatTile`s, then one row per finding (severity as icon + text label, rule, `path:line` in mono, message as text). It is a table from `md` and cards below, capped with "Show all".
@@ -92,7 +91,7 @@ Principles that drive it (mission):
 | Output | One normalised `FindingsReport` as the tool's structured `data`, with a stable `fingerprint` | Typed ports, artifacts, 4.5 dedupe and 4.7 all read one shape. Each tool's own JSON stays inside the server. |
 | Severity in the UI | An icon and a text label in neutral colours, never a status colour | Colour means status only (design system rule 2). |
 | Who chooses the checks | The workflow's author: one tool per kind of check, and `linters` is an explicit list or `"auto"` | Orchestration is open, never a fixed menu (mission). A run does only what its spec says. |
-| What `auto` runs | The linter each module's stack and config call for. A linter we cannot run offline is reported as skipped, never replaced | A generic linter on a repo that chose another one gives findings against rules the team never chose. The report's `stack` says what was detected and why. |
+| What `auto` runs | The linter each module's stack and config call for. A linter we cannot run offline is reported as skipped, never replaced | A generic linter on a repo that chose another one gives findings against rules the team never chose. The report's `checks` say what was detected and why. |
 | A supported language with no linter config | Our linter with a conservative platform rule set (likely bugs, no style), and each finding marked `config: platform-default` | Real errors are still caught, and agents and users can weigh these findings lower than the repo's own rules. |
 | Stack detection | Shared with `repo.list_modules` (one manifest table) | One definition of "the repo's stack" for agents and scanners, ready for the RepoProfile (9.1). |
 | Who may call them | Tool nodes and agents, everywhere (loops, maps, parallels) | They are read-only and deterministic. |
@@ -100,4 +99,4 @@ Principles that drive it (mission):
 
 ## Open questions
 
-- The size of the osv database for all eight ecosystems. If the image grows too much (over about 500 MB), we keep PyPI, npm, Go and crates.io now and record the cut in tech-stack. This is checked in task group 3.
+- None. The osv database for all eight ecosystems is about 290 MB (npm alone 209 MB) and the image about 510 MB, so all eight are kept. Prettier is a formatter, not a linter, so it is not checked.

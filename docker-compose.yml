@@ -104,7 +104,8 @@ services:
       redis:
         condition: service_healthy
 
-  # Builds the image run sandboxes are made from (alpine + git); the worker starts the containers.
+  # Builds the image run sandboxes are made from (alpine, git and the scanners of the `scan` tools);
+  # the worker starts the containers.
   sandbox-image:
     build:
       context: packages/sandbox

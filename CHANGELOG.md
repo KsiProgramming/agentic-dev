@@ -9,6 +9,13 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 4.4 deterministic tool nodes, linter, dependency scanner and secret scanner:
+  - **Tools.** A read-only `scan` MCP server for every run with a sandbox: `scan.lint`, `scan.secrets` and `scan.dependencies`. Each returns one findings report (`schemas/findings.v1.json`): what was checked where and why anything was skipped, then the findings most severe first, each with a stable `fingerprint`. The workflow's author picks the checks; they need a repo, like `repo.*`.
+  - **Lint follows the repo's own stack.** With `linters: "auto"`, each module gets the linter its own config names (ruff, Biome, ShellCheck). A module configured for a linter the sandbox cannot run (ESLint, flake8, pylint) is skipped with the reason, never linted by another tool. A module with no linter config gets conservative platform rules, its findings marked `platform-default`. Module detection is shared with `repo.list_modules`.
+  - **Secrets and dependencies.** gitleaks runs redacted, and a finding never carries the secret. osv-scanner runs offline against the OSV database in the image (8 ecosystems), and the report gives its date.
+  - **Sandbox image.** Pinned, checksummed scanner releases for amd64 and arm64 and the OSV database. The image grows from about 20 MB to about 510 MB.
+  - **Console.** A scan step's Output and a findings artifact show counts by severity, what was checked, and the findings as a table (cards on small screens). Severity is shown as an icon and a word, never a status colour. The scan tools have their own lines in the activity.
+  - A `scan-specialists` sample spec: three scans in parallel write `lint.json`, `secrets.json` and `dependencies.json`, and a security specialist reads all three.
 - Phase 4.3 shared run context, named artifacts in the run workspace ([#139](https://github.com/KsiProgramming/agentic-dev/pull/139)):
   - **Spec.** `agent`, `tool` and `reduce` nodes take `writes: "findings.json"`; `agent` and `tool` nodes take `reads: [...]`. Names end in `.json`, `.md` or `.txt`.
   - **Engine.** A writer's output is stored as a new version once it completes (`artifact_written`); a `.json` artifact must be JSON, and sizes are capped at 1 MB each and 8 MB per run. A reader's input is the versions the run had when it started (its `node_started` names them), and a name not written yet fails it before it runs. Loop conditions and map `over` read `artifacts` in CEL. The state keeps refs only, so checkpoints stay small.

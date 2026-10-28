@@ -9,6 +9,7 @@ import {
   GATE,
   MAP,
   REPO_READER,
+  SCANS,
   startReviewRun,
   startRun,
   TYPED_WRITER,
@@ -171,6 +172,15 @@ for (const colorScheme of ["light", "dark"] as const) {
         .getByRole("button", { name: /findings\.json/ })
         .click();
       await expect(page.getByTestId("artifact-sheet").getByRole("group")).toBeVisible();
+      await expectNoSeriousIssues(page);
+    });
+
+    test("a scan step's findings have no serious a11y issues", async ({ page, request }) => {
+      const runId = await startRun(request, SCANS, "E2E scan a11y", DOCS_DEMO_URL);
+      await open(page, `/runs/${runId}?step=lint`);
+      await expect(page.getByTestId("step-panel").getByTestId("findings-view")).toBeVisible({
+        timeout: 60_000,
+      });
       await expectNoSeriousIssues(page);
     });
 
