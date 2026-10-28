@@ -145,6 +145,7 @@ async def test_three_branches_run_concurrently_and_join_all() -> None:
         "completed": BRANCHES,
         "failed": [],
         "cancelled": [],
+        "errors": {},
     }
     assert runtime.requests[-1].node_id == "after"
     assert runtime.requests[-1].input == joined
@@ -410,3 +411,29 @@ async def test_resume_mid_parallel_runs_only_the_unfinished_branches() -> None:
     assert sorted(r.node_id for r in second.requests) == ["after", "b", "c"]
     assert result.results["review"].text == "\n\n".join(f"{b}(brief)" for b in BRANCHES)
     assert [e.seq for e in sink.events] == list(range(1, len(sink.events) + 1))
+
+
+async def test_join_settled_waits_for_every_branch_and_completes_with_one_failed() -> None:
+    """4.6: a failed branch neither fails a `settled` parallel nor cancels the others; the join
+    records why it did not complete."""
+    runtime = CountingRuntime(delays={"a": 0.01, "b": 0.05, "c": 0.1}, fail=frozenset({"a"}))
+    sink = InMemoryEventSink()
+
+    result = await run(parallel(join="settled"), runtime, sink)
+
+    assert result.status == "completed"
+    assert branch_ends(sink.events) == {"a": "failed", "b": "completed", "c": "completed"}
+    data = result.results["review"].data or {}
+    assert data["completed"] == ["b", "c"]
+    assert data["errors"] == {"a": "a failed: model refused"}
+    assert result.results["review"].text == "b(brief)\n\nc(brief)"
+
+
+async def test_join_settled_fails_when_no_branch_completes() -> None:
+    runtime = CountingRuntime(fail=frozenset(BRANCHES))
+
+    result = await run(parallel(join="settled"), runtime)
+
+    assert result.status == "failed"
+    assert result.stopped_at == "review"
+    assert (result.results["review"].error or "").startswith("join settled: 0 of 3 branches")

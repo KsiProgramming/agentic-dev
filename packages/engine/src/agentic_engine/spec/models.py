@@ -269,15 +269,18 @@ class ParallelNode(_Base):
     `join` says when the parallel is done: `all` once every branch completed, `any` once one
     did, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on
     the first branch that does not complete, the others once the join can no longer be met) and
-    the branches still running end `node_cancelled`. Its output is the completed branches'
-    outputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the
-    branch, and it holds no gate, writer or publisher. Every agent in the branches counts toward
-    the run's `agents_spawned` limit when the parallel starts."""
+    the branches still running end `node_cancelled`. `settled` (4.6) never decides early: it
+    waits for every branch to end and completes if at least one completed, so one failed branch
+    does not cancel the others. Its output is the completed branches' outputs in branch order.
+    A branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a
+    reduce that writes nothing), its id names the branch, and it holds no gate, writer or
+    publisher. Every agent in the branches counts toward the run's `agents_spawned` limit when
+    the parallel starts."""
 
     type: Literal["parallel"]
     id: NodeId
     branches: list["Node"] = Field(min_length=2, max_length=MAX_AGENTS_ALIVE)
-    join: Literal["all", "any", "quorum"]
+    join: Literal["all", "any", "quorum", "settled"]
     quorum: int | None = Field(
         default=None, description="`quorum` only, and required: how many branches must complete."
     )

@@ -338,3 +338,35 @@ async def test_three_reviewers_keep_only_what_most_of_them_found() -> None:
     assert findings is not None
     assert [f["fingerprint"] for f in json.loads(findings.content)["findings"]] == ["agreed"]
     assert runtime.requests[-1].node_id == "fix_first_report"
+
+
+async def test_a_failed_review_leaves_the_audit_to_finish_and_says_so() -> None:
+    """A real audit failed when one reviewer answered off its schema (4.6): the checks are a
+    `settled` parallel, so the others still merge and the report names the failed check."""
+    spec = build_audit_spec(AuditParams(checks=["lint", "security", "tests"]))
+    runtime = Reviewers({"security": _report("agent", _finding("s", "high", "security"))})
+    original = runtime.start
+
+    def start(request: AgentRequest) -> AgentRun:
+        if request.node_id == "tests":
+            runtime.requests.append(request)
+            return FakeRuntime({"tests": [Message(text="I could not finish."), ECHO_USAGE]}).start(
+                request
+            )
+        return original(request)
+
+    runtime.start = start  # type: ignore[method-assign]
+    store = InMemoryArtifactStore()
+
+    result = await run_workflow(
+        spec, runtime, "", tools=_tools(lint=_report("lint")), artifacts=store
+    )
+
+    assert result.status == "completed", {k: r.error for k, r in result.results.items()}
+    findings = await store.get("findings.json")
+    assert findings is not None
+    merged = json.loads(findings.content)
+    [failed] = [c for c in merged["checks"] if c["status"] == "failed"]
+    assert (failed["tool"], failed["kind"]) == ("tests", "branch")
+    assert "output of 'tests' is not JSON" in failed["reason"]
+    assert runtime.requests[-1].node_id == "fix_first_report"

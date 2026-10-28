@@ -427,6 +427,7 @@ async def test_a_router_in_a_branch_runs_with_the_branch() -> None:
         "completed": ["a", "choose"],
         "failed": [],
         "cancelled": [],
+        "errors": {},
     }
     assert {branch_of(e) for e in sink.events if e.node_id in {"choose", "x_review"}} == {1}
 

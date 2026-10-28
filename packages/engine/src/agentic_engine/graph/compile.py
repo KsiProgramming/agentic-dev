@@ -141,7 +141,13 @@ from agentic_engine.spec import (
 )
 from agentic_engine.tool import run_tool_node
 from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor, Usage
-from agentic_runtime.findings import FindingsReport, VoteError, merge_reports
+from agentic_runtime.findings import (
+    Check,
+    FindingsReport,
+    VoteError,
+    clip_message,
+    merge_reports,
+)
 
 type CompiledWorkflow = CompiledStateGraph[RunState]
 type StepNode = AgentNode | ToolNode | GateNode
@@ -823,8 +829,12 @@ def ordered_items(state: RunState, map_id: str) -> list[AgentNodeResult]:
 def join_outcome(parallel: ParallelNode, completed: int, failed: int) -> AgentNodeStatus | None:
     """How `parallel` ends once `completed` of its branches completed and `failed` did not:
     `completed` once enough did for its join, `failed` once enough can no longer, else `None`
-    (not decided yet)."""
+    (not decided yet). A `settled` join decides only once every branch ended."""
     needed = _needed(parallel)
+    if parallel.join == "settled":
+        if completed + failed < len(parallel.branches):
+            return None
+        return "completed" if completed >= needed else "failed"
     if completed >= needed:
         return "completed"
     if len(parallel.branches) - failed < needed:
@@ -837,7 +847,7 @@ def _needed(parallel: ParallelNode) -> int:
     match parallel.join:
         case "all":
             return len(parallel.branches)
-        case "any":
+        case "any" | "settled":
             return 1
         case "quorum":
             return parallel.quorum or len(parallel.branches)
@@ -1024,7 +1034,11 @@ def _joined(
     done = [(i, o) for i, o in outcomes if o.status == "completed"]
     text = "\n\n".join(o.text for _, o in done)
     outputs: dict[str, JsonValue] = {i: o.text for i, o in done}
-    data: dict[str, JsonValue] = {"outputs": outputs, **ids}
+    # Why each branch that did not complete did not, so a merge can say which checks failed.
+    errors: dict[str, JsonValue] = {
+        i: o.error or o.status for i, o in outcomes if o.status != "completed"
+    }
+    data: dict[str, JsonValue] = {"outputs": outputs, **ids, "errors": errors}
     needed = _needed(parallel)
     if len(done) >= needed:
         return AgentNodeResult(status="completed", text=text, usage=None, data=data), ids
@@ -1070,7 +1084,12 @@ async def _combine(
     sources = _reduce_sources(data)
     log, tag = scope.log, scope.tag()
     if reduce.merges:
-        return await _merge(reduce, sources, scope)
+        errors = data.get("errors")
+        missing = [
+            (branch, str(why))
+            for branch, why in (errors if isinstance(errors, dict) else {}).items()
+        ]
+        return await _merge(reduce, sources, scope, missing)
     if reduce.agent is None:
         await log.emit(NODE_STARTED, node_id=reduce.id, **tag)
         separator = "\n\n" if reduce.separator is None else reduce.separator
@@ -1113,11 +1132,15 @@ def _reduce_sources(data: dict[str, JsonValue]) -> list[tuple[str, JsonValue, Js
 
 
 async def _merge(
-    reduce: ReduceNode, sources: list[tuple[str, JsonValue, JsonValue]], scope: "_Scope"
+    reduce: ReduceNode,
+    sources: list[tuple[str, JsonValue, JsonValue]],
+    scope: "_Scope",
+    missing: list[tuple[str, str]],
 ) -> AgentNodeResult:
     """A `dedupe` or `vote` reduce (4.5): each source's output checked as a findings report, then
     merged with no model. A source that is not a report, or too few sources for the vote, fails
-    the reduce."""
+    the reduce. Each branch of its parallel that did not complete (`missing`: id, why) is a failed
+    check of the merged report (4.6), so what was not checked is said."""
     log, limits, tag = scope.log, scope.limits, scope.tag()
     await log.emit(NODE_STARTED, node_id=reduce.id, **tag)
     reports: list[tuple[str, FindingsReport]] = []
@@ -1140,7 +1163,12 @@ async def _merge(
     if merged is None:
         result = AgentNodeResult(status="failed", text="", usage=None, error=error)
     else:
-        data: dict[str, JsonValue] = merged.report.model_dump(mode="json")
+        failed = [
+            Check(path=".", kind="branch", tool=branch, status="failed", reason=clip_message(why))
+            for branch, why in missing
+        ]
+        report = merged.report.model_copy(update={"checks": [*merged.report.checks, *failed]})
+        data: dict[str, JsonValue] = report.model_dump(mode="json")
         text = json.dumps(data, indent=2, ensure_ascii=False)
         result = AgentNodeResult(status="completed", text=text, usage=None, data=data)
         if reduce.writes:

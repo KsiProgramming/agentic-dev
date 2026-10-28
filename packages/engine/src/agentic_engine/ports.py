@@ -30,6 +30,7 @@ MAX_ERROR_TEXT = 500
 _MAX_MESSAGE = 200
 _DIALECT = "https://json-schema.org/draft/2020-12/schema"
 _FENCED = re.compile(r"```[a-zA-Z]*[ \t]*\r?\n(.*?)```", re.DOTALL)
+_LINE_OBJECT = re.compile(r"(?:^|\n)[ \t]*(\{)")
 
 type PortSide = Literal["input", "output"]
 
@@ -109,8 +110,10 @@ def check_value(schema: Mapping[str, JsonValue], value: JsonValue) -> list[PortE
 
 
 def parse_value(text: str) -> JsonValue:
-    """`text` as JSON, or the one fenced code block it holds as JSON (agents often fence their
-    answer). Raises `json.JSONDecodeError` for the text itself when neither parses."""
+    """`text` as JSON, the one fenced code block it holds as JSON (agents often fence their
+    answer), or the JSON object it ends with (`OUTPUT_SCHEMA_INSTRUCTION` asks an agent to end its
+    answer with one, and some say a sentence first). Raises `json.JSONDecodeError` for the text
+    itself when none parses."""
     try:
         return cast(JsonValue, json.loads(text))
     except json.JSONDecodeError as e:
@@ -120,7 +123,26 @@ def parse_value(text: str) -> JsonValue:
                 return cast(JsonValue, json.loads(blocks[0]))
             except json.JSONDecodeError:
                 pass
+        if (ending := _ending_object(text)) is not None:
+            return ending
         raise e
+
+
+def _ending_object(text: str) -> JsonValue | None:
+    """The JSON object `text` ends with, after other text: the first `{` starting a line that
+    decodes to the end of the text."""
+    body = text.rstrip()
+    if not body.endswith("}"):
+        return None
+    decoder = json.JSONDecoder()
+    for match in _LINE_OBJECT.finditer(body):
+        try:
+            value, end = decoder.raw_decode(body, match.start(1))
+        except json.JSONDecodeError:
+            continue
+        if end == len(body) and isinstance(value, dict):
+            return cast(JsonValue, value)
+    return None
 
 
 def check_port(

@@ -75,8 +75,9 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 | 4.4 | Deterministic tool nodes: linter, dependency scanner, secret scanner | Tool outputs feed specialist agents | ✅ Done ([#140](https://github.com/KsiProgramming/agentic-dev/pull/140)) |
 | 4.5 | `reduce` strategies: dedupe, vote | Duplicate findings are merged with severity and confidence | ✅ Done ([#141](https://github.com/KsiProgramming/agentic-dev/pull/141)) |
 | 4.6 | `router` primitive (CEL rule + classifier agent) and the "Audit codebase" template (read-only, report only) | An audit run branches on a condition and produces findings.json + a readable report | — |
+| 4.8 | .NET analyzers in the sandbox: `scan.lint` lints C#/.NET modules with the Roslyn analyzers (`dotnet format analyzers`, the repo's `.editorconfig`), the .NET SDK in the sandbox image, NuGet restore through the egress allowlist | An audit of a .NET repo reports analyzer findings instead of "no supported linter for dotnet" | — |
 
-4.6 merges the former 4.7 ("Audit codebase" template) into the `router` phase: the template is the router's first real use, and its report path is the branch that proves it. The number 4.7 is retired and not reused.
+4.6 merges the former 4.7 ("Audit codebase" template) into the `router` phase: the template is the router's first real use, and its report path is the branch that proves it. The number 4.7 is retired and not reused. 4.8 was added after a 4.6 test audit of a .NET repo, whose modules were all skipped by `scan.lint` (4.4 left .NET, Go, Rust and Java out).
 
 ## Milestone 11: Product UI v2
 

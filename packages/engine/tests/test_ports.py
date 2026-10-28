@@ -93,6 +93,18 @@ def test_a_value_is_parsed_from_its_text_or_its_one_fenced_block() -> None:
         parse_value("hello")
 
 
+def test_a_value_is_parsed_from_the_object_an_answer_ends_with() -> None:
+    """An agent asked to end its answer with a JSON object may say a sentence first (seen on a
+    real audit run, 4.6)."""
+    answer = 'I reviewed the repository.\n\n{"findings": [{"message": "a {brace}"}], "n": 1}\n'
+    assert parse_value(answer) == {"findings": [{"message": "a {brace}"}], "n": 1}
+    assert parse_value('Done: {"a": 1}\n{"b": {"c": 2}}') == {"b": {"c": 2}}
+    with pytest.raises(ValueError, match="Extra data"):
+        parse_value('{"a": 1}\nThat is all.')
+    with pytest.raises(ValueError, match="Expecting value"):
+        parse_value("Here:\n[1, 2]")
+
+
 def test_check_port_gives_the_matching_object() -> None:
     assert check_port("output", "scan", FINDINGS, '{"findings": []}') == {"findings": []}
     assert check_port("output", "scan", FINDINGS, {"findings": []}) == {"findings": []}

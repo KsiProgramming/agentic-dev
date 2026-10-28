@@ -17,6 +17,9 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - **Findings schema.** Additive in v1: `scanner: "agent"` and the categories `security`, `tests` and `architecture`.
   - **Console.** A router's route nests under it ("Routed to fix_first"), and its Output says which route it took and why, the others marked Skipped. Nested nodes are placed by the run's spec. The run graph is laid out by ELK (`elkjs`, loaded with the tab) and draws routers, with routes not taken Skipped.
   - **New run form.** Template options may be whole numbers and lists of choices (checkboxes).
+  - **Settled join.** A `parallel` may take `join: "settled"`: it waits for every branch and completes if one did, cancelling none. The audit's checks use it, so a failed check no longer fails the audit; the merged report lists it as a failed check with the reason.
+  - **Typed outputs.** An agent's answer that ends with its JSON object after a sentence is now parsed (a real audit's test review was refused for it).
+  - **Roadmap.** New phase 4.8, .NET analyzers in the sandbox, after a test audit of a .NET repo was not linted at all.
   - Sample specs: `router-rule`, `router-classifier`, `router-in-map` and `parallel-nested-vote`.
 - Phase 4.5 `reduce` strategies, dedupe and vote ([#141](https://github.com/KsiProgramming/agentic-dev/pull/141)):
   - **Spec.** `reduce` takes `strategy: "dedupe"` or `"vote"` (with optional `min_votes`, default a majority of the sources that completed), and `from` may name a `parallel` as well as a map, for every strategy.

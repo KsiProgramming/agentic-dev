@@ -2,7 +2,8 @@
 
 The flow, as one sequence:
 
-1. `checks`: a parallel of the chosen checks. The scanners are tool nodes (`scan.lint`,
+1. `checks`: a `settled` parallel of the chosen checks: one that fails does not stop the others,
+   and the merge lists it as a failed check. The scanners are tool nodes (`scan.lint`,
    `scan.secrets`, `scan.dependencies`, no model); each agent review (security, tests,
    architecture) is one read-only agent that answers with a findings report. With `reviewers`
    above 1, a review is that many agents in a parallel whose findings are kept by a majority
@@ -195,7 +196,7 @@ def _check(check: Check, params: AuditParams, writes: str | None = None) -> dict
     parallel: dict[str, JsonValue] = {
         "type": "parallel",
         "id": f"{check}_reviewers",
-        "join": "all",
+        "join": "settled",
         "branches": reviewers,
     }
     return {"type": "sequence", "id": check, "steps": [parallel, vote]}
@@ -266,7 +267,7 @@ def build_audit_spec(params: AuditParams) -> WorkflowSpec:
         steps.append(_check(checks[0], params, writes=FINDINGS_ARTIFACT))
     else:
         branches: list[JsonValue] = [_check(c, params) for c in checks]
-        steps.append({"type": "parallel", "id": "checks", "join": "all", "branches": branches})
+        steps.append({"type": "parallel", "id": "checks", "join": "settled", "branches": branches})
         steps.append(
             {
                 "type": "reduce",

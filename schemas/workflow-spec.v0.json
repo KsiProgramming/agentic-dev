@@ -387,7 +387,7 @@
     },
     "ParallelNode": {
       "additionalProperties": false,
-      "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. Its output is the completed branches'\noutputs in branch order. A branch is one `agent`, `tool` or `sequence` node, its id names the\nbranch, and it holds no gate, writer or publisher. Every agent in the branches counts toward\nthe run's `agents_spawned` limit when the parallel starts.",
+      "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. `settled` (4.6) never decides early: it\nwaits for every branch to end and completes if at least one completed, so one failed branch\ndoes not cancel the others. Its output is the completed branches' outputs in branch order.\nA branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a\nreduce that writes nothing), its id names the branch, and it holds no gate, writer or\npublisher. Every agent in the branches counts toward the run's `agents_spawned` limit when\nthe parallel starts.",
       "properties": {
         "branches": {
           "items": {
@@ -449,7 +449,8 @@
           "enum": [
             "all",
             "any",
-            "quorum"
+            "quorum",
+            "settled"
           ],
           "title": "Join",
           "type": "string"
