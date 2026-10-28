@@ -1,0 +1,34 @@
+{
+  "spec_version": "0",
+  "id": "port-mismatch-required",
+  "name": "A consumer that requires what its producer does not give",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "triage",
+        "role": "Reviewer",
+        "instructions": "List the findings.",
+        "output_schema": {
+          "type": "object",
+          "required": ["findings"],
+          "properties": { "findings": { "type": "array" } }
+        }
+      },
+      { "type": "gate", "id": "approve", "title": "Approve the findings" },
+      {
+        "type": "agent",
+        "id": "report",
+        "role": "Writer",
+        "instructions": "Write a report.",
+        "input_schema": {
+          "type": "object",
+          "required": ["issues"],
+          "properties": { "issues": { "type": "array" } }
+        }
+      }
+    ]
+  }
+}

@@ -10,11 +10,21 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agentic_engine.expr import ExpressionError, compile_condition, compile_list
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimit
+from agentic_engine.ports import schema_problem
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
 """Slug used in branch names (`agent/<run>/<node>`), so it must be path- and ref-safe."""
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
+
+PortSchema = Annotated[
+    dict[str, JsonValue],
+    Field(
+        description="A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+        examples=[{"type": "object", "required": ["findings"], "properties": {"findings": {}}}],
+    ),
+]
+"""A typed port (4.2): checked against the value that crosses it, at runtime."""
 
 
 class _Base(BaseModel):
@@ -35,6 +45,14 @@ class AgentNode(_Base):
     )
     model: NonEmptyStr | None = None
     tools: list[str] = Field(default_factory=list[str])
+    input_schema: PortSchema | None = Field(
+        default=None, description="Its input must be JSON that matches this, or it does not start."
+    )
+    output_schema: PortSchema | None = Field(
+        default=None,
+        description="It is asked to answer with JSON that matches this, and fails if it does not; "
+        "the parsed object is its `data`.",
+    )
 
 
 class ToolNode(_Base):
@@ -46,6 +64,13 @@ class ToolNode(_Base):
     tool: NonEmptyStr = Field(description="The platform tool to call, e.g. `repo.list_files`.")
     args: dict[str, JsonValue] = Field(
         default_factory=dict[str, JsonValue], description="The tool's arguments."
+    )
+    input_schema: PortSchema | None = Field(
+        default=None, description="Its input must be JSON that matches this, or it does not run."
+    )
+    output_schema: PortSchema | None = Field(
+        default=None,
+        description="Its structured result (else its text as JSON) must match this, or it fails.",
     )
 
 
@@ -277,6 +302,8 @@ type IssueCode = Literal[
     "unknown_tool",
     "policy_limit",
     "budget_unpriced_model",
+    "invalid_schema",
+    "port_mismatch",
 ]
 
 
@@ -729,21 +756,145 @@ def budget_errors(
     return messages(budget_issues(root, policy, priced, default_model))
 
 
+type PortNode = AgentNode | ToolNode
+"""A node that may declare typed ports."""
+
+
+def port_edges(root: Node) -> list[tuple[PortNode, PortNode, str]]:
+    """Each place under `root` where one agent or tool node's output is the next one's input, as
+    `(producer, consumer, consumer's path)` in run order: consecutive steps of a sequence (nested
+    sequences flattened), looking through gates, which pass their input on unchanged. A loop, map,
+    parallel or reduce between two steps breaks the edge: its output is not typed."""
+    edges: list[tuple[PortNode, PortNode, str]] = []
+
+    def steps(node: Node, path: str) -> Iterator[tuple[str, Node]]:
+        if isinstance(node, SequenceNode):
+            for i, step in enumerate(node.steps):
+                yield from steps(step, f"{path}.steps[{i}]")
+        else:
+            yield path, node
+
+    def visit(node: Node, path: str) -> None:
+        previous: PortNode | None = None
+        for step_path, step in steps(node, path):
+            match step:
+                case AgentNode() | ToolNode():
+                    if previous is not None:
+                        edges.append((previous, step, step_path))
+                    previous = step
+                case GateNode():
+                    pass
+                case LoopNode() | MapNode():
+                    previous = None
+                    visit(step.body, f"{step_path}.body")
+                case ParallelNode():
+                    previous = None
+                    for i, branch in enumerate(step.branches):
+                        visit(branch, f"{step_path}.branches[{i}]")
+                case ReduceNode() | SequenceNode():
+                    previous = None
+
+    visit(root, "root")
+    return edges
+
+
+def port_issues(root: Node) -> list[ValidationIssue]:
+    """Why the typed ports under `root` cannot work, in run order: a schema that is not a port's
+    schema (`invalid_schema`, on the field), and a consumer whose `input_schema` requires what the
+    previous step's `output_schema` does not give (`port_mismatch`, on the consumer). The second
+    check is light: required properties must be declared, with the same top-level type."""
+    issues: list[ValidationIssue] = []
+    broken: set[str] = set()
+    for path, node in iter_nodes(root):
+        if not isinstance(node, AgentNode | ToolNode):
+            continue
+        for side, schema in (("input", node.input_schema), ("output", node.output_schema)):
+            if schema is None or (problem := schema_problem(schema)) is None:
+                continue
+            broken.add(node.id)
+            issues.append(
+                ValidationIssue(
+                    code="invalid_schema",
+                    path=f"{path}.{side}_schema",
+                    node_id=node.id,
+                    message=f"{node.type} {node.id!r} at {path}: {side}_schema: {problem}",
+                )
+            )
+    for producer, consumer, path in port_edges(root):
+        out, wanted = producer.output_schema, consumer.input_schema
+        if out is None or wanted is None or {producer.id, consumer.id} & broken:
+            continue
+        if why := _port_mismatch(out, wanted, producer.id):
+            message = f"{consumer.type} {consumer.id!r} at {path}: input_schema {why}"
+            issues.append(
+                ValidationIssue(
+                    code="port_mismatch", path=path, node_id=consumer.id, message=message
+                )
+            )
+    return issues
+
+
+def _port_mismatch(
+    out: dict[str, JsonValue], wanted: dict[str, JsonValue], producer: str
+) -> str | None:
+    given = _properties(out)
+    expected = _properties(wanted)
+    required = wanted.get("required")
+    for name in required if isinstance(required, list) else []:
+        if not isinstance(name, str):
+            continue
+        if name not in given:
+            return f"requires {name!r}, which the output_schema of {producer!r} does not declare"
+        has, needs = _types(given[name]), _types(expected.get(name))
+        if "number" in needs:
+            needs.add("integer")
+        if has and needs and not has & needs:
+            return (
+                f"wants {name!r} as {' or '.join(sorted(needs))}, but the output_schema of "
+                f"{producer!r} gives {' or '.join(sorted(has))}"
+            )
+    return None
+
+
+def _properties(schema: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    properties = schema.get("properties")
+    return properties if isinstance(properties, dict) else {}
+
+
+def _types(schema: JsonValue) -> set[str]:
+    """A property schema's top-level `type`s; empty when it does not say."""
+    if not isinstance(schema, dict):
+        return set()
+    match schema.get("type"):
+        case str() as one:
+            return {one}
+        case list() as many:
+            return {t for t in many if isinstance(t, str)}
+        case _:
+            return set()
+
+
 def structure_issues(root: Node) -> list[ValidationIssue]:
     """Why the spec under `root` cannot run anywhere, in run order: duplicate node ids, the loop,
-    map and parallel rules, references to other nodes, a gate before every publisher, and the
-    rules for creating the repo."""
+    map and parallel rules, references to other nodes, a gate before every publisher, the rules
+    for creating the repo, and typed ports."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root)
+    issues += port_issues(root)
     return in_run_order(root, issues)
 
 
 def in_run_order(root: Node, issues: list[ValidationIssue]) -> list[ValidationIssue]:
-    """`issues` sorted by where their node runs under `root` (depth first). The sort is stable,
-    and issues on no node come first."""
+    """`issues` sorted by where their node runs under `root` (depth first); an issue on a node's
+    field (`root.steps[1].output_schema`) sorts with its node. The sort is stable, and issues on
+    no node come first."""
     order = {path: i for i, (path, _) in enumerate(iter_nodes(root))}
-    return sorted(issues, key=lambda issue: order.get(issue.path, -1))
+
+    def key(issue: ValidationIssue) -> int:
+        return order.get(issue.path, order.get(issue.path.rpartition(".")[0], -1))
+
+    return sorted(issues, key=key)
 
 
 def writer_node_ids(root: Node, write_tools: Collection[str] = WRITE_TOOLS) -> set[str]:

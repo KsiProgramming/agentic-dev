@@ -111,6 +111,25 @@ function NodeFields({ node }: { node: SpecNode }) {
   }
 }
 
+/** The JSON Schemas a typed agent or tool node (4.2) checks its input and output against. */
+function PortSchemas({ node }: { node: SpecNode }) {
+  if (node.type !== "agent" && node.type !== "tool") return null;
+  return (
+    <>
+      {node.input_schema ? (
+        <Field label="Input schema">
+          <JsonView value={node.input_schema} label={`Input schema of ${node.id}`} />
+        </Field>
+      ) : null}
+      {node.output_schema ? (
+        <Field label="Output schema">
+          <JsonView value={node.output_schema} label={`Output schema of ${node.id}`} />
+        </Field>
+      ) : null}
+    </>
+  );
+}
+
 /** What the step was given: its node in the spec, the map item it ran for, and the run's input
  * for the run's first step. */
 export function StepInput({
@@ -145,6 +164,7 @@ export function StepInput({
         </Field>
       ) : null}
       {node ? <NodeFields node={node} /> : null}
+      {node ? <PortSchemas node={node} /> : null}
     </dl>
   );
 }

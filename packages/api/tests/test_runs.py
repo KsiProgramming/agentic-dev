@@ -1142,6 +1142,24 @@ async def test_a_workflow_naming_an_unknown_tool_is_refused(
     assert listed["items"] == []
 
 
+async def test_a_workflow_with_a_broken_port_schema_is_refused(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workspace_id = await policy_workspace(sessions)
+    body = {
+        "workflow": spec_json("invalid/port-remote-ref.json"),
+        "workspace_id": str(workspace_id),
+    }
+
+    async with api(postgres_url, redis_url) as client:
+        response = await client.post("/runs", json=body)
+        listed = (await client.get("/runs", params={"workspace_id": str(workspace_id)})).json()
+
+    assert response.status_code == 422, response.text
+    assert "`$ref` 'https://example.com/findings.json' is not local" in response.text
+    assert listed["items"] == []
+
+
 async def test_a_run_keeps_the_limits_it_was_created_with(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
 ) -> None:

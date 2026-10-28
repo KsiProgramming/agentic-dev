@@ -115,6 +115,19 @@ INVALID: dict[str, Rejection] = {
     "parallel-in-loop": Rejection(
         (), "value_error", "loop 'revise' at root: parallel 'review' at root.body cannot be inside"
     ),
+    "port-invalid-schema": Rejection(
+        (), "value_error", "output_schema: it is not a valid JSON Schema at /properties/findings"
+    ),
+    "port-not-object": Rejection((), "value_error", 'its root must be `"type": "object"`'),
+    "port-remote-ref": Rejection(
+        (), "value_error", "`$ref` 'https://example.com/findings.json' is not local"
+    ),
+    "port-mismatch-required": Rejection(
+        (), "value_error", "requires 'issues', which the output_schema of 'triage' does not"
+    ),
+    "port-mismatch-type": Rejection(
+        (), "value_error", "wants 'findings' as string, but the output_schema of 'triage' gives"
+    ),
 }
 
 

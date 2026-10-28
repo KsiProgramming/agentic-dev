@@ -206,3 +206,17 @@ async def test_validating_writes_nothing(
     await validate(client, spec_json("invalid/open-pr-without-gate.json"), workspace)
 
     assert await counts() == before
+
+
+async def test_typed_ports_are_checked_before_a_run(client: AsyncClient, workspace: UUID) -> None:
+    broken = await validate(client, spec_json("invalid/port-not-object.json"), workspace)
+    mismatched = await validate(client, spec_json("invalid/port-mismatch-required.json"), workspace)
+    typed = await validate(client, spec_json("valid/typed-ports.json"), workspace)
+
+    assert where(broken) == [("invalid_schema", "root.output_schema", "triage")]
+    assert where(mismatched) == [("port_mismatch", "root.steps[2]", "report")]
+    assert mismatched["issues"][0]["message"] == (
+        "agent 'report' at root.steps[2]: input_schema requires 'issues', which the "
+        "output_schema of 'triage' does not declare"
+    )
+    assert typed["valid"] is True

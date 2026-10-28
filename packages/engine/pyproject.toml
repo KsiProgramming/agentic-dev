@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agentic-runtime",
     "cel-python>=0.5.0",
+    "jsonschema>=4.26",
     "langgraph>=1.2.16",
     "pydantic>=2.11",
 ]

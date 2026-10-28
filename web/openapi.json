@@ -1809,6 +1809,60 @@
             },
             "type": "array",
             "title": "Tools"
+          },
+          "input_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object",
+                "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+                "examples": [
+                  {
+                    "properties": {
+                      "findings": {}
+                    },
+                    "required": [
+                      "findings"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Schema",
+            "description": "Its input must be JSON that matches this, or it does not start."
+          },
+          "output_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object",
+                "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+                "examples": [
+                  {
+                    "properties": {
+                      "findings": {}
+                    },
+                    "required": [
+                      "findings"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Schema",
+            "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`."
           }
         },
         "additionalProperties": false,
@@ -2612,7 +2666,9 @@
           "create_not_first",
           "unknown_tool",
           "policy_limit",
-          "budget_unpriced_model"
+          "budget_unpriced_model",
+          "invalid_schema",
+          "port_mismatch"
         ]
       },
       "JsonValue": {},
@@ -4506,6 +4562,60 @@
             "type": "object",
             "title": "Args",
             "description": "The tool's arguments."
+          },
+          "input_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object",
+                "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+                "examples": [
+                  {
+                    "properties": {
+                      "findings": {}
+                    },
+                    "required": [
+                      "findings"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Schema",
+            "description": "Its input must be JSON that matches this, or it does not run."
+          },
+          "output_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object",
+                "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+                "examples": [
+                  {
+                    "properties": {
+                      "findings": {}
+                    },
+                    "required": [
+                      "findings"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Schema",
+            "description": "Its structured result (else its text as JSON) must match this, or it fails."
           }
         },
         "additionalProperties": false,

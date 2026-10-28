@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { DOCS_DEMO_URL, FAILING, REPO_READER, startRun, WRITER } from "./runs";
+import { DOCS_DEMO_URL, FAILING, REPO_READER, startRun, TYPED_WRITER, WRITER } from "./runs";
 
 /** Done when (11.6): from the runs list, one click shows an agent's output; a failed run names its
  * failing step and reason (the viewport checks are in layout.spec.ts); no JSON is shown inside a
@@ -35,6 +35,38 @@ test("a failed run names its failing step and reason; Go to step selects it", as
   await banner.getByRole("button", { name: "Go to step" }).click();
   await expect(page).toHaveURL(/step=broken/);
   await expect(page.getByTestId("step-panel")).toHaveAttribute("data-key", "broken");
+});
+
+/** Done when (4.2): a wrong-shaped output fails at the edge with a clear error. */
+test("a typed output that is not JSON fails at its port; a JSON one passes", async ({
+  page,
+  request,
+}) => {
+  const runId = await startRun(request, [TYPED_WRITER], "E2E typed port");
+  await page.goto(`/runs/${runId}`);
+
+  const banner = page.getByTestId("run-banner");
+  await expect(banner).toHaveAttribute("data-kind", "failed", { timeout: 30_000 });
+  await expect(banner).toContainText("Failed at writer");
+  await expect(banner).toContainText("output of 'writer' is not JSON");
+  const port = page.getByTestId("step-panel").getByTestId("port-errors");
+  await expect(port).toContainText("Wrong shape");
+  await expect(port).toContainText("The output of writer does not match its output schema.");
+
+  const passing = await startRun(
+    request,
+    [TYPED_WRITER],
+    "E2E typed port",
+    undefined,
+    '{"findings": []}',
+  );
+  await page.goto(`/runs/${passing}?tab=input`);
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    "succeeded",
+    { timeout: 30_000 },
+  );
+  await expect(page.getByTestId("step-panel").getByText("Output schema")).toBeVisible();
 });
 
 test("no table cell holds JSON; an event's payload opens in the drawer", async ({

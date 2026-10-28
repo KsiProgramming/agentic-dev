@@ -11,6 +11,7 @@ import {
   REPO_READER,
   startReviewRun,
   startRun,
+  TYPED_WRITER,
   WRITER,
 } from "./runs";
 
@@ -148,6 +149,15 @@ for (const colorScheme of ["light", "dark"] as const) {
           timeout: 30_000,
         },
       );
+      await expectNoSeriousIssues(page);
+    });
+
+    test("a run failed at a typed port has no serious a11y issues", async ({ page, request }) => {
+      const runId = await startRun(request, [TYPED_WRITER], "E2E typed port a11y");
+      await open(page, `/runs/${runId}`);
+      await expect(page.getByTestId("step-panel").getByTestId("port-errors")).toBeVisible({
+        timeout: 30_000,
+      });
       await expectNoSeriousIssues(page);
     });
 

@@ -11,6 +11,7 @@ import {
   startRun,
   GATE,
   MAP,
+  TYPED_WRITER,
   WRITER,
 } from "./runs";
 
@@ -230,6 +231,15 @@ test("a failed run", async ({ page, request }) => {
   await expect(banner).toContainText("Failed at broken");
   await expect(banner).toBeInViewport({ ratio: 1 });
   await checkPage(page, "run-failed");
+});
+
+test("a run failed at a typed port", async ({ page, request }) => {
+  const runId = await startRun(request, [TYPED_WRITER], "E2E typed port layout");
+  await page.goto(`/runs/${runId}`);
+  const banner = page.getByTestId("run-banner");
+  await expect(banner).toHaveAttribute("data-kind", "failed", { timeout: 30_000 });
+  await expect(page.getByTestId("step-panel").getByTestId("port-errors")).toBeVisible();
+  await checkPage(page, "run-port-failed");
 });
 
 test("runs, with a run's menu open", async ({ page, request }) => {

@@ -1,0 +1,33 @@
+{
+  "spec_version": "0",
+  "id": "port-mismatch-type",
+  "name": "A consumer that wants another type than its producer gives",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "triage",
+        "role": "Reviewer",
+        "instructions": "List the findings.",
+        "output_schema": {
+          "type": "object",
+          "required": ["findings"],
+          "properties": { "findings": { "type": "array" } }
+        }
+      },
+      {
+        "type": "agent",
+        "id": "report",
+        "role": "Writer",
+        "instructions": "Write a report.",
+        "input_schema": {
+          "type": "object",
+          "required": ["findings"],
+          "properties": { "findings": { "type": "string" } }
+        }
+      }
+    ]
+  }
+}

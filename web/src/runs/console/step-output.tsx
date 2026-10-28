@@ -20,6 +20,7 @@ import type { NodeKind } from "../graph/spec-graph";
 import type { Step } from "../timeline";
 import { AgentMessage } from "./agent-message";
 import { GateDecision } from "./gate-decision";
+import { PortErrors } from "./port-errors";
 import { StatusMarker } from "./rail";
 import { lastMessage, type StepEntry, type StepRow } from "./step-entries";
 import { ErrorLine } from "./step-view";
@@ -219,7 +220,8 @@ export function StepOutput({
   const final = turns.at(-1);
   const parts: ReactNode[] = [];
 
-  if (step.error) parts.push(<ErrorLine key="error" error={step.error} />);
+  if (step.port) parts.push(<PortErrors key="error" stepId={step.id} port={step.port} />);
+  else if (step.error) parts.push(<ErrorLine key="error" error={step.error} />);
   if (step.gate) parts.push(<GateDecision key="gate" gate={step.gate} />);
   if (extra) parts.push(<div key="extra">{extra}</div>);
   if (final && final.work.length > 0) {
