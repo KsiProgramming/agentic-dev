@@ -116,6 +116,7 @@ async def test_run_pauses_at_gate() -> None:
         "artifact": "draft notes",
         "ttl_s": 72 * 60 * 60,
         "changes": [],
+        "run_artifacts": [],
     }
     assert isinstance(expires_at, str)
     assert datetime.fromisoformat(expires_at) - waiting.created_at == pytest.approx(
@@ -258,6 +259,7 @@ async def test_gate_first_shows_the_run_input() -> None:
         "prompt": None,
         "artifact": "go",
         "changes": [],
+        "run_artifacts": [],
     }
     result = await run.resume(APPROVE)
     assert (result.status, result.text) == ("completed", "go")

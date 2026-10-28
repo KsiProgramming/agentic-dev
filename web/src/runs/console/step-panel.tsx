@@ -36,6 +36,8 @@ const LABELS: Record<StepTab, string> = {
 /** The selected step: its name, status, time and cost, then its Output, Activity, Input, Usage
  * and Events. */
 export function StepPanel({
+  runId,
+  baseUrl,
   row,
   kind,
   entries,
@@ -49,6 +51,8 @@ export function StepPanel({
   onSelect,
   extra,
 }: {
+  runId: string;
+  baseUrl?: string;
   row: StepRow;
   kind: NodeKind;
   entries: StepEntry[];
@@ -110,6 +114,8 @@ export function StepPanel({
         </TabsList>
         <TabsContent value="output" className="pt-3">
           <StepOutput
+            runId={runId}
+            baseUrl={baseUrl}
             step={step}
             row={row}
             kind={kind}
@@ -126,7 +132,14 @@ export function StepPanel({
           )}
         </TabsContent>
         <TabsContent value="input" className="pt-3">
-          <StepInput row={row} spec={spec} runInput={runInput} first={first} />
+          <StepInput
+            runId={runId}
+            baseUrl={baseUrl}
+            row={row}
+            spec={spec}
+            runInput={runInput}
+            first={first}
+          />
         </TabsContent>
         <TabsContent value="usage" className="pt-3">
           <StepUsage step={step} items={children} />

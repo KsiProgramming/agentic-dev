@@ -13,6 +13,12 @@ from agentic_store.approvals import (
     pending_gate,
     record_approval,
 )
+from agentic_store.artifacts import (
+    PostgresArtifactStore,
+    StoredArtifact,
+    get_run_artifact,
+    list_run_artifacts,
+)
 from agentic_store.audit import AUDIT_ACTIONS, AuditAction
 from agentic_store.audit_log import AuditEventRow, AuditRunRef, list_audit_events
 from agentic_store.cancel import (
@@ -56,6 +62,7 @@ from agentic_store.models import (
     Base,
     Connection,
     Run,
+    RunArtifact,
     RunEventRow,
     Workspace,
     WorkspaceModelPrice,
@@ -121,8 +128,10 @@ __all__ = [
     "InvalidEditsError",
     "PendingGate",
     "PolicyViolationError",
+    "PostgresArtifactStore",
     "PostgresEventSink",
     "Run",
+    "RunArtifact",
     "RunCountsRow",
     "RunEndedError",
     "RunEventRow",
@@ -132,6 +141,7 @@ __all__ = [
     "RunSummaryRow",
     "RunTimesRow",
     "RunUsageRow",
+    "StoredArtifact",
     "StoredRun",
     "Workspace",
     "WorkspaceInfo",
@@ -155,6 +165,7 @@ __all__ = [
     "get_github_installation",
     "get_policy_overrides",
     "get_run",
+    "get_run_artifact",
     "get_run_summary",
     "get_workspace",
     "leased_run_ids",
@@ -162,6 +173,7 @@ __all__ = [
     "list_changed_run_summaries",
     "list_connections",
     "list_price_overrides",
+    "list_run_artifacts",
     "list_run_events",
     "list_run_summaries",
     "list_workspaces",

@@ -8,7 +8,7 @@ a run spends at gates never uses up its retries. The gate a run waits at is the 
 `gate_expires_at` takes no decision: the run is being cancelled (`agentic_store.expiry`).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -17,6 +17,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.artifacts import GateArtifact
 from agentic_engine.events import GATE_WAITING
 from agentic_engine.gate import EditError, EditErrorCode, FileChange, GateDecision, check_edits
 from agentic_store.audit import audit
@@ -137,6 +138,8 @@ class PendingGate:
     # Why the changes could not be read, if they could not.
     changes_error: str | None
     expires_at: datetime | None
+    # The run's artifacts at the pause (none before phase 4.3).
+    run_artifacts: list[GateArtifact] = field(default_factory=list[GateArtifact])
 
 
 async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> PendingGate:
@@ -163,7 +166,13 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         changes=_shown_changes(payload),
         changes_error=_text(payload.get("changes_error")),
         expires_at=run.gate_expires_at,
+        run_artifacts=_shown_artifacts(payload),
     )
+
+
+def _shown_artifacts(payload: dict[str, JsonValue]) -> list[GateArtifact]:
+    shown = payload.get("run_artifacts")
+    return [GateArtifact.model_validate(a) for a in shown] if isinstance(shown, list) else []
 
 
 async def pending_decision(

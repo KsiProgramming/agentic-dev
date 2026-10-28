@@ -1,3 +1,4 @@
+import { parseArtifact, parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
 import { parseChanges, parseEdits, type FileChange, type FileEdit } from "./gates";
 import type { RunEvent } from "./types";
@@ -86,6 +87,10 @@ export interface Step {
   stopReason: string | null;
   /** The typed port that failed the step (4.2): its `node_failed`'s `port`. */
   port: PortFailure | null;
+  /** The run artifacts the step wrote (4.3), from its `artifact_written` events. */
+  artifactsWritten: ArtifactVersion[];
+  /** The versions of run artifacts the step read, from its `node_started`'s `reads`. */
+  artifactsRead: ArtifactVersion[];
 }
 
 /** A value that did not match a node's input or output schema, and where it went wrong. */
@@ -228,6 +233,8 @@ function newStep(id: string, at: string): Step {
     branches: null,
     stopReason: null,
     port: null,
+    artifactsWritten: [],
+    artifactsRead: [],
   };
 }
 
@@ -399,6 +406,9 @@ class Builder {
         step.itemCount = num(payload.items);
       }
       if (payload.branches !== undefined) step.branches ??= [];
+      // A step run again reads (and writes) afresh.
+      step.artifactsRead = parseArtifacts(payload.reads);
+      step.artifactsWritten = [];
       return;
     }
 
@@ -445,6 +455,11 @@ class Builder {
       case "repo_created":
         step.createdRepo = createdRepoOf(payload);
         return;
+      case "artifact_written": {
+        const written = parseArtifact({ ...payload, node_id: nodeId });
+        if (written) step.artifactsWritten.push(written);
+        return;
+      }
       case "text_delta": {
         const last = step.turns.at(-1);
         const text = str(payload.text) ?? "";

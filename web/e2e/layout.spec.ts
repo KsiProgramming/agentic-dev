@@ -242,6 +242,25 @@ test("a run failed at a typed port", async ({ page, request }) => {
   await checkPage(page, "run-port-failed");
 });
 
+test("a run's artifacts, and one open in its sheet", async ({ page, request }) => {
+  const runId = await startRun(
+    request,
+    [{ ...TYPED_WRITER, writes: "findings.json" }],
+    "E2E artifacts layout",
+    undefined,
+    '{"findings": [{"id": "F1"}]}',
+  );
+  await page.goto(`/runs/${runId}?view=artifacts`);
+  await expect(page.getByTestId("run-artifact")).toBeVisible({ timeout: 30_000 });
+  await checkPage(page, "run-artifacts");
+  await page
+    .getByTestId("run-artifact")
+    .getByRole("button", { name: /findings\.json/ })
+    .click();
+  await expect(page.getByTestId("artifact-sheet").getByRole("group")).toBeVisible();
+  await screenshot(page, "run-artifact-sheet");
+});
+
 test("runs, with a run's menu open", async ({ page, request }) => {
   const runId = await startRun(request, [WRITER]);
   await page.goto(`/runs/${runId}`);

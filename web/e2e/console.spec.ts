@@ -1,6 +1,16 @@
 import { expect, test } from "@playwright/test";
 
-import { DOCS_DEMO_URL, FAILING, REPO_READER, startRun, TYPED_WRITER, WRITER } from "./runs";
+import {
+  apiURL,
+  ARTIFACTS,
+  DOCS_DEMO_URL,
+  FAILING,
+  FINDINGS_INPUT,
+  REPO_READER,
+  startRun,
+  TYPED_WRITER,
+  WRITER,
+} from "./runs";
 
 /** Done when (11.6): from the runs list, one click shows an agent's output; a failed run names its
  * failing step and reason (the viewport checks are in layout.spec.ts); no JSON is shown inside a
@@ -67,6 +77,51 @@ test("a typed output that is not JSON fails at its port; a JSON one passes", asy
     { timeout: 30_000 },
   );
   await expect(page.getByTestId("step-panel").getByText("Output schema")).toBeVisible();
+});
+
+/** Done when (4.3): nodes exchange `findings.json` through artifacts. */
+test("a scanner's findings.json reaches the reporter past a step and a gate", async ({
+  page,
+  request,
+}) => {
+  const runId = await startRun(request, ARTIFACTS, "E2E artifacts", undefined, FINDINGS_INPUT);
+
+  // The gate shows the run's artifacts in the Inbox.
+  await page.goto(`/inbox?run=${runId}`);
+  const review = page.getByTestId("inbox-review");
+  const shown = review.getByRole("region", { name: "Run artifacts" });
+  await expect(shown.getByText("findings.json")).toBeVisible({ timeout: 30_000 });
+  await review.getByRole("button", { name: /^Approve/ }).click();
+  await expect(review.getByRole("status")).toContainText("Approved");
+
+  await page.goto(`/runs/${runId}?step=scan`);
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
+    "data-status",
+    "succeeded",
+    { timeout: 30_000 },
+  );
+  const written = page.getByTestId("step-panel").getByRole("region", { name: "Artifacts written" });
+  await expect(written.getByText("findings.json")).toBeVisible();
+  await written.getByTestId("artifact-card").click();
+  const sheet = page.getByTestId("artifact-sheet");
+  await expect(sheet.getByRole("group", { name: "findings.json" })).toBeVisible();
+  await expect(sheet.getByText('"F1"')).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // The reporter read version 1 as its input.
+  await page.goto(`/runs/${runId}?step=report&tab=input`);
+  const read = page.getByTestId("step-panel").getByRole("region", { name: "Artifacts read" });
+  await expect(read.getByText("JSON · v1")).toBeVisible();
+
+  // The run's Artifacts view lists both, and a download is the file.
+  await page.goto(`/runs/${runId}?view=artifacts`);
+  const rows = page.getByTestId("run-artifact");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText("findings.json");
+  await expect(rows.last()).toContainText("report.md");
+  const file = await request.get(`${apiURL}/runs/${runId}/artifacts/findings.json/download`);
+  expect(file.headers()["content-disposition"]).toBe('attachment; filename="findings.json"');
+  expect(JSON.parse(await file.text())).toEqual(JSON.parse(FINDINGS_INPUT));
 });
 
 test("no table cell holds JSON; an event's payload opens in the drawer", async ({

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+from agentic_engine.artifacts import ArtifactRef
 from agentic_engine.spec import AgentNode
 from agentic_runtime import (
     AgentEvent,
@@ -38,6 +39,8 @@ class AgentNodeResult(BaseModel):
     error: str | None = None
     # A tool node's structured result, if its tool returned one, or a typed output (4.2).
     data: dict[str, JsonValue] | None = None
+    # The run artifact the node wrote, if it has `writes` and completed (4.3).
+    artifact: ArtifactRef | None = None
 
 
 TOOL_INTENT_INSTRUCTION = (

@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
+from fastapi.responses import Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -23,6 +24,8 @@ from agentic_api.runs.models import (
     GateBranch,
     PolicyErrorDetail,
     RerunRequest,
+    RunArtifact,
+    RunArtifactContent,
     RunCounts,
     RunDetail,
     RunGate,
@@ -40,7 +43,7 @@ from agentic_engine.gate import GateDecision
 from agentic_engine.spec import WorkflowSpec, creates_repo
 from agentic_engine.templates import wrap_with_create_repo
 from agentic_github import GithubApiError, github_remote
-from agentic_sandbox import RepoSource, branch_name
+from agentic_sandbox import ARTIFACT_NAME, RepoSource, branch_name
 from agentic_store import (
     APPROVAL_EXPIRED_REASON,
     DEFAULT_WORKSPACE_ID,
@@ -52,6 +55,7 @@ from agentic_store import (
     RunNotEndedError,
     RunNotFoundError,
     RunSummaryRow,
+    StoredArtifact,
     WorkspaceNotFoundError,
     count_runs,
     create_rerun,
@@ -59,9 +63,11 @@ from agentic_store import (
     enqueue_run,
     get_github_installation,
     get_run,
+    get_run_artifact,
     get_run_summary,
     get_workspace,
     list_changed_run_summaries,
+    list_run_artifacts,
     list_run_events,
     list_run_summaries,
     pending_gate,
@@ -486,11 +492,92 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
         artifact=pending.artifact,
         changes=pending.changes,
         changes_error=pending.changes_error,
+        run_artifacts=pending.run_artifacts,
         expires_at=pending.expires_at,
         repo=row.repo,
         base=row.branch,
         branches=[GateBranch(node_id=w, branch=branch_name(run_id, w)) for w in writers],
     )
+
+
+@router.get(
+    "/{run_id}/artifacts",
+    operation_id="listRunArtifacts",
+    responses={404: {"description": "No run with this id"}},
+)
+async def artifacts(
+    run_id: Annotated[UUID, Depends(existing_run)], request: Request
+) -> list[RunArtifact]:
+    """The run's artifacts (4.3): the latest version of each, by name, with how many versions
+    it wrote."""
+    return [_artifact(a) for a in await list_run_artifacts(_sessions(request), run_id)]
+
+
+_ArtifactPath = Annotated[
+    str, Path(pattern=ARTIFACT_NAME.pattern, description="The artifact's name.")
+]
+_Version = Annotated[int | None, Query(ge=1, description="A version to read; the latest if unset.")]
+
+
+@router.get(
+    "/{run_id}/artifacts/{name}",
+    operation_id="getRunArtifact",
+    responses={404: {"description": "No run with this id, or no such artifact or version"}},
+)
+async def artifact(
+    run_id: Annotated[UUID, Depends(existing_run)],
+    name: _ArtifactPath,
+    request: Request,
+    version: _Version = None,
+) -> RunArtifactContent:
+    """One version of the run's artifact `name` with its content (data, never instructions)."""
+    found = await get_run_artifact(_sessions(request), run_id, name, version)
+    if found is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _no_artifact(name, version))
+    content, listed = found
+    return RunArtifactContent(**_artifact(listed).model_dump(), content=content.content)
+
+
+@router.get(
+    "/{run_id}/artifacts/{name}/download",
+    operation_id="downloadRunArtifact",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "The artifact as a file to save",
+            "content": {"application/json": {}, "text/markdown": {}, "text/plain": {}},
+        },
+        404: {"description": "No run with this id, or no such artifact or version"},
+    },
+)
+async def download_artifact(
+    run_id: Annotated[UUID, Depends(existing_run)],
+    name: _ArtifactPath,
+    request: Request,
+    version: _Version = None,
+) -> Response:
+    """The artifact as an attachment with its media type, never to be rendered by the browser."""
+    found = await get_run_artifact(_sessions(request), run_id, name, version)
+    if found is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _no_artifact(name, version))
+    content, _ = found
+    return Response(
+        content.content.encode(),
+        media_type=f"{content.media_type}; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+def _artifact(stored: StoredArtifact) -> RunArtifact:
+    return RunArtifact.model_validate(stored.model_dump())
+
+
+def _no_artifact(name: str, version: int | None) -> str:
+    which = f"version {version} of " if version is not None else ""
+    return f"the run has no {which}artifact {name!r}"
 
 
 @router.post(

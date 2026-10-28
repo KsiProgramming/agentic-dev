@@ -13,6 +13,8 @@ import { useGateShortcuts } from "./use-gate-shortcuts";
 export type Decision = "approve" | "reject";
 
 export interface GateDecision {
+  runId: string;
+  baseUrl: string | undefined;
   gate: PendingGate;
   edits: GateEdits;
   /** The decision being sent. */
@@ -106,6 +108,8 @@ export function useGateDecision({
   });
 
   return {
+    runId,
+    baseUrl,
     gate,
     edits,
     pending,

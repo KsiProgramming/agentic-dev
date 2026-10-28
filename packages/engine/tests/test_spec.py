@@ -21,6 +21,16 @@ class Rejection:
 
 
 INVALID: dict[str, Rejection] = {
+    "artifact-bad-name": Rejection(("root", "agent", "writes"), "string_pattern_mismatch"),
+    "artifact-branch-conflict": Rejection(
+        (), "value_error", "writes 'findings.json', which branch 'security' of parallel 'review'"
+    ),
+    "artifact-read-before-write": Rejection(
+        (), "value_error", "reads 'findings.json', which no node writes before it"
+    ),
+    "artifact-write-in-map": Rejection(
+        (), "value_error", "writes 'findings.json' inside map 'each'"
+    ),
     "unknown-node-type": Rejection(("root",), "union_tag_invalid"),
     "missing-instructions": Rejection(("root", "agent", "instructions"), "missing"),
     "extra-key": Rejection(("root", "agent", "temprature"), "extra_forbidden"),

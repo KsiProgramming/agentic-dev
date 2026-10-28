@@ -97,6 +97,20 @@
           "description": "Unset means the workspace default.",
           "title": "Provider"
         },
+        "reads": {
+          "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
+          "items": {
+            "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+            "examples": [
+              "findings.json"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Reads",
+          "type": "array"
+        },
         "role": {
           "minLength": 1,
           "title": "Role",
@@ -113,6 +127,24 @@
           "const": "agent",
           "title": "Type",
           "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
         }
       },
       "required": [
@@ -539,6 +571,24 @@
           "const": "reduce",
           "title": "Type",
           "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
         }
       },
       "required": [
@@ -692,6 +742,20 @@
           "description": "Its structured result (else its text as JSON) must match this, or it fails.",
           "title": "Output Schema"
         },
+        "reads": {
+          "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
+          "items": {
+            "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+            "examples": [
+              "findings.json"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Reads",
+          "type": "array"
+        },
         "tool": {
           "description": "The platform tool to call, e.g. `repo.list_files`.",
           "minLength": 1,
@@ -702,6 +766,24 @@
           "const": "tool",
           "title": "Type",
           "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
         }
       },
       "required": [

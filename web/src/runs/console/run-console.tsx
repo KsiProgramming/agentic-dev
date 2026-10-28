@@ -1,7 +1,14 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDownIcon, CirclePauseIcon, ListTreeIcon, NetworkIcon, RadioIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  CirclePauseIcon,
+  FilesIcon,
+  ListTreeIcon,
+  NetworkIcon,
+  RadioIcon,
+} from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -12,6 +19,7 @@ import type { RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import { ArtifactsView } from "../artifacts/artifacts-view";
 import { pendingGate, type PendingGate } from "../gates";
 import { RunGraph } from "../graph/run-graph";
 import { allSpecNodes, type NodeKind } from "../graph/spec-graph";
@@ -44,7 +52,7 @@ import {
 import { guessKind, StepList } from "./step-list";
 import { STEP_TABS, StepPanel, type StepTab } from "./step-panel";
 
-type View = "list" | "graph";
+type View = "list" | "graph" | "artifacts";
 
 /** From 1280 px the step list and the selected step sit side by side. */
 const XL_UP = "(min-width: 1280px)";
@@ -149,14 +157,17 @@ function WaitingMarker() {
   );
 }
 
-/** The console's place in the URL: the step list or the graph, the selected step and its tab.
- * Links from before 11.6 still open: `?tab=graph` is the graph, `?tab=raw` the Events tab. */
+/** The console's place in the URL: the step list, the graph or the run's artifacts, the selected
+ * step and its tab. Links from before 11.6 still open: `?tab=graph` is the graph, `?tab=raw` the
+ * Events tab. */
 function useConsoleParams() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const asked = params.get("tab");
-  const view: View = params.get("view") === "graph" || asked === "graph" ? "graph" : "list";
+  const named = params.get("view");
+  const view: View =
+    named === "graph" || asked === "graph" ? "graph" : named === "artifacts" ? "artifacts" : "list";
   const tab: StepTab =
     asked === "raw" ? "events" : (STEP_TABS.find((t) => t === asked) ?? "output");
   const step = params.get("step");
@@ -223,6 +234,7 @@ function Console({
   const rows = useMemo(() => stepRows(entries), [entries]);
   const gate = status === "live" ? pendingGate(events) : null;
   const prUrl = lastPullRequest(timeline.steps);
+  const written = events.filter((e) => e.type === "artifact_written").length;
   const live = status === "connecting" || status === "live";
   const now = useNow(1000, live);
   const follow = useFollowScroll(events.length, status === "live");
@@ -337,7 +349,7 @@ function Console({
       <div className="flex min-w-0 flex-col gap-6 xl:grid xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] xl:items-start">
         <Tabs
           value={view}
-          onValueChange={(next) => update({ view: next === "graph" ? "graph" : null })}
+          onValueChange={(next) => update({ view: next === "list" ? null : next })}
           className="min-w-0"
         >
           <TabsList aria-label="Run views">
@@ -348,6 +360,10 @@ function Console({
             <TabsTrigger value="graph">
               <NetworkIcon aria-hidden="true" />
               Graph
+            </TabsTrigger>
+            <TabsTrigger value="artifacts">
+              <FilesIcon aria-hidden="true" />
+              Artifacts
             </TabsTrigger>
           </TabsList>
 
@@ -384,11 +400,24 @@ function Console({
               <LoadingState label="Loading the workflow…" />
             )}
           </TabsContent>
+
+          <TabsContent value="artifacts" className="pt-2">
+            <ArtifactsView
+              runId={runId}
+              written={written}
+              live={live}
+              now={now}
+              onOpenStep={openNode}
+              baseUrl={baseUrl}
+            />
+          </TabsContent>
         </Tabs>
 
         {selected && kind ? (
           <div id={PANEL_ID} tabIndex={-1} className="min-w-0 scroll-mt-20 outline-none">
             <StepPanel
+              runId={runId}
+              baseUrl={baseUrl}
               row={selected}
               kind={kind}
               entries={entries}

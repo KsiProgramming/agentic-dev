@@ -27,6 +27,7 @@ from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.policy import PolicyOverrides
 from agentic_engine.spec import (
+    ARTIFACT_TOOLS,
     CREATE_TOOLS,
     PUBLISH_TOOLS,
     READ_TOOLS,
@@ -61,7 +62,9 @@ from agentic_store import (
     get_run,
     get_run_summary,
     list_audit_events,
+    list_run_artifacts,
     list_run_events,
+    pending_gate,
     put_connection,
     put_github_connection,
     record_approval,
@@ -69,6 +72,7 @@ from agentic_store import (
     replace_price_overrides,
     request_cancel,
 )
+from agentic_tools.artifacts import ARTIFACT_TOOL_NAMES
 from agentic_tools.github import CREATE_TOOL_NAMES, PUBLISH_TOOL_NAMES, GithubPublisher
 from agentic_tools.repo import COMMIT_AUTHOR, READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.testing import FakeGithub, bare_remote
@@ -1188,6 +1192,7 @@ def test_the_engine_and_the_tool_servers_agree_on_tool_names() -> None:
     assert WRITE_TOOLS == WRITE_TOOL_NAMES
     assert PUBLISH_TOOLS == PUBLISH_TOOL_NAMES
     assert CREATE_TOOLS == CREATE_TOOL_NAMES
+    assert ARTIFACT_TOOLS == ARTIFACT_TOOL_NAMES
 
 
 async def test_the_fake_github_app_clones_and_publishes_local_fixture_repos(
@@ -1542,3 +1547,119 @@ async def test_spend_before_a_gate_counts_and_the_budget_stays_frozen(
         ("run_failed", None),
     ]
     assert events[-2].payload["observed"] == "1.2"
+
+
+def findings_runtime(tools: ToolExecutor | None) -> AgentRuntime:
+    """The fake runtime with `scan` answering JSON findings; the others echo, after calling their
+    tools."""
+    return FakeRuntime(
+        {"scan": [Message(text='{"findings": [{"id": "F1"}]}'), ECHO_USAGE]}, tools=tools
+    )
+
+
+class ArtifactFiles:
+    """`inspect` for `RecordingSandboxes`: the files in the sandbox's artifacts directory."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, str] = {}
+
+    async def __call__(self, box: Sandbox) -> None:
+        folder = Path(box.artifacts_dir)
+        self.files = await asyncio.to_thread(
+            lambda: {p.name: p.read_text(encoding="utf-8") for p in folder.iterdir()}
+        )
+
+
+async def test_a_run_without_a_repo_exchanges_artifacts_and_its_agents_read_them(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    spec = parse_spec(
+        {
+            "spec_version": "0",
+            "id": "findings",
+            "name": "Findings",
+            "root": {
+                "type": "sequence",
+                "id": "main",
+                "steps": [
+                    {
+                        "type": "agent",
+                        "id": "scan",
+                        "role": "R",
+                        "instructions": "Go.",
+                        "writes": "findings.json",
+                    },
+                    {
+                        "type": "agent",
+                        "id": "report",
+                        "role": "R",
+                        "instructions": "Go.",
+                        "tools": ["artifacts.read"],
+                        "reads": ["findings.json"],
+                    },
+                ],
+            },
+        }
+    )
+
+    async with worker(postgres_url, redis_url, make_runtime=findings_runtime):
+        run_id = await submit(sessions, redis_url, spec)
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    [written] = [e for e in events if e.type == "artifact_written"]
+    assert (written.node_id, written.payload["name"], written.payload["version"]) == (
+        "scan",
+        "findings.json",
+        1,
+    )
+    [result] = [e for e in events if e.type == "tool_result" and e.node_id == "report"]
+    assert result.payload["is_error"] is False
+    read = json.loads(str(result.payload["output"]))
+    assert json.loads(read["content"]) == {"findings": [{"id": "F1"}]}
+    [listed] = await list_run_artifacts(sessions, run_id)
+    assert (listed.name, listed.node_id, listed.size) == (
+        "findings.json",
+        "scan",
+        written.payload["size"],
+    )
+
+
+async def test_artifacts_are_mirrored_into_the_sandbox_and_again_into_a_fresh_one(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """A run's artifacts are read-only files in its sandbox. When the sandbox it kept at a gate
+    is lost, the attempt that continues it copies them into the new one."""
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    files = ArtifactFiles()
+    sandboxes = RecordingSandboxes(
+        FakeSandboxManager(local_root=repos, base_dir=boxes), inspect=files
+    )
+    repo = RepoSource(url=str(repos / "hello"))
+
+    async with worker(postgres_url, redis_url, make_runtime=findings_runtime, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, load_spec("artifacts-findings.json"), repo)
+        await wait_for_status(sessions, run_id, "waiting")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+        assert set(files.files) == {"findings.json"}
+        gate = await pending_gate(sessions, run_id)
+        assert [a.name for a in gate.run_artifacts] == ["findings.json"]
+
+        await sandboxes.discard(run_id)  # the kept sandbox is lost
+        sandboxes.closed.clear()
+        await record_approval(sessions, run_id, "approve", GateDecision(decision="approve"))
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+
+    assert set(files.files) == {"findings.json", "report.md"}
+    assert json.loads(files.files["findings.json"]) == {"findings": [{"id": "F1"}]}
+    events = await list_run_events(sessions, run_id)
+    calls = [e.payload["name"] for e in events if e.type == "tool_call" and e.node_id == "report"]
+    assert calls == ["artifacts.list", "artifacts.read"]

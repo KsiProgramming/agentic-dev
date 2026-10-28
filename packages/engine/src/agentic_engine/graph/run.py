@@ -13,6 +13,7 @@ from langgraph.types import Command
 from pydantic import JsonValue
 
 from agentic_engine.agent import sum_usage
+from agentic_engine.artifacts import ArtifactStore, GateArtifact
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
     GATE_WAITING,
@@ -60,6 +61,7 @@ async def run_workflow(
     policy: Policy = PLATFORM_POLICY,
     spent: Decimal = Decimal(0),
     review: GateReview | None = None,
+    artifacts: ArtifactStore | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -71,7 +73,8 @@ async def run_workflow(
     spent `spent`; once its spend reaches the budget it ends `failed` the same way, and the
     result says so.
     A gate pauses the run: it ends `waiting`, after `node_started` and `gate_waiting` (payload
-    `title`, `prompt`, `artifact`, `ttl_s`, `expires_at`, `changes`) for the gate, and
+    `title`, `prompt`, `artifact`, `ttl_s`, `expires_at`, `changes`, `run_artifacts`) for the
+    gate, and
     `resume_workflow` continues it with the decision. `changes` are the files the writers that
     ran before the gate changed, from `review` (none without one), and an approval's edits are
     committed through it. The gate expires `ttl_s` after it paused (`expires_at`).
@@ -86,14 +89,18 @@ async def run_workflow(
     `resume_workflow` can carry on after the last completed node.
 
     `tool` nodes call `tools`: give it the executor the runtime's agents use, so both reach the
-    same per-run tools. A spec with a gate needs `checkpointer`.
+    same per-run tools. A spec with a gate needs `checkpointer`. The run's artifacts are stored
+    in `artifacts` (in memory without one); a run that pauses needs a store that outlives the
+    attempt, as its checkpoints do.
     """
     log = RunEventLog(run_id or uuid4(), sink or NullEventSink())
     budget = budget_meter(policy, spent)
     await _start(log, spec, input)
     return await _finish(
         log,
-        lambda: compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget, review),
+        lambda: compile_workflow(
+            spec, runtime, log, checkpointer, tools, policy, budget, review, artifacts
+        ),
         initial_state(input),
         _config(spec, log.run_id),
         budget,
@@ -116,6 +123,7 @@ async def resume_workflow(
     policy: Policy = PLATFORM_POLICY,
     spent: Decimal = Decimal(0),
     review: GateReview | None = None,
+    artifacts: ArtifactStore | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -134,7 +142,9 @@ async def resume_workflow(
     """
     log = RunEventLog(run_id, sink, next_seq=next_seq)
     budget = budget_meter(policy, spent)
-    graph = compile_workflow(spec, runtime, log, checkpointer, tools, policy, budget, review)
+    graph = compile_workflow(
+        spec, runtime, log, checkpointer, tools, policy, budget, review, artifacts
+    )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
     saved = snapshot.values
@@ -243,8 +253,9 @@ async def _wait(
     review: GateReview | None,
 ) -> WorkflowRunResult:
     """Announce the pause at `gate_id`, with the files the writers that completed before it
-    changed, and when the gate expires (`expires_at`, its `ttl_s` from now). If the files cannot
-    be read, the gate pauses without them and says why (`changes_error`)."""
+    changed, the run artifacts so far (`run_artifacts`: the latest version of each, by name) and
+    when the gate expires (`expires_at`, its `ttl_s` from now). If the files cannot be read, the
+    gate pauses without them and says why (`changes_error`)."""
     ran = [n for n in dict.fromkeys(state["order"]) if state["results"][n].status == "completed"]
     changes: list[FileChange] = []
     error: str | None = None
@@ -255,6 +266,10 @@ async def _wait(
             error = str(e)
     shown: list[JsonValue] = [c.model_dump(mode="json") for c in changes]
     payload: dict[str, JsonValue] = {**request, "changes": shown}
+    payload["run_artifacts"] = [
+        GateArtifact.model_validate(ref.model_dump(exclude={"sha256"})).model_dump(mode="json")
+        for _, ref in sorted(state.get("artifacts", {}).items())
+    ]
     if error is not None:
         payload["changes_error"] = error
     if isinstance(ttl := request.get("ttl_s"), int):
@@ -294,6 +309,8 @@ def _result(
         usage=sum_usage(state.get("usage") or [r.usage for r in results.values()]),
         stopped_at=stopped_at,
         waiting_at=waiting_at,
+        # Checkpoints saved before phase 4.3 have no `artifacts`.
+        artifacts=state.get("artifacts", {}),
     )
 
 

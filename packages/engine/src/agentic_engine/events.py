@@ -52,6 +52,10 @@ REPO_CREATED: Final = "repo_created"
 `created` (false if an earlier attempt of the run created it). The run then stops its attempt
 and goes on in a new one, which clones the repo."""
 
+ARTIFACT_WRITTEN: Final = "artifact_written"
+"""A node wrote a run artifact (4.3), before its `node_completed`: `name`, `version`,
+`media_type`, `size` (bytes) and `sha256`. The content is in the run's artifact store."""
+
 RUN_END_STATUS: Final[dict[str, RunStatus]] = {
     RUN_COMPLETED: "completed",
     RUN_FAILED: "failed",

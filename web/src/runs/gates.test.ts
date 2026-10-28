@@ -26,9 +26,30 @@ test("a gate waits until it is decided", () => {
     changes: [],
     changesError: null,
     expiresAt: null,
+    runArtifacts: [],
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
+});
+
+test("a gate shows the run's artifacts at its pause", () => {
+  const waiting = runEvent(2, "gate_waiting", {
+    title: "Approve?",
+    run_artifacts: [
+      {
+        name: "findings.json",
+        version: 2,
+        node_id: "scan",
+        media_type: "application/json",
+        size: 12,
+      },
+      { name: "broken" },
+    ],
+  });
+
+  expect(pendingGate([waiting])?.runArtifacts).toEqual([
+    { name: "findings.json", version: 2, nodeId: "scan", mediaType: "application/json", size: 12 },
+  ]);
 });
 
 test("only GitHub pull request URLs are offered as links", () => {
@@ -51,6 +72,7 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     changes: [],
     changesError: null,
     expiresAt: null,
+    runArtifacts: [],
     ...overrides,
   };
 }

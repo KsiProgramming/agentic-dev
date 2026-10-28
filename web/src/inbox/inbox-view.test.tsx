@@ -44,6 +44,7 @@ function gateOf(runId: string, overrides: Partial<RunGate> = {}): RunGate {
     artifact: "# Notes\n\nWhat the repo is for.",
     changes: [],
     changes_error: null,
+    run_artifacts: [],
     expires_at: LATER,
     repo: { url: "https://github.com/acme/docs", ref: null },
     base: "main",
@@ -206,6 +207,28 @@ test("a gate with changed files lists them, and what approving lets go on", asyn
   expect(within(review).getByText("agent/r-old/writer")).toBeTruthy();
   expect(within(review).getByText("main")).toBeTruthy();
   expect(within(review).getByRole("button", { name: "Review 1 file" })).toBeTruthy();
+});
+
+test("a gate lists the run's artifacts, which open read-only", async () => {
+  wide();
+  api([older], {
+    [older.id]: gateOf(older.id, {
+      run_artifacts: [
+        {
+          name: "findings.json",
+          version: 1,
+          node_id: "scan",
+          media_type: "application/json",
+          size: 20,
+        },
+      ],
+    }),
+  });
+  show();
+
+  const review = await screen.findByTestId("inbox-review");
+  const section = await within(review).findByRole("region", { name: "Run artifacts" });
+  expect(within(section).getByText("findings.json")).toBeTruthy();
 });
 
 test("Approve decides the gate and moves on to the next one", async () => {

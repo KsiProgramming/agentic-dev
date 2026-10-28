@@ -5,7 +5,13 @@ from uuid import uuid4
 
 import pytest
 
-from agentic_sandbox import FakeSandboxManager, RepoSource, SandboxError, SandboxManager
+from agentic_sandbox import (
+    MAX_PUT_FILE_BYTES,
+    FakeSandboxManager,
+    RepoSource,
+    SandboxError,
+    SandboxManager,
+)
 
 
 def manager(repos: Path, tmp_path: Path) -> FakeSandboxManager:
@@ -128,3 +134,19 @@ async def test_opening_without_reuse_replaces_a_kept_sandbox(repos: Path, tmp_pa
 
     async with sandboxes.open(run_id, repo):
         assert not await asyncio.to_thread(marker.exists)
+
+
+async def test_artifacts_are_copied_read_only_and_replaced(repos: Path, tmp_path: Path) -> None:
+    async with manager(repos, tmp_path).open(uuid4(), RepoSource(url=str(repos / "hello"))) as box:
+        first = await box.put_artifact("notes.md", b"one")
+        path = await box.put_artifact("notes.md", b"two")
+
+        assert first == path
+        assert Path(path).parent == Path(box.artifacts_dir)
+        assert await asyncio.to_thread(Path(path).read_bytes) == b"two"
+        with pytest.raises(PermissionError):
+            await asyncio.to_thread(Path(path).write_bytes, b"three")
+        with pytest.raises(ValueError, match="not an artifact name"):
+            await box.put_artifact("../escape.md", b"x")
+        with pytest.raises(SandboxError, match="artifact too large"):
+            await box.put_artifact("big.txt", b"x" * (MAX_PUT_FILE_BYTES + 1))

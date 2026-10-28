@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { JsonView, OutputView } from "@/components/json-view";
 import { LoadingState } from "@/components/states";
 
+import { ArtifactCards } from "../artifacts/artifact-cards";
 import type { SpecNode, WorkflowSpec } from "../graph/spec-graph";
 import { allSpecNodes } from "../graph/spec-graph";
 import type { StepRow } from "./step-entries";
@@ -130,14 +131,45 @@ function PortSchemas({ node }: { node: SpecNode }) {
   );
 }
 
-/** What the step was given: its node in the spec, the map item it ran for, and the run's input
- * for the run's first step. */
+/** The run artifacts (4.3) the node's spec says it reads and writes. */
+function ArtifactFields({ node }: { node: SpecNode }) {
+  const reads = node.type === "agent" || node.type === "tool" ? (node.reads ?? []) : [];
+  const writes =
+    node.type === "agent" || node.type === "tool" || node.type === "reduce" ? node.writes : null;
+  return (
+    <>
+      {reads.length > 0 ? (
+        <Field label="Reads">
+          <ul className="flex flex-wrap gap-1.5">
+            {reads.map((name) => (
+              <li key={name} className="rounded-sm border px-1.5 py-0.5">
+                <Mono>{name}</Mono>
+              </li>
+            ))}
+          </ul>
+        </Field>
+      ) : null}
+      {writes ? (
+        <Field label="Writes">
+          <Mono>{writes}</Mono>
+        </Field>
+      ) : null}
+    </>
+  );
+}
+
+/** What the step was given: the run artifacts it read, its node in the spec, the map item it ran
+ * for, and the run's input for the run's first step. */
 export function StepInput({
+  runId,
+  baseUrl,
   row,
   spec,
   runInput,
   first,
 }: {
+  runId: string;
+  baseUrl?: string;
   row: StepRow;
   spec: WorkflowSpec | null;
   runInput: string | null;
@@ -146,25 +178,32 @@ export function StepInput({
 }) {
   if (!spec) return <LoadingState label="Loading the workflow…" />;
   const node = allSpecNodes(spec).find((n) => n.id === row.step.id);
+  const read = row.step.artifactsRead;
   return (
-    <dl className="flex min-w-0 flex-col gap-4">
-      {row.item ? (
-        <Field label="Item">
-          {typeof row.item.item === "string" ? (
-            <Mono>{row.item.item}</Mono>
-          ) : (
-            <JsonView value={row.item.item} label={`Item ${row.item.index + 1}`} />
-          )}
-        </Field>
+    <div className="flex min-w-0 flex-col gap-4">
+      {read.length > 0 ? (
+        <ArtifactCards runId={runId} artifacts={read} title="Artifacts read" baseUrl={baseUrl} />
       ) : null}
-      {row.iteration ? <Field label="Iteration">{row.iteration.index}</Field> : null}
-      {first && runInput ? (
-        <Field label="Run input">
-          <OutputView text={runInput} label="Run input" />
-        </Field>
-      ) : null}
-      {node ? <NodeFields node={node} /> : null}
-      {node ? <PortSchemas node={node} /> : null}
-    </dl>
+      <dl className="flex min-w-0 flex-col gap-4">
+        {row.item ? (
+          <Field label="Item">
+            {typeof row.item.item === "string" ? (
+              <Mono>{row.item.item}</Mono>
+            ) : (
+              <JsonView value={row.item.item} label={`Item ${row.item.index + 1}`} />
+            )}
+          </Field>
+        ) : null}
+        {row.iteration ? <Field label="Iteration">{row.iteration.index}</Field> : null}
+        {first && runInput ? (
+          <Field label="Run input">
+            <OutputView text={runInput} label="Run input" />
+          </Field>
+        ) : null}
+        {node ? <NodeFields node={node} /> : null}
+        {node ? <ArtifactFields node={node} /> : null}
+        {node ? <PortSchemas node={node} /> : null}
+      </dl>
+    </div>
   );
 }

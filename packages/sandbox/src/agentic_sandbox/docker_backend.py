@@ -4,7 +4,8 @@ The repo is cloned on the worker and copied into a per-run volume mounted at `/w
 container has no network, a read-only root filesystem, no capabilities and runs as a non-root
 user. The checkout at `/workspace/repo` is owned by root, so agents can read it but not change
 it. Its `.git`, `/workspace/worktrees` (writer nodes' worktrees) and `/workspace/.incoming` (files
-on their way in or out) belong to the sandbox user, so writers can commit on their own branch. Every
+on their way in or out) belong to the sandbox user, so writers can commit on their own branch.
+`/workspace/artifacts` (the run's artifacts) is root's, like the checkout. Every
 container and volume carries the `agentic.run_id` label, so leftovers can be swept. A run that is
 resumed after its worker died gets a fresh sandbox: `open` first removes the one it left. A run
 paused at a gate keeps its container and volume (`keep`), and `open(..., reuse=True)` attaches
@@ -42,6 +43,7 @@ from agentic_sandbox.protocol import (
     MAX_PUT_FILE_BYTES,
     MAX_TAKE_FILE_BYTES,
     ExecResult,
+    check_artifact_name,
     decode_capped,
 )
 from agentic_sandbox.source import RepoSource, clone_shallow
@@ -56,6 +58,7 @@ WORKSPACE = "/workspace"
 REPO_DIR = f"{WORKSPACE}/repo"
 WORKTREES_DIR = f"{WORKSPACE}/worktrees"
 INCOMING_DIR = f"{WORKSPACE}/.incoming"
+ARTIFACTS_DIR = f"{WORKSPACE}/artifacts"
 SANDBOX_UID = 1000
 SANDBOX_USER = f"{SANDBOX_UID}:{SANDBOX_UID}"
 # Exit codes `timeout` gives a command it had to stop: GNU's, and busybox's (SIGTERM).
@@ -129,6 +132,25 @@ class DockerSandbox:
     @property
     def staging_dir(self) -> str:
         return INCOMING_DIR
+
+    @property
+    def artifacts_dir(self) -> str:
+        return ARTIFACTS_DIR
+
+    async def put_artifact(self, name: str, data: bytes) -> str:
+        check_artifact_name(name)
+        if len(data) > MAX_PUT_FILE_BYTES:
+            raise SandboxError(f"artifact too large for the sandbox: {len(data)} bytes")
+        # With the directory, so a sandbox kept from before artifacts existed gets it too.
+        archive = _one_file_tar(name, data, uid=0, directory=posixpath.basename(ARTIFACTS_DIR))
+        try:
+            copied = await asyncio.to_thread(_put_archive, self._container, archive, WORKSPACE)
+        except DockerException as e:
+            log.warning("sandbox put_artifact failed: %s", e)
+            raise SandboxError("the sandbox is not available") from e
+        if not copied:
+            raise SandboxError("could not copy the artifact into the sandbox")
+        return f"{ARTIFACTS_DIR}/{name}"
 
     async def take_file(self, path: str) -> bytes:
         name = posixpath.basename(path)
@@ -324,7 +346,8 @@ def _get_file(container: Container, path: str) -> bytes:
 def _workspace_tar(clone: Path) -> bytes:
     """The tar `open` copies to `/workspace`. The checkout (`repo/`) is owned by root, readable
     by all and writable by none but root. `repo/.git`, `worktrees/` and `.incoming/` belong to
-    the sandbox user, so writer nodes can add worktrees and commit, but not touch the checkout."""
+    the sandbox user, so writer nodes can add worktrees and commit, but not touch the checkout.
+    `artifacts/` is root's: the run's artifacts are copied there, for agents to read."""
 
     def normalise(info: tarfile.TarInfo) -> tarfile.TarInfo:
         git = info.name == "repo/.git" or info.name.startswith("repo/.git/")
@@ -336,24 +359,33 @@ def _workspace_tar(clone: Path) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as tar:
         tar.add(clone, arcname="repo", filter=normalise)
-        for name in ("worktrees", ".incoming"):
+        for name in ("worktrees", ".incoming", "artifacts"):
             directory = tarfile.TarInfo(name)
             directory.type = tarfile.DIRTYPE
             directory.mode = 0o755
-            _own(directory, SANDBOX_UID)
+            _own(directory, 0 if name == "artifacts" else SANDBOX_UID)
             tar.addfile(directory)
     return buffer.getvalue()
 
 
-def _one_file_tar(name: str, data: bytes) -> bytes:
-    """A tar holding the file `name` with `data`, owned by the sandbox user."""
-    info = tarfile.TarInfo(name)
+def _one_file_tar(
+    name: str, data: bytes, *, uid: int = SANDBOX_UID, directory: str | None = None
+) -> bytes:
+    """A tar holding the file `name` with `data`, owned by `uid` (the sandbox user unless
+    given), inside `directory` (also `uid`'s) if given."""
+    info = tarfile.TarInfo(f"{directory}/{name}" if directory else name)
     info.size = len(data)
     info.mode = 0o644
     info.mtime = int(time.time())
-    _own(info, SANDBOX_UID)
+    _own(info, uid)
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as tar:
+        if directory:
+            folder = tarfile.TarInfo(directory)
+            folder.type = tarfile.DIRTYPE
+            folder.mode = 0o755
+            _own(folder, uid)
+            tar.addfile(folder)
         tar.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
 

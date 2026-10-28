@@ -53,6 +53,26 @@ export const TYPED_WRITER = {
   },
 };
 
+/** Run artifacts (4.3): a typed scanner writes `findings.json` (the fake runtime echoes the run's
+ * JSON input), an unrelated step runs, then a gate, then a reporter that reads `findings.json`,
+ * may look it up with the artifact tools, and writes `report.md`. */
+export const ARTIFACTS = [
+  { ...TYPED_WRITER, id: "scan", writes: "findings.json" },
+  { type: "agent", id: "summary", role: "Editor", instructions: "Summarise your input." },
+  { ...GATE, title: "Approve the findings" },
+  {
+    type: "agent",
+    id: "report",
+    role: "Writer",
+    instructions: "Write a report of the findings in your input.",
+    tools: ["artifacts.list", "artifacts.read"],
+    reads: ["findings.json"],
+    writes: "report.md",
+  },
+];
+
+export const FINDINGS_INPUT = '{"findings": [{"id": "F1", "severity": "high"}]}';
+
 /** A gate that expires a few seconds after it pauses (the e2e worker sweeps every second). */
 export const EXPIRING_GATE = { ...GATE, ttl_s: 8 };
 

@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "id": "artifact-branch-conflict",
+  "name": "Two branches writing the same artifact",
+  "root": {
+    "type": "parallel",
+    "id": "review",
+    "join": "all",
+    "branches": [
+      {
+        "type": "agent",
+        "id": "security",
+        "role": "Security reviewer",
+        "instructions": "List the security findings.",
+        "writes": "findings.json"
+      },
+      {
+        "type": "agent",
+        "id": "quality",
+        "role": "Code reviewer",
+        "instructions": "List the quality findings.",
+        "writes": "findings.json"
+      }
+    ]
+  }
+}

@@ -126,6 +126,13 @@ class Worktree:
     async def take_file(self, path: str) -> bytes:
         return await self._sandbox.take_file(path)
 
+    @property
+    def artifacts_dir(self) -> str:
+        return self._sandbox.artifacts_dir
+
+    async def put_artifact(self, name: str, data: bytes) -> str:
+        return await self._sandbox.put_artifact(name, data)
+
 
 async def add_worktree(sandbox: Sandbox, run_id: UUID, node_id: str) -> Worktree:
     """The worktree of `node_id` on `agent/<run-id>/<node-id>`, created from the clone's `HEAD`

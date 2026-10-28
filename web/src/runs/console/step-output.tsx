@@ -16,10 +16,12 @@ import {
 } from "@/components/ui/sheet";
 import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 
+import { ArtifactCards } from "../artifacts/artifact-cards";
 import type { NodeKind } from "../graph/spec-graph";
 import type { Step } from "../timeline";
 import { AgentMessage } from "./agent-message";
 import { GateDecision } from "./gate-decision";
+import { isLongOutput } from "./long-output";
 import { PortErrors } from "./port-errors";
 import { StatusMarker } from "./rail";
 import { lastMessage, type StepEntry, type StepRow } from "./step-entries";
@@ -28,13 +30,7 @@ import { WorkBlock } from "./work-block";
 import { agentTurns, mapTotals, workStart } from "./work-blocks";
 import { writtenFiles, type WrittenFile } from "./written-files";
 
-/** An answer longer than this is capped (about 480 px) with "Show full output". */
-const LONG_CHARS = 1200;
-const LONG_LINES = 20;
-
-export function isLongOutput(text: string): boolean {
-  return text.length > LONG_CHARS || text.split("\n").length > LONG_LINES;
-}
+export { isLongOutput } from "./long-output";
 
 /** The agent's answer as Markdown, capped when it is long. */
 function Answer({ text, streaming }: { text: string; streaming: boolean }) {
@@ -194,9 +190,11 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
 
 /**
  * What the step produced: an agent's answer, a tool's result, a gate's decision, a container's
- * items; the pull request or repo it opened, and the files it wrote.
+ * items; the pull request or repo it opened, the files and the run artifacts it wrote.
  */
 export function StepOutput({
+  runId,
+  baseUrl,
   step,
   row,
   kind,
@@ -204,6 +202,8 @@ export function StepOutput({
   extra,
   onSelect,
 }: {
+  runId: string;
+  baseUrl?: string;
   step: Step;
   row: StepRow;
   kind: NodeKind;
@@ -266,6 +266,17 @@ export function StepOutput({
     );
   }
   if (files.length > 0) parts.push(<WrittenFiles key="files" files={files} />);
+  if (step.artifactsWritten.length > 0) {
+    parts.push(
+      <ArtifactCards
+        key="artifacts"
+        runId={runId}
+        artifacts={step.artifactsWritten}
+        title="Artifacts written"
+        baseUrl={baseUrl}
+      />,
+    );
+  }
 
   if (parts.length === 0) {
     return (

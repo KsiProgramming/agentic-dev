@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 
+import { ArtifactCards } from "../artifacts/artifact-cards";
 import type { PendingGate } from "../gates";
 import { AgentMessage } from "./agent-message";
 import type { GateFile } from "./gate-files";
@@ -120,6 +121,27 @@ export function GateArtifact({ gate }: { gate: PendingGate }) {
   );
 }
 
+/** The run's artifacts a gate shows (4.3), read-only, as cards that open their content. */
+export function GateRunArtifacts({
+  runId,
+  gate,
+  baseUrl,
+}: {
+  runId: string;
+  gate: PendingGate;
+  baseUrl?: string;
+}) {
+  if (gate.runArtifacts.length === 0) return null;
+  return (
+    <ArtifactCards
+      runId={runId}
+      artifacts={gate.runArtifacts}
+      title="Run artifacts"
+      baseUrl={baseUrl}
+    />
+  );
+}
+
 /**
  * The review and Reject dialogs of a gate decision, shared by the approval dock and the Inbox:
  * a gate with changed files opens them in the review sheet (editable, with Approve and Reject in
@@ -154,6 +176,8 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
+            ) : gate.runArtifacts.length > 0 ? (
+              <GateRunArtifacts runId={decision.runId} gate={gate} baseUrl={decision.baseUrl} />
             ) : null
           }
           footer={
@@ -181,8 +205,11 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
                 {gate.prompt ?? "Review what the run produced before it goes on."}
               </SheetDescription>
             </SheetHeader>
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-              <GateArtifact gate={gate} />
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+              <div>
+                <GateArtifact gate={gate} />
+              </div>
+              <GateRunArtifacts runId={decision.runId} gate={gate} baseUrl={decision.baseUrl} />
             </div>
           </SheetContent>
         </Sheet>

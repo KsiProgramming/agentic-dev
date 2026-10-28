@@ -13,6 +13,7 @@ type Checkpointer = BaseCheckpointSaver[str]
 
 CHECKPOINT_TYPES: tuple[tuple[str, str], ...] = (
     ("agentic_engine.agent", "AgentNodeResult"),
+    ("agentic_engine.artifacts", "ArtifactRef"),
     ("agentic_runtime.events", "Usage"),
 )
 """The classes `RunState` holds, which a checkpoint may deserialise. LangGraph blocks any other."""

@@ -472,6 +472,7 @@ async def test_the_gate_a_run_waits_at_is_read_without_its_events(
     assert body["artifact"] == shown["artifact"]
     assert body["changes"] == []
     assert body["changes_error"] is None
+    assert body["run_artifacts"] == []
     assert body["expires_at"] is not None
     assert datetime.fromisoformat(body["expires_at"]) == datetime.fromisoformat(shown["expires_at"])
     assert (body["repo"], body["base"], body["branches"]) == (None, None, [])

@@ -152,6 +152,28 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoSeriousIssues(page);
     });
 
+    test("a run's artifacts and the artifact sheet have no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(
+        request,
+        [{ ...TYPED_WRITER, writes: "findings.json" }],
+        "E2E artifacts a11y",
+        undefined,
+        '{"findings": []}',
+      );
+      await open(page, `/runs/${runId}?view=artifacts`);
+      await expect(page.getByTestId("run-artifact")).toBeVisible({ timeout: 30_000 });
+      await expectNoSeriousIssues(page);
+      await page
+        .getByTestId("run-artifact")
+        .getByRole("button", { name: /findings\.json/ })
+        .click();
+      await expect(page.getByTestId("artifact-sheet").getByRole("group")).toBeVisible();
+      await expectNoSeriousIssues(page);
+    });
+
     test("a run failed at a typed port has no serious a11y issues", async ({ page, request }) => {
       const runId = await startRun(request, [TYPED_WRITER], "E2E typed port a11y");
       await open(page, `/runs/${runId}`);

@@ -1,3 +1,4 @@
+import { parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import type { RunEvent } from "./types";
 
 export type FileChangeStatus = "added" | "modified" | "deleted" | "renamed";
@@ -37,6 +38,8 @@ export interface PendingGate {
   changesError: string | null;
   /** When the gate expires and its run is cancelled; null for a gate paused without one. */
   expiresAt: string | null;
+  /** The run's artifacts at the pause (4.3), the latest version of each. */
+  runArtifacts: ArtifactVersion[];
 }
 
 const STATUSES: readonly FileChangeStatus[] = ["added", "modified", "deleted", "renamed"];
@@ -109,7 +112,8 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
     if (!event || event.node_id == null) continue;
     if (event.type === "gate_decided") return null;
     if (event.type === "gate_waiting") {
-      const { title, prompt, artifact, changes, changes_error, expires_at } = event.payload ?? {};
+      const { title, prompt, artifact, changes, changes_error, expires_at, run_artifacts } =
+        event.payload ?? {};
       return {
         nodeId: event.node_id,
         title: typeof title === "string" ? title : "Approve?",
@@ -121,6 +125,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
           typeof expires_at === "string" && !Number.isNaN(Date.parse(expires_at))
             ? expires_at
             : null,
+        runArtifacts: parseArtifacts(run_artifacts),
       };
     }
   }

@@ -1,12 +1,13 @@
 """The LangGraph state of a workflow run, and the summary `run_workflow` returns."""
 
 import operator
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agentic_engine.agent import AgentNodeResult, AgentNodeStatus
+from agentic_engine.artifacts import ArtifactRef
 from agentic_runtime import Usage
 
 
@@ -34,6 +35,13 @@ def merge_map_results(
     return merged
 
 
+def merge_artifacts(
+    left: dict[str, ArtifactRef], right: dict[str, ArtifactRef]
+) -> dict[str, ArtifactRef]:
+    """Reducer for `RunState.artifacts`: a write replaces the name's ref with its new version."""
+    return {**left, **right}
+
+
 class RunState(TypedDict):
     """What flows through the compiled graph.
 
@@ -56,6 +64,10 @@ class RunState(TypedDict):
     The nodes inside a branch are in `results` too, as their ids do not repeat, but not in
     `order`: a branch can fail while its parallel completes, and `order` is the run's path.
     Checkpoints saved before phase 4.1 have none, which counts as empty.
+
+    `artifacts` holds the latest version the run wrote of each run artifact, by name (4.3); the
+    content is in the run's `ArtifactStore`. Checkpoints saved before phase 4.3 have none, which
+    counts as empty.
     """
 
     input: str
@@ -67,6 +79,7 @@ class RunState(TypedDict):
     map_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
     spawned: Annotated[int, operator.add]
     parallel_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
+    artifacts: Annotated[dict[str, ArtifactRef], merge_artifacts]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -80,22 +93,27 @@ class RunUpdate(TypedDict, total=False):
     map_results: dict[str, dict[str, AgentNodeResult]]
     spawned: int
     parallel_results: dict[str, dict[str, AgentNodeResult]]
+    artifacts: dict[str, ArtifactRef]
 
 
 class MapItem(TypedDict):
-    """What a map sends the worker that runs its body for one item."""
+    """What a map sends the worker that runs its body for one item, with the run's artifacts when
+    the map started (`item_artifacts`; sends from before 4.3 have none)."""
 
     index: int
     item: JsonValue
     item_input: str
+    item_artifacts: NotRequired[dict[str, ArtifactRef]]
 
 
 class ParallelBranch(TypedDict):
-    """What a parallel sends the worker that runs one of its branches: the branch's index and
-    the parallel's input (`input` would clash with `RunState.input`)."""
+    """What a parallel sends the worker that runs one of its branches: the branch's index, the
+    parallel's input (`input` would clash with `RunState.input`) and the run's artifacts when the
+    parallel started (sends from before 4.3 have none)."""
 
     index: int
     branch_input: str
+    branch_artifacts: NotRequired[dict[str, ArtifactRef]]
 
 
 def initial_state(input: str) -> RunState:
@@ -109,6 +127,7 @@ def initial_state(input: str) -> RunState:
         map_results={},
         spawned=0,
         parallel_results={},
+        artifacts={},
     )
 
 
@@ -131,3 +150,4 @@ class WorkflowRunResult(BaseModel):
     usage: Usage | None
     stopped_at: str | None = None
     waiting_at: str | None = None
+    artifacts: dict[str, ArtifactRef] = Field(default_factory=dict[str, ArtifactRef])
