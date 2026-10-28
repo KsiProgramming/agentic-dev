@@ -1,17 +1,21 @@
 import type { Edge, Node } from "@xyflow/react";
+import type { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk-api";
 
 import type { components } from "@/api/schema";
 
 /**
  * The run's workflow as a graph to draw: one node per spec node, top to bottom in run order.
- * Sequences are not drawn, only their steps; a loop or a map is a box holding its body, and a
- * parallel a box holding its branches side by side. The spec is a tree and no edge leaves a box,
- * so the layout is placed by hand, and the same spec always gives the same positions.
+ * Sequences are not drawn, only their steps; a loop or a map is a box holding its body, a
+ * parallel a box holding its branches side by side, and a router (4.6) a box holding one group
+ * per route, labelled with the route's id. ELK lays it out (`layoutSpec`): `specToElk` builds
+ * its input and `fromElk` places the drawn nodes from its output, both pure, so the same spec
+ * always gives the same graph.
  */
 
 export type WorkflowSpec = components["schemas"]["WorkflowSpec"];
 export type SpecNode = WorkflowSpec["root"];
 export type NodeKind = SpecNode["type"];
+type RouterSpec = Extract<SpecNode, { type: "router" }>;
 
 export interface GraphNodeData extends Record<string, unknown> {
   kind: NodeKind;
@@ -21,9 +25,17 @@ export interface GraphNodeData extends Record<string, unknown> {
   detail: string;
 }
 
+/** One route of a router: not a spec node, a labelled group of the route's steps. */
+export interface RouteData extends Record<string, unknown> {
+  routerId: string;
+  /** The route's id, `default` for the router's default. */
+  routeId: string;
+}
+
 export type LeafNode = Node<GraphNodeData, "leaf">;
 export type ContainerNode = Node<GraphNodeData, "container">;
-export type GraphNode = LeafNode | ContainerNode;
+export type RouteNode = Node<RouteData, "route">;
+export type GraphNode = LeafNode | ContainerNode | RouteNode;
 
 export interface SpecGraph {
   /** Parents come before their children, as React Flow requires. */
@@ -39,16 +51,15 @@ export const GAP = 40;
 export const PADDING = 16;
 /** A container's title above its body. */
 export const HEADER = 56;
+/** A route's label above its steps. */
+export const ROUTE_HEADER = 32;
 
-/** A laid-out piece of the spec, its own nodes placed from (0, 0). */
-interface Block {
-  width: number;
-  height: number;
-  nodes: GraphNode[];
-  edges: Edge[];
-  /** Where an edge into the block ends, and where one out of it starts. */
-  entry: string;
-  exit: string;
+export const DEFAULT_ROUTE = "default";
+
+/** The id of the group drawn for route `routeId` of router `routerId`. Spec node ids have no
+ * `:`, so it never clashes with one. */
+export function routeNodeId(routerId: string, routeId: string): string {
+  return `${routerId}:route:${routeId}`;
 }
 
 const REDUCE_LABEL: Record<Extract<SpecNode, { type: "reduce" }>["strategy"], string> = {
@@ -78,145 +89,102 @@ function detail(node: SpecNode): string {
       if (node.join === "any") return `Any of ${n} branches`;
       return `${node.quorum ?? n} of ${n} branches`;
     }
+    case "router": {
+      const n = routesOf(node).length;
+      const by = node.classifier ? "a classifier" : "rules";
+      return `One of ${n} ${n === 1 ? "route" : "routes"}, by ${by}`;
+    }
     case "sequence":
       return "";
   }
+}
+
+/** A router's routes as `[route id, what runs on it]`, `default` last. */
+export function routesOf(router: RouterSpec): [string, SpecNode][] {
+  const routes: [string, SpecNode][] = router.routes.map((r) => [r.id, r.then]);
+  if (router.default) routes.push([DEFAULT_ROUTE, router.default]);
+  return routes;
 }
 
 function edge(source: string, target: string): Edge {
   return { id: `${source}->${target}`, source, target, type: "smoothstep" };
 }
 
-/** Moves the nodes `parentId` holds directly; deeper ones are placed in their own parent. */
-function shift(nodes: GraphNode[], parentId: string | undefined, dx: number, dy: number) {
-  for (const node of nodes) {
-    if (node.parentId === parentId) {
-      node.position = { x: node.position.x + dx, y: node.position.y + dy };
-    }
-  }
+/** How every level is laid out: ELK reads these per box, they are not inherited. */
+const LAYERED: Record<string, string> = {
+  "elk.algorithm": "layered",
+  "elk.direction": "DOWN",
+  "elk.spacing.nodeNode": String(GAP),
+  "elk.layered.spacing.nodeNodeBetweenLayers": String(GAP),
+  "elk.layered.spacing.edgeNodeBetweenLayers": String(GAP / 2),
+  // Branches and routes keep the spec's order, left to right.
+  "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+  "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
+  "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+};
+
+const ROOT_OPTIONS: Record<string, string> = {
+  ...LAYERED,
+  // Edges between nodes of different boxes (a reduce of a map) are routed through the boxes.
+  "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+};
+
+const boxPadding = (top: number) =>
+  `[top=${top},left=${PADDING},bottom=${PADDING},right=${PADDING}]`;
+
+/** The drawn node of each spec node and route, with its parent, in the order React Flow needs
+ * them (parents first), and the run-order edges between them. */
+interface Shape {
+  nodes: { id: string; parentId: string | undefined; data: GraphNodeData | RouteData }[];
+  edges: Edge[];
 }
 
-function layout(node: SpecNode, parentId: string | undefined): Block {
+/** Adds `node` (in `parentId`) to `shape` and returns the ids an edge enters it at and leaves it
+ * from. A sequence is its steps, chained. */
+function walk(node: SpecNode, parentId: string | undefined, shape: Shape): [string, string] {
+  if (node.type === "sequence") {
+    const ends = node.steps.map((step) => walk(step, parentId, shape));
+    ends.forEach(([entry], i) => {
+      const previous = ends[i - 1];
+      if (previous) shape.edges.push(edge(previous[1], entry));
+    });
+    return [ends[0]![0], ends.at(-1)![1]];
+  }
   const data: GraphNodeData = { kind: node.type, nodeId: node.id, detail: detail(node) };
+  shape.nodes.push({ id: node.id, parentId, data });
   switch (node.type) {
-    case "sequence": {
-      const blocks = node.steps.map((step) => layout(step, parentId));
-      const width = Math.max(...blocks.map((b) => b.width));
-      const nodes: GraphNode[] = [];
-      const edges: Edge[] = [];
-      let y = 0;
-      blocks.forEach((block, i) => {
-        // Steps are centred under each other.
-        shift(block.nodes, parentId, (width - block.width) / 2, y);
-        nodes.push(...block.nodes);
-        edges.push(...block.edges);
-        const previous = blocks[i - 1];
-        if (previous) edges.push(edge(previous.exit, block.entry));
-        y += block.height + GAP;
-      });
-      return {
-        width,
-        height: y - GAP,
-        nodes,
-        edges,
-        entry: blocks[0]!.entry,
-        exit: blocks.at(-1)!.exit,
-      };
-    }
     case "loop":
-    case "map": {
-      const body = layout(node.body, node.id);
-      shift(body.nodes, node.id, PADDING, HEADER);
-      const width = body.width + 2 * PADDING;
-      const height = HEADER + body.height + PADDING;
-      const container: ContainerNode = {
-        id: node.id,
-        type: "container",
-        data,
-        position: { x: 0, y: 0 },
-        width,
-        height,
-        ...(parentId ? { parentId, extent: "parent" as const } : {}),
-      };
-      return {
-        width,
-        height,
-        nodes: [container, ...body.nodes],
-        edges: body.edges,
-        entry: node.id,
-        exit: node.id,
-      };
-    }
-    case "parallel": {
-      const blocks = node.branches.map((branch) => layout(branch, node.id));
-      const nodes: GraphNode[] = [];
-      const edges: Edge[] = [];
-      let x = PADDING;
-      for (const block of blocks) {
-        shift(block.nodes, node.id, x, HEADER);
-        nodes.push(...block.nodes);
-        edges.push(...block.edges);
-        x += block.width + GAP;
+    case "map":
+      walk(node.body, node.id, shape);
+      break;
+    case "parallel":
+      for (const branch of node.branches) walk(branch, node.id, shape);
+      break;
+    case "router":
+      for (const [routeId, route] of routesOf(node)) {
+        const id = routeNodeId(node.id, routeId);
+        shape.nodes.push({ id, parentId: node.id, data: { routerId: node.id, routeId } });
+        walk(route, id, shape);
       }
-      const width = x - GAP + PADDING;
-      const height = HEADER + Math.max(...blocks.map((b) => b.height)) + PADDING;
-      const container: ContainerNode = {
-        id: node.id,
-        type: "container",
-        data,
-        position: { x: 0, y: 0 },
-        width,
-        height,
-        ...(parentId ? { parentId, extent: "parent" as const } : {}),
-      };
-      return { width, height, nodes: [container, ...nodes], edges, entry: node.id, exit: node.id };
-    }
-    default: {
-      const leaf: LeafNode = {
-        id: node.id,
-        type: "leaf",
-        data,
-        position: { x: 0, y: 0 },
-        width: LEAF_WIDTH,
-        height: LEAF_HEIGHT,
-        ...(parentId ? { parentId, extent: "parent" as const } : {}),
-      };
-      return {
-        width: LEAF_WIDTH,
-        height: LEAF_HEIGHT,
-        nodes: [leaf],
-        edges: [],
-        entry: node.id,
-        exit: node.id,
-      };
-    }
+      break;
+    default:
+      break;
   }
+  return [node.id, node.id];
 }
 
-function* specNodes(node: SpecNode): Generator<SpecNode> {
-  yield node;
-  if (node.type === "sequence") for (const step of node.steps) yield* specNodes(step);
-  if (node.type === "loop" || node.type === "map") yield* specNodes(node.body);
-  if (node.type === "parallel") for (const branch of node.branches) yield* specNodes(branch);
-}
-
-/** Every node of the spec, depth first in run order, sequences included. */
-export function allSpecNodes(spec: WorkflowSpec): SpecNode[] {
-  return [...specNodes(spec.root)];
-}
-
-/** The graph of `spec`. A reduce is linked to the map it combines, labelled "reduces". */
-export function specToGraph(spec: WorkflowSpec): SpecGraph {
-  const { nodes, edges } = layout(spec.root, undefined);
+function shapeOf(spec: WorkflowSpec): Shape {
+  const shape: Shape = { nodes: [], edges: [] };
+  walk(spec.root, undefined, shape);
   for (const node of specNodes(spec.root)) {
     if (node.type !== "reduce") continue;
     const id = `${node.from}->${node.id}`;
-    const existing = edges.find((e) => e.id === id);
+    const existing = shape.edges.find((e) => e.id === id);
     if (existing) {
       existing.label = "reduces";
     } else {
       // Not the step right before it: a dashed link, apart from the run order.
-      edges.push({
+      shape.edges.push({
         id,
         source: node.from,
         target: node.id,
@@ -226,5 +194,87 @@ export function specToGraph(spec: WorkflowSpec): SpecGraph {
       });
     }
   }
-  return { nodes, edges };
+  return shape;
+}
+
+const isRoute = (data: GraphNodeData | RouteData): data is RouteData => "routeId" in data;
+
+/** ELK's input for `spec`: one ELK node per drawn node, nested as they are drawn, leaves at
+ * their fixed size, every edge at the root (`INCLUDE_CHILDREN` routes it). */
+export function specToElk(spec: WorkflowSpec): ElkNode {
+  const shape = shapeOf(spec);
+  const elk = new Map<string, ElkNode>();
+  const root: ElkNode = { id: "root", layoutOptions: ROOT_OPTIONS, children: [] };
+  for (const { id, parentId, data } of shape.nodes) {
+    const box = isRoute(data) || ["loop", "map", "parallel", "router"].includes(data.kind);
+    const node: ElkNode = box
+      ? {
+          id,
+          children: [],
+          layoutOptions: {
+            ...LAYERED,
+            "elk.padding": boxPadding(isRoute(data) ? ROUTE_HEADER : HEADER),
+            // An empty box still has room for its title.
+            "elk.nodeSize.constraints": "MINIMUM_SIZE",
+            "elk.nodeSize.minimum": `(${LEAF_WIDTH + 2 * PADDING}, ${HEADER + PADDING})`,
+          },
+        }
+      : { id, width: LEAF_WIDTH, height: LEAF_HEIGHT };
+    elk.set(id, node);
+    const parent = parentId ? elk.get(parentId) : root;
+    parent!.children!.push(node);
+  }
+  root.edges = shape.edges.map((e): ElkExtendedEdge => ({
+    id: e.id,
+    sources: [e.source],
+    targets: [e.target],
+  }));
+  return root;
+}
+
+/** The drawn graph of `spec`, placed where ELK put each node (`laidOut`, ELK's output for
+ * `specToElk(spec)`; a position is relative to the node's parent, as in React Flow). */
+export function fromElk(spec: WorkflowSpec, laidOut: ElkNode): SpecGraph {
+  const placed = new Map<string, ElkNode>();
+  const visit = (node: ElkNode) => {
+    placed.set(node.id, node);
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(laidOut);
+  const shape = shapeOf(spec);
+  const nodes = shape.nodes.map(({ id, parentId, data }): GraphNode => {
+    const at = placed.get(id);
+    if (!at) throw new Error(`ELK did not place ${id}`);
+    const common = {
+      id,
+      position: { x: at.x ?? 0, y: at.y ?? 0 },
+      width: at.width ?? LEAF_WIDTH,
+      height: at.height ?? LEAF_HEIGHT,
+      ...(parentId ? { parentId, extent: "parent" as const } : {}),
+    };
+    if (isRoute(data)) return { ...common, type: "route", data };
+    const box = ["loop", "map", "parallel", "router"].includes(data.kind);
+    return box ? { ...common, type: "container", data } : { ...common, type: "leaf", data };
+  });
+  return { nodes, edges: shape.edges };
+}
+
+/** Lays `spec` out with ELK, loaded on first use so it stays out of the page's bundle. */
+export async function layoutSpec(spec: WorkflowSpec): Promise<SpecGraph> {
+  const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
+  const laidOut = await new ELK().layout(specToElk(spec));
+  return fromElk(spec, laidOut);
+}
+
+function* specNodes(node: SpecNode): Generator<SpecNode> {
+  yield node;
+  if (node.type === "sequence") for (const step of node.steps) yield* specNodes(step);
+  if (node.type === "loop" || node.type === "map") yield* specNodes(node.body);
+  if (node.type === "parallel") for (const branch of node.branches) yield* specNodes(branch);
+  if (node.type === "router") for (const [, route] of routesOf(node)) yield* specNodes(route);
+}
+
+/** Every node of the spec, depth first in run order, sequences included. */
+export function allSpecNodes(spec: WorkflowSpec): SpecNode[] {
+  return [...specNodes(spec.root)];
 }

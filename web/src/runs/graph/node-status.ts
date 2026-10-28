@@ -1,13 +1,20 @@
 import type { Step, StepStatus } from "../timeline";
-import { allSpecNodes, type SpecNode, type WorkflowSpec } from "./spec-graph";
+import {
+  allSpecNodes,
+  routeNodeId,
+  routesOf,
+  type SpecNode,
+  type WorkflowSpec,
+} from "./spec-graph";
 
-/** A spec node's status: a step's, or `not_started` while the run has not reached it. */
-export type NodeStatus = StepStatus | "not_started";
+/** A spec node's status: a step's, `not_started` while the run has not reached it, or
+ * `skipped` when it is on a route its router did not take (4.6). */
+export type NodeStatus = StepStatus | "not_started" | "skipped";
 
 export interface NodeState {
   status: NodeStatus;
-  /** For a map, a parallel or a loop: how far it got, e.g. "2 of 3 items · 1 failed",
-   * "2 of 3 branches · any", "Iteration 2 of 5". */
+  /** For a map, a parallel, a loop or a router: how far it got, e.g. "2 of 3 items · 1 failed",
+   * "2 of 3 branches · any", "Iteration 2 of 5", "Routed to fix_first". */
   summary: string | null;
 }
 
@@ -28,6 +35,7 @@ function stepsById(steps: Step[]): Map<string, Step[]> {
       for (const item of step.items ?? []) visit(item.steps);
       for (const branch of step.branches ?? []) visit(branch.steps);
       for (const iteration of step.iterations ?? []) visit(iteration.steps);
+      if (step.router) visit(step.router.steps);
     }
   };
   visit(steps);
@@ -54,6 +62,7 @@ function mapSummary(runs: Step[]): string | null {
 }
 
 type ParallelSpec = Extract<SpecNode, { type: "parallel" }>;
+type RouterSpec = Extract<SpecNode, { type: "router" }>;
 
 /** How a parallel joins, in a word or two: "all", "any", "quorum 2". */
 export function joinLabel(node: ParallelSpec): string {
@@ -77,15 +86,60 @@ function loopSummary(runs: Step[], maxIterations: number): string | null {
   return iterations > 0 ? `Iteration ${iterations} of ${maxIterations}` : null;
 }
 
-/** The state of every node of `spec` (sequences left out), from the run's timeline. */
+/** The routes a router's runs took, in the order of its routes. */
+function chosenRoutes(runs: Step[], node: RouterSpec): string[] {
+  const chosen = new Set(runs.flatMap((step) => (step.router?.chosen ? [step.router.chosen] : [])));
+  return routesOf(node)
+    .map(([id]) => id)
+    .filter((id) => chosen.has(id));
+}
+
+function routerSummary(runs: Step[], node: RouterSpec): string | null {
+  const chosen = chosenRoutes(runs, node);
+  if (chosen.length > 0) return `Routed to ${chosen.join(", ")}`;
+  return runs.some((step) => step.status === "running") ? "Choosing a route" : null;
+}
+
+/** Every node under `node`, itself included. */
+function* under(node: SpecNode): Generator<SpecNode> {
+  yield node;
+  if (node.type === "sequence") for (const step of node.steps) yield* under(step);
+  if (node.type === "loop" || node.type === "map") yield* under(node.body);
+  if (node.type === "parallel") for (const branch of node.branches) yield* under(branch);
+  if (node.type === "router") for (const [, route] of routesOf(node)) yield* under(route);
+}
+
+/** The routes the routers of `spec` did not take, by `routeNodeId`, and every node on them: a
+ * route is skipped once its router chose another one (every run of it, in a map or a loop). */
+function skippedIds(spec: WorkflowSpec, byId: Map<string, Step[]>): Set<string> {
+  const skipped = new Set<string>();
+  for (const node of allSpecNodes(spec)) {
+    if (node.type !== "router") continue;
+    const chosen = chosenRoutes(byId.get(node.id) ?? [], node);
+    if (chosen.length === 0) continue;
+    for (const [routeId, route] of routesOf(node)) {
+      if (chosen.includes(routeId)) continue;
+      skipped.add(routeNodeId(node.id, routeId));
+      for (const inner of under(route)) skipped.add(inner.id);
+    }
+  }
+  return skipped;
+}
+
+/** The state of every node of `spec` (sequences left out), from the run's timeline. A node on a
+ * route its router did not take is `skipped`. */
 export function nodeStatuses(spec: WorkflowSpec, steps: Step[]): Map<string, NodeState> {
   const byId = stepsById(steps);
+  const skipped = skippedIds(spec, byId);
   const states = new Map<string, NodeState>();
   for (const node of allSpecNodes(spec)) {
     if (node.type === "sequence") continue;
     const runs = byId.get(node.id) ?? [];
     states.set(node.id, {
-      status: aggregate(runs.map((step) => step.status)),
+      status:
+        runs.length === 0 && skipped.has(node.id)
+          ? "skipped"
+          : aggregate(runs.map((step) => step.status)),
       summary:
         runs.length === 0
           ? null
@@ -95,15 +149,32 @@ export function nodeStatuses(spec: WorkflowSpec, steps: Step[]): Map<string, Nod
               ? parallelSummary(runs, node)
               : node.type === "loop"
                 ? loopSummary(runs, node.max_iterations)
-                : null,
+                : node.type === "router"
+                  ? routerSummary(runs, node)
+                  : null,
     });
+  }
+  return states;
+}
+
+/** The state of each route of the routers of `spec`, by `routeNodeId`: `skipped` once its router
+ * took another route, else `not_started` (the route's own nodes say how far it got). */
+export function routeStates(spec: WorkflowSpec, steps: Step[]): Map<string, NodeState> {
+  const skipped = skippedIds(spec, stepsById(steps));
+  const states = new Map<string, NodeState>();
+  for (const node of allSpecNodes(spec)) {
+    if (node.type !== "router") continue;
+    for (const [routeId] of routesOf(node)) {
+      const id = routeNodeId(node.id, routeId);
+      states.set(id, { status: skipped.has(id) ? "skipped" : "not_started", summary: null });
+    }
   }
   return states;
 }
 
 /**
  * What node `nodeId` did, to show it on its own. A node run once is its step. A node inside a
- * map, a parallel or a loop is shown inside its outermost container, which keeps only the items,
+ * map, a parallel, a loop or a router is shown inside its outermost container, which keeps only the items,
  * branches and iterations that ran it, each holding only that node's run: one entry per item,
  * branch or iteration.
  * `null` if the node has not run.
@@ -125,7 +196,8 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
       const found = focusStep(iteration.steps, nodeId);
       return found ? [{ ...iteration, steps: [found] }] : [];
     });
-    if (items.length > 0 || branches.length > 0 || iterations.length > 0) {
+    const routed = step.router ? focusStep(step.router.steps, nodeId) : null;
+    if (items.length > 0 || branches.length > 0 || iterations.length > 0 || routed) {
       // The container's own turns, usage and outcome are not the node's.
       return {
         ...step,
@@ -138,6 +210,7 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
         items: step.items ? items : null,
         branches: step.branches ? branches : null,
         iterations: step.iterations ? iterations : null,
+        router: step.router ? { ...step.router, steps: routed ? [routed] : [] } : null,
       };
     }
   }

@@ -4,10 +4,12 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import {
   BotIcon,
   CircleDashedIcon,
+  CircleSlashIcon,
   LayersIcon,
   MergeIcon,
   RepeatIcon,
   ShieldCheckIcon,
+  SignpostIcon,
   SplitIcon,
   WrenchIcon,
   type LucideIcon,
@@ -19,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { StatusIcon } from "../console/rail";
 import { stepBadge } from "../console/step-status";
 import type { NodeState, NodeStatus } from "./node-status";
-import type { ContainerNode, LeafNode, NodeKind } from "./spec-graph";
+import type { ContainerNode, LeafNode, NodeKind, RouteNode } from "./spec-graph";
 
 /** What the drawn nodes read: each node's state, which one is selected, and how to select one.
  * Passed by context so a status change re-renders the nodes without laying the graph out
@@ -44,6 +46,7 @@ const KIND: Record<NodeKind, { icon: LucideIcon; label: string }> = {
   loop: { icon: RepeatIcon, label: "loop" },
   map: { icon: LayersIcon, label: "map" },
   parallel: { icon: SplitIcon, label: "parallel" },
+  router: { icon: SignpostIcon, label: "router" },
   sequence: { icon: LayersIcon, label: "sequence" },
 };
 
@@ -58,7 +61,9 @@ export function KindIcon({ kind, className }: { kind: NodeKind; className?: stri
 }
 
 export function statusLabel(status: NodeStatus): string {
-  return status === "not_started" ? "Not started" : stepBadge(status).label;
+  if (status === "not_started") return "Not started";
+  if (status === "skipped") return "Skipped";
+  return stepBadge(status).label;
 }
 
 /** Only states that need attention or are going on tint the node's border. */
@@ -74,6 +79,8 @@ export function NodeStatusLine({ status }: { status: NodeStatus }) {
     <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
       {status === "not_started" ? (
         <CircleDashedIcon aria-hidden="true" className="size-3.5" />
+      ) : status === "skipped" ? (
+        <CircleSlashIcon aria-hidden="true" className="size-3.5" />
       ) : (
         <StatusIcon status={status} small />
       )}
@@ -155,8 +162,8 @@ export function LeafNodeView({ data }: NodeProps<LeafNode>) {
   );
 }
 
-/** A loop, map or parallel: a box holding its body (a parallel's branches side by side), its
- * header selecting what the node did. */
+/** A loop, map, parallel or router: a box holding its body (a parallel's branches and a
+ * router's routes side by side), its header selecting what the node did. */
 export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
   const { state, selected, open } = useNodeState(data.nodeId);
   const Icon = KIND[data.kind].icon;
@@ -196,4 +203,34 @@ export function ContainerNodeView({ data }: NodeProps<ContainerNode>) {
   );
 }
 
-export const NODE_TYPES = { leaf: LeafNodeView, container: ContainerNodeView };
+/** One route of a router: a group labelled with the route's id, holding the route's steps. Not
+ * a step itself, so not a button; it says when its router took another route. */
+export function RouteNodeView({ data, id }: NodeProps<RouteNode>) {
+  const { states } = useContext(GraphContext);
+  const status = states.get(id)?.status ?? "not_started";
+  const skipped = status === "skipped";
+  return (
+    <div
+      role="group"
+      aria-label={`route ${data.routeId}${skipped ? ", Skipped" : ""}`}
+      data-testid="graph-route"
+      data-route-id={data.routeId}
+      data-status={status}
+      className="h-full w-full rounded-md border border-dashed bg-background/60"
+    >
+      <Handles />
+      <div className="flex h-8 min-w-0 items-center gap-2 px-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+          {data.routeId}
+        </span>{" "}
+        {skipped ? <NodeStatusLine status={status} /> : null}
+      </div>
+    </div>
+  );
+}
+
+export const NODE_TYPES = {
+  leaf: LeafNodeView,
+  container: ContainerNodeView,
+  route: RouteNodeView,
+};
