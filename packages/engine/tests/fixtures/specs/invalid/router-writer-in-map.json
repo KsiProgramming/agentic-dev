@@ -1,0 +1,30 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Writer in a mapped route",
+  "root": {
+    "type": "map",
+    "id": "each",
+    "over": "[\"a\"]",
+    "max_concurrency": 1,
+    "body": {
+      "type": "router",
+      "id": "by_kind",
+      "routes": [
+        {
+          "id": "write",
+          "when": "true",
+          "then": {
+            "type": "agent",
+            "id": "writer",
+            "role": "Writer",
+            "instructions": "Go.",
+            "tools": [
+              "repo.write_file"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

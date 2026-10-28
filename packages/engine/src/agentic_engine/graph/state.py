@@ -42,6 +42,13 @@ def merge_artifacts(
     return {**left, **right}
 
 
+def merge_routes(
+    left: dict[str, str | None], right: dict[str, str | None]
+) -> dict[str, str | None]:
+    """Reducer for `RunState.routes`: a router's choice replaces its last one (a loop's)."""
+    return {**left, **right}
+
+
 class RunState(TypedDict):
     """What flows through the compiled graph.
 
@@ -68,6 +75,9 @@ class RunState(TypedDict):
     `artifacts` holds the latest version the run wrote of each run artifact, by name (4.3); the
     content is in the run's `ArtifactStore`. Checkpoints saved before phase 4.3 have none, which
     counts as empty.
+
+    `routes` holds the route each router chose, by router id (`None` if it could not choose), so
+    a resumed run goes on in that route. Checkpoints saved before phase 4.6 have none.
     """
 
     input: str
@@ -80,6 +90,7 @@ class RunState(TypedDict):
     spawned: Annotated[int, operator.add]
     parallel_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
     artifacts: Annotated[dict[str, ArtifactRef], merge_artifacts]
+    routes: Annotated[dict[str, str | None], merge_routes]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -94,6 +105,7 @@ class RunUpdate(TypedDict, total=False):
     spawned: int
     parallel_results: dict[str, dict[str, AgentNodeResult]]
     artifacts: dict[str, ArtifactRef]
+    routes: dict[str, str | None]
 
 
 class MapItem(TypedDict):
@@ -128,6 +140,7 @@ def initial_state(input: str) -> RunState:
         spawned=0,
         parallel_results={},
         artifacts={},
+        routes={},
     )
 
 

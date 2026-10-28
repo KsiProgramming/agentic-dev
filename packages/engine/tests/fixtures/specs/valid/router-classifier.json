@@ -1,0 +1,64 @@
+{
+  "spec_version": "0",
+  "id": "triage-request",
+  "name": "Triage a request",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "router",
+        "id": "kind",
+        "classifier": {
+          "instructions": "Decide what kind of request this is."
+        },
+        "routes": [
+          {
+            "id": "bug",
+            "description": "Something is broken.",
+            "then": {
+              "type": "agent",
+              "id": "fix_plan",
+              "role": "Writer",
+              "instructions": "Plan a fix."
+            }
+          },
+          {
+            "id": "feature",
+            "description": "A new capability.",
+            "then": {
+              "type": "sequence",
+              "id": "feature_flow",
+              "steps": [
+                {
+                  "type": "agent",
+                  "id": "spec_writer",
+                  "role": "Writer",
+                  "instructions": "Write a spec."
+                },
+                {
+                  "type": "agent",
+                  "id": "planner",
+                  "role": "Writer",
+                  "instructions": "Plan it."
+                }
+              ]
+            }
+          }
+        ],
+        "default": {
+          "type": "agent",
+          "id": "answer",
+          "role": "Writer",
+          "instructions": "Answer the question."
+        }
+      },
+      {
+        "type": "agent",
+        "id": "reply",
+        "role": "Support",
+        "instructions": "Reply to the user."
+      }
+    ]
+  }
+}

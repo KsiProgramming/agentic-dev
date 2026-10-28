@@ -1,0 +1,74 @@
+{
+  "spec_version": "0",
+  "id": "report-path",
+  "name": "Report path",
+  "description": "Writes findings, then a report whose path depends on them.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "triage",
+        "role": "Triage",
+        "instructions": "List the findings as JSON.",
+        "output_schema": {
+          "type": "object",
+          "required": [
+            "findings"
+          ],
+          "properties": {
+            "findings": {
+              "type": "array"
+            }
+          }
+        },
+        "writes": "findings.json"
+      },
+      {
+        "type": "router",
+        "id": "report_path",
+        "routes": [
+          {
+            "id": "clean",
+            "when": "size(artifacts[\"findings.json\"].findings) == 0",
+            "then": {
+              "type": "agent",
+              "id": "clean_report",
+              "role": "Writer",
+              "instructions": "Say that no issues were found.",
+              "writes": "report.md"
+            }
+          },
+          {
+            "id": "fix_first",
+            "when": "artifacts[\"findings.json\"].findings.exists(f, f.severity in [\"high\", \"critical\"])",
+            "then": {
+              "type": "agent",
+              "id": "fix_first_report",
+              "role": "Writer",
+              "instructions": "Open with what to fix first.",
+              "writes": "report.md"
+            }
+          }
+        ],
+        "default": {
+          "type": "agent",
+          "id": "standard_report",
+          "role": "Writer",
+          "instructions": "Report every finding.",
+          "writes": "report.md"
+        }
+      },
+      {
+        "type": "agent",
+        "id": "summary",
+        "role": "Editor",
+        "instructions": "Summarise the report.",
+        "reads": [
+          "report.md"
+        ]
+      }
+    ]
+  }
+}

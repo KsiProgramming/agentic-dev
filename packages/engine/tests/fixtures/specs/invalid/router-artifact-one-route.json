@@ -1,0 +1,49 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Written on one route",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "triage",
+        "role": "Writer",
+        "instructions": "Go."
+      },
+      {
+        "type": "router",
+        "id": "report_path",
+        "routes": [
+          {
+            "id": "clean",
+            "when": "last == \"\"",
+            "then": {
+              "type": "agent",
+              "id": "clean_report",
+              "role": "Writer",
+              "instructions": "Go.",
+              "writes": "report.md"
+            }
+          }
+        ],
+        "default": {
+          "type": "agent",
+          "id": "standard_report",
+          "role": "Writer",
+          "instructions": "Go."
+        }
+      },
+      {
+        "type": "agent",
+        "id": "summary",
+        "role": "Writer",
+        "instructions": "Go.",
+        "reads": [
+          "report.md"
+        ]
+      }
+    ]
+  }
+}

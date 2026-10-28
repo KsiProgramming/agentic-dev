@@ -52,6 +52,11 @@ REPO_CREATED: Final = "repo_created"
 `created` (false if an earlier attempt of the run created it). The run then stops its attempt
 and goes on in a new one, which clones the repo."""
 
+ROUTE_CHOSEN: Final = "route_chosen"
+"""A router chose its route (4.6), before the route starts: `route` (a route id, or `default`),
+`mode` (`rule` or `classifier`) and `reason`: the condition that held, or the classifier's
+answer."""
+
 ARTIFACT_WRITTEN: Final = "artifact_written"
 """A node wrote a run artifact (4.3), before its `node_completed`: `name`, `version`,
 `media_type`, `size` (bytes) and `sha256`. The content is in the run's artifact store."""

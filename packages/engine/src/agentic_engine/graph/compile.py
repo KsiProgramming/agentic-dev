@@ -1,16 +1,21 @@
 """Compiles a workflow spec to a LangGraph graph.
 
-v0 supports `agent`, `tool`, `gate`, `sequence`, `loop`, `map`, `reduce` and `parallel`. Agent,
-tool, gate
-and reduce nodes become LangGraph nodes named by their spec node id; a sequence chains its steps;
-a loop becomes an entry node (its id), its body, and a check node (`<id>.check`, a name no spec
-node can have) that evaluates `until` and goes back to the entry or on. A map becomes an entry
+v0 supports `agent`, `tool`, `gate`, `sequence`, `loop`, `map`, `reduce`, `parallel` and
+`router`. Agent, tool, gate and reduce nodes become LangGraph nodes named by their spec node id;
+a sequence chains its steps; a loop becomes an entry node (its id), its body, and a check node
+(`<id>.check`, a name no spec node can have) that evaluates `until` and goes back to the entry or
+on. A map becomes an entry
 node (its id) that evaluates `over` and sends each item to a worker (`<id>.item`, one LangGraph
 `Send` per item) that runs the whole body for it, and a join node (`<id>.join`) that collects the
 items' results in item order. A parallel becomes an entry node (its id) that sends each branch
 to a worker (`<id>.branch`, one `Send` per branch) that runs the branch, and a join node
-(`<id>.join`) that applies its join policy to the branches' outcomes. A node that does not
-complete ends the run.
+(`<id>.join`) that applies its join policy to the branches' outcomes. A router becomes an entry
+node (its id) that chooses a route and records it in the state (`routes`), each route's nodes,
+and a node (`<id>.done`) every route ends at, which ends the router; a resumed run goes on in the
+route it chose. A node that does not complete ends the run.
+
+A map item's body and a parallel's branch run in-process, in one LangGraph task: their routers,
+the parallels inside a branch and the reduces of those run there too (`_run_inline`).
 
 Each node writes `node_started`, its agent events (a tool node: one `tool_call` and its
 `tool_result`, `pr_opened` if it published a branch, `repo_created` if it created the run's
@@ -28,7 +33,10 @@ body, whose events carry `item`, then its end; a reduce writes the events of an 
 parallel writes `node_started` (payload `branches`, `join`, `quorum`),
 `parallel_branch_started` and `parallel_branch_completed` around each branch, whose events carry
 `branch`, then its end (payload `completed`, `failed`, `cancelled`: branch ids). Once its join is
-decided, the branches still running end `node_cancelled`.
+decided, the branches still running end `node_cancelled`. A router writes `node_started` (payload
+`routes`, `mode`), its classifier's agent events if it has one, `route_chosen` (`route`, `mode`,
+`reason`), then the route's events and its end (`node_completed` with `route`), or `node_failed`
+if no route could be chosen.
 
 An agent or tool node with typed ports (4.2) has its input checked before it starts and its
 output once it completes: a value that does not match fails the node, whose `node_failed` carries
@@ -56,8 +64,8 @@ end the run.
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import cast
+from dataclasses import dataclass, field, replace
+from typing import TypedDict, cast
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
@@ -92,10 +100,17 @@ from agentic_engine.events import (
     POLICY_LIMIT_EXCEEDED,
     PR_OPENED,
     REPO_CREATED,
+    ROUTE_CHOSEN,
     NullEventSink,
     RunEventLog,
 )
-from agentic_engine.expr import CompiledList, ExpressionError, compile_condition, compile_list
+from agentic_engine.expr import (
+    ROUTE_VARIABLES,
+    CompiledList,
+    ExpressionError,
+    compile_condition,
+    compile_list,
+)
 from agentic_engine.gate import GateReview, run_gate_node
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
@@ -104,6 +119,7 @@ from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
 from agentic_engine.spec import (
     CREATE_TOOLS,
+    DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
     PUBLISH_TOOLS,
     AgentNode,
@@ -113,11 +129,15 @@ from agentic_engine.spec import (
     Node,
     ParallelNode,
     ReduceNode,
+    RouterNode,
     SequenceNode,
     ToolNode,
     WorkflowSpec,
+    agents_spawned,
+    classifier_schema,
     iter_nodes,
     port_edges,
+    router_routes,
 )
 from agentic_engine.tool import run_tool_node
 from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor, Usage
@@ -151,13 +171,20 @@ class _Limits:
 
 def step_nodes(root: Node) -> list[StepNode]:
     """The agent, tool and gate nodes under `root` in spec order (depth first; a loop's or a
-    map's body once, a parallel's branches in branch order)."""
+    map's body once, a parallel's branches in branch order, a router's routes in route order)."""
     steps: list[StepNode] = []
     for path, node in iter_nodes(root):
         match node:
             case AgentNode() | ToolNode() | GateNode():
                 steps.append(node)
-            case SequenceNode() | LoopNode() | MapNode() | ReduceNode() | ParallelNode():
+            case (
+                SequenceNode()
+                | LoopNode()
+                | MapNode()
+                | ReduceNode()
+                | ParallelNode()
+                | RouterNode()
+            ):
                 pass
             case _:
                 raise CompileError(f"node type {node.type!r} at {path} is not supported yet")
@@ -188,6 +215,11 @@ def branch_node_id(parallel: ParallelNode) -> str:
 def parallel_join_node_id(parallel: ParallelNode) -> str:
     """The LangGraph node that joins `parallel`'s branches."""
     return f"{parallel.id}.join"
+
+
+def router_done_node_id(router: RouterNode) -> str:
+    """The LangGraph node every route of `router` ends at, which ends the router."""
+    return f"{router.id}.done"
 
 
 def repo_ready_node_id(node: ToolNode) -> str:
@@ -227,6 +259,8 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return node.max_iterations * (steps(node.body) + 2)
             case MapNode() | ParallelNode():
                 return 3
+            case RouterNode():
+                return 2 + max(steps(route) for _, _, route in router_routes(node, node.id))
             case ToolNode() if creates_repo(node):
                 return 2  # and its `<id>.ready` node
             case AgentNode() | ToolNode() | GateNode() | ReduceNode():
@@ -317,6 +351,19 @@ def compile_workflow(
                 builder.add_edge(worker, join)
                 builder.add_node(join, _parallel_join(node, log))
                 go_on(join, node.id, then)
+                return node.id
+            case RouterNode():
+                done = router_done_node_id(node)
+                builder.add_node(node.id, _router_entry(node, runtime, log, limits))
+                starts = {
+                    route_id: add(route, done)
+                    for route_id, _, route in router_routes(node, node.id)
+                }
+                builder.add_conditional_edges(
+                    node.id, _to_route(node, starts), list(dict.fromkeys([*starts.values(), END]))
+                )
+                builder.add_node(done, _router_done(node, log))
+                go_on(done, node.id, then)
                 return node.id
             case ToolNode() if creates_repo(node):
                 ready = repo_ready_node_id(node)
@@ -617,10 +664,7 @@ def _after_check(loop: LoopNode, then: str) -> Callable[[RunState], str]:
 
 def _results_context(state: RunState) -> dict[str, JsonValue]:
     """`results` as a CEL expression sees it: node id → `{status, text, data}`."""
-    return {
-        node_id: {"status": r.status, "text": r.text, "data": r.data}
-        for node_id, r in state["results"].items()
-    }
+    return _results_of(state["results"])
 
 
 async def _artifacts_context(source: str, state: RunState, limits: _Limits) -> dict[str, JsonValue]:
@@ -642,7 +686,7 @@ def _map_entry(
     be had or their agents would take the run past its `agents_spawned` limit; `_fan_out` then
     sends them, from `evaluated` (filled here, in the same LangGraph task). The items run in one
     LangGraph step, so they cannot count themselves."""
-    agents_per_item = sum(isinstance(n, AgentNode) for n in step_nodes(map.body))
+    agents_per_item = agents_spawned(map.body)
 
     async def enter(state: RunState) -> RunUpdate:
         try:
@@ -711,9 +755,8 @@ def _map_item(
     log: RunEventLog,
     limits: _Limits,
 ) -> Callable[[MapItem], Awaitable[RunUpdate]]:
-    """Runs `map`'s body for one item, each step on the previous one's output, stopping at the
-    first step that does not complete. At most `max_concurrency` items run at once."""
-    steps = step_nodes(map.body)
+    """Runs `map`'s body for one item (`_run_inline`), stopping at the first step that does not
+    complete. At most `max_concurrency` items run at once."""
     slots = asyncio.Semaphore(map.max_concurrency)
 
     async def work(task: MapItem) -> RunUpdate:
@@ -722,17 +765,11 @@ def _map_item(
             await log.emit(
                 MAP_ITEM_STARTED, node_id=map.id, payload={"index": index, "item": task["item"]}
             )
-            text, usage, error = task["item_input"], list[Usage](), None
-            refs = task.get("item_artifacts", {})
-            result = AgentNodeResult(status="completed", text=text, usage=None)
-            for step in steps:
-                result = await _run_step(step, runtime, tools, log, limits, text, refs, index)
-                if result.usage:
-                    usage.append(result.usage)
-                if result.status != "completed":
-                    error = f"{step.id} {result.status}: {result.error or 'no error given'}"
-                    break
-                text = result.text
+            refs = dict(task.get("item_artifacts", {}))
+            scope = _Scope(runtime, tools, log, limits, item=index, refs=refs)
+            ended, result = await _run_inline(map.body, task["item_input"], scope)
+            error = _stop_error(ended, result)
+            usage = scope.usage()
             end: dict[str, JsonValue] = {"index": index, "status": result.status}
             if error:
                 end["error"] = error
@@ -841,12 +878,8 @@ def _parallel_entry(
     """Starts the parallel, counting all its branches' agents as spawned, or fails it if they
     would take the run past its `agents_spawned` limit; `_fan_out_branches` then sends them. The
     branches run in one LangGraph step, so they cannot count themselves."""
-    agents = sum(
-        isinstance(n, AgentNode) for branch in parallel.branches for n in step_nodes(branch)
-    )
-    started: dict[str, JsonValue] = {"branches": len(parallel.branches), "join": parallel.join}
-    if parallel.quorum is not None:
-        started["quorum"] = parallel.quorum
+    agents = sum(agents_spawned(branch) for branch in parallel.branches)
+    started = _parallel_started(parallel)
 
     async def enter(state: RunState) -> RunUpdate:
         if refused := await _refuse_spawn(parallel.id, state, agents, limits, log, started):
@@ -855,6 +888,14 @@ def _parallel_entry(
         return {"spawned": agents}
 
     return enter
+
+
+def _parallel_started(parallel: ParallelNode) -> dict[str, JsonValue]:
+    """The payload of `parallel`'s `node_started`."""
+    started: dict[str, JsonValue] = {"branches": len(parallel.branches), "join": parallel.join}
+    if parallel.quorum is not None:
+        started["quorum"] = parallel.quorum
+    return started
 
 
 def _fan_out_branches(parallel: ParallelNode) -> Callable[[RunState], Sequence[Send] | str]:
@@ -886,65 +927,26 @@ def _parallel_branch(
     log: RunEventLog,
     limits: _Limits,
 ) -> Callable[[ParallelBranch], Awaitable[RunUpdate]]:
-    """Runs one of `parallel`'s branches, each step on the previous one's output, stopping at the
-    first step that does not complete; or ends it `cancelled` once the other branches decided
-    the join. Its nodes' results go into `results` (not `order`, the run's path, which a branch
-    that fails under a join that is met does not stop), its outcome into `parallel_results`, and
-    the run artifacts it wrote into `artifacts`; its later steps read what its earlier ones
-    wrote."""
+    """Runs one of `parallel`'s branches (`_run_inline`), stopping at the first step that does
+    not complete; or ends it `cancelled` once the other branches decided the join. Its nodes'
+    results go into `results` (not `order`, the run's path, which a branch that fails under a join
+    that is met does not stop), its outcome into `parallel_results`, and the run artifacts it
+    wrote into `artifacts`; its later steps read what its earlier ones wrote."""
     join = _BranchJoin(parallel)
-    steps = [step_nodes(branch) for branch in parallel.branches]
 
     async def work(task: ParallelBranch) -> RunUpdate:
         index, text = task["index"], task["branch_input"]
         branch_id = parallel.branches[index].id
         marker: dict[str, JsonValue] = {"index": index, "branch_id": branch_id}
         await log.emit(PARALLEL_BRANCH_STARTED, node_id=parallel.id, payload=marker)
-        ran: dict[str, AgentNodeResult] = {}
-        error: str | None = None
         refs = dict(task.get("branch_artifacts", {}))
-        wrote: dict[str, ArtifactRef] = {}
-
-        async def run() -> AgentNodeResult:
-            nonlocal error
-            output = text
-            result = AgentNodeResult(status="completed", text=output, usage=None)
-            for step in steps[index]:
-                # Stays `cancelled` if the branch is cancelled while the step runs.
-                ran[step.id] = AgentNodeResult(status="cancelled", text=output, usage=None)
-                result = await _run_step(
-                    step, runtime, tools, log, limits, output, refs, branch=index
-                )
-                ran[step.id] = result
-                if result.artifact is not None:
-                    refs[result.artifact.name] = wrote[result.artifact.name] = result.artifact
-                if result.status != "completed":
-                    error = f"{step.id} {result.status}: {result.error or 'no error given'}"
-                    break
-                output = result.text
-            return result
-
-        cancelled = AgentNodeResult(status="cancelled", text=text, usage=None)
-        if join.decided:
-            result = cancelled
-        else:
-            runner = asyncio.create_task(run())
-            join.running[index] = runner
-            try:
-                result = await runner
-            except asyncio.CancelledError:
-                current = asyncio.current_task()
-                if not runner.cancelled() or (current is not None and current.cancelling()):
-                    raise  # the run itself is being stopped
-                result = cancelled  # the step that was running logged its end
-            join.end(index, result.status)
-        if result.status == "cancelled":
-            error = "cancelled: the join was decided without it"
+        scope = _Scope(runtime, tools, log, limits, branch=index, refs=refs)
+        result, error = await _run_branch(join, index, parallel.branches[index], text, scope)
         end: dict[str, JsonValue] = {**marker, "status": result.status}
         if error:
             end["error"] = error
         await log.emit(PARALLEL_BRANCH_COMPLETED, node_id=parallel.id, payload=end)
-        usage = [r.usage for r in ran.values() if r.usage]
+        usage = scope.usage()
         outcome = AgentNodeResult(
             status=result.status,
             text=result.text,
@@ -953,13 +955,44 @@ def _parallel_branch(
             data={"index": index},
         )
         return {
-            "results": ran,
+            "results": scope.ran,
             "usage": usage,
             "parallel_results": {parallel.id: {branch_id: outcome}},
-            "artifacts": wrote,
+            "artifacts": scope.wrote,
         }
 
     return work
+
+
+async def _run_branch(
+    join: _BranchJoin, index: int, branch: Node, input: str, scope: "_Scope"
+) -> tuple[AgentNodeResult, str | None]:
+    """Run branch `index` of `join`'s parallel in `scope`, unless the join is already decided,
+    and record how it ended: its result, and why it did not complete, if it did not."""
+    cancelled = AgentNodeResult(status="cancelled", text=input, usage=None)
+    if join.decided:
+        return cancelled, "cancelled: the join was decided without it"
+    error: str | None = None
+
+    async def run() -> AgentNodeResult:
+        nonlocal error
+        ended, result = await _run_inline(branch, input, scope)
+        error = _stop_error(ended, result)
+        return result
+
+    runner = asyncio.create_task(run())
+    join.running[index] = runner
+    try:
+        result = await runner
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if not runner.cancelled() or (current is not None and current.cancelling()):
+            raise  # the run itself is being stopped
+        result = cancelled  # the step that was running logged its end
+    join.end(index, result.status)
+    if result.status == "cancelled":
+        error = "cancelled: the join was decided without it"
+    return result, error
 
 
 def _parallel_join(
@@ -972,30 +1005,37 @@ def _parallel_join(
     async def join(state: RunState) -> RunUpdate:
         by_id = state.get("parallel_results", {}).get(parallel.id, {})
         outcomes = [(b.id, by_id[b.id]) for b in parallel.branches if b.id in by_id]
-        ids: dict[str, JsonValue] = {
-            status: [i for i, o in outcomes if o.status == status]
-            for status in ("completed", "failed", "cancelled")
-        }
-        done = [(i, o) for i, o in outcomes if o.status == "completed"]
-        text = "\n\n".join(o.text for _, o in done)
-        outputs: dict[str, JsonValue] = {i: o.text for i, o in done}
-        data: dict[str, JsonValue] = {"outputs": outputs, **ids}
-        needed = _needed(parallel)
-        if len(done) >= needed:
-            await log.emit(NODE_COMPLETED, node_id=parallel.id, payload=ids)
-            completed = AgentNodeResult(status="completed", text=text, usage=None, data=data)
-            return _update(parallel.id, completed)
-        error = (
-            f"join {parallel.join}: {len(done)} of {len(parallel.branches)} branches completed, "
-            f"{needed} needed"
-        )
-        if failed := next(((i, o) for i, o in outcomes if o.status == "failed"), None):
-            error += f"; branch {failed[0]!r} {failed[1].error}"
-        await log.emit(NODE_FAILED, node_id=parallel.id, payload={"error": error, **ids})
-        stopped = AgentNodeResult(status="failed", text=text, usage=None, error=error, data=data)
-        return _update(parallel.id, stopped)
+        result, payload = _joined(parallel, outcomes)
+        await log.emit(NODE_END[result.status], node_id=parallel.id, payload=payload)
+        return _update(parallel.id, result)
 
     return join
+
+
+def _joined(
+    parallel: ParallelNode, outcomes: list[tuple[str, AgentNodeResult]]
+) -> tuple[AgentNodeResult, dict[str, JsonValue]]:
+    """`parallel`'s result from its branches' outcomes (branch id, result; in branch order), and
+    the payload of its end."""
+    ids: dict[str, JsonValue] = {
+        status: [i for i, o in outcomes if o.status == status]
+        for status in ("completed", "failed", "cancelled")
+    }
+    done = [(i, o) for i, o in outcomes if o.status == "completed"]
+    text = "\n\n".join(o.text for _, o in done)
+    outputs: dict[str, JsonValue] = {i: o.text for i, o in done}
+    data: dict[str, JsonValue] = {"outputs": outputs, **ids}
+    needed = _needed(parallel)
+    if len(done) >= needed:
+        return AgentNodeResult(status="completed", text=text, usage=None, data=data), ids
+    error = (
+        f"join {parallel.join}: {len(done)} of {len(parallel.branches)} branches completed, "
+        f"{needed} needed"
+    )
+    if failed := next(((i, o) for i, o in outcomes if o.status == "failed"), None):
+        error += f"; branch {failed[0]!r} {failed[1].error}"
+    stopped = AgentNodeResult(status="failed", text=text, usage=None, error=error, data=data)
+    return stopped, {"error": error, **ids}
 
 
 def _reduce(
@@ -1010,41 +1050,51 @@ def _reduce(
     turn on them as a JSON array of `{item, output}` (a branch's item is its id), and `dedupe` and
     `vote` merge them as findings reports."""
 
+    scope = _Scope(runtime, tools, log, limits)
+
     async def combine(state: RunState) -> RunUpdate:
-        sources = _reduce_sources(state["results"][reduce.from_].data or {})
-        if reduce.merges:
-            return await _merge(reduce, sources, limits, log)
-        outputs = [output for _, _, output in sources]
-        if reduce.agent is None:
-            await log.emit(NODE_STARTED, node_id=reduce.id)
-            separator = "\n\n" if reduce.separator is None else reduce.separator
-            text = separator.join(str(o) for o in outputs)
-            result = AgentNodeResult(status="completed", text=text, usage=None)
-            if reduce.writes:
-                result = await _write(reduce.id, reduce.writes, None, result, limits, log)
-            end: dict[str, JsonValue] = {"error": result.error} if result.error else {}
-            await log.emit(NODE_END[result.status], node_id=reduce.id, payload=end)
-            return _update(reduce.id, result)
-        agent = AgentNode(
-            type="agent",
-            id=reduce.id,
-            role=reduce.agent.role,
-            instructions=reduce.agent.instructions,
-            provider=reduce.agent.provider,
-            model=reduce.agent.model,
-            writes=reduce.writes,
-        )
-        pairs: list[JsonValue] = [{"item": item, "output": output} for _, item, output in sources]
-        input = json.dumps(pairs, ensure_ascii=False, indent=2)
-        return await _spawn(
-            reduce.id,
-            state,
-            limits,
-            log,
-            lambda: _run_step(agent, runtime, tools, log, limits, input, {}),
-        )
+        data = state["results"][reduce.from_].data or {}
+        if reduce.agent is not None:
+            return await _spawn(
+                reduce.id, state, limits, log, lambda: _combine(reduce, data, scope)
+            )
+        return _update(reduce.id, await _combine(reduce, data, scope))
 
     return combine
+
+
+async def _combine(
+    reduce: ReduceNode, data: dict[str, JsonValue], scope: "_Scope"
+) -> AgentNodeResult:
+    """Run `reduce` on the `data` of its map or parallel, writing its events in `scope`."""
+    sources = _reduce_sources(data)
+    log, tag = scope.log, scope.tag()
+    if reduce.merges:
+        return await _merge(reduce, sources, scope)
+    if reduce.agent is None:
+        await log.emit(NODE_STARTED, node_id=reduce.id, **tag)
+        separator = "\n\n" if reduce.separator is None else reduce.separator
+        text = separator.join(str(output) for _, _, output in sources)
+        result = AgentNodeResult(status="completed", text=text, usage=None)
+        if reduce.writes:
+            result = await _write(reduce.id, reduce.writes, None, result, scope.limits, log)
+        end: dict[str, JsonValue] = {"error": result.error} if result.error else {}
+        await log.emit(NODE_END[result.status], node_id=reduce.id, payload=end, **tag)
+        return result
+    agent = AgentNode(
+        type="agent",
+        id=reduce.id,
+        role=reduce.agent.role,
+        instructions=reduce.agent.instructions,
+        provider=reduce.agent.provider,
+        model=reduce.agent.model,
+        writes=reduce.writes,
+    )
+    pairs: list[JsonValue] = [{"item": item, "output": output} for _, item, output in sources]
+    input = json.dumps(pairs, ensure_ascii=False, indent=2)
+    return await _run_step(
+        agent, scope.runtime, scope.tools, log, scope.limits, input, {}, scope.item, scope.branch
+    )
 
 
 def _reduce_sources(data: dict[str, JsonValue]) -> list[tuple[str, JsonValue, JsonValue]]:
@@ -1063,15 +1113,13 @@ def _reduce_sources(data: dict[str, JsonValue]) -> list[tuple[str, JsonValue, Js
 
 
 async def _merge(
-    reduce: ReduceNode,
-    sources: list[tuple[str, JsonValue, JsonValue]],
-    limits: _Limits,
-    log: RunEventLog,
-) -> RunUpdate:
+    reduce: ReduceNode, sources: list[tuple[str, JsonValue, JsonValue]], scope: "_Scope"
+) -> AgentNodeResult:
     """A `dedupe` or `vote` reduce (4.5): each source's output checked as a findings report, then
     merged with no model. A source that is not a report, or too few sources for the vote, fails
     the reduce."""
-    await log.emit(NODE_STARTED, node_id=reduce.id)
+    log, limits, tag = scope.log, scope.limits, scope.tag()
+    await log.emit(NODE_STARTED, node_id=reduce.id, **tag)
     reports: list[tuple[str, FindingsReport]] = []
     port: PortFailure | None = None
     error: str | None = None
@@ -1106,8 +1154,378 @@ async def _merge(
             "findings_in": merged.findings_in,
             "findings_out": len(merged.report.findings),
         }
-    await log.emit(NODE_END[result.status], node_id=reduce.id, payload=end)
-    return _update(reduce.id, result)
+    await log.emit(NODE_END[result.status], node_id=reduce.id, payload=end, **tag)
+    return result
+
+
+class _Tag(TypedDict):
+    """The `item` and `branch` an in-process node's events carry."""
+
+    item: int | None
+    branch: int | None
+
+
+@dataclass
+class _Scope:
+    """Where nodes run in-process (`_run_inline`): a map item (`item`) or a parallel branch
+    (`branch`, the innermost), with the run artifacts it sees (`refs`), every node it ran
+    (`ran`, shared with the parallels inside it) and the artifacts it wrote (`wrote`)."""
+
+    runtime: AgentRuntime
+    tools: ToolExecutor | None
+    log: RunEventLog
+    limits: _Limits
+    item: int | None = None
+    branch: int | None = None
+    refs: dict[str, ArtifactRef] = field(default_factory=dict[str, ArtifactRef])
+    ran: dict[str, AgentNodeResult] = field(default_factory=dict[str, AgentNodeResult])
+    wrote: dict[str, ArtifactRef] = field(default_factory=dict[str, ArtifactRef])
+
+    def tag(self) -> _Tag:
+        """The `item` and `branch` its events carry."""
+        return _Tag(item=self.item, branch=self.branch)
+
+    def usage(self) -> list[Usage]:
+        """The usage of every node it ran."""
+        return [r.usage for r in self.ran.values() if r.usage]
+
+    def inner(self, branch: int) -> "_Scope":
+        """Branch `branch` of a parallel that runs in this scope: it sees this scope's artifacts
+        and writes its own, which the parallel adds to this scope once it ends."""
+        return replace(self, branch=branch, refs=dict(self.refs), wrote={})
+
+
+async def _run_inline(node: Node, input: str, scope: _Scope) -> tuple[str, AgentNodeResult]:
+    """Run `node` on `input` in-process, in `scope`: a sequence's steps each on the previous
+    one's output, stopping at the first that does not complete. Returns the id of the node that
+    ended it (the step that did not complete, else `node`) and its result."""
+    match node:
+        case AgentNode() | ToolNode() | GateNode():
+            # Stays `cancelled` if the branch is cancelled while the step runs.
+            scope.ran[node.id] = AgentNodeResult(status="cancelled", text=input, usage=None)
+            result = await _run_step(
+                node,
+                scope.runtime,
+                scope.tools,
+                scope.log,
+                scope.limits,
+                input,
+                scope.refs,
+                scope.item,
+                scope.branch,
+            )
+            scope.ran[node.id] = result
+            if result.artifact is not None:
+                scope.refs[result.artifact.name] = result.artifact
+                scope.wrote[result.artifact.name] = result.artifact
+            return node.id, result
+        case SequenceNode():
+            ended, result = node.id, AgentNodeResult(status="completed", text=input, usage=None)
+            for step in node.steps:
+                ended, result = await _run_inline(step, input, scope)
+                if result.status != "completed":
+                    break
+                input = result.text
+            return ended, result
+        case RouterNode():
+            return await _router_inline(node, input, scope)
+        case ParallelNode():
+            return await _parallel_inline(node, input, scope)
+        case ReduceNode():
+            result = await _combine(node, scope.ran[node.from_].data or {}, scope)
+            scope.ran[node.id] = result
+            return node.id, result
+        case LoopNode() | MapNode():
+            raise CompileError(f"{node.type} {node.id!r} cannot run inside a map or a parallel")
+
+
+def _stop_error(ended: str, result: AgentNodeResult) -> str | None:
+    """Why a map item or a branch did not complete: the node that ended it, and its error."""
+    if result.status == "completed":
+        return None
+    return f"{ended} {result.status}: {result.error or 'no error given'}"
+
+
+async def _parallel_inline(
+    parallel: ParallelNode, input: str, scope: _Scope
+) -> tuple[str, AgentNodeResult]:
+    """Run a parallel inside a branch: its branches at once, each in its own scope, joined as at
+    the top of the run. What its branches wrote is the outer scope's once it ends."""
+    log, tag = scope.log, scope.tag()
+    await log.emit(NODE_STARTED, node_id=parallel.id, payload=_parallel_started(parallel), **tag)
+    join = _BranchJoin(parallel)
+    inners = [scope.inner(i) for i in range(len(parallel.branches))]
+
+    async def one(index: int) -> tuple[str, AgentNodeResult]:
+        branch = parallel.branches[index]
+        marker: dict[str, JsonValue] = {"index": index, "branch_id": branch.id}
+        await log.emit(PARALLEL_BRANCH_STARTED, node_id=parallel.id, payload=marker, **tag)
+        result, error = await _run_branch(join, index, branch, input, inners[index])
+        end: dict[str, JsonValue] = {**marker, "status": result.status}
+        if error:
+            end["error"] = error
+        await log.emit(PARALLEL_BRANCH_COMPLETED, node_id=parallel.id, payload=end, **tag)
+        return branch.id, result.model_copy(update={"error": error})
+
+    outcomes = await asyncio.gather(*(one(i) for i in range(len(parallel.branches))))
+    for inner in inners:
+        scope.refs.update(inner.wrote)
+        scope.wrote.update(inner.wrote)
+    result, payload = _joined(parallel, list(outcomes))
+    await log.emit(NODE_END[result.status], node_id=parallel.id, payload=payload, **tag)
+    scope.ran[parallel.id] = result
+    return parallel.id, result
+
+
+def _router_started(router: RouterNode) -> dict[str, JsonValue]:
+    """The payload of `router`'s `node_started`."""
+    routes: list[JsonValue] = list(router.route_ids)
+    return {"routes": routes, "mode": "classifier" if router.classifier else "rule"}
+
+
+def _router_entry(
+    router: RouterNode, runtime: AgentRuntime, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Starts `router` and chooses its route, which `_to_route` then takes. The choice is in the
+    state (`routes`; `None` if none could be made), so a resumed run does not choose again. A
+    classifier counts as one agent spawned."""
+    spawned = 1 if router.classifier is not None else 0
+    scope = _Scope(runtime, None, log, limits)
+
+    async def enter(state: RunState) -> RunUpdate:
+        if spawned and (
+            refused := await _refuse_spawn(
+                router.id, state, 1, limits, log, _router_started(router)
+            )
+        ):
+            return {
+                "results": {router.id: refused},
+                "order": [router.id],
+                "routes": {router.id: None},
+            }
+        results = _results_of(state["results"])
+        choice = await _choose(
+            router, state["last_text"], results, state.get("artifacts", {}), scope
+        )
+        update: RunUpdate = {
+            "spawned": spawned,
+            "usage": [choice.usage] if choice.usage else [],
+            "routes": {router.id: _chosen(choice)},
+        }
+        if choice.status != "completed":
+            update["results"] = {router.id: choice}
+            update["order"] = [router.id]
+        return update
+
+    return enter
+
+
+def _chosen(choice: AgentNodeResult) -> str | None:
+    """The route a router's choice names, if it made one."""
+    route = (choice.data or {}).get("route") if choice.status == "completed" else None
+    return route if isinstance(route, str) else None
+
+
+def _to_route(router: RouterNode, starts: Mapping[str, str]) -> Callable[[RunState], str]:
+    """To the first node of the route `router` chose; to `END` if it chose none."""
+
+    def route(state: RunState) -> str:
+        chosen = state.get("routes", {}).get(router.id)
+        return starts[chosen] if chosen is not None else END
+
+    return route
+
+
+def _router_done(
+    router: RouterNode, log: RunEventLog
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Ends `router` once its route completed. Its output is the route's, and its `data` the
+    route's last node's."""
+    outputs = {route_id: _output_id(route) for route_id, _, route in router_routes(router, "")}
+
+    async def done(state: RunState) -> RunUpdate:
+        chosen = state.get("routes", {}).get(router.id) or DEFAULT_ROUTE
+        source = state["results"].get(outputs[chosen])
+        await log.emit(NODE_COMPLETED, node_id=router.id, payload={"route": chosen})
+        data = source.data if source is not None else None
+        result = AgentNodeResult(status="completed", text=state["last_text"], usage=None, data=data)
+        return _update(router.id, result)
+
+    return done
+
+
+def _output_id(node: Node) -> str:
+    """The node whose result is `node`'s output: a sequence's last step's."""
+    return _output_id(node.steps[-1]) if isinstance(node, SequenceNode) else node.id
+
+
+async def _router_inline(
+    router: RouterNode, input: str, scope: _Scope
+) -> tuple[str, AgentNodeResult]:
+    """Run a router inside a map item or a branch: choose, then run the route in `scope`. Its
+    classifier was counted as spawned with the rest of the item or branch."""
+    choice = await _choose(router, input, _results_of(scope.ran), scope.refs, scope)
+    route_id = _chosen(choice)
+    if route_id is None:
+        scope.ran[router.id] = choice
+        return router.id, choice
+    ended, result = await _run_inline(router.route(route_id), input, scope)
+    log, tag = scope.log, scope.tag()
+    end: dict[str, JsonValue] = {"route": route_id}
+    if (error := _stop_error(ended, result)) is not None:
+        end["error"] = error
+    await log.emit(NODE_END[result.status], node_id=router.id, payload=end, **tag)
+    if result.status != "completed":
+        scope.ran[router.id] = result.model_copy(update={"usage": choice.usage, "error": error})
+        return ended, result
+    done = AgentNodeResult(
+        status="completed", text=result.text, usage=choice.usage, data=result.data
+    )
+    scope.ran[router.id] = done
+    return router.id, done
+
+
+async def _choose(
+    router: RouterNode,
+    input: str,
+    results: dict[str, JsonValue],
+    refs: Mapping[str, ArtifactRef],
+    scope: _Scope,
+) -> AgentNodeResult:
+    """Start `router` and choose its route: by its rules, or by asking its classifier. Logs
+    `route_chosen`, and returns a completed result whose `data` is `{route, mode, reason}` and
+    whose usage is the classifier's; or logs `node_failed` and returns the failure."""
+    log, tag = scope.log, scope.tag()
+    mode = "classifier" if router.classifier is not None else "rule"
+    await log.emit(NODE_STARTED, node_id=router.id, payload=_router_started(router), **tag)
+    usage: Usage | None = None
+    port: PortFailure | None = None
+    route: str | None = None
+    if router.classifier is not None:
+        answer, port = await _classify(router, input, scope)
+        usage = answer.usage
+        if answer.status != "completed":
+            error = answer.error or "the classifier did not answer"
+            return await _not_routed(router, answer.status, error, input, usage, port, scope)
+        route = cast(str, (answer.data or {})["route"])
+        reason = cast(str, (answer.data or {})["reason"])
+    else:
+        try:
+            route, reason = await _rule(router, input, results, refs, scope.limits)
+        except ExpressionError as e:
+            return await _not_routed(router, "failed", str(e), input, None, None, scope)
+        if route is None:
+            error = f"no route of {router.id!r} matched, and it has no default"
+            return await _not_routed(router, "failed", error, input, None, None, scope)
+    chosen: dict[str, JsonValue] = {"route": route, "mode": mode, "reason": reason}
+    await log.emit(ROUTE_CHOSEN, node_id=router.id, payload=chosen, **tag)
+    return AgentNodeResult(status="completed", text=input, usage=usage, data=chosen)
+
+
+async def _not_routed(
+    router: RouterNode,
+    status: AgentNodeStatus,
+    error: str,
+    input: str,
+    usage: Usage | None,
+    port: PortFailure | None,
+    scope: _Scope,
+) -> AgentNodeResult:
+    """End `router` without a route: log its end with `error` (and the classifier's refused
+    `port`), and return the result."""
+    end: dict[str, JsonValue] = {"error": error}
+    if port is not None:
+        end["port"] = port.payload()
+    await scope.log.emit(NODE_END[status], node_id=router.id, payload=end, **scope.tag())
+    return AgentNodeResult(status=status, text=input, usage=usage, error=error)
+
+
+async def _rule(
+    router: RouterNode,
+    input: str,
+    results: dict[str, JsonValue],
+    refs: Mapping[str, ArtifactRef],
+    limits: _Limits,
+) -> tuple[str | None, str]:
+    """The first route of `router` whose `when` holds and that condition, else its default (or
+    `None` if it has none). Raises `ExpressionError` naming the route whose condition failed."""
+    reads = any("artifacts" in (route.when or "") for route in router.routes)
+    artifacts = await artifact_values(limits.artifacts, refs) if reads else {}
+    for route in router.routes:
+        when = route.when or "false"
+        try:
+            met = compile_condition(when, ROUTE_VARIABLES).evaluate(
+                last=input, iteration=0, results=results, artifacts=artifacts
+            )
+        except ExpressionError as e:
+            raise ExpressionError(when, f"when of route {route.id!r} failed: {e.message}") from e
+        if met:
+            return route.id, when
+    if router.default is None:
+        return None, ""
+    return DEFAULT_ROUTE, "no route matched"
+
+
+CLASSIFIER_ROLE = "router"
+"""The role a router's classifier runs as."""
+
+
+def classifier_instructions(router: RouterNode) -> str:
+    """What `router`'s classifier is asked: its own instructions, then each route it may choose,
+    with its description."""
+    assert router.classifier is not None
+    lines = [f"- `{route.id}`: {route.description or 'no description'}" for route in router.routes]
+    if router.default is not None:
+        lines.append(f"- `{DEFAULT_ROUTE}`: when no other route fits")
+    return (
+        f"{router.classifier.instructions}\n\nChoose one route for the input. The routes:\n"
+        + "\n".join(lines)
+        + "\n\nAnswer with the route's id as `route` and why, in one sentence, as `reason`."
+    )
+
+
+async def _classify(
+    router: RouterNode, input: str, scope: _Scope
+) -> tuple[AgentNodeResult, PortFailure | None]:
+    """Ask `router`'s classifier to choose, as one agent turn whose events are the router's: its
+    answer checked against `classifier_schema`, so it can only name one of the router's routes.
+    It waits for an `agents_alive` slot, and its usage counts on the run's budget."""
+    assert router.classifier is not None
+    agent = AgentNode(
+        type="agent",
+        id=router.id,
+        role=CLASSIFIER_ROLE,
+        instructions=classifier_instructions(router),
+        provider=router.classifier.provider,
+        model=router.classifier.model,
+        output_schema=classifier_schema(router),
+    )
+    log, limits = scope.log, scope.limits
+
+    async def write(event: AgentEvent) -> None:
+        await log.agent_event(router.id, event, scope.item, scope.branch)
+        if isinstance(event, Usage) and limits.budget is not None:
+            limits.budget.add(event, router.id)
+
+    buffer = DeltaBuffer(write)
+    try:
+        try:
+            async with limits.alive:
+                result = await run_agent_node(agent, scope.runtime, input, buffer.emit)
+        finally:
+            await buffer.close()
+    except (asyncio.CancelledError, PolicyLimitExceeded):
+        await log.emit(NODE_CANCELLED, node_id=router.id, **scope.tag())
+        raise
+    return _check_output(agent, result)
+
+
+def _results_of(results: Mapping[str, AgentNodeResult]) -> dict[str, JsonValue]:
+    """`results` as a CEL expression sees it: node id → `{status, text, data}`."""
+    return {
+        node_id: {"status": r.status, "text": r.text, "data": r.data}
+        for node_id, r in results.items()
+    }
 
 
 _PULL_REQUEST_FIELDS = ("url", "number", "head", "base", "commit")

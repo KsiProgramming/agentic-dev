@@ -3,7 +3,7 @@
   "id": "bad",
   "name": "Unknown node type",
   "root": {
-    "type": "router",
-    "id": "route"
+    "type": "orchestrator",
+    "id": "hub"
   }
 }

@@ -1,0 +1,33 @@
+{
+  "spec_version": "0",
+  "id": "route-each",
+  "name": "Route each module",
+  "root": {
+    "type": "map",
+    "id": "each",
+    "over": "[\"api\", \"web\"]",
+    "max_concurrency": 2,
+    "body": {
+      "type": "router",
+      "id": "by_kind",
+      "routes": [
+        {
+          "id": "frontend",
+          "when": "last == \"web\"",
+          "then": {
+            "type": "agent",
+            "id": "ui_review",
+            "role": "Writer",
+            "instructions": "Review the UI."
+          }
+        }
+      ],
+      "default": {
+        "type": "agent",
+        "id": "code_review",
+        "role": "Writer",
+        "instructions": "Review the code."
+      }
+    }
+  }
+}

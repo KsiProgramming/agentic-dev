@@ -3,13 +3,14 @@
 New primitives are added as members of the `Node` union; existing specs keep validating.
 """
 
+import re
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from agentic_engine.expr import ExpressionError, compile_condition, compile_list
+from agentic_engine.expr import ROUTE_VARIABLES, ExpressionError, compile_condition, compile_list
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimit
 from agentic_engine.ports import schema_problem
 from agentic_runtime.findings import FindingsReport
@@ -296,10 +297,123 @@ class ParallelNode(_Base):
         return self
 
 
+MAX_ROUTES = 8
+"""Routes a router may have, besides its `default`."""
+
+DEFAULT_ROUTE = "default"
+"""The name `route_chosen` gives a router's `default`; no route may take it as its id."""
+
+
+class Route(_Base):
+    """One way a router can go: `then` runs when this route is chosen."""
+
+    id: NodeId = Field(description="The route's name, shown in the console and the events.")
+    when: NonEmptyStr | None = Field(
+        default=None,
+        description="Rule mode, and required there: the CEL condition that picks this route.",
+        examples=['artifacts["findings.json"].findings.size() == 0'],
+    )
+    description: Annotated[str, Field(max_length=300)] | None = Field(
+        default=None, description="What the route is for; a classifier is shown it to choose."
+    )
+    then: "Node" = Field(description="What runs on this route: one agent, tool or sequence node.")
+
+
+class RouterClassifier(_Base):
+    """The agent that chooses a router's route (classifier mode), as for an `agent` node. It
+    answers with one of the router's route ids and a reason, through a typed output the engine
+    makes (`classifier_schema`)."""
+
+    instructions: NonEmptyStr
+    provider: Literal["claude"] | None = Field(
+        default=None, description="Unset means the workspace default."
+    )
+    model: NonEmptyStr | None = None
+
+
+class RouterNode(_Base):
+    """Runs exactly one of its routes, on the router's input, and outputs what that route outputs.
+
+    In rule mode every route has `when`, a CEL condition over `last` (the router's input),
+    `results` and `artifacts` (as for a loop's `until`); the first route whose condition is true
+    runs, else `default`. In classifier mode no route has `when`: one agent (`classifier`)
+    chooses a route id, `default` included when there is one, and says why. A router with no
+    matching route and no `default` fails. The routes not taken never start. A route is one
+    `agent`, `tool` or `sequence` node, and it may hold what the router's own place allows."""
+
+    type: Literal["router"]
+    id: NodeId
+    routes: list[Route] = Field(min_length=1, max_length=MAX_ROUTES)
+    default: "Node | None" = Field(default=None, description="What runs when no route is chosen.")
+    classifier: RouterClassifier | None = Field(
+        default=None, description="Classifier mode: the agent that chooses the route."
+    )
+
+    @property
+    def route_ids(self) -> list[str]:
+        """The names a route can be chosen by, `default` last if the router has one."""
+        ids = [route.id for route in self.routes]
+        return [*ids, DEFAULT_ROUTE] if self.default is not None else ids
+
+    def route(self, route_id: str) -> "Node":
+        """What runs on the route named `route_id` (`default` for the default)."""
+        if route_id == DEFAULT_ROUTE and self.default is not None:
+            return self.default
+        return next(route.then for route in self.routes if route.id == route_id)
+
+    @model_validator(mode="after")
+    def _mode_fields(self) -> Self:
+        ids = [route.id for route in self.routes]
+        if DEFAULT_ROUTE in ids:
+            raise ValueError(f"no route may be named {DEFAULT_ROUTE!r}; use `default`")
+        if len(set(ids)) != len(ids):
+            raise ValueError("two routes have the same id")
+        if self.classifier is None:
+            if missing := [route.id for route in self.routes if route.when is None]:
+                raise ValueError(
+                    f"route {missing[0]!r} needs `when`, or the router needs `classifier`"
+                )
+        elif with_when := [route.id for route in self.routes if route.when is not None]:
+            raise ValueError(
+                f"route {with_when[0]!r} has `when`, but a classifier chooses this router's route"
+            )
+        return self
+
+
 Node = Annotated[
-    AgentNode | ToolNode | GateNode | SequenceNode | LoopNode | MapNode | ReduceNode | ParallelNode,
+    AgentNode
+    | ToolNode
+    | GateNode
+    | SequenceNode
+    | LoopNode
+    | MapNode
+    | ReduceNode
+    | ParallelNode
+    | RouterNode,
     Field(discriminator="type"),
 ]
+
+
+def classifier_schema(router: RouterNode) -> dict[str, JsonValue]:
+    """The output schema of `router`'s classifier: one of its route ids and why."""
+    ids: list[JsonValue] = list(router.route_ids)
+    return {
+        "type": "object",
+        "required": ["route", "reason"],
+        "properties": {
+            "route": {"enum": ids},
+            "reason": {"type": "string", "maxLength": 300},
+        },
+        "additionalProperties": False,
+    }
+
+
+def router_routes(router: RouterNode, path: str) -> list[tuple[str, str, "Node"]]:
+    """`(route id, path, node)` for each of `router`'s routes, `default` last."""
+    routes = [(r.id, f"{path}.routes[{i}].then", r.then) for i, r in enumerate(router.routes)]
+    if router.default is not None:
+        routes.append((DEFAULT_ROUTE, f"{path}.default", router.default))
+    return routes
 
 
 def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
@@ -317,8 +431,27 @@ def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
         case ParallelNode():
             for i, branch in enumerate(node.branches):
                 yield from iter_nodes(branch, f"{path}.branches[{i}]")
+        case RouterNode():
+            for _, route_path, route in router_routes(node, path):
+                yield from iter_nodes(route, route_path)
         case _:
             pass
+
+
+_SCOPE = re.compile(r"\.(branches\[\d+\]|routes\[\d+\]\.then|default|body)")
+
+
+def scope_of(path: str) -> str:
+    """The innermost parallel branch, router route, or loop or map body the node at `path` is
+    in, as that branch's, route's or body's path; `""` for none. What runs there may not run at
+    all (a route not taken) or runs apart from the rest of the run (a branch, an item)."""
+    ends = [m.end() for m in _SCOPE.finditer(path)]
+    return path[: ends[-1]] if ends else ""
+
+
+def within(path: str, scope: str) -> bool:
+    """Whether the node at `path` is in `scope` (`scope_of`); everything is in `""`."""
+    return not scope or path == scope or path.startswith((f"{scope}.", f"{scope}["))
 
 
 def node_tools(node: Node) -> list[str]:
@@ -328,7 +461,15 @@ def node_tools(node: Node) -> list[str]:
             return list(node.tools)
         case ToolNode():
             return [node.tool]
-        case GateNode() | SequenceNode() | LoopNode() | MapNode() | ReduceNode() | ParallelNode():
+        case (
+            GateNode()
+            | SequenceNode()
+            | LoopNode()
+            | MapNode()
+            | ReduceNode()
+            | ParallelNode()
+            | RouterNode()
+        ):
             return []
 
 
@@ -380,6 +521,7 @@ type IssueCode = Literal[
     "artifact_unknown",
     "artifact_conflict",
     "invalid_vote",
+    "invalid_router",
 ]
 
 
@@ -431,9 +573,9 @@ def publish_gate_issues(root: Node) -> list[ValidationIssue]:
     empty if they are. Each must be a tool node whose `from_node` names an earlier writer, with a
     gate between that writer and itself, so a human approves what is published."""
     issues: list[ValidationIssue] = []
-    seen: list[Node] = []
+    seen: list[tuple[str, Node]] = []
     for path, node in iter_nodes(root):
-        if isinstance(node, SequenceNode | LoopNode | MapNode | ParallelNode):
+        if isinstance(node, SequenceNode | LoopNode | MapNode | ParallelNode | RouterNode):
             continue
         for tool in sorted(PUBLISH_TOOLS.intersection(node_tools(node))):
             if not isinstance(node, ToolNode):
@@ -443,12 +585,16 @@ def publish_gate_issues(root: Node) -> list[ValidationIssue]:
                         code="publish_not_tool_node", path=path, node_id=node.id, message=message
                     )
                 )
-            elif found := _publish_issue(node, seen):
+                continue
+            # A writer or gate on a route of a router may not have run: only those whose
+            # route holds the publisher too count.
+            earlier = [n for at, n in seen if within(path, scope_of(at))]
+            if found := _publish_issue(node, earlier):
                 code, message = found
                 issues.append(
                     ValidationIssue(code=code, path=path, node_id=node.id, message=message)
                 )
-        seen.append(node)
+        seen.append((path, node))
     return issues
 
 
@@ -612,11 +758,13 @@ def _not_in_loop(node: Node) -> str | None:
 def map_issues(root: Node) -> list[ValidationIssue]:
     """Why the maps and reduces under `root` cannot run, in run order (depth first); empty if
     they can. A map's `over` must be a valid list expression, and its body must hold only agent,
-    tool and sequence nodes, none of them a writer or a publisher. A reduce's `from` must name a
-    map or a parallel that runs before it, and a vote's `min_votes` must be reachable by that
-    parallel's join (`invalid_vote`; a map's item count is only known when it runs)."""
+    tool, sequence and router nodes, none of them a writer or a publisher. A reduce's `from` must
+    name a map or a parallel that runs before it, in the same branch, route or body or around it,
+    and a vote's `min_votes` must be reachable by that parallel's join (`invalid_vote`; a map's
+    item count is only known when it runs)."""
     issues: list[ValidationIssue] = []
     sources: dict[str, MapNode | ParallelNode] = {}
+    scopes: dict[str, str] = {}
     for path, node in iter_nodes(root):
         match node:
             case MapNode():
@@ -644,12 +792,23 @@ def map_issues(root: Node) -> list[ValidationIssue]:
                             )
                         )
                 sources[node.id] = node
+                scopes[node.id] = scope_of(path)
             case ParallelNode():
                 sources[node.id] = node
+                scopes[node.id] = scope_of(path)
             case ReduceNode() if node.from_ not in sources:
                 message = (
                     f"reduce {node.id!r} at {path}: `from` {node.from_!r} is not a map or "
                     "parallel that runs before it"
+                )
+                issues.append(
+                    ValidationIssue(code="reference", path=path, node_id=node.id, message=message)
+                )
+            # A source in a branch, route or body the reduce is not in may not have run.
+            case ReduceNode() if not within(path, scopes[node.from_]):
+                message = (
+                    f"reduce {node.id!r} at {path}: `from` {node.from_!r} runs inside "
+                    f"{scopes[node.from_]}, which the reduce is not in; move the reduce there"
                 )
                 issues.append(
                     ValidationIssue(code="reference", path=path, node_id=node.id, message=message)
@@ -692,23 +851,36 @@ def map_errors(root: Node) -> list[str]:
 
 def _not_in_map(node: Node) -> str | None:
     match node:
-        case AgentNode() | ToolNode() | SequenceNode():
+        case AgentNode() | ToolNode() | SequenceNode() | RouterNode():
             return _not_in_loop(node)
         case _:
             return node.type
 
 
+def _not_in_parallel(node: Node) -> str | None:
+    """Why `node` cannot be in a parallel's branch: as in a map's body, but a branch may also
+    hold a parallel, and a reduce that writes no artifact (4.6)."""
+    match node:
+        case ParallelNode():
+            return None
+        case ReduceNode():
+            return "writing reduce" if node.writes else None
+        case _:
+            return _not_in_map(node)
+
+
 def parallel_issues(root: Node) -> list[ValidationIssue]:
     """Why the parallels under `root` cannot run, in run order (depth first); empty if they can.
-    A branch must hold only agent, tool and sequence nodes, none of them a writer or a publisher
-    (as a map's body): the issue is on that node, which is the one to move."""
+    A branch must hold only agent, tool, sequence, router and parallel nodes and reduces that
+    write no artifact, none of them a writer or a publisher: the issue is on that node, which is
+    the one to move."""
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, ParallelNode):
             continue
         for i, branch in enumerate(node.branches):
             for inner_path, inner in iter_nodes(branch, f"{path}.branches[{i}]"):
-                if reason := _not_in_map(inner):
+                if reason := _not_in_parallel(inner):
                     message = (
                         f"parallel {node.id!r} at {path}: {reason} {inner.id!r} at {inner_path} "
                         "cannot be inside a parallel yet"
@@ -721,6 +893,44 @@ def parallel_issues(root: Node) -> list[ValidationIssue]:
                             message=message,
                         )
                     )
+    return issues
+
+
+def router_issues(root: Node) -> list[ValidationIssue]:
+    """Why the routers under `root` cannot run, in run order; empty if they can. Each `when` must
+    be a valid condition (`invalid_expression`, on the `when`), and each route an agent, tool or
+    sequence node (`invalid_router`, on the route)."""
+    issues: list[ValidationIssue] = []
+    for path, node in iter_nodes(root):
+        if not isinstance(node, RouterNode):
+            continue
+        for i, route in enumerate(node.routes):
+            if route.when is None:
+                continue
+            try:
+                compile_condition(route.when, ROUTE_VARIABLES)
+            except ExpressionError as e:
+                message = f"router {node.id!r} at {path}: route {route.id!r}: invalid when: {e}"
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_expression",
+                        path=f"{path}.routes[{i}].when",
+                        node_id=node.id,
+                        message=message,
+                    )
+                )
+        for route_id, route_path, route in router_routes(node, path):
+            if isinstance(route, AgentNode | ToolNode | SequenceNode):
+                continue
+            message = (
+                f"router {node.id!r} at {path}: route {route_id!r} is {route.type} {route.id!r}; "
+                "a route is one agent, tool or sequence node (wrap it in a sequence)"
+            )
+            issues.append(
+                ValidationIssue(
+                    code="invalid_router", path=route_path, node_id=route.id, message=message
+                )
+            )
     return issues
 
 
@@ -787,6 +997,12 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
                     f"{policy.agents_alive} agents alive"
                 )
                 over(node, path, "agents_alive", policy.agents_alive, len(node.branches), why)
+            case ParallelNode() if (alive := agents_alive(node)) > policy.agents_alive:
+                why = (
+                    f"its branches can run {alive} agents at once, above the workspace limit of "
+                    f"{policy.agents_alive} agents alive"
+                )
+                over(node, path, "agents_alive", policy.agents_alive, alive, why)
             case GateNode() if node.ttl_s is not None and node.ttl_s > policy.approval_ttl_s:
                 why = (
                     f"ttl_s {node.ttl_s} is above the workspace limit of "
@@ -811,11 +1027,58 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
             case SequenceNode():
                 for i, step in enumerate(node.steps):
                     visit(step, f"{path}.steps[{i}]", depth)
+            case RouterNode():
+                for _, route_path, route in router_routes(node, path):
+                    visit(route, route_path, depth)
             case _:
                 pass
 
     visit(root, "root", 0)
     return issues
+
+
+def agents_alive(node: Node) -> int:
+    """The most agents `node` can run at once: a parallel's branches all together, a router's
+    classifier or its largest route, a map's `max_concurrency` items."""
+    match node:
+        case AgentNode():
+            return 1
+        case ReduceNode():
+            return 1 if node.agent is not None else 0
+        case ToolNode() | GateNode():
+            return 0
+        case SequenceNode():
+            return max(agents_alive(step) for step in node.steps)
+        case LoopNode():
+            return agents_alive(node.body)
+        case MapNode():
+            return node.max_concurrency * agents_alive(node.body)
+        case ParallelNode():
+            return sum(agents_alive(branch) for branch in node.branches)
+        case RouterNode():
+            routes = [agents_alive(route) for _, _, route in router_routes(node, "")]
+            return max([*routes, 1 if node.classifier is not None else 0])
+
+
+def agents_spawned(node: Node) -> int:
+    """The most agents `node` starts, counted before it runs: a router its classifier and its
+    largest route. A map's items are only known when it runs, so a map counts none here."""
+    match node:
+        case AgentNode():
+            return 1
+        case ReduceNode():
+            return 1 if node.agent is not None else 0
+        case ToolNode() | GateNode() | MapNode():
+            return 0
+        case SequenceNode():
+            return sum(agents_spawned(step) for step in node.steps)
+        case LoopNode():
+            return agents_spawned(node.body)
+        case ParallelNode():
+            return sum(agents_spawned(branch) for branch in node.branches)
+        case RouterNode():
+            routes = [agents_spawned(route) for _, _, route in router_routes(node, "")]
+            return (1 if node.classifier is not None else 0) + max(routes)
 
 
 def policy_errors(root: Node, policy: Policy) -> list[str]:
@@ -839,6 +1102,8 @@ def budget_issues(
                 model = node.model
             case ReduceNode() if node.agent is not None:
                 model = node.agent.model
+            case RouterNode() if node.classifier is not None:
+                model = node.classifier.model
             case _:
                 continue
         model = model or default_model
@@ -887,6 +1152,13 @@ type ArtifactWriter = AgentNode | ToolNode | ReduceNode
 """A node that may write a run artifact."""
 
 
+_UNTYPED = ReduceNode.model_validate(
+    {"type": "reduce", "id": "untyped", "from": "untyped", "strategy": "concat"}
+)
+"""An artifact's writer when a router's routes write it with different types: a reduce that does
+not merge has no typed output, so no port edge is drawn from it."""
+
+
 @dataclass
 class _ArtifactFlow:
     """What `_walk_artifacts` finds: each reader's writers, by artifact name, and the issues."""
@@ -902,7 +1174,8 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
     always run before it: an earlier step, not a sibling branch of the same parallel, and not a
     later step of the same loop body (its first iteration would not have it). A map's body may not
     write (its ids repeat for every item), and two branches of one parallel may not write the same
-    name. After a parallel, what its branches wrote is visible."""
+    name. After a parallel, what its branches wrote is visible; after a router, what all its
+    routes wrote."""
     flow = _ArtifactFlow()
 
     def conflict(node: Node, path: str, why: str) -> None:
@@ -975,6 +1248,21 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                         by_branch[name] = branch.id
                         after[name] = writer
                 return after
+            case RouterNode():
+                # One route runs: a name is written after the router when every route writes
+                # it. Its typed producer is the routes' writer when they all type it alike;
+                # otherwise a reader of it has none.
+                wrote = [visit(r, at, seen) for _, at, r in router_routes(node, path)]
+                after = dict(seen)
+                for name, writer in wrote[0].items():
+                    writers = [w.get(name) for w in wrote]
+                    if seen.get(name) is writer or any(w is None for w in writers):
+                        continue
+                    alike = all(
+                        w is not None and output_schema(w) == output_schema(writer) for w in writers
+                    )
+                    after[name] = writer if alike else _UNTYPED
+                return after
 
     visit(root, "root", {})
     return flow
@@ -998,9 +1286,9 @@ def port_edges(root: Node) -> list[tuple[PortProducer, PortNode, str]]:
     `(producer, consumer, consumer's path)` in run order: consecutive steps of a sequence (nested
     sequences flattened), looking through gates, which pass their input on unchanged. The producer
     is an agent or tool node, or a reduce that merges findings (its output is a findings report).
-    A loop, map, parallel or other reduce between two steps breaks the edge: its output is not
-    typed. A node that reads one run artifact takes it from the artifact's last writer instead (if
-    that is a producer), and one that reads several has no producer."""
+    A loop, map, parallel, router or other reduce between two steps breaks the edge: its output is
+    not typed. A node that reads one run artifact takes it from the artifact's last writer instead
+    (if that is a producer), and one that reads several has no producer."""
     edges: list[tuple[PortProducer, PortNode, str]] = []
     writers = artifact_writers(root)
 
@@ -1035,6 +1323,10 @@ def port_edges(root: Node) -> list[tuple[PortProducer, PortNode, str]]:
                     previous = None
                     for i, branch in enumerate(step.branches):
                         visit(branch, f"{step_path}.branches[{i}]")
+                case RouterNode():
+                    previous = None
+                    for _, route_path, route in router_routes(step, step_path):
+                        visit(route, route_path)
                 case ReduceNode():
                     previous = step if step.merges else None
                 case SequenceNode():
@@ -1172,10 +1464,10 @@ def _types(schema: JsonValue) -> set[str]:
 
 def structure_issues(root: Node) -> list[ValidationIssue]:
     """Why the spec under `root` cannot run anywhere, in run order: duplicate node ids, the loop,
-    map and parallel rules, references to other nodes, a gate before every publisher, the rules
-    for creating the repo, typed ports and run artifacts."""
+    map, parallel and router rules, references to other nodes, a gate before every publisher, the
+    rules for creating the repo, typed ports and run artifacts."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
-    issues += parallel_issues(root)
+    issues += parallel_issues(root) + router_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root)
     issues += port_issues(root) + artifact_issues(root)
     return in_run_order(root, issues)

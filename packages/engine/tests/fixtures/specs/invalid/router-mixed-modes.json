@@ -1,0 +1,24 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "Mixed modes",
+  "root": {
+    "type": "router",
+    "id": "kind",
+    "classifier": {
+      "instructions": "Choose."
+    },
+    "routes": [
+      {
+        "id": "bug",
+        "when": "last == \"bug\"",
+        "then": {
+          "type": "agent",
+          "id": "fix_plan",
+          "role": "Writer",
+          "instructions": "Go."
+        }
+      }
+    ]
+  }
+}

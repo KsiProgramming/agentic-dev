@@ -2941,7 +2941,8 @@
           "port_mismatch",
           "artifact_unknown",
           "artifact_conflict",
-          "invalid_vote"
+          "invalid_vote",
+          "invalid_router"
         ]
       },
       "JsonValue": {},
@@ -3000,6 +3001,9 @@
               },
               {
                 "$ref": "#/components/schemas/ParallelNode"
+              },
+              {
+                "$ref": "#/components/schemas/RouterNode"
               }
             ],
             "title": "Body",
@@ -3012,6 +3016,7 @@
                 "map": "#/components/schemas/MapNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
+                "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
               }
@@ -3091,6 +3096,9 @@
               },
               {
                 "$ref": "#/components/schemas/ParallelNode"
+              },
+              {
+                "$ref": "#/components/schemas/RouterNode"
               }
             ],
             "title": "Body",
@@ -3103,6 +3111,7 @@
                 "map": "#/components/schemas/MapNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
+                "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
               }
@@ -3397,6 +3406,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ParallelNode"
+                },
+                {
+                  "$ref": "#/components/schemas/RouterNode"
                 }
               ],
               "discriminator": {
@@ -3408,6 +3420,7 @@
                   "map": "#/components/schemas/MapNode",
                   "parallel": "#/components/schemas/ParallelNode",
                   "reduce": "#/components/schemas/ReduceNode",
+                  "router": "#/components/schemas/RouterNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "tool": "#/components/schemas/ToolNode"
                 }
@@ -3844,6 +3857,238 @@
         "additionalProperties": false,
         "type": "object",
         "title": "RerunRequest"
+      },
+      "Route": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id",
+            "description": "The route's name, shown in the console and the events."
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When",
+            "description": "Rule mode, and required there: the CEL condition that picks this route.",
+            "examples": [
+              "artifacts[\"findings.json\"].findings.size() == 0"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "What the route is for; a classifier is shown it to choose."
+          },
+          "then": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentNode"
+              },
+              {
+                "$ref": "#/components/schemas/ToolNode"
+              },
+              {
+                "$ref": "#/components/schemas/GateNode"
+              },
+              {
+                "$ref": "#/components/schemas/SequenceNode"
+              },
+              {
+                "$ref": "#/components/schemas/LoopNode"
+              },
+              {
+                "$ref": "#/components/schemas/MapNode"
+              },
+              {
+                "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
+              },
+              {
+                "$ref": "#/components/schemas/RouterNode"
+              }
+            ],
+            "title": "Then",
+            "description": "What runs on this route: one agent, tool or sequence node.",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "agent": "#/components/schemas/AgentNode",
+                "gate": "#/components/schemas/GateNode",
+                "loop": "#/components/schemas/LoopNode",
+                "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
+                "reduce": "#/components/schemas/ReduceNode",
+                "router": "#/components/schemas/RouterNode",
+                "sequence": "#/components/schemas/SequenceNode",
+                "tool": "#/components/schemas/ToolNode"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "then"
+        ],
+        "title": "Route",
+        "description": "One way a router can go: `then` runs when this route is chosen."
+      },
+      "RouterClassifier": {
+        "properties": {
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Instructions"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "claude"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Unset means the workspace default."
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instructions"
+        ],
+        "title": "RouterClassifier",
+        "description": "The agent that chooses a router's route (classifier mode), as for an `agent` node. It\nanswers with one of the router's route ids and a reason, through a typed output the engine\nmakes (`classifier_schema`)."
+      },
+      "RouterNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "router",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Routes"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AgentNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ToolNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GateNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SequenceNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LoopNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MapNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ReduceNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ParallelNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RouterNode"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "agent": "#/components/schemas/AgentNode",
+                    "gate": "#/components/schemas/GateNode",
+                    "loop": "#/components/schemas/LoopNode",
+                    "map": "#/components/schemas/MapNode",
+                    "parallel": "#/components/schemas/ParallelNode",
+                    "reduce": "#/components/schemas/ReduceNode",
+                    "router": "#/components/schemas/RouterNode",
+                    "sequence": "#/components/schemas/SequenceNode",
+                    "tool": "#/components/schemas/ToolNode"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default",
+            "description": "What runs when no route is chosen."
+          },
+          "classifier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouterClassifier"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Classifier mode: the agent that chooses the route."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "routes"
+        ],
+        "title": "RouterNode",
+        "description": "Runs exactly one of its routes, on the router's input, and outputs what that route outputs.\n\nIn rule mode every route has `when`, a CEL condition over `last` (the router's input),\n`results` and `artifacts` (as for a loop's `until`); the first route whose condition is true\nruns, else `default`. In classifier mode no route has `when`: one agent (`classifier`)\nchooses a route id, `default` included when there is one, and says why. A router with no\nmatching route and no `default` fails. The routes not taken never start. A route is one\n`agent`, `tool` or `sequence` node, and it may hold what the router's own place allows."
       },
       "RunArtifact": {
         "properties": {
@@ -4861,6 +5106,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ParallelNode"
+                },
+                {
+                  "$ref": "#/components/schemas/RouterNode"
                 }
               ],
               "discriminator": {
@@ -4872,6 +5120,7 @@
                   "map": "#/components/schemas/MapNode",
                   "parallel": "#/components/schemas/ParallelNode",
                   "reduce": "#/components/schemas/ReduceNode",
+                  "router": "#/components/schemas/RouterNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "tool": "#/components/schemas/ToolNode"
                 }
@@ -5396,6 +5645,9 @@
               },
               {
                 "$ref": "#/components/schemas/ParallelNode"
+              },
+              {
+                "$ref": "#/components/schemas/RouterNode"
               }
             ],
             "title": "Root",
@@ -5408,6 +5660,7 @@
                 "map": "#/components/schemas/MapNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
+                "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "tool": "#/components/schemas/ToolNode"
               }

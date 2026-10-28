@@ -1,0 +1,104 @@
+{
+  "spec_version": "0",
+  "id": "voted-review",
+  "name": "Voted review",
+  "description": "Scanners beside three security reviewers, whose findings a majority must agree on.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "checks",
+        "join": "all",
+        "branches": [
+          {
+            "type": "tool",
+            "id": "lint",
+            "tool": "scan.lint",
+            "args": {
+              "linters": "auto"
+            }
+          },
+          {
+            "type": "sequence",
+            "id": "security",
+            "steps": [
+              {
+                "type": "parallel",
+                "id": "security_reviewers",
+                "join": "all",
+                "branches": [
+                  {
+                    "type": "agent",
+                    "id": "security_1",
+                    "role": "Security reviewer",
+                    "instructions": "Report security findings as JSON.",
+                    "output_schema": {
+                      "type": "object",
+                      "required": [
+                        "findings"
+                      ],
+                      "properties": {
+                        "findings": {
+                          "type": "array"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "agent",
+                    "id": "security_2",
+                    "role": "Security reviewer",
+                    "instructions": "Report security findings as JSON.",
+                    "output_schema": {
+                      "type": "object",
+                      "required": [
+                        "findings"
+                      ],
+                      "properties": {
+                        "findings": {
+                          "type": "array"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "agent",
+                    "id": "security_3",
+                    "role": "Security reviewer",
+                    "instructions": "Report security findings as JSON.",
+                    "output_schema": {
+                      "type": "object",
+                      "required": [
+                        "findings"
+                      ],
+                      "properties": {
+                        "findings": {
+                          "type": "array"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "reduce",
+                "id": "security_vote",
+                "from": "security_reviewers",
+                "strategy": "vote"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "reduce",
+        "id": "merge",
+        "from": "checks",
+        "strategy": "dedupe",
+        "writes": "findings.json"
+      }
+    ]
+  }
+}

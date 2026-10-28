@@ -1,4 +1,4 @@
-"""Sandboxed CEL expressions: conditions (`loop.until`; later `router`) and lists (`map.over`).
+"""Sandboxed CEL expressions: conditions (`loop.until`, `router` routes) and lists (`map.over`).
 
 An expression is CEL text from the spec, run with `cel-python`. It can only read the variables it
 is given and call CEL's standard functions and macros: no custom functions are registered, so an
@@ -34,6 +34,11 @@ text, data}`, the latest result of each node run so far) and `artifacts` (map: r
 LIST_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
 """What a map's `over` can read: `last` (string, the map's input), `results` and `artifacts` (as
 for a condition)."""
+
+ROUTE_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
+"""What a router's `when` can read: `last` (string, the router's input), `results` and
+`artifacts` (as for a condition). Inside a map item or a parallel branch, `results` holds the
+nodes that ran in it so far."""
 
 _MACROS: Final = frozenset({"has", "all", "exists", "exists_one", "map", "filter"})
 _FUNCTIONS: Final = frozenset(n for n in base_functions if not n.startswith("_") and n != "!_")

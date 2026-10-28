@@ -1,0 +1,50 @@
+{
+  "spec_version": "0",
+  "id": "bad",
+  "name": "A reduce in a branch writes",
+  "root": {
+    "type": "parallel",
+    "id": "checks",
+    "join": "all",
+    "branches": [
+      {
+        "type": "agent",
+        "id": "a",
+        "role": "Writer",
+        "instructions": "Go."
+      },
+      {
+        "type": "sequence",
+        "id": "voted",
+        "steps": [
+          {
+            "type": "parallel",
+            "id": "inner",
+            "join": "all",
+            "branches": [
+              {
+                "type": "agent",
+                "id": "b",
+                "role": "Writer",
+                "instructions": "Go."
+              },
+              {
+                "type": "agent",
+                "id": "c",
+                "role": "Writer",
+                "instructions": "Go."
+              }
+            ]
+          },
+          {
+            "type": "reduce",
+            "id": "inner_merge",
+            "from": "inner",
+            "strategy": "concat",
+            "writes": "merged.md"
+          }
+        ]
+      }
+    ]
+  }
+}
