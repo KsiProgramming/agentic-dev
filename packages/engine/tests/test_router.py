@@ -3,7 +3,7 @@
 
 import asyncio
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,13 +25,12 @@ from agentic_engine.spec import (
     RouterNode,
     SequenceNode,
     WorkflowSpec,
-    agents_alive,
     agents_spawned,
     parse_spec,
     policy_issues,
     validate_workflow,
 )
-from agentic_runtime import AgentRequest, AgentRun, Message
+from agentic_runtime import AgentEvent, AgentRequest, AgentRun, Message
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime, Script
 
 FIXTURES = Path(__file__).parent / "fixtures" / "specs" / "valid"
@@ -533,44 +532,68 @@ async def test_nested_parallel_and_vote_in_a_branch() -> None:
     assert result.usage is not None and result.usage.input_tokens == 4 * ECHO_USAGE.input_tokens
 
 
-async def test_the_nested_vote_fixture_validates_and_its_agents_count() -> None:
+def test_the_nested_vote_fixture_counts_its_agents() -> None:
     nested = parse_spec(json.loads((FIXTURES / "parallel-nested-vote.json").read_text()))
     assert isinstance(nested.root, SequenceNode)
-    checks = nested.root.steps[0]
 
-    assert agents_alive(checks) == 3
-    assert agents_spawned(checks) == 3
+    assert agents_spawned(nested.root.steps[0]) == 3
 
 
-def test_nested_branches_above_agents_alive_are_refused() -> None:
-    wide = {
-        "type": "parallel",
-        "id": "inner",
-        "join": "all",
-        "branches": [agent(f"r{i}") for i in range(4)],
-    }
-    spec_ = spec(
+class Throttled(Recorder):
+    """Records the most runs in flight at once."""
+
+    def __init__(self, delays: Mapping[str, float]) -> None:
+        super().__init__(delays=delays)
+        self.live = 0
+        self.peak = 0
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        return _Live(super().start(request), self)
+
+
+class _Live:
+    def __init__(self, run: AgentRun, runtime: Throttled) -> None:
+        self._run = run
+        self._runtime = runtime
+
+    def cancel(self) -> None:
+        self._run.cancel()
+
+    def __aiter__(self) -> AsyncIterator[AgentEvent]:
+        return self._stream()
+
+    async def _stream(self) -> AsyncIterator[AgentEvent]:
+        self._runtime.live += 1
+        self._runtime.peak = max(self._runtime.peak, self._runtime.live)
+        try:
+            async for event in self._run:
+                yield event
+        finally:
+            self._runtime.live -= 1
+
+
+async def test_nested_branches_above_agents_alive_wait_for_a_slot() -> None:
+    """Two parallels of three reviewers inside one: six agents could run at once. Under a
+    limit of three they queue instead, and the spec is not refused."""
+    runtime = Throttled(delays={f"{p}{i}": 0.02 for p in "rs" for i in range(3)})
+    inner = [
         {
             "type": "parallel",
-            "id": "outer",
+            "id": f"inner_{p}",
             "join": "all",
-            "branches": [
-                wide,
-                {**wide, "id": "inner2", "branches": [agent(f"s{i}") for i in range(4)]},
-            ],
+            "branches": [agent(f"{p}{i}") for i in range(3)],
         }
-    )
-    policy = PLATFORM_POLICY.model_copy(update={"agents_alive": 6})
+        for p in "rs"
+    ]
+    nested = spec({"type": "parallel", "id": "outer", "join": "all", "branches": inner})
+    policy = PLATFORM_POLICY.model_copy(update={"agents_alive": 3})
 
-    [issue] = policy_issues(spec_.root, policy)
+    assert policy_issues(nested.root, policy) == []
+    result = await run(nested, runtime, policy=policy)
 
-    assert (issue.code, issue.limit, issue.value, issue.observed) == (
-        "policy_limit",
-        "agents_alive",
-        6,
-        8,
-    )
-    assert issue.path == "root.steps[0]"
+    assert result.status == "completed"
+    assert len(runtime.nodes) == 6
+    assert runtime.peak == 3
 
 
 async def test_a_classifier_counts_as_spawned_and_the_spawn_limit_refuses_it() -> None:

@@ -957,7 +957,8 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
     `max_concurrency` and a parallel's branches within `agents_alive`, and loops, maps and
     parallels must not nest deeper than `max_depth`, and a gate's `ttl_s` must be within
     `approval_ttl_s`. Agents spawned and wall time are only known at runtime, where the engine
-    checks them."""
+    checks them; agents beyond `agents_alive` at once (a parallel inside a branch) wait there for
+    a slot."""
     issues: list[ValidationIssue] = []
 
     def over(
@@ -997,12 +998,6 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
                     f"{policy.agents_alive} agents alive"
                 )
                 over(node, path, "agents_alive", policy.agents_alive, len(node.branches), why)
-            case ParallelNode() if (alive := agents_alive(node)) > policy.agents_alive:
-                why = (
-                    f"its branches can run {alive} agents at once, above the workspace limit of "
-                    f"{policy.agents_alive} agents alive"
-                )
-                over(node, path, "agents_alive", policy.agents_alive, alive, why)
             case GateNode() if node.ttl_s is not None and node.ttl_s > policy.approval_ttl_s:
                 why = (
                     f"ttl_s {node.ttl_s} is above the workspace limit of "
@@ -1035,29 +1030,6 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
 
     visit(root, "root", 0)
     return issues
-
-
-def agents_alive(node: Node) -> int:
-    """The most agents `node` can run at once: a parallel's branches all together, a router's
-    classifier or its largest route, a map's `max_concurrency` items."""
-    match node:
-        case AgentNode():
-            return 1
-        case ReduceNode():
-            return 1 if node.agent is not None else 0
-        case ToolNode() | GateNode():
-            return 0
-        case SequenceNode():
-            return max(agents_alive(step) for step in node.steps)
-        case LoopNode():
-            return agents_alive(node.body)
-        case MapNode():
-            return node.max_concurrency * agents_alive(node.body)
-        case ParallelNode():
-            return sum(agents_alive(branch) for branch in node.branches)
-        case RouterNode():
-            routes = [agents_alive(route) for _, _, route in router_routes(node, "")]
-            return max([*routes, 1 if node.classifier is not None else 0])
 
 
 def agents_spawned(node: Node) -> int:
