@@ -73,7 +73,7 @@ Milestone 1 proved the engine end to end, but the UI is a debug view. Every late
 | 4.2 | Typed ports: input/output JSON Schemas validated at each edge | A wrong-shaped output fails at the edge with a clear error | ✅ Done ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)) |
 | 4.3 | Shared run context: named artifacts in the run workspace | Nodes exchange `findings.json` through artifacts | ✅ Done ([#139](https://github.com/KsiProgramming/agentic-dev/pull/139)) |
 | 4.4 | Deterministic tool nodes: linter, dependency scanner, secret scanner | Tool outputs feed specialist agents | ✅ Done ([#140](https://github.com/KsiProgramming/agentic-dev/pull/140)) |
-| 4.5 | `reduce` strategies: dedupe, vote | Duplicate findings are merged with severity and confidence | — |
+| 4.5 | `reduce` strategies: dedupe, vote | Duplicate findings are merged with severity and confidence | ✅ Done ([#141](https://github.com/KsiProgramming/agentic-dev/pull/141)) |
 | 4.6 | `router` primitive (rule + classifier agent) | A run branches on a condition | — |
 | 4.7 | "Audit codebase" template (read-only, report only) | Audit run produces findings.json + readable report | — |
 

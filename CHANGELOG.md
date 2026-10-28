@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 4.5 `reduce` strategies, dedupe and vote:
+- Phase 4.5 `reduce` strategies, dedupe and vote ([#141](https://github.com/KsiProgramming/agentic-dev/pull/141)):
   - **Spec.** `reduce` takes `strategy: "dedupe"` or `"vote"` (with optional `min_votes`, default a majority of the sources that completed), and `from` may name a `parallel` as well as a map, for every strategy.
   - **Engine.** Both strategies merge findings reports with no model call. Findings with the same `fingerprint` are one issue; an agent's finding without one is matched by category, path, line and rule. A merged finding keeps the highest severity and lists the `sources` that reported it. Its `confidence` is the share of sources that reported it, times their own confidence. `vote` keeps the issues `min_votes` sources reported, and fails when fewer sources completed. A source that is not a findings report fails the reduce, with the typed-port error format. `node_completed` carries `merged: {sources, findings_in, findings_out}`.
   - **Findings schema.** Additive in v1: `scanner: "merged"`, an optional `fingerprint` on input, and per finding `confidence` and `sources`; the report gains `sources`. The model moves to `agentic_runtime.findings`, re-exported by `agentic_tools.scan.report`.
