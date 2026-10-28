@@ -80,10 +80,13 @@ export function PaletteButton({ onClick }: { onClick: () => void }) {
       className="size-9 p-0 text-muted-foreground md:w-56 md:justify-start md:px-3"
     >
       <SearchIcon aria-hidden="true" />
-      <span className="hidden md:inline">Search…</span>
-      <kbd className="ml-auto hidden rounded-sm border bg-muted px-1.5 font-sans text-caption md:inline">
-        ⌘K
-      </kbd>
+      {/* The name starts with the visible text, "Search" (WCAG 2.5.3): the ellipsis is drawn by
+          CSS, as is the shortcut (in `aria-keyshortcuts`), so neither is visible text. */}
+      <span className="hidden after:content-['…'] md:inline">Search</span>
+      <kbd
+        aria-hidden="true"
+        className="ml-auto hidden rounded-sm border bg-muted px-1.5 font-sans text-caption after:content-['⌘K'] md:inline"
+      />
     </Button>
   );
 }

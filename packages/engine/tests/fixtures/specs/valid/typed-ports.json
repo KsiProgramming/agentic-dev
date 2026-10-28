@@ -1,0 +1,62 @@
+{
+  "spec_version": "0",
+  "id": "typed-ports",
+  "name": "Typed ports",
+  "description": "Nodes that declare the JSON their input and output must match, checked at each edge.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "tool",
+        "id": "scan",
+        "tool": "repo.list_modules",
+        "output_schema": {
+          "type": "object",
+          "required": ["modules"],
+          "properties": { "modules": { "type": "array", "items": { "type": "string" } } }
+        }
+      },
+      {
+        "type": "agent",
+        "id": "triage",
+        "role": "Security reviewer",
+        "instructions": "Review the modules in your input and list the findings.",
+        "input_schema": {
+          "type": "object",
+          "required": ["modules"],
+          "properties": { "modules": { "type": "array" } }
+        },
+        "output_schema": {
+          "type": "object",
+          "required": ["findings"],
+          "properties": {
+            "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+          },
+          "$defs": {
+            "finding": {
+              "type": "object",
+              "required": ["title", "severity"],
+              "properties": {
+                "title": { "type": "string" },
+                "severity": { "enum": ["low", "medium", "high"] }
+              }
+            }
+          }
+        }
+      },
+      { "type": "gate", "id": "approve", "title": "Approve the findings" },
+      {
+        "type": "agent",
+        "id": "report",
+        "role": "Writer",
+        "instructions": "Write a short report of the findings in your input.",
+        "input_schema": {
+          "type": "object",
+          "required": ["findings"],
+          "properties": { "findings": { "type": "array" } }
+        }
+      }
+    ]
+  }
+}

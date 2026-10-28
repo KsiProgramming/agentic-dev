@@ -84,6 +84,17 @@ export interface Step {
   branches: Branch[] | null;
   /** Why a loop stopped: `condition` or `max_iterations`. */
   stopReason: string | null;
+  /** The typed port that failed the step (4.2): its `node_failed`'s `port`. */
+  port: PortFailure | null;
+}
+
+/** A value that did not match a node's input or output schema, and where it went wrong. */
+export interface PortFailure {
+  side: "input" | "output";
+  /** The node the value came from, on the input side, when it is the previous step. */
+  fromNodeId: string | null;
+  /** JSON pointers (empty for the value itself) and messages, the most relevant first. */
+  errors: { pointer: string; message: string }[];
 }
 
 export interface CreatedRepo {
@@ -179,6 +190,22 @@ function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function parsePort(value: unknown): PortFailure | null {
+  if (typeof value !== "object" || value === null) return null;
+  const port = value as Record<string, unknown>;
+  if (port.side !== "input" && port.side !== "output") return null;
+  const errors = Array.isArray(port.errors) ? (port.errors as unknown[]) : [];
+  return {
+    side: port.side,
+    fromNodeId: str(port.from_node_id),
+    errors: errors.flatMap((e) => {
+      const error = (typeof e === "object" && e !== null ? e : {}) as Record<string, unknown>;
+      const message = str(error.message);
+      return message === null ? [] : [{ pointer: str(error.pointer) ?? "", message }];
+    }),
+  };
+}
+
 function num(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -200,6 +227,7 @@ function newStep(id: string, at: string): Step {
     itemCount: null,
     branches: null,
     stopReason: null,
+    port: null,
   };
 }
 
@@ -388,6 +416,7 @@ class Builder {
         step.endedAt = at;
         step.error = str(payload.error) ?? step.error;
         step.stopReason = str(payload.stop_reason);
+        step.port = parsePort(payload.port);
         this.open = this.open.filter((s) => s !== step);
         return;
       case "gate_waiting":

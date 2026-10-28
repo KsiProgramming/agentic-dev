@@ -25,6 +25,7 @@ dev = [
     "ruff>=0.13",
     "testcontainers[postgres,redis]>=4.10",
     "types-docker>=7.1",
+    "types-jsonschema>=4.25",
 ]
 
 [tool.uv]

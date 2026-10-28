@@ -29,6 +29,11 @@ parallel writes `node_started` (payload `branches`, `join`, `quorum`),
 `branch`, then its end (payload `completed`, `failed`, `cancelled`: branch ids). Once its join is
 decided, the branches still running end `node_cancelled`.
 
+An agent or tool node with typed ports (4.2) has its input checked before it starts and its
+output once it completes: a value that does not match fails the node, whose `node_failed` carries
+the `port` that refused it. A typed output becomes the node's `data`, and its text the JSON the
+next node receives.
+
 The run's `Policy` is enforced as it goes: at most `agents_alive` agents run at once across the
 whole run, and an agent node (or a map, for all its items' agents) that would take the run past
 `agents_spawned` does not start. It writes `node_started`, `policy_limit_exceeded` and
@@ -75,6 +80,7 @@ from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.graph.state import MapItem, ParallelBranch, RunState, RunUpdate
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
+from agentic_engine.ports import PortFailure, check_port
 from agentic_engine.spec import (
     CREATE_TOOLS,
     PUBLISH_TOOLS,
@@ -89,6 +95,7 @@ from agentic_engine.spec import (
     ToolNode,
     WorkflowSpec,
     iter_nodes,
+    port_edges,
 )
 from agentic_engine.tool import run_tool_node
 from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor, Usage
@@ -104,12 +111,14 @@ class CompileError(ValueError):
 @dataclass
 class _Limits:
     """A run's policy, the slots of its `agents_alive` limit, its budget meter if it has a
-    budget, and the review its gates show and edit branches through, shared by all its nodes for
-    one attempt."""
+    budget, the review its gates show and edit branches through, and the node each typed input
+    comes from (consumer id → producer id, `port_edges`), shared by all its nodes for one
+    attempt."""
 
     policy: Policy
     budget: BudgetMeter | None = None
     review: GateReview | None = None
+    sources: dict[str, str] = field(default_factory=dict[str, str])
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -231,7 +240,8 @@ def compile_workflow(
     if checkpointer is None and (gate := next((n for n in steps if isinstance(n, GateNode)), None)):
         raise CompileError(f"gate {gate.id!r} needs a checkpointer to pause the run")
     builder = StateGraph(RunState)
-    limits = _Limits(policy, budget, review)
+    sources = {consumer.id: producer.id for producer, consumer, _ in port_edges(spec.root)}
+    limits = _Limits(policy, budget, review, sources)
 
     def add(node: Node, then: str) -> str:
         """Add `node`, going on to `then` once it completes (to `END` otherwise), and return the
@@ -404,6 +414,13 @@ async def _run_step(
     # A gate runs again from its start when the run continues; the runner logs its start.
     if not isinstance(node, GateNode):
         await log.emit(NODE_STARTED, node_id=node.id, item=item, branch=branch)
+    if not isinstance(node, GateNode) and node.input_schema is not None:
+        source = limits.sources.get(node.id)
+        checked = check_port("input", node.id, node.input_schema, input, source)
+        if isinstance(checked, PortFailure):
+            refused: dict[str, JsonValue] = {"error": checked.error, "port": checked.payload()}
+            await log.emit(NODE_FAILED, node_id=node.id, payload=refused, item=item, branch=branch)
+            return AgentNodeResult(status="failed", text=input, usage=None, error=checked.error)
     try:
         try:
             result = await run()
@@ -412,15 +429,37 @@ async def _run_step(
     except (asyncio.CancelledError, PolicyLimitExceeded):
         await log.emit(NODE_CANCELLED, node_id=node.id, item=item, branch=branch)
         raise
+    port: PortFailure | None = None
+    if not isinstance(node, GateNode) and node.output_schema is not None:
+        result, port = _check_output(node, result)
     if (pull := _pull_request(node, result)) is not None:
         await log.emit(PR_OPENED, node_id=node.id, payload=pull, item=item, branch=branch)
     if (repo := _created_repo(node, result)) is not None:
         await log.emit(REPO_CREATED, node_id=node.id, payload=repo, item=item, branch=branch)
     payload: dict[str, JsonValue] = {"error": result.error} if result.error else {}
+    if port is not None:
+        payload["port"] = port.payload()
     await log.emit(
         NODE_END[result.status], node_id=node.id, payload=payload, item=item, branch=branch
     )
     return result
+
+
+def _check_output(
+    node: AgentNode | ToolNode, result: AgentNodeResult
+) -> tuple[AgentNodeResult, PortFailure | None]:
+    """`result` checked against `node`'s `output_schema`, if it completed: with the matching
+    object as its `data` and as its text (pretty JSON, which the next node gets), or failed with
+    why it does not match. Its usage is kept either way. A tool's structured result is checked
+    when it has one, else its text, as an agent's."""
+    if result.status != "completed" or node.output_schema is None:
+        return result, None
+    value = result.data if isinstance(node, ToolNode) and result.data is not None else result.text
+    checked = check_port("output", node.id, node.output_schema, value)
+    if isinstance(checked, PortFailure):
+        return result.model_copy(update={"status": "failed", "error": checked.error}), checked
+    text = json.dumps(checked, indent=2, ensure_ascii=False)
+    return result.model_copy(update={"data": checked, "text": text}), None
 
 
 def _update(node_id: str, result: AgentNodeResult) -> RunUpdate:

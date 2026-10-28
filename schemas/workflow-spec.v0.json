@@ -9,6 +9,34 @@
           "title": "Id",
           "type": "string"
         },
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its input must be JSON that matches this, or it does not start.",
+          "title": "Input Schema"
+        },
         "instructions": {
           "minLength": 1,
           "title": "Instructions",
@@ -26,6 +54,34 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.",
+          "title": "Output Schema"
         },
         "provider": {
           "anyOf": [
@@ -579,6 +635,62 @@
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "title": "Id",
           "type": "string"
+        },
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its input must be JSON that matches this, or it does not run.",
+          "title": "Input Schema"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its structured result (else its text as JSON) must match this, or it fails.",
+          "title": "Output Schema"
         },
         "tool": {
           "description": "The platform tool to call, e.g. `repo.list_files`.",

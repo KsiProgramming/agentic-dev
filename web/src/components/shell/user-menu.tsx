@@ -60,7 +60,9 @@ export function UserMenu({ rail = false }: { rail?: boolean }) {
     </DropdownMenuTrigger>
   );
   return (
-    <DropdownMenu>
+    // Not modal: a modal menu hides the page with `aria-hidden` while its scroll areas stay
+    // focusable (axe `aria-hidden-focus`). Escape and a click outside still close it.
+    <DropdownMenu modal={false}>
       {rail ? (
         <Tooltip>
           <TooltipTrigger asChild>{trigger}</TooltipTrigger>

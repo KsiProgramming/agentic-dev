@@ -1,0 +1,15 @@
+{
+  "spec_version": "0",
+  "id": "port-remote-ref",
+  "name": "A port schema with a remote reference",
+  "root": {
+    "type": "agent",
+    "id": "triage",
+    "role": "Reviewer",
+    "instructions": "List the findings.",
+    "input_schema": {
+      "type": "object",
+      "properties": { "findings": { "$ref": "https://example.com/findings.json" } }
+    }
+  }
+}

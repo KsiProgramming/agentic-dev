@@ -577,6 +577,20 @@ export interface components {
             model?: string | null;
             /** Tools */
             tools?: string[];
+            /**
+             * Input Schema
+             * @description Its input must be JSON that matches this, or it does not start.
+             */
+            input_schema?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /**
+             * Output Schema
+             * @description It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.
+             */
+            output_schema?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
         };
         /** ApprovalRequest */
         ApprovalRequest: {
@@ -931,7 +945,7 @@ export interface components {
             install_url: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1730,6 +1744,20 @@ export interface components {
             args?: {
                 [key: string]: components["schemas"]["JsonValue"];
             };
+            /**
+             * Input Schema
+             * @description Its input must be JSON that matches this, or it does not run.
+             */
+            input_schema?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /**
+             * Output Schema
+             * @description Its structured result (else its text as JSON) must match this, or it fails.
+             */
+            output_schema?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
         };
         /** ValidateWorkflowRequest */
         ValidateWorkflowRequest: {

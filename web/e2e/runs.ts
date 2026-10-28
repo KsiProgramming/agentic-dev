@@ -14,6 +14,7 @@ export async function startRun(
   steps: unknown[],
   name = "E2E layout",
   repo?: string,
+  input = "hello",
 ): Promise<string> {
   const response = await request.post(`${apiURL}/runs`, {
     data: {
@@ -23,7 +24,7 @@ export async function startRun(
         name,
         root: { type: "sequence", id: "main", steps },
       },
-      input: "hello",
+      input,
       workspace_id: e2eWorkspaceId(),
       ...(repo ? { repo: { url: repo } } : {}),
     },
@@ -39,6 +40,17 @@ export const GATE = {
   id: "approve",
   title: "Approve the greeting",
   prompt: "Check it before the run ends.",
+};
+
+/** A writer whose output must be JSON with a `findings` list (4.2). The fake runtime echoes its
+ * input, so it fails at its output port on "hello" and passes on `{"findings": []}`. */
+export const TYPED_WRITER = {
+  ...WRITER,
+  output_schema: {
+    type: "object",
+    required: ["findings"],
+    properties: { findings: { type: "array" } },
+  },
 };
 
 /** A gate that expires a few seconds after it pauses (the e2e worker sweeps every second). */

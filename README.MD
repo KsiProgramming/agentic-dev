@@ -745,6 +745,24 @@ A `parallel` node runs different branches at the same time on the same input and
 - **Durability.** LangGraph checkpoints each finished branch, so a run cut off mid-parallel runs again only the branches that had not finished. Early cancelling only sees the branches of the current attempt; the join itself decides from the checkpointed outcomes, so it is right either way.
 - **Console.** The timeline nests each branch under the parallel, like map items, with "Cancelled" on the branches the join left behind. The Graph tab draws the parallel as a box with its branches side by side, its header saying how far it got ("2 of 3 branches · any · 1 cancelled").
 
+## Typed ports
+An `agent` or `tool` node may declare the JSON its input and its output must match (phase 4.2). A value of the wrong shape then fails the run at the edge where it appears, not three nodes later. [typed-ports.json](packages/engine/tests/fixtures/specs/valid/typed-ports.json) lists the modules, has an agent turn them into findings, and hands the findings to a writer:
+
+```json
+{ "type": "agent", "id": "triage", "role": "Security reviewer", "instructions": "...",
+  "input_schema":  { "type": "object", "required": ["modules"], "properties": { "modules": { "type": "array" } } },
+  "output_schema": { "type": "object", "required": ["findings"],
+                     "properties": { "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } } },
+                     "$defs": { "finding": { "...": "..." } } } }
+```
+
+- **Schemas.** JSON Schema 2020-12 with an object at the root, only local `$ref`s (`#/...`), at most 16 KB. Both fields are optional; an untyped node works as before.
+- **Output.** An agent with an `output_schema` is asked to end its answer with one JSON object that matches it. The engine parses the answer (the whole text, or the one fenced block in it) and checks it; a tool's structured result is checked, else its text. A match becomes the node's `data` (`results.triage.data.findings` in CEL), and the next node receives it as pretty JSON. A mismatch fails the node, whose usage is still counted.
+- **Input.** A node with an `input_schema` checks what it is given before it starts: the previous step's output, the run input for the first step, a map item or a parallel's input. A mismatch fails it, and no agent starts.
+- **Errors.** One line that names the node, the side and where the JSON broke: `output of 'triage' does not match its output_schema at /findings/0/severity: 'urgent' is not one of ['low', 'medium', 'high']`, or `input of 'report' (from 'triage') …`, or `output of 'triage' is not JSON: …`. `node_failed` also carries `port`: `{side, node_id, from_node_id, errors: [{pointer, message}]}`, with at most 10 errors.
+- **Validation.** `POST /workflows/{id}/validate` and `POST /runs` refuse a schema a port cannot take (`invalid_schema`, on the field), and a consumer whose `input_schema` requires a property the previous step's `output_schema` does not declare, or declares with another type (`port_mismatch`, looking through gates). That check is deliberately light: anything deeper is caught at runtime.
+- **Console.** A step failed by a port shows "Wrong shape" in its Output, with each JSON pointer and message. Its Input tab shows both schemas.
+
 ## Generate docs
 The "Generate docs" template documents each module of a repo and opens a pull request after you approve (phase 1.11, AC-1). A template is a named builder of an ordinary workflow spec (`agentic_engine.templates`): the API builds the spec from the template's options and runs it like any other.
 

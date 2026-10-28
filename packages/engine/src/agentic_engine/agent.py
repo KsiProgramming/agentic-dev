@@ -1,5 +1,6 @@
 """Runs one `agent` node on an `AgentRuntime`. The LangGraph compiler (0.4) wraps this."""
 
+import json
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Literal
 
@@ -35,7 +36,7 @@ class AgentNodeResult(BaseModel):
     tool_calls: list[ToolCall] = Field(default_factory=list[ToolCall])
     events: list[AgentEvent] = Field(default_factory=list[AgentEvent])
     error: str | None = None
-    # A tool node's structured result, if its tool returned one.
+    # A tool node's structured result, if its tool returned one, or a typed output (4.2).
     data: dict[str, JsonValue] | None = None
 
 
@@ -46,11 +47,21 @@ TOOL_INTENT_INSTRUCTION = (
 """Added to the instructions of an agent with tools, so the console can say why each call was
 made. Every platform tool takes the optional `description` (`agentic_tools.strict`)."""
 
+OUTPUT_SCHEMA_INSTRUCTION = (
+    "End your answer with one JSON object that matches this JSON Schema, and write nothing after "
+    "it. The next step reads only that object."
+)
+"""Added, with the schema after it, to the instructions of an agent with an `output_schema`
+(4.2). The engine parses the answer and checks it (`agentic_engine.ports`)."""
+
 
 def to_request(node: AgentNode, input: str) -> AgentRequest:
     instructions = node.instructions
     if node.tools:
         instructions = f"{instructions}\n\n{TOOL_INTENT_INSTRUCTION}"
+    if node.output_schema is not None:
+        schema = json.dumps(node.output_schema, ensure_ascii=False)
+        instructions = f"{instructions}\n\n{OUTPUT_SCHEMA_INSTRUCTION}\n\n{schema}"
     return AgentRequest(
         node_id=node.id,
         role=node.role,

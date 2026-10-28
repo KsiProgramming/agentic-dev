@@ -1,0 +1,12 @@
+{
+  "spec_version": "0",
+  "id": "port-not-object",
+  "name": "A port schema whose root is not an object",
+  "root": {
+    "type": "agent",
+    "id": "triage",
+    "role": "Reviewer",
+    "instructions": "List the findings.",
+    "output_schema": { "type": "array", "items": { "type": "string" } }
+  }
+}

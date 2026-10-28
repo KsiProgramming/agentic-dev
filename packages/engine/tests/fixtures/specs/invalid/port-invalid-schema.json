@@ -1,0 +1,12 @@
+{
+  "spec_version": "0",
+  "id": "port-invalid-schema",
+  "name": "A port schema that is not JSON Schema",
+  "root": {
+    "type": "agent",
+    "id": "triage",
+    "role": "Reviewer",
+    "instructions": "List the findings.",
+    "output_schema": { "type": "object", "properties": { "findings": { "type": "list" } } }
+  }
+}

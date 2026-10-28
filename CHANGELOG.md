@@ -9,6 +9,13 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 4.2 typed ports ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)):
+  - **Spec.** `agent` and `tool` nodes take optional `input_schema` and `output_schema`: JSON Schema 2020-12 with an object root, only local `$ref`s, at most 16 KB.
+  - **Engine.** A node's input is checked before it starts and its output once it completes. A value of the wrong shape fails the node with one line naming the node, the side and the JSON pointer, and `node_failed` carries a structured `port`. An agent with an `output_schema` is asked for JSON and its answer is parsed (one fenced block allowed). A typed output becomes the node's `data` and reaches the next node as JSON.
+  - **Validation.** New issue codes `invalid_schema` and `port_mismatch` (required properties the previous step does not declare, or declares with another type), from `/validate` and `POST /runs`.
+  - **Console.** A step failed by a port shows a "Wrong shape" alert with each pointer and message, and its Input tab shows the node's schemas.
+  - The engine depends on `jsonschema`, and the spec JSON Schema, OpenAPI spec and web client are regenerated.
+  - **Roadmap and board, done by hand.** GitHub Actions jobs are not starting on this repo (a billing block), so CI could not run. Phase 4.2 was marked done in `specs/roadmap.md` with `scripts/check_roadmap.py --mark-done`, the command the "Roadmap phase marked done" job runs. The project board was synced with `scripts/sync_roadmap_board.py`, what `roadmap-board.yml` runs. The checks were run locally, as listed in the PR.
 - Phase 11.8 agent activity, read like a chat with Claude ([#137](https://github.com/KsiProgramming/agentic-dev/pull/137)):
   - **Work blocks.** In a step's Activity and Output, each agent turn's work (its reasoning, notes and tool calls) folds into one line: "Listed 1 folder, read 2 files · 3 tool calls · 8s". The answer stays open below it. A block opens on a failed call. While the agent works, the line says what it is doing, with a timer that ticks.
   - **Why each call was made.** The platform's tools take an optional `description`, which the agent fills with its intent ("Read the frontend config"). It is the call's title in the console and in the live line, shown as plain text. Reads with no intent still fold into one row.
@@ -256,6 +263,9 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
+- Accessibility of the 11.7 shell ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)), found by the axe checks while building 4.2. CI never ran them on `main`, because the jobs were not started:
+  - **Search button.** Its accessible name ("Search runs and commands") now starts with its visible text (WCAG 2.5.3). The ellipsis and the `⌘K` hint are drawn by CSS and hidden from the name, and the shortcut stays in `aria-keyshortcuts`.
+  - **Preferences menu.** It is no longer modal, so it does not hide the page with `aria-hidden` while scroll areas behind it stay focusable. Escape and a click outside still close it.
 - CI is green again on `main` ([#132](https://github.com/KsiProgramming/agentic-dev/pull/132)):
   - **Graph node detail.** The sheet now takes focus itself when it opens. It used to focus its first value, whose tooltip then took the first Escape and left the sheet open. On close, focus goes back to the node it was opened from (Radix only refocuses a dialog's own trigger, and this sheet has none).
   - **Graph a11y.** Each node's accessible name starts with its visible text, word for word ("worker, Done, writer, agent"; WCAG 2.5.3). The node's status line shows a new `StatusIcon`, without `StatusMarker`'s hidden copy of the label. React Flow's credit link moves bottom left, away from the zoom controls, and is now readable and a 24 px target.
