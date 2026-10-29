@@ -277,7 +277,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
-- Phase 11.9 Design language v2: every screen follows the new [`specs/design-language.md`](specs/design-language.md), now part of the constitution:
+- Phase 11.9 Design language v2 ([#144](https://github.com/KsiProgramming/agentic-dev/pull/144)): every screen follows the new [`specs/design-language.md`](specs/design-language.md), now part of the constitution:
   - **Tokens.** An ink (near-black) primary replaces indigo; three text levels (`foreground`, `foreground-secondary`, `muted-foreground`) plus `placeholder`; tinted surfaces (`surface-sunken`, `surface-subtle`), `border-strong`, `divider`, an edge per status (`--status-*-border`) and colours per finding severity (`--severity-*`); UI text 13 px, Inter `cv11`/`ss01`, `text-kbd`. A test checks every text level is ≥ 4.5:1 on every surface, light and dark.
   - **Components.** Underline tabs (segmented only for a view switch or a form choice), badges with edges, bordered tables with a 36 px tinted header, inputs with a stronger edge, outlined and solid red destructive buttons, sheets and panes with header rows, `StatStrip` (stat tiles as one strip), `TruncatedPath` (paths cut from the left), filter chips with "+ Filter", a new `EmptyState` and `Kbd`.
   - **Shell.** A tinted sidebar with a white current item, a 48 px top bar, 32 px page padding and a header band that holds page tabs.
