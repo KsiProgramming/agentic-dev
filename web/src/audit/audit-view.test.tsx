@@ -142,12 +142,14 @@ test("filters from the URL narrow the query, and Load more fetches the next page
   expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
 });
 
-test("a run id is applied on Enter, and a partial one is refused on the field", async () => {
+test("a run id is applied from its filter, and a partial one is refused on the field", async () => {
   api(() => json(page([created])));
   show();
   await screen.findByRole("table", { name: "Audit log" });
 
-  const field = screen.getByRole("textbox", { name: "Run id" });
+  fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Run" }));
+  const field = await screen.findByRole("textbox", { name: "Run id" });
   fireEvent.change(field, { target: { value: "1a2b" } });
   fireEvent.submit(field);
   expect(screen.getByText("Enter a full run id.")).toBeTruthy();
@@ -164,8 +166,8 @@ test("the category filter sets the URL", async () => {
   show();
   await screen.findByRole("table", { name: "Audit log" });
 
-  fireEvent.change(screen.getByRole("combobox", { name: "Category" }), {
-    target: { value: "runs" },
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Category" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Runs" }));
   expect(nav.replace).toHaveBeenCalledWith("/audit?category=runs", { scroll: false });
 });

@@ -45,7 +45,6 @@ export function RunBanner({
               type="button"
               variant="link"
               size="sm"
-              className="h-auto px-0"
               onClick={() => onGoToStep(banner.step!.key)}
             >
               Go to step
@@ -59,12 +58,12 @@ export function RunBanner({
     const { gate } = banner;
     return (
       // Not an alert: the page's live region already announces the gate once.
-      <Alert role={undefined} data-testid="run-banner" data-kind="waiting">
-        <CirclePauseIcon aria-hidden="true" className="text-status-waiting" />
+      <Alert variant="waiting" role={undefined} data-testid="run-banner" data-kind="waiting">
+        <CirclePauseIcon aria-hidden="true" />
         <AlertTitle className="flex flex-wrap items-center gap-x-2 break-words">
           <span>Needs approval: {gate.title}</span>
           {gate.expiresAt ? (
-            <ExpiresIn iso={gate.expiresAt} className="font-normal text-muted-foreground" />
+            <ExpiresIn iso={gate.expiresAt} className="font-normal text-status-waiting" />
           ) : null}
         </AlertTitle>
         <AlertDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -72,14 +71,13 @@ export function RunBanner({
             type="button"
             variant="link"
             size="sm"
-            className="h-auto px-0"
             onClick={() => document.getElementById(DOCK_ID)?.focus()}
           >
             Review
           </Button>
           <Link
             href={`/inbox?run=${banner.runId}`}
-            className="text-meta text-primary underline-offset-4 hover:underline"
+            className="text-meta text-foreground underline-offset-4 hover:underline"
           >
             Open in Inbox
           </Link>

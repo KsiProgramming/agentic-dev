@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Kbd as UiKbd } from "@/components/ui/kbd";
 import {
   Sheet,
   SheetContent,
@@ -38,11 +39,12 @@ export function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-export function Kbd({ children }: { children: ReactNode }) {
+/** A button's shortcut, from 768 px (no keyboard assumed below). */
+export function Kbd({ children, onPrimary = false }: { children: ReactNode; onPrimary?: boolean }) {
   return (
-    <kbd className="ml-1 hidden rounded border border-current/30 px-1 font-mono text-[11px] leading-4 opacity-70 md:inline">
+    <UiKbd onPrimary={onPrimary} className="ml-1 hidden md:inline-flex">
       {children}
-    </kbd>
+    </UiKbd>
   );
 }
 
@@ -72,7 +74,7 @@ export function ApproveButton({
         <CheckIcon aria-hidden="true" data-icon="inline-start" />
       )}
       {edits > 0 ? `Approve with ${plural(edits, "edit")}` : "Approve"}
-      {shortcut ? <Kbd>A</Kbd> : null}
+      {shortcut ? <Kbd onPrimary>A</Kbd> : null}
     </Button>
   );
 }
@@ -88,7 +90,7 @@ export function RejectButton({
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="destructive"
       onClick={() => decision.setRejecting(true)}
       disabled={decision.busy}
       aria-keyshortcuts={shortcut ? "R" : undefined}
@@ -182,7 +184,7 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
           }
           footer={
             <>
-              <p className="text-sm text-muted-foreground md:mr-auto" aria-live="polite">
+              <p className="text-meta text-muted-foreground md:mr-auto" aria-live="polite">
                 {edits.count > 0
                   ? `${plural(edits.count, "file")} edited`
                   : "Edit a file to change it before approving."}
@@ -196,10 +198,11 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
         <Sheet open={decision.details} onOpenChange={decision.setDetails}>
           <SheetContent
             side={wide ? "right" : "bottom"}
-            className="data-[side=bottom]:max-h-[85svh] data-[side=right]:w-full! data-[side=right]:sm:max-w-[560px]!"
+            className="data-[side=bottom]:max-h-[85svh]"
+            size="md"
             data-testid="gate-details"
           >
-            <SheetHeader className="border-b pr-12">
+            <SheetHeader>
               <SheetTitle>{gate.title}</SheetTitle>
               <SheetDescription>
                 {gate.prompt ?? "Review what the run produced before it goes on."}
@@ -268,13 +271,13 @@ function RejectDialog({ decision }: { decision: GateDecision }) {
           </Alert>
         ) : null}
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => setRejecting(false)}>
+          <Button type="button" variant="outline" onClick={() => setRejecting(false)}>
             Cancel
           </Button>
           <Button
             type="submit"
             form={`${commentId}-form`}
-            variant="destructive"
+            variant="destructive-solid"
             disabled={decision.pending !== null}
           >
             {decision.pending === "reject" ? (

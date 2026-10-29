@@ -56,9 +56,7 @@ export function TemplatesView({
           ) : (
             <CircleAlertIcon aria-hidden="true" />
           )}
-          <AlertDescription className={banner.ok ? "text-foreground" : undefined}>
-            {banner.text}
-          </AlertDescription>
+          <AlertDescription>{banner.text}</AlertDescription>
         </Alert>
       ) : null}
       <TemplateGallery readiness={readiness} onStart={open} baseUrl={baseUrl} />

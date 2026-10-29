@@ -6,6 +6,7 @@ export { Money } from "./money";
 export { Percent } from "./percent";
 export { RelativeTime } from "./relative-time";
 export { shortId } from "./short-id";
-export { StatTile } from "./stat-tile";
+export { StatStrip, StatTile } from "./stat-tile";
 export { TokenCount } from "./token-count";
+export { pathLabel, TruncatedPath } from "./truncated-path";
 export { WaitingTime } from "./waiting-time";

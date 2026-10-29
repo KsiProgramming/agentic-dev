@@ -3,14 +3,14 @@
 import Link from "next/link";
 
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+import { tabsListVariants, tabsTriggerVariants, useEdgeFade } from "@/components/ui/tabs";
 
 import { formatCount } from "./cost";
 import { RUN_VIEWS, runsQueryToString, type RunsQuery } from "./filters";
 import type { RunCounts } from "./use-run-counts";
 
-/** The runs list's saved views as tabs, each with how many runs it holds. Each is a link (the
- * view lives in the URL), the current one marked with `aria-current`. */
+/** The runs list's saved views as underline tabs in the page header, each with how many runs it
+ * holds. Each is a link (the view lives in the URL), the current one marked with `aria-current`. */
 export function RunViewTabs({
   query,
   counts,
@@ -20,24 +20,22 @@ export function RunViewTabs({
   counts: RunCounts | undefined;
   pathname: string;
 }) {
+  const { ref, style } = useEdgeFade<HTMLUListElement>();
   return (
-    <nav aria-label="Views" className="max-w-full overflow-x-auto">
-      <ul className="inline-flex h-9 items-center gap-1 rounded-lg bg-muted p-1 text-muted-foreground">
+    <nav aria-label="Views">
+      <ul ref={ref} style={style} className={tabsListVariants()}>
         {RUN_VIEWS.map((view) => {
           const current = view.id === query.view;
           const search = runsQueryToString({ ...query, view: view.id });
           const count = counts?.[view.id];
           return (
-            <li key={view.id}>
+            <li key={view.id} className="flex">
               <Link
                 href={search ? `${pathname}?${search}` : pathname}
                 scroll={false}
                 aria-current={current ? "page" : undefined}
                 data-view={view.id}
-                className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-body font-medium whitespace-nowrap transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50",
-                  current && "bg-background text-foreground shadow-xs",
-                )}
+                className={tabsTriggerVariants({ className: "h-full" })}
               >
                 {view.label}
                 {count === undefined ? (
@@ -45,7 +43,7 @@ export function RunViewTabs({
                 ) : (
                   <span
                     data-testid={`view-count-${view.id}`}
-                    className="text-caption text-muted-foreground tabular-nums"
+                    className="font-normal text-muted-foreground tabular-nums"
                   >
                     <span className="sr-only">, </span>
                     {formatCount(count)}

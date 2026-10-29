@@ -99,14 +99,14 @@ export function ApprovalDock({
                 ) : null}
               </div>
               {summary ? (
-                <p className="truncate text-sm text-muted-foreground" title={summary}>
+                <p className="truncate text-meta text-foreground-secondary" title={summary}>
                   {summary}
                 </p>
               ) : null}
             </div>
           </div>
           {sent ? (
-            <p role="status" className="text-sm font-medium">
+            <p role="status" className="text-meta font-medium">
               {sent === "approve" ? "Approved" : "Rejected"}. The run carries on shortly.
             </p>
           ) : (

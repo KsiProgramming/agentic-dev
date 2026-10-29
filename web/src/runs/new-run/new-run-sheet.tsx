@@ -228,7 +228,7 @@ function NewRunForm({
           onValueChange={(mode) => form.setValue("repoMode", mode as RepoMode)}
           className="gap-4"
         >
-          <TabsList aria-label="Where the run works" className="w-full">
+          <TabsList variant="segmented" aria-label="Where the run works" className="w-full">
             <TabsTrigger value="existing" disabled={isSubmitting}>
               Existing repo
             </TabsTrigger>
@@ -343,7 +343,8 @@ export function NewRunSheet({ open, onOpenChange, ...props }: SheetProps & { ope
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={wide ? "right" : "bottom"}
-        className="data-[side=bottom]:h-svh data-[side=right]:w-full! data-[side=right]:sm:max-w-[480px]!"
+        className="data-[side=bottom]:h-svh"
+        size="sm"
         data-testid="new-run-sheet"
       >
         {/* Mounted only while open, so a closed sheet asks the API for nothing. */}
@@ -456,14 +457,14 @@ function SheetBody({
 
   return (
     <>
-      <SheetHeader className="border-b pr-12">
+      <SheetHeader>
         <SheetTitle>{template ? `New run: ${template.name}` : "New run"}</SheetTitle>
         <SheetDescription>
           {template?.description ?? "Pick a template to start a run on your repository."}
         </SheetDescription>
       </SheetHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4">{body}</div>
-      <SheetFooter className="flex-row justify-end gap-2 border-t">
+      <SheetFooter className="flex-row justify-end gap-2">
         <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>

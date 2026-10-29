@@ -1,13 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { XIcon } from "lucide-react";
-import { useId } from "react";
 
 import { apiBaseUrl, createApiClient } from "@/api/client";
+import { AddFilter, FilterChip, FilterChoices, type FilterOption } from "@/components/filters";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
 import { useTemplates } from "@/api/queries";
 
@@ -29,7 +26,8 @@ function useRepoOptions(workspaceId: string, baseUrl: string) {
   });
 }
 
-/** Narrow the runs list by template and repo (the view tabs pick the status). */
+/** Narrow the runs list by template and repo (the view tabs pick the status): a chip per filter
+ * that is on, then "+ Filter" (design-language.md → Components). The filters live in the URL. */
 export function RunFiltersBar({
   filters,
   onChange,
@@ -41,8 +39,6 @@ export function RunFiltersBar({
   workspaceId: string;
   baseUrl?: string;
 }) {
-  const templateId = useId();
-  const repoId = useId();
   const repos = useRepoOptions(workspaceId, baseUrl);
   const templates = useTemplates({ baseUrl });
   const templateOptions =
@@ -52,46 +48,63 @@ export function RunFiltersBar({
     : filters.repo
       ? [filters.repo]
       : null;
+  const templateName =
+    templateOptions.find((t) => t.id === filters.template)?.label ?? filters.template;
+
+  const options: FilterOption[] = [
+    {
+      id: "template",
+      label: "Template",
+      control: (done) => (
+        <FilterChoices
+          label="Template"
+          choices={templateOptions}
+          value={filters.template}
+          onPick={(template) => {
+            onChange({ ...filters, template });
+            done();
+          }}
+        />
+      ),
+    },
+  ];
+  if (repoOptions) {
+    options.push({
+      id: "repo",
+      label: "Repository",
+      control: (done) => (
+        <FilterChoices
+          label="Repository"
+          mono
+          choices={repoOptions.map((url) => ({ id: url, label: repoLabel(url) }))}
+          value={filters.repo}
+          onPick={(repo) => {
+            onChange({ ...filters, repo });
+            done();
+          }}
+        />
+      ),
+    });
+  }
 
   return (
     <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-2">
-      <Label htmlFor={templateId} className="sr-only">
-        Template
-      </Label>
-      <NativeSelect
-        id={templateId}
-        size="sm"
-        value={filters.template ?? ""}
-        onChange={(e) => onChange({ ...filters, template: e.target.value || null })}
-      >
-        <NativeSelectOption value="">Any template</NativeSelectOption>
-        {templateOptions.map((t) => (
-          <NativeSelectOption key={t.id} value={t.id}>
-            {t.label}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-      {repoOptions ? (
-        <>
-          <Label htmlFor={repoId} className="sr-only">
-            Repo
-          </Label>
-          <NativeSelect
-            id={repoId}
-            size="sm"
-            className="max-w-full"
-            value={filters.repo ?? ""}
-            onChange={(e) => onChange({ ...filters, repo: e.target.value || null })}
-          >
-            <NativeSelectOption value="">Any repo</NativeSelectOption>
-            {repoOptions.map((url) => (
-              <NativeSelectOption key={url} value={url}>
-                {repoLabel(url)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </>
+      {filters.template ? (
+        <FilterChip
+          label="Template"
+          value={templateName}
+          onRemove={() => onChange({ ...filters, template: null })}
+        />
       ) : null}
+      {filters.repo ? (
+        <FilterChip
+          label="Repository"
+          value={repoLabel(filters.repo)}
+          mono
+          onRemove={() => onChange({ ...filters, repo: null })}
+        />
+      ) : null}
+      <AddFilter options={options} />
       {isFiltered(filters) ? (
         <Button
           type="button"
@@ -99,7 +112,6 @@ export function RunFiltersBar({
           size="sm"
           onClick={() => onChange({ ...filters, template: null, repo: null })}
         >
-          <XIcon aria-hidden="true" data-icon="inline-start" />
           Clear filters
         </Button>
       ) : null}

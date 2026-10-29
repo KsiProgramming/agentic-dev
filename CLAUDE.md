@@ -4,7 +4,7 @@ Read this before every task. It is short on purpose: the details live in `specs/
 
 ## Specs are the source of truth
 
-`specs/mission.md` (principles, non-goals), `specs/roadmap.md` (milestones, phases and their "Done when", and which milestone is next) and `specs/tech-stack.md` (libraries, API contracts, the UI design system and the decisions log) are the constitution of this repo. They govern the spec-driven workflow, and they win over this file, over code and over anything said in a chat.
+`specs/mission.md` (principles, non-goals), `specs/roadmap.md` (milestones, phases and their "Done when", and which milestone is next), `specs/tech-stack.md` (libraries, API contracts, the UI design system and the decisions log) and `specs/design-language.md` (how the UI looks: colours, type, surfaces, components) are the constitution of this repo. They govern the spec-driven workflow, and they win over this file, over code and over anything said in a chat.
 
 **Everything is tracked in them.** Nothing is decided only in code, in a chat or here:
 
@@ -18,11 +18,11 @@ Work happens one roadmap phase at a time: plan it with the `plan-feature` skill 
 
 ## Frontend (`web/`)
 
-Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design system", including "UI v2" for what is planned (roadmap Milestone 11). Next.js here is newer than your training data: read `web/AGENTS.md` and the docs it points to before writing Next.js code.
+Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design system" (what each screen shows) and `specs/design-language.md` (how it looks: the three text levels, surfaces, tabs, stat strips, badges and the content rules). Next.js here is newer than your training data: read `web/AGENTS.md` and the docs it points to before writing Next.js code.
 
 ### Rules that are not optional
 
-1. **Colour comes from semantic tokens only**: `bg-background`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-status-failed`, `bg-status-waiting-muted`. Never palette classes (`bg-red-100`, `text-indigo-600`), hex, `rgb()` or `oklch()` in a component. A new colour is a token in `web/src/app/globals.css` (light and dark) and a line in tech-stack first. `pnpm lint` rejects the rest (`agentic-ui/no-raw-colors`).
+1. **Colour comes from semantic tokens only**: `bg-background`, `text-foreground-secondary`, `text-muted-foreground`, `text-placeholder`, `bg-surface-subtle`, `border-border`, `border-divider`, `bg-primary`, `text-status-failed`, `border-status-waiting-border`, `text-severity-high`. Metadata a reader needs (repo, branch, times, durations, costs) is `foreground-secondary`; `muted-foreground` is for labels, headers and counts only. Never palette classes (`bg-red-100`, `text-indigo-600`), hex, `rgb()` or `oklch()` in a component. A new colour is a token in `web/src/app/globals.css` (light and dark) and a line in tech-stack first. `pnpm lint` rejects the rest (`agentic-ui/no-raw-colors`).
 2. **Colour means status only.** Status is shown through `StatusBadge` (`@/components/status-badge`), always icon + label. API statuses go through `badgeStatus` and `statusLabel` (`@/runs/summaries`); the live console through `displayStatus` (`@/runs/status`). Never hand-roll a coloured pill.
 3. **Values have one way to be shown**, a component from `@/components/display` (tech-stack → UI design system → Display values):
    | Value | Use |
@@ -35,14 +35,15 @@ Before changing anything in `web/`, read `specs/tech-stack.md` → "UI design sy
    | Tokens | `TokenCount` |
    | Shares (confidence) | `Percent` |
    | Ids | `IdChip` (copies, or links with `href`) |
-   | A figure with its label | `StatTile` |
+   | Figures with their labels | `StatTile`s in one `StatStrip` |
+   | Paths | `TruncatedPath` (cut from the left, "repo root" for `.`) |
    | Repos | `repoLabel` (`@/runs/summaries`) in the mono font |
    | JSON | `JsonView` (`@/components/json-view`), never in a table cell |
 
    Dates and numbers follow the display locale (`@/lib/locale`): never `toLocaleString()` or a hand-made `Intl` format in a component. The formatters behind the components (`@/runs/summaries`, `@/runs/cost`) are for values that must be strings (placeholders, toasts, titles). In a list row, pass `focusable={false}` so values do not add tab stops.
 4. **A duration shown to the user is active time.** Time waiting at a gate is never added to it; it is shown apart with `WaitingTime`, and start-to-end time only in the start time's tooltip (tech-stack → UI design system → Display values → Time). Never read the API's deprecated `duration_ms`.
 5. **Every data view has three states** from `@/components/states`: `LoadingState` (skeleton), `EmptyState` (icon, one sentence, one action) and `ErrorState` (message and Retry).
-6. **Pages start with `PageHeader`** (`@/components/page-header`): title, one-line description, actions on the right. Breadcrumbs come from the shell; do not add your own. Pages use the full content width the shell gives them: never `mx-auto max-w-*` on a page. Sizes come from the type scale (`text-caption`, `text-meta`, `text-body`, `text-section`, `text-page`, `text-stat`), not `text-[13px]`.
+6. **Pages start with `PageHeader`** (`@/components/page-header`): title, one-line description, actions on the right. Breadcrumbs come from the shell; do not add your own. Pages use the full content width the shell gives them: never `mx-auto max-w-*` on a page. Page-level tabs go in its `tabs` slot. Sizes come from the type scale (`text-kbd`, `text-caption`, `text-meta`, `text-body`, `text-section`, `text-page`, `text-stat`), not `text-[13px]` or `text-xs`/`text-sm`; `pnpm lint` rejects arbitrary sizes.
 7. **Fonts:** Inter for UI text; JetBrains Mono (`font-mono`) only for ids, paths, branches, code and JSON.
 8. **Icons:** `lucide-react`, `aria-hidden="true"`, `size-4` by default. Icon-only buttons have an `aria-label`.
 9. **Build from what exists.** Use the primitives in `web/src/components/ui` (shadcn/ui, owned by us) and compose them; change a primitive only when every use should change. Check `web/src/components` and the feature folder for an existing component before writing a new one.

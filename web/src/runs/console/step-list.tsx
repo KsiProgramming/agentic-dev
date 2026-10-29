@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Duration, Money, WaitingTime } from "@/components/display";
 import { cn } from "@/lib/utils";
 
-import { KindIcon } from "../graph/graph-nodes";
+import { KindIcon } from "../graph/node-kinds";
 import type { NodeKind } from "../graph/spec-graph";
 import { stepUsage, type Step } from "../timeline";
 import { StatusIcon, StatusMarker } from "./rail";
@@ -61,9 +61,10 @@ function StepButton({
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(row.key)}
       className={cn(
-        "flex w-full min-w-0 items-start gap-2 rounded-md py-2 pr-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+        "flex w-full min-w-0 items-start gap-2 rounded-md py-2 pr-2 text-left hover:bg-muted",
         indent(row.depth),
-        selected && "bg-muted",
+        // Selected: a tint and a 2 px ink bar on the left edge (design-language.md → Rows).
+        selected && "bg-surface-subtle shadow-[inset_2px_0_0_var(--primary)] hover:bg-muted",
       )}
     >
       <span className="flex h-5 shrink-0 items-center">
@@ -71,7 +72,7 @@ function StepButton({
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">
-          <KindIcon kind={kind} className="size-3.5 shrink-0 text-muted-foreground" />
+          <KindIcon kind={kind} className="size-3.5 shrink-0 text-foreground-secondary" />
           <span className="min-w-0 truncate font-mono text-meta font-medium">{row.name}</span>
           {row.itemKind ? (
             <span className="shrink-0 text-caption text-muted-foreground">{row.itemKind}</span>
@@ -81,15 +82,15 @@ function StepButton({
           <span
             data-testid="step-outline"
             className={cn(
-              "truncate text-caption",
-              step.status === "failed" ? "text-destructive" : "text-muted-foreground",
+              "truncate text-meta",
+              step.status === "failed" ? "text-status-failed" : "text-foreground-secondary",
             )}
           >
             {outline}
           </span>
         ) : null}
       </span>
-      <span className="flex shrink-0 flex-col items-end text-caption text-muted-foreground">
+      <span className="flex shrink-0 flex-col items-end text-caption text-foreground-secondary">
         {step.gate ? (
           <WaitingTime ms={ms} live={step.status === "waiting"} />
         ) : (
@@ -107,7 +108,7 @@ function ScopeHeading({ entry }: { entry: Extract<StepEntry, { kind: "scope" }> 
     <div
       data-testid="step-scope"
       className={cn(
-        "flex min-w-0 items-center gap-2 py-1.5 pr-2 text-caption text-muted-foreground",
+        "flex min-w-0 items-center gap-2 py-1.5 pr-2 text-caption font-semibold text-foreground-secondary",
         indent(entry.depth),
       )}
     >
@@ -118,10 +119,72 @@ function ScopeHeading({ entry }: { entry: Extract<StepEntry, { kind: "scope" }> 
   );
 }
 
+/** Where level `depth`'s status icon is centred, in px from the row's left (its indent + 8). */
+function iconX(depth: number): number {
+  return 16 + 20 * Math.min(depth, DEPTH.length - 1);
+}
+
+/** Whether a later entry at `level` comes before the list leaves the parent at `level - 1`. */
+function hasLaterSibling(entries: StepEntry[], index: number, level: number): boolean {
+  for (const entry of entries.slice(index + 1)) {
+    if (entry.depth < level) return false;
+    if (entry.depth === level) return true;
+  }
+  return false;
+}
+
+const GUIDE = "pointer-events-none absolute w-px bg-border-strong";
+
+/**
+ * The tree lines of entry `index`, as in a file tree: a line down from each parent's icon to its
+ * last child, an elbow into each child's icon, and a line from a row's own icon to its first
+ * child. They run 2 px past the row (`-bottom-0.5`) to meet the next row across the list's gap.
+ */
+function Guides({ entries, index }: { entries: StepEntry[]; index: number }) {
+  const entry = entries[index]!;
+  const depth = entry.depth;
+  // The icon's middle, from the row's top: a step row's (py-2, h-5) or a heading's (py-1.5).
+  const iconY = entry.kind === "scope" ? 14 : 18;
+  const lines: ReactNode[] = [];
+  for (let level = 0; level < depth; level++) {
+    const x = iconX(level);
+    const continues = hasLaterSibling(entries, index, level + 1);
+    if (level === depth - 1) {
+      lines.push(
+        <span
+          key={`v${level}`}
+          className={cn(GUIDE, "top-0", continues && "-bottom-0.5")}
+          style={{ left: x, height: continues ? undefined : iconY }}
+        />,
+        <span
+          key={`h${level}`}
+          className="pointer-events-none absolute h-px bg-border-strong"
+          style={{ left: x, top: iconY, width: iconX(depth) - x - 10 }}
+        />,
+      );
+    } else if (continues) {
+      lines.push(
+        <span key={`v${level}`} className={cn(GUIDE, "top-0 -bottom-0.5")} style={{ left: x }} />,
+      );
+    }
+  }
+  const next = entries[index + 1];
+  if (next && next.depth > depth) {
+    lines.push(
+      <span
+        key="down"
+        className={cn(GUIDE, "-bottom-0.5")}
+        style={{ left: iconX(depth), top: iconY + 10 }}
+      />,
+    );
+  }
+  return <>{lines}</>;
+}
+
 /**
  * The run's steps as a list: status, type, name, one line on what each did, its duration and
- * cost. Map items, branches and iterations nest under their node. Selecting a row shows the step
- * beside the list.
+ * cost. Map items, branches and iterations nest under their node, joined to it by tree lines.
+ * Selecting a row shows the step beside the list.
  */
 export function StepList({
   entries,
@@ -142,8 +205,9 @@ export function StepList({
   return (
     <nav aria-label="Steps" className="flex min-w-0 flex-col">
       <ol className="flex min-w-0 flex-col gap-0.5">
-        {entries.map((entry) => (
-          <li key={`${entry.kind}:${entry.key}`} className="min-w-0">
+        {entries.map((entry, index) => (
+          <li key={`${entry.kind}:${entry.key}`} className="relative min-w-0">
+            <Guides entries={entries} index={index} />
             {entry.kind === "scope" ? (
               <ScopeHeading entry={entry} />
             ) : (

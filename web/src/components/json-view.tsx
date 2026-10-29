@@ -24,7 +24,7 @@ function Scalar({ value }: { value: unknown }) {
     );
   }
   return (
-    <span className="text-primary">
+    <span className="text-foreground">
       {value === undefined ? "undefined" : JSON.stringify(value)}
     </span>
   );
@@ -105,7 +105,10 @@ export function JsonView({
   return (
     <div
       data-slot="json-view"
-      className={cn("relative rounded-md border bg-muted/40 font-mono text-xs", className)}
+      className={cn(
+        "relative rounded-md border bg-surface-subtle font-mono text-caption",
+        className,
+      )}
     >
       <CopyButton text={JSON.stringify(value, null, 2)} label={`Copy ${label}`} />
       <div role="group" aria-label={label} className="-ml-2 max-h-96 overflow-auto py-2 pr-10">
@@ -128,7 +131,10 @@ export function TextView({
   return (
     <div
       data-slot="text-view"
-      className={cn("relative rounded-md border bg-muted/40 font-mono text-xs", className)}
+      className={cn(
+        "relative rounded-md border bg-surface-subtle font-mono text-caption",
+        className,
+      )}
     >
       <CopyButton text={text} label={`Copy ${label}`} />
       <pre

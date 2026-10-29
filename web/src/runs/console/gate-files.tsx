@@ -53,7 +53,7 @@ export interface GateFile {
 export function StatusLabel({ status }: { status: FileChangeStatus }) {
   const { icon: Icon, label } = STATUS[status];
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+    <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
       <Icon aria-hidden="true" className="size-3.5" />
       {label}
     </span>
@@ -155,7 +155,7 @@ export function GateFilesView({
                       <StatusLabel status={file.change.status} />
                       {file.edited ? <Badge variant="secondary">Edited</Badge> : null}
                       {!file.change.editable ? (
-                        <span className="text-xs text-muted-foreground">Read-only</span>
+                        <span className="text-caption text-muted-foreground">Read-only</span>
                       ) : null}
                     </span>
                   </button>
@@ -166,7 +166,7 @@ export function GateFilesView({
         </nav>
       ) : (
         <div className="flex flex-col gap-1 border-b px-4 py-2">
-          <label htmlFor={pickerId} className="text-xs text-muted-foreground">
+          <label htmlFor={pickerId} className="text-caption text-muted-foreground">
             File {files.indexOf(selected) + 1} of {files.length}
           </label>
           <NativeSelect

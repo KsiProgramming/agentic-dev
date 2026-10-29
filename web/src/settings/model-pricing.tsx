@@ -133,11 +133,11 @@ export function ModelPricingCard({
 
   return card(
     <>
-      {/* A table from `md`, sized to fit its card; a card per model below that. */}
-      <div className="hidden rounded-md border md:block">
-        <Table aria-label="Model prices, USD per million tokens" className="text-meta">
+      {/* A table where the card is 720 px or wider, a card per model below that (by the card, not the screen). */}
+      <div className="hidden @min-[720px]:block">
+        <Table aria-label="Model prices, USD per million tokens">
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
+            <TableRow>
               <TableHead>Model</TableHead>
               <TableHead className="text-right">Input</TableHead>
               <TableHead className="text-right">Output</TableHead>
@@ -156,16 +156,16 @@ export function ModelPricingCard({
                   <TableCell className="whitespace-normal">
                     <ModelName model={model} />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right text-foreground-secondary tabular-nums">
                     <PriceValue prices={prices} field="input" />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right text-foreground-secondary tabular-nums">
                     <PriceValue prices={prices} field="output" />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right text-foreground-secondary tabular-nums">
                     <CacheWrite prices={prices} />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">
+                  <TableCell className="text-right text-foreground-secondary tabular-nums">
                     <PriceValue prices={prices} field="cache_read" />
                   </TableCell>
                   <TableCell>
@@ -179,7 +179,7 @@ export function ModelPricingCard({
       </div>
       <ul
         aria-label="Model prices, USD per million tokens"
-        className="flex flex-col gap-2 md:hidden"
+        className="flex flex-col gap-2 @min-[720px]:hidden"
       >
         {models.map((model) => {
           const prices = effective(model);
@@ -187,7 +187,7 @@ export function ModelPricingCard({
             <li
               key={model.model}
               data-model={model.model}
-              className="flex flex-col gap-3 rounded-md border p-3 text-meta"
+              className="flex flex-col gap-3 rounded-lg border p-3 text-meta"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -226,7 +226,7 @@ export function ModelPricingCard({
             }
           />
         ) : null}
-        <span className="ml-auto text-xs text-muted-foreground">
+        <span className="ml-auto text-caption text-muted-foreground">
           List prices as of <time dateTime={asOf}>{asOf}</time>
         </span>
       </div>
@@ -252,15 +252,13 @@ function ModelName({ model }: { model: ModelPricing }) {
   return (
     <>
       <span className="flex items-center gap-2">
-        <span className="font-mono text-xs break-all">{model.model}</span>
-        {model.override ? (
-          <Badge variant="secondary" className="h-5 px-1.5 text-xs">
-            Custom
-          </Badge>
-        ) : null}
+        <span title={model.model} className="min-w-0 truncate font-mono text-caption font-medium">
+          {model.model}
+        </span>
+        {model.override ? <Badge variant="secondary">Custom</Badge> : null}
       </span>
       {model.long_context && !model.override ? (
-        <span className="block text-xs text-muted-foreground">
+        <span className="block text-caption text-muted-foreground">
           Higher price above{" "}
           <TokenCount value={model.long_context.above_tokens} focusable={false} /> prompt tokens
         </span>
@@ -306,7 +304,7 @@ function ModelActions({
 }) {
   return (
     <div className="flex justify-end gap-1">
-      <Button type="button" size="xs" variant="ghost" onClick={() => onEdit(model.model)}>
+      <Button type="button" size="sm" variant="ghost" onClick={() => onEdit(model.model)}>
         Edit<span className="sr-only"> {model.model}</span>
       </Button>
       {model.override ? (

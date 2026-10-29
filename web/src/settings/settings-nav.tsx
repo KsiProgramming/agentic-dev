@@ -26,10 +26,12 @@ export function SettingsNav() {
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex h-9 items-center gap-2.5 px-2.5 font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
-                  // Tabs below `md` (an underline), a list item from `md` (a filled row).
+                  "flex h-9 items-center gap-2.5 px-2.5 text-meta font-medium whitespace-nowrap text-foreground-secondary transition-colors hover:text-foreground",
+                  // Underline tabs below `md`; from `md` a list whose current item is the
+                  // sidebar's white pill (design-language.md → Sidebar).
                   "-mb-px border-b-2 border-transparent md:mb-0 md:rounded-md md:border-b-0 md:hover:bg-muted",
-                  active && "border-primary text-foreground md:bg-muted",
+                  active &&
+                    "border-primary text-foreground md:bg-background md:shadow-xs md:ring-1 md:ring-border md:hover:bg-background",
                 )}
               >
                 <Icon aria-hidden="true" className="size-4 shrink-0" />
@@ -50,7 +52,7 @@ export function SettingsSection({ href }: { href: string }) {
   return (
     <div className="flex flex-col gap-1">
       <h2 className="text-section font-semibold">{page.label}</h2>
-      <p className="max-w-prose text-muted-foreground">{page.description}</p>
+      <p className="max-w-prose text-meta text-foreground-secondary">{page.description}</p>
     </div>
   );
 }

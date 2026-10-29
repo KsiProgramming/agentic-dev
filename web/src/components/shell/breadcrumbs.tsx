@@ -14,7 +14,7 @@ export function Breadcrumbs({ className }: { className?: string }) {
   if (crumbs.length === 0) return null;
   return (
     <nav aria-label="Breadcrumb" className={cn("min-w-0", className)}>
-      <ol className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+      <ol className="flex min-w-0 items-center gap-1.5 text-meta text-muted-foreground">
         {crumbs.map((crumb, i) => (
           <li key={i} className={cn("flex min-w-0 items-center gap-1.5", crumb.href && "shrink-0")}>
             {i > 0 ? <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0" /> : null}
@@ -26,7 +26,10 @@ export function Breadcrumbs({ className }: { className?: string }) {
               <span
                 aria-current="page"
                 title={crumb.title}
-                className={cn("truncate font-medium text-foreground", crumb.mono && "font-mono")}
+                className={cn(
+                  "truncate font-medium text-foreground",
+                  crumb.mono && "font-mono text-caption",
+                )}
               >
                 {crumb.label}
               </span>

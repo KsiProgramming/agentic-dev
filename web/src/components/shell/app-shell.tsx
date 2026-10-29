@@ -22,8 +22,9 @@ function MobileNav({ baseUrl }: { baseUrl?: string }) {
       : "Open navigation";
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      {/* The badge sits beside the button, not in it: text inside would be the button's visible
-          label, which its name must match (WCAG 2.5.3), and the name already says the count. */}
+      {/* A dot beside the button, not in it: text inside would be the button's visible label,
+          which its name must match (WCAG 2.5.3). The name says the count; the drawer's Inbox
+          item shows it. */}
       <span className="relative inline-flex">
         <SheetTrigger asChild>
           <Button type="button" variant="ghost" size="icon" aria-label={label}>
@@ -34,10 +35,8 @@ function MobileNav({ baseUrl }: { baseUrl?: string }) {
           <span
             aria-hidden="true"
             data-testid="menu-waiting-badge"
-            className="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-status-waiting px-1 text-[10px] font-semibold text-background tabular-nums"
-          >
-            {countLabel(waiting)}
-          </span>
+            className="pointer-events-none absolute top-1 right-1 size-2 rounded-full bg-status-waiting ring-2 ring-background"
+          />
         ) : null}
       </span>
       <SheetContent side="left" className="w-64 p-0" aria-describedby={undefined}>
@@ -67,13 +66,16 @@ export function AppShell({ children, baseUrl }: { children: ReactNode; baseUrl?:
         </a>
         <div data-testid="app-shell" className="flex min-h-svh">
           {/* The border spans the whole page; the sidebar itself stays in view while it scrolls. */}
-          <aside aria-label="Sidebar" className="hidden shrink-0 border-r lg:block lg:w-16 xl:w-60">
+          <aside
+            aria-label="Sidebar"
+            className="hidden shrink-0 border-r bg-surface-sunken lg:block lg:w-16 xl:w-60"
+          >
             <div className="sticky top-0 h-svh">
               <Sidebar rail baseUrl={baseUrl} />
             </div>
           </aside>
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b bg-background px-4 md:px-6">
+            <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b bg-background px-4 md:px-8">
               <div className="lg:hidden">
                 <MobileNav baseUrl={baseUrl} />
               </div>
@@ -90,7 +92,7 @@ export function AppShell({ children, baseUrl }: { children: ReactNode; baseUrl?:
             <main
               id="content"
               tabIndex={-1}
-              className="min-w-0 flex-1 px-4 py-6 outline-none md:px-6"
+              className="min-w-0 flex-1 px-4 py-6 outline-none md:px-8"
             >
               <div className="mx-auto w-full max-w-content">{children}</div>
             </main>

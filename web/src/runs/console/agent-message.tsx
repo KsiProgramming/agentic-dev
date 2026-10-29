@@ -17,11 +17,11 @@ const COMPONENTS: Components = {
       {...plain(props)}
       target="_blank"
       rel="noreferrer"
-      className="text-primary underline underline-offset-4"
+      className="text-foreground underline underline-offset-4"
     />
   ),
-  h1: (props) => <h3 {...plain(props)} className="text-base font-semibold" />,
-  h2: (props) => <h4 {...plain(props)} className="text-base font-semibold" />,
+  h1: (props) => <h3 {...plain(props)} className="text-section font-semibold" />,
+  h2: (props) => <h4 {...plain(props)} className="text-section font-semibold" />,
   h3: (props) => <h5 {...plain(props)} className="font-semibold" />,
   h4: (props) => <h6 {...plain(props)} className="font-semibold" />,
   ul: (props) => <ul {...plain(props)} className="list-disc pl-5" />,
@@ -32,7 +32,7 @@ const COMPONENTS: Components = {
   pre: (props) => (
     <pre
       {...plain(props)}
-      className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs [&_code]:bg-transparent [&_code]:p-0"
+      className="overflow-x-auto rounded-md border bg-surface-subtle p-3 font-mono text-caption [&_code]:bg-transparent [&_code]:p-0"
     />
   ),
   blockquote: (props) => (

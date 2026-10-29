@@ -50,14 +50,14 @@ export function GateReviewSheet({
         className="gap-0 data-[side=bottom]:h-svh data-[side=right]:w-[min(1100px,92vw)]! data-[side=right]:max-w-none!"
         data-testid="gate-review"
       >
-        <SheetHeader className="border-b pr-12">
+        <SheetHeader>
           <SheetTitle>{title}</SheetTitle>
           <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
         {notice ? <div className="border-b px-4 py-3">{notice}</div> : null}
         <GateFilesView files={files} wide={wide} onEdit={onEdit} onDiscard={onDiscard} />
         {footer ? (
-          <SheetFooter className="mt-0 border-t pb-[max(1rem,env(safe-area-inset-bottom))] md:flex-row md:items-center">
+          <SheetFooter className="mt-0 pb-[max(1rem,env(safe-area-inset-bottom))] md:flex-row md:items-center">
             {footer}
           </SheetFooter>
         ) : null}

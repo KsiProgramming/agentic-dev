@@ -11,7 +11,7 @@ export default function SettingsLayout({ children }: LayoutProps<"/settings">) {
         description="Model access, the repositories this workspace can work on, what its runs cost and how far they may go."
       />
       <div className="flex flex-col gap-6 md:flex-row md:items-start">
-        <div className="md:sticky md:top-20 md:w-52 md:shrink-0">
+        <div className="md:sticky md:top-16 md:w-52 md:shrink-0">
           <SettingsNav />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-6">{children}</div>

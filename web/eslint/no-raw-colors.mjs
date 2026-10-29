@@ -5,6 +5,9 @@
 // - arbitrary colour values: `bg-[#4f46e5]`, `text-[oklch(0.5_0.2_270)]`, `shadow-[0_1px_rgb(…)]`;
 // - colour literals: `"#4f46e5"`, `"rgb(0 0 0)"`, `"oklch(0.5 0.2 270)"`.
 // A new colour is a token in `src/app/globals.css` (light and dark), which is not linted.
+// It also rejects arbitrary text sizes (`text-[13px]`, `leading-[1.1rem]`): sizes come from the
+// type scale (`text-caption` … `text-stat`, `text-kbd`). Sizes relative to the parent (`em`) and
+// `text-[0px]` (a visually hidden count) are allowed.
 
 const PALETTE =
   "slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
@@ -32,6 +35,10 @@ const CHECKS = [
     pattern: new RegExp(`(?:^|[\\s,(])${COLOR_FUNCTION}`),
     message: "Colour function",
   },
+  {
+    pattern: /(?:^|[\s:!"'`])(?:text|leading)-\[(?!0px\])[\d.]+(?:px|rem)\]/,
+    message: "Arbitrary text size",
+  },
 ];
 
 /** @type {import("eslint").Rule.RuleModule} */
@@ -39,10 +46,11 @@ const noRawColors = {
   meta: {
     type: "problem",
     docs: {
-      description: "Colour comes from semantic tokens (bg-background, text-status-failed) only.",
+      description:
+        "Colour comes from semantic tokens (bg-background, text-status-failed) and text sizes from the type scale only.",
     },
     messages: {
-      raw: "{{kind}} `{{text}}`: use a semantic token (bg-primary, text-muted-foreground, bg-status-failed-muted). A new colour is a token in src/app/globals.css, light and dark.",
+      raw: "{{kind}} `{{text}}`: use a semantic token (bg-primary, text-muted-foreground, bg-status-failed-muted) or a type-scale size (text-meta). A new colour or size is a token in src/app/globals.css.",
     },
     schema: [],
   },

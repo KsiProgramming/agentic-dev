@@ -46,9 +46,10 @@ function EventDrawer({ row, onClose }: { row: Row | null; onClose: () => void })
         <SheetContent
           side={wide ? "right" : "bottom"}
           data-testid="event-drawer"
-          className="data-[side=bottom]:max-h-[85svh] data-[side=right]:w-full! data-[side=right]:sm:max-w-[560px]!"
+          className="data-[side=bottom]:max-h-[85svh]"
+          size="md"
         >
-          <SheetHeader className="border-b pr-12">
+          <SheetHeader>
             <SheetTitle className="font-mono break-all">
               {rowType(row)}
               {row.kind === "text" ? ` × ${row.events.length}` : ""}
@@ -74,7 +75,7 @@ function EventDrawer({ row, onClose }: { row: Row | null; onClose: () => void })
                     <li
                       key={event.seq}
                       data-testid="chunk-row"
-                      className="flex min-w-0 gap-3 font-mono text-xs"
+                      className="flex min-w-0 gap-3 font-mono text-caption"
                     >
                       <span className="shrink-0 text-muted-foreground tabular-nums">
                         {event.seq}
@@ -134,7 +135,7 @@ export function RawEvents({
         <Label htmlFor={typeId} className="sr-only">
           Event type
         </Label>
-        <NativeSelect id={typeId} size="sm" value={type} onChange={(e) => setType(e.target.value)}>
+        <NativeSelect id={typeId} value={type} onChange={(e) => setType(e.target.value)}>
           <NativeSelectOption value="">All types</NativeSelectOption>
           {types.map((t) => (
             <NativeSelectOption key={t} value={t}>
@@ -145,7 +146,7 @@ export function RawEvents({
         <Label htmlFor={nodeId} className="sr-only">
           Step
         </Label>
-        <NativeSelect id={nodeId} size="sm" value={node} onChange={(e) => setNode(e.target.value)}>
+        <NativeSelect id={nodeId} value={node} onChange={(e) => setNode(e.target.value)}>
           <NativeSelectOption value="">All steps</NativeSelectOption>
           {/* The selected step stays listed even before it has events. */}
           {(node && !nodes.includes(node) ? [node, ...nodes] : nodes).map((n) => (
@@ -154,11 +155,11 @@ export function RawEvents({
             </NativeSelectOption>
           ))}
         </NativeSelect>
-        <span className="text-xs text-muted-foreground tabular-nums">
+        <span className="text-caption text-muted-foreground tabular-nums">
           {shown.length} of {rows.length} rows · {events.length} events
         </span>
       </div>
-      <Table className="text-meta" scrollLabel="Run events">
+      <Table scrollLabel="Run events">
         <TableHeader>
           <TableRow>
             <TableHead>#</TableHead>

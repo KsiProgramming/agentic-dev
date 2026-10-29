@@ -87,7 +87,7 @@ export function AuditView({
             icon={FilterXIcon}
             message="No activity matches these filters."
             action={
-              <Button type="button" variant="outline" onClick={() => setFilters(NO_AUDIT_FILTERS)}>
+              <Button type="button" onClick={() => setFilters(NO_AUDIT_FILTERS)}>
                 Clear filters
               </Button>
             }

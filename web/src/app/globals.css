@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@xyflow/react/dist/style.css";
 
 /* Design tokens (tech-stack.md → UI design system). Components use these semantic tokens only;
  * palette values (oklch) live in this file and nowhere else. */
@@ -28,15 +27,31 @@
   --text-page--line-height: 1.75rem;
   --text-stat: 1.5rem;
   --text-stat--line-height: 2rem;
+  /* The one size below the scale, for keyboard hints (`Kbd`). */
+  --text-kbd: 0.6875rem;
+  --text-kbd--line-height: 1rem;
 
-  /* Density: `h-row` is a table row, 40 px or 32 px in compact mode. */
+  /* Density: `h-row` is a table row, 40 px or 32 px in compact mode; `h-row-header` its header. */
   --spacing-row: var(--row-height);
+  --spacing-row-header: 2.25rem;
   /* The widest a page's content gets, and the measure of reading text. */
   --container-content: 1600px;
   --container-prose: 72ch;
+  /* Side sheets (`Sheet size`) and the Inbox list column. */
+  --container-sheet-sm: 480px;
+  --container-sheet-md: 560px;
+  --container-sheet-file: 640px;
+  --container-sheet-lg: 720px;
+  --container-inbox-list: 22rem;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-foreground-secondary: var(--foreground-secondary);
+  --color-placeholder: var(--placeholder);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-divider: var(--divider);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -57,16 +72,38 @@
 
   --color-status-queued: var(--status-queued);
   --color-status-queued-muted: var(--status-queued-muted);
+  --color-status-queued-border: var(--status-queued-border);
   --color-status-running: var(--status-running);
   --color-status-running-muted: var(--status-running-muted);
+  --color-status-running-border: var(--status-running-border);
   --color-status-waiting: var(--status-waiting);
   --color-status-waiting-muted: var(--status-waiting-muted);
+  --color-status-waiting-border: var(--status-waiting-border);
   --color-status-succeeded: var(--status-succeeded);
   --color-status-succeeded-muted: var(--status-succeeded-muted);
+  --color-status-succeeded-border: var(--status-succeeded-border);
   --color-status-failed: var(--status-failed);
   --color-status-failed-muted: var(--status-failed-muted);
+  --color-status-failed-border: var(--status-failed-border);
   --color-status-cancelled: var(--status-cancelled);
   --color-status-cancelled-muted: var(--status-cancelled-muted);
+  --color-status-cancelled-border: var(--status-cancelled-border);
+
+  --color-severity-critical: var(--severity-critical);
+  --color-severity-critical-muted: var(--severity-critical-muted);
+  --color-severity-critical-border: var(--severity-critical-border);
+  --color-severity-high: var(--severity-high);
+  --color-severity-high-muted: var(--severity-high-muted);
+  --color-severity-high-border: var(--severity-high-border);
+  --color-severity-medium: var(--severity-medium);
+  --color-severity-medium-muted: var(--severity-medium-muted);
+  --color-severity-medium-border: var(--severity-medium-border);
+  --color-severity-low: var(--severity-low);
+  --color-severity-low-muted: var(--severity-low-muted);
+  --color-severity-low-border: var(--severity-low-border);
+  --color-severity-info: var(--severity-info);
+  --color-severity-info-muted: var(--severity-info-muted);
+  --color-severity-info-border: var(--severity-info-border);
 
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
@@ -82,45 +119,82 @@
   --shadow-dock: 0 -1px 3px 0 oklch(0 0 0 / 6%);
 }
 
-/* Light: zinc neutrals on white, indigo for primary actions and focus. */
+/* Light: zinc neutrals on white, an ink (near-black) primary; colour is kept for status.
+ * Values: specs/design-language.md → Colour tokens. */
 :root {
   --radius: 0.5rem;
   --row-height: 2.5rem;
   --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  /* Three text levels: names and values, metadata a reader needs, labels and captions. */
+  --foreground: oklch(0.21 0.006 285.9);
+  --foreground-secondary: oklch(0.37 0.012 285.8);
+  --muted-foreground: oklch(0.442 0.015 285.8);
+  /* Placeholders, disabled text and "—"; never content. */
+  --placeholder: oklch(0.541 0.014 285.9);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.511 0.262 276.966);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --popover-foreground: var(--foreground);
+  /* The sidebar, and the header rows of tables, panes and cards. */
+  --surface-sunken: oklch(0.976 0.001 286.4);
+  --surface-subtle: oklch(0.985 0 0);
+  --primary: oklch(0.21 0.006 285.9);
+  --primary-foreground: oklch(1 0 0);
   --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.5 0.016 285.9);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.505 0.213 27.518);
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --accent: var(--muted);
+  --accent-foreground: var(--foreground);
   --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.871 0.006 286.286);
-  --ring: oklch(0.585 0.233 277.117);
+  /* Input edges and the dashed "+ Filter". */
+  --border-strong: oklch(0.871 0.005 286.3);
+  --input: var(--border-strong);
+  /* Row dividers inside a table or list. */
+  --divider: oklch(0.956 0.003 286.3);
+  --ring: var(--primary);
   /* Behind a sheet or dialog. */
   --overlay: oklch(0 0 0 / 10%);
 
-  /* Status: `--status-*` is the icon and label colour, `--status-*-muted` the badge background.
-   * Each label is ≥ 4.5:1 on its muted background and on --background. */
-  --status-queued: oklch(0.442 0.017 285.786);
+  /* Status: `--status-*` is the icon and label colour, `--status-*-muted` the badge background,
+   * `--status-*-border` its edge. Each label is ≥ 4.5:1 on its muted background and on
+   * --background. */
+  --status-queued: oklch(0.442 0.015 285.8);
   --status-queued-muted: oklch(0.967 0.001 286.375);
-  --status-running: oklch(0.488 0.243 264.376);
-  --status-running-muted: oklch(0.97 0.014 254.604);
-  --status-waiting: oklch(0.473 0.137 46.201);
-  --status-waiting-muted: oklch(0.987 0.022 95.277);
-  --status-succeeded: oklch(0.448 0.119 151.328);
-  --status-succeeded-muted: oklch(0.982 0.018 155.826);
-  --status-failed: oklch(0.505 0.213 27.518);
-  --status-failed-muted: oklch(0.971 0.013 17.38);
-  --status-cancelled: oklch(0.442 0.017 285.786);
-  --status-cancelled-muted: oklch(0.967 0.001 286.375);
+  --status-queued-border: oklch(0.92 0.004 286.3);
+  --status-running: oklch(0.488 0.217 264.4);
+  --status-running-muted: oklch(0.97 0.014 254.6);
+  --status-running-border: oklch(0.882 0.057 254.1);
+  --status-waiting: oklch(0.555 0.146 49);
+  --status-waiting-muted: oklch(0.987 0.021 95.3);
+  --status-waiting-border: oklch(0.924 0.115 95.7);
+  --status-succeeded: oklch(0.527 0.137 150.1);
+  --status-succeeded-muted: oklch(0.982 0.018 155.8);
+  --status-succeeded-border: oklch(0.925 0.081 156);
+  --status-failed: oklch(0.505 0.19 27.5);
+  --status-failed-muted: oklch(0.971 0.013 17.4);
+  --status-failed-border: oklch(0.885 0.059 18.3);
+  --status-cancelled: var(--status-queued);
+  --status-cancelled-muted: var(--status-queued-muted);
+  --status-cancelled-border: var(--status-queued-border);
+  --destructive: var(--status-failed);
+
+  /* Severity of a finding: its own hues, never a status's (a Critical finding must not read as a
+   * failed run). Text ≥ 4.5:1 on its fill and on --background. */
+  --severity-critical: oklch(0.444 0.161 26.9);
+  --severity-critical-muted: oklch(0.971 0.013 17.4);
+  --severity-critical-border: oklch(0.885 0.059 18.3);
+  --severity-high: oklch(0.553 0.174 38.4);
+  --severity-high-muted: oklch(0.98 0.016 73.7);
+  --severity-high-border: oklch(0.901 0.073 70.7);
+  --severity-medium: oklch(0.554 0.121 66.4);
+  --severity-medium-muted: oklch(0.987 0.026 102.2);
+  --severity-medium-border: oklch(0.924 0.115 95.7);
+  --severity-low: oklch(0.488 0.217 264.4);
+  --severity-low-muted: oklch(0.97 0.014 254.6);
+  --severity-low-border: oklch(0.882 0.057 254.1);
+  --severity-info: oklch(0.442 0.015 285.8);
+  --severity-info-muted: oklch(0.967 0.001 286.4);
+  --severity-info-border: oklch(0.92 0.004 286.3);
 }
 
 /* Compact mode (the top bar's density toggle): denser table rows. */
@@ -130,38 +204,54 @@
 
 /* Dark: zinc neutrals on near-black. */
 .dark {
-  --background: oklch(0.141 0.005 285.823);
+  --background: oklch(0.141 0.004 285.8);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.673 0.182 276.935);
-  --primary-foreground: oklch(0.141 0.005 285.823);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.808 0.114 19.571);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.673 0.182 276.935);
+  --foreground-secondary: oklch(0.871 0.005 286.3);
+  --muted-foreground: oklch(0.712 0.013 286.1);
+  --placeholder: oklch(0.639 0.012 286.1);
+  --card: oklch(0.179 0.004 286);
+  --popover: oklch(0.179 0.004 286);
+  --surface-sunken: oklch(0.169 0.004 286);
+  --surface-subtle: oklch(0.192 0.004 286);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.141 0.004 285.8);
+  --muted: oklch(0.228 0.006 285.9);
+  --border: oklch(0.274 0.005 286);
+  --border-strong: oklch(0.37 0.012 285.8);
+  --divider: oklch(0.228 0.006 285.9);
   --overlay: oklch(0 0 0 / 50%);
 
-  --status-queued: oklch(0.871 0.006 286.286);
-  --status-queued-muted: oklch(0.274 0.006 286.033);
-  --status-running: oklch(0.809 0.105 251.813);
-  --status-running-muted: oklch(0.282 0.091 267.935);
-  --status-waiting: oklch(0.879 0.169 91.605);
-  --status-waiting-muted: oklch(0.279 0.077 45.635);
-  --status-succeeded: oklch(0.871 0.15 154.449);
-  --status-succeeded-muted: oklch(0.266 0.065 152.934);
-  --status-failed: oklch(0.808 0.114 19.571);
-  --status-failed-muted: oklch(0.258 0.092 26.042);
-  --status-cancelled: oklch(0.871 0.006 286.286);
-  --status-cancelled-muted: oklch(0.274 0.006 286.033);
+  --status-queued: oklch(0.871 0.005 286.3);
+  --status-queued-muted: oklch(0.228 0.006 285.9);
+  --status-queued-border: oklch(0.37 0.012 285.8);
+  --status-running: oklch(0.809 0.096 251.8);
+  --status-running-muted: oklch(0.282 0.087 267.9);
+  --status-running-border: oklch(0.379 0.138 265.5);
+  --status-waiting: oklch(0.879 0.153 91.6);
+  --status-waiting-muted: oklch(0.234 0.042 71.3);
+  --status-waiting-border: oklch(0.414 0.105 45.9);
+  --status-succeeded: oklch(0.871 0.136 154.4);
+  --status-succeeded-muted: oklch(0.266 0.063 152.9);
+  --status-succeeded-border: oklch(0.393 0.09 152.5);
+  --status-failed: oklch(0.808 0.103 19.6);
+  --status-failed-muted: oklch(0.201 0.054 23.2);
+  --status-failed-border: oklch(0.396 0.133 25.7);
+
+  --severity-critical: oklch(0.808 0.103 19.6);
+  --severity-critical-muted: oklch(0.201 0.054 23.2);
+  --severity-critical-border: oklch(0.396 0.133 25.7);
+  --severity-high: oklch(0.837 0.117 66.3);
+  --severity-high-muted: oklch(0.219 0.044 53.9);
+  --severity-high-border: oklch(0.408 0.116 38.2);
+  --severity-medium: oklch(0.905 0.166 98.1);
+  --severity-medium-muted: oklch(0.244 0.043 96.8);
+  --severity-medium-border: oklch(0.421 0.09 57.7);
+  --severity-low: oklch(0.809 0.096 251.8);
+  --severity-low-muted: oklch(0.282 0.087 267.9);
+  --severity-low-border: oklch(0.379 0.138 265.5);
+  --severity-info: oklch(0.871 0.005 286.3);
+  --severity-info-muted: oklch(0.228 0.006 285.9);
+  --severity-info-border: oklch(0.37 0.012 285.8);
 }
 
 @layer base {
@@ -171,8 +261,11 @@
   html {
     @apply font-sans;
   }
+  /* UI text is 13 px; Inter's single-storey a and open digits; every number lines up. */
   body {
-    @apply bg-background text-sm text-foreground antialiased;
+    @apply bg-background text-meta text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    font-variant-numeric: tabular-nums;
   }
   :focus-visible {
     @apply outline-2 outline-offset-2 outline-ring;
@@ -187,31 +280,4 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-/* React Flow (the run graph) in our tokens, light and dark alike. */
-.react-flow {
-  --xy-background-color: var(--background);
-  --xy-edge-stroke: var(--muted-foreground);
-  --xy-edge-label-background-color: var(--background);
-  --xy-edge-label-color: var(--muted-foreground);
-  --xy-controls-button-background-color: var(--card);
-  --xy-controls-button-background-color-hover: var(--accent);
-  --xy-controls-button-color: var(--foreground);
-  --xy-controls-button-color-hover: var(--foreground);
-  --xy-controls-button-border-color: var(--border);
-  --xy-controls-box-shadow: var(--shadow-xs);
-  --xy-attribution-background-color: transparent;
-  font-family: var(--font-sans);
-}
-
-/* Its "React Flow" credit stays (their attribution policy), readable and a 24 px target (WCAG
- * 1.4.3 and 2.5.8). */
-.react-flow__attribution a {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding-inline: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }

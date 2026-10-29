@@ -325,7 +325,7 @@ function LimitsForm({
           </p>
           <Button
             type="button"
-            variant="ghost"
+            variant="outline"
             disabled={pending}
             onClick={() => {
               form.reset();
@@ -415,7 +415,7 @@ function WallTimeInput({
   const described = [`${id}-help`, error ? `${id}-error` : null].filter(Boolean).join(" ");
   return (
     <fieldset className="flex flex-col gap-2" data-invalid={error ? true : undefined}>
-      <legend className="mb-2 text-sm font-medium">Wall time</legend>
+      <legend className="mb-2 text-meta font-medium">Wall time</legend>
       <div className="flex items-center gap-2">
         <Input
           aria-label="Wall time hours"
@@ -428,7 +428,7 @@ function WallTimeInput({
           disabled={disabled}
           {...hours}
         />
-        <span className="text-sm text-muted-foreground">h</span>
+        <span className="text-meta text-muted-foreground">h</span>
         <Input
           aria-label="Wall time minutes"
           inputMode="numeric"
@@ -440,7 +440,7 @@ function WallTimeInput({
           disabled={disabled}
           {...minutes}
         />
-        <span className="text-sm text-muted-foreground">min</span>
+        <span className="text-meta text-muted-foreground">min</span>
       </div>
       <FieldDescription id={`${id}-help`}>
         Time a run may spend executing; time waiting for an approval does not count. Platform limit:{" "}

@@ -42,8 +42,8 @@ function Preview({ text, failed }: { text: string; failed: boolean }) {
       data-testid="tool-preview"
       className={
         failed
-          ? "mt-0.5 mb-1 ml-1.5 rounded-md border border-status-failed/30 bg-status-failed-muted px-3 py-2 font-mono text-xs text-status-failed"
-          : "mt-0.5 mb-1 ml-1.5 rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs"
+          ? "mt-0.5 mb-1 ml-1.5 rounded-md border border-status-failed-border bg-status-failed-muted px-3 py-2 font-mono text-caption text-status-failed"
+          : "mt-0.5 mb-1 ml-1.5 rounded-md border bg-surface-subtle px-3 py-2 font-mono text-caption"
       }
     >
       <pre className="break-all whitespace-pre-wrap">
@@ -105,18 +105,18 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
             <span className="shrink-0 text-status-failed">failed</span>
           ) : null}{" "}
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            {ms !== null ? <Duration ms={ms} className="text-xs" /> : null}
+            {ms !== null ? <Duration ms={ms} className="text-caption" /> : null}
             <Chevron of="call" />
           </span>
         </CollapsibleTrigger>
         {preview ? <Preview text={preview} failed={turn.status === "failed"} /> : null}
         <CollapsibleContent className="mt-1 mb-2 ml-3.5 flex flex-col gap-2 border-l pl-4">
           <section className="flex flex-col gap-1">
-            <h4 className="text-xs font-medium text-muted-foreground">Arguments</h4>
+            <h4 className="text-caption font-medium text-muted-foreground">Arguments</h4>
             <JsonView value={turn.arguments} label={`${turn.name} arguments`} />
           </section>
           <section className="flex flex-col gap-1">
-            <h4 className="text-xs font-medium text-muted-foreground">Result</h4>
+            <h4 className="text-caption font-medium text-muted-foreground">Result</h4>
             {turn.output === null ? (
               <p className="text-meta text-muted-foreground">Waiting for the result…</p>
             ) : (
@@ -177,7 +177,7 @@ export function ToolCallGroup({ turns }: { turns: ToolTurn[] }) {
           )}
         </span>{" "}
         {failed > 0 ? <span className="shrink-0 text-status-failed">· {failed} failed</span> : null}{" "}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs tabular-nums">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-caption tabular-nums">
           {turns.length} tool calls
           {ms !== null ? (
             <>

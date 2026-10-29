@@ -11,7 +11,7 @@ import { ArtifactSheet, artifactFacts } from "./artifact-cards";
 import { artifactKind, type ArtifactVersion } from "./artifacts";
 import { useRunArtifacts, type RunArtifact } from "./use-run-artifacts";
 
-function versionOf(artifact: RunArtifact): ArtifactVersion {
+export function versionOf(artifact: RunArtifact): ArtifactVersion {
   return {
     name: artifact.name,
     version: artifact.version,
@@ -93,7 +93,7 @@ export function ArtifactsView({
                 <button
                   type="button"
                   onClick={() => onOpenStep(artifact.node_id)}
-                  className="rounded-sm font-mono text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="rounded-sm font-mono text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   {artifact.node_id}
                 </button>

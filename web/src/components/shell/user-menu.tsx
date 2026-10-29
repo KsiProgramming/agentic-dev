@@ -47,7 +47,7 @@ export function UserMenu({ rail = false }: { rail?: boolean }) {
   const trigger = (
     <DropdownMenuTrigger
       className={cn(
-        "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 font-medium text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-muted data-[state=open]:text-foreground",
+        "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-meta font-medium text-foreground-secondary transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground",
         rail && "lg:max-xl:justify-center",
       )}
     >

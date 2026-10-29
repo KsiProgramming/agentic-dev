@@ -48,13 +48,19 @@ async function expectNavReachable(page: Page) {
   }
 }
 
-/** Kept as a CI artifact (`layout-screenshots`) for review, not compared pixel by pixel. */
+/** Kept as a CI artifact (`layout-screenshots`) for review, not compared pixel by pixel. At
+ * 375 px each screen is also taken in dark (`<name>-dark`): a PR that changes a screen attaches
+ * its 1440 px light and 375 px dark views (design-language.md → How this is checked). */
 async function screenshot(page: Page, name: string) {
   const project = test.info().project.name;
-  await page.screenshot({
-    path: `test-results/screenshots/${project}/${name}.png`,
-    fullPage: true,
-  });
+  const path = (suffix = "") => `test-results/screenshots/${project}/${name}${suffix}.png`;
+  await page.screenshot({ path: path(), fullPage: true });
+  if (project !== "mobile-375") return;
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/\bdark\b/);
+  await page.screenshot({ path: path("-dark"), fullPage: true });
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
 }
 
 async function checkPage(page: Page, name: string) {

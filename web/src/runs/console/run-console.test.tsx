@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { mockReactFlow } from "@/testing/react-flow";
 
 import docsRun from "../fixtures/docs-run.json";
 import docsSpec from "../fixtures/docs-run-spec.json";
@@ -88,8 +87,6 @@ function expectStatus(status: string, label: string) {
   expect(badge.dataset.status).toBe(status);
   expect(badge.textContent).toBe(label);
 }
-
-beforeAll(mockReactFlow);
 
 beforeEach(() => {
   nav.search = "";
@@ -856,11 +853,11 @@ test("?tab=graph opens the graph of the run's workflow", async () => {
   });
 
   expect(screen.getByRole("tab", { name: "Graph" }).getAttribute("aria-selected")).toBe("true");
-  // The graph is laid out by ELK, loaded on first use: allow it more than the default second.
-  await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7), {
+  // The map draws each node of the spec as a card.
+  await waitFor(() => expect(screen.getAllByTestId("map-node")).toHaveLength(7), {
     timeout: 10_000,
   });
-  const reviewer = screen.getAllByTestId("graph-node").find((n) => n.dataset.nodeId === "reviewer");
+  const reviewer = screen.getAllByTestId("map-node").find((n) => n.dataset.node === "reviewer");
   expect(reviewer?.dataset.status).toBe("completed");
 });
 
@@ -889,8 +886,8 @@ test("clicking a graph node selects its step", async () => {
     for (const event of docsRun as RunEvent[]) source.emit(event);
   });
 
-  await waitFor(() => expect(screen.getAllByTestId("graph-node")).toHaveLength(7));
-  fireEvent.click(screen.getAllByTestId("graph-node").find((n) => n.dataset.nodeId === "combine")!);
+  await waitFor(() => expect(screen.getAllByTestId("map-node")).toHaveLength(7));
+  fireEvent.click(screen.getAllByTestId("map-node").find((n) => n.dataset.node === "combine")!);
   expect(nav.replace).toHaveBeenCalledWith(`/runs/${RUN_ID}?view=graph&step=combine`, {
     scroll: false,
   });

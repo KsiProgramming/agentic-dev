@@ -71,7 +71,7 @@ export function NewRepoFields<T extends { newRepo: NewRepoValues }>({
         render={({ field, fieldState }) => (
           <Field data-invalid={fieldState.error ? true : undefined}>
             <FieldLabel htmlFor={`${id}-name`}>Repository name</FieldLabel>
-            <div className="flex min-w-0 items-center gap-1 font-mono text-sm">
+            <div className="flex min-w-0 items-center gap-1 font-mono text-meta">
               <span className="shrink-0 text-muted-foreground">{options.owner}/</span>
               <Input
                 id={`${id}-name`}

@@ -11,7 +11,16 @@ import Link from "next/link";
 import { useId } from "react";
 
 import { ApiError } from "@/api/errors";
-import { Duration, ExpiresIn, IdChip, Money, StatTile, WaitingTime } from "@/components/display";
+import {
+  Duration,
+  ExpiresIn,
+  IdChip,
+  Money,
+  StatStrip,
+  StatTile,
+  TruncatedPath,
+  WaitingTime,
+} from "@/components/display";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -86,7 +95,7 @@ export function NoLongerWaiting({ runId }: { runId: string }) {
       icon={CircleSlashIcon}
       message="This run no longer waits for a decision."
       action={
-        <Button asChild variant="outline">
+        <Button asChild>
           <Link href={`/runs/${runId}`}>Open run</Link>
         </Button>
       }
@@ -117,18 +126,19 @@ function GateReview({
     <section
       aria-labelledby={headingId}
       data-testid="inbox-review"
-      className="flex min-w-0 flex-col gap-4 rounded-lg border bg-card p-4"
+      className="flex min-w-0 flex-col gap-4 overflow-hidden rounded-lg border bg-card p-4"
     >
-      <header className="flex flex-col gap-1">
+      {/* The pane's header row (design-language.md → Cards and panes). */}
+      <header className="-mx-4 -mt-4 flex flex-col gap-1 border-b bg-surface-subtle px-4 py-3">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <h2 id={headingId} className="text-section font-semibold">
             {gate.title}
           </h2>
           {gate.expiresAt ? (
-            <ExpiresIn iso={gate.expiresAt} className="text-meta text-muted-foreground" />
+            <ExpiresIn iso={gate.expiresAt} className="text-meta text-foreground-secondary" />
           ) : null}
         </div>
-        <p className="flex flex-wrap items-center gap-x-2 text-meta text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-x-2 text-meta text-foreground-secondary">
           <span>{run.workflow.name}</span>
           <IdChip id={run.id} label="run id" />
         </p>
@@ -137,22 +147,22 @@ function GateReview({
 
       <ApprovingDoes gate={gate} />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <StatStrip columns={2}>
         <StatTile
           label="Active time"
           value={<Duration ms={times.activeMs} />}
-          secondary={<WaitingTime ms={times.waitingMs} live />}
+          secondary={<WaitingTime ms={times.waitingMs} live className="text-status-waiting" />}
         />
         <StatTile
           label="Cost so far"
           value={<Money usage={usageOfRun(run.usage)} budget={run.usage.budget_usd ?? null} />}
         />
-      </div>
+      </StatStrip>
 
       {gate.changes.length > 0 ? (
         <ChangedFiles gate={gate} onReview={() => decision.setDetails(true)} />
       ) : (
-        <div className="max-h-96 overflow-y-auto rounded-md border p-3">
+        <div className="max-h-96 overflow-y-auto rounded-lg border p-3">
           <GateArtifact gate={gate} />
         </div>
       )}
@@ -191,7 +201,9 @@ function ApprovingDoes({ gate }: { gate: InboxGate }) {
   const base = gate.base ?? "default branch";
   return (
     <section aria-label="What approving does" className="flex flex-col gap-1 text-meta">
-      <h3 className="text-caption text-muted-foreground">Approving lets the run go on</h3>
+      <h3 className="text-caption font-medium text-muted-foreground">
+        Approving lets the run go on
+      </h3>
       {gate.repoUrl ? (
         <p>
           In <span className="font-mono">{repoLabel(gate.repoUrl)}</span>
@@ -201,16 +213,16 @@ function ApprovingDoes({ gate }: { gate: InboxGate }) {
         <ul className="flex flex-col gap-1">
           {gate.branches.map((b) => (
             <li key={b.nodeId} className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <GitBranchIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-              <span className="font-mono break-all">{b.branch}</span>
-              <ArrowRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+              <GitBranchIcon aria-hidden="true" className="size-4 text-foreground-secondary" />
+              <TruncatedPath path={b.branch} className="min-w-0 flex-1 basis-40" />
+              <ArrowRightIcon aria-hidden="true" className="size-4 text-foreground-secondary" />
               <span className="sr-only">into</span>
-              <span className={gate.base ? "font-mono" : "text-muted-foreground"}>{base}</span>
+              <span className={gate.base ? "font-mono" : "text-foreground-secondary"}>{base}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-muted-foreground">No files changed before this gate.</p>
+        <p className="text-foreground-secondary">No files changed before this gate.</p>
       )}
     </section>
   );
@@ -222,13 +234,13 @@ function ChangedFiles({ gate, onReview }: { gate: InboxGate; onReview: () => voi
   const more = gate.changes.length - shown.length;
   return (
     <section aria-label="Changed files" className="flex flex-col gap-2">
-      <ul className="flex flex-col divide-y rounded-md border">
+      <ul className="flex flex-col divide-y divide-divider rounded-lg border">
         {shown.map((change) => (
           <li
             key={fileKey(change)}
             className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2"
           >
-            <span className="min-w-0 font-mono text-meta break-all">{change.path}</span>
+            <TruncatedPath path={change.path} className="min-w-0 flex-1 text-meta" />
             <StatusLabel status={change.status} />
           </li>
         ))}

@@ -55,13 +55,7 @@ export function GateDecision({ gate }: { gate: GateInfo }) {
       ) : null}
       {edited > 0 ? (
         <>
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="h-auto px-0"
-            onClick={() => setOpen(true)}
-          >
+          <Button type="button" variant="link" size="sm" onClick={() => setOpen(true)}>
             <FileDiffIcon aria-hidden="true" data-icon="inline-start" />
             View edits
           </Button>

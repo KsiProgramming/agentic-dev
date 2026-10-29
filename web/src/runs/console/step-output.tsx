@@ -99,15 +99,18 @@ function WrittenFiles({ files }: { files: WrittenFile[] }) {
           <SheetContent
             side={wide ? "right" : "bottom"}
             data-testid="written-file-sheet"
-            className="data-[side=bottom]:max-h-[85svh] data-[side=right]:w-full! data-[side=right]:sm:max-w-[640px]!"
+            className="data-[side=bottom]:max-h-[85svh]"
+            size="file"
           >
-            <SheetHeader className="border-b pr-12">
+            <SheetHeader>
               <SheetTitle className="font-mono break-all">{open.path}</SheetTitle>
               <SheetDescription>{open.kind}, as the agent last wrote it</SheetDescription>
             </SheetHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
               {/* Repo content is data: plain text, never Markdown or HTML. */}
-              <pre className="font-mono text-xs break-all whitespace-pre-wrap">{open.content}</pre>
+              <pre className="font-mono text-caption break-all whitespace-pre-wrap">
+                {open.content}
+              </pre>
             </div>
           </SheetContent>
         ) : null}
@@ -232,7 +235,7 @@ function ExternalLink({ href, children }: { href: string; children: ReactNode })
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex w-fit items-center gap-1 font-mono text-meta break-all text-primary underline-offset-4 hover:underline"
+      className="inline-flex w-fit items-center gap-1 font-mono text-meta break-all text-foreground underline-offset-4 hover:underline"
     >
       {children}
       <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
