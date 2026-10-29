@@ -144,9 +144,10 @@ export function ArtifactSheet({
         <SheetContent
           side={wide ? "right" : "bottom"}
           data-testid="artifact-sheet"
-          className="data-[side=bottom]:max-h-[85svh] data-[side=right]:w-full! data-[side=right]:sm:max-w-[720px]!"
+          className="data-[side=bottom]:max-h-[85svh]"
+          size="lg"
         >
-          <SheetHeader className="border-b pr-12">
+          <SheetHeader>
             <SheetTitle className="font-mono break-all">{artifact.name}</SheetTitle>
             <SheetDescription>
               {artifactFacts(artifact)}

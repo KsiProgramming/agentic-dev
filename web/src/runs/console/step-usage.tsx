@@ -2,7 +2,7 @@
 
 import { CoinsIcon } from "lucide-react";
 
-import { Money, StatTile, TokenCount } from "@/components/display";
+import { Money, StatStrip, StatTile, TokenCount } from "@/components/display";
 import { EmptyState } from "@/components/states";
 
 import { stepUsage, type Step } from "../timeline";
@@ -24,7 +24,7 @@ export function StepUsage({
     .filter((c) => c.usage !== null);
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatStrip columns={4}>
         <StatTile label="Input" value={<TokenCount value={usage.inputTokens} usage={usage} />} />
         <StatTile label="Output" value={<TokenCount value={usage.outputTokens} usage={usage} />} />
         <StatTile
@@ -40,9 +40,12 @@ export function StepUsage({
           }
         />
         <StatTile label="Cost" value={<Money data-testid="step-cost" usage={usage} />} />
-      </div>
+      </StatStrip>
       {parts.length > 0 ? (
-        <ul aria-label="Usage by step" className="flex flex-col divide-y rounded-lg border">
+        <ul
+          aria-label="Usage by step"
+          className="flex flex-col divide-y divide-divider rounded-lg border"
+        >
           {parts.map((part) => (
             <li key={part.key} className="flex min-w-0 items-center gap-3 px-3 py-2 text-meta">
               <span className="min-w-0 flex-1 truncate font-mono">{part.name}</span>

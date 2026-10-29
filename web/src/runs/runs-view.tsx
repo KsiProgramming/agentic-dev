@@ -109,6 +109,7 @@ export function RunsView({
             New run
           </Button>
         }
+        tabs={<RunViewTabs query={query} counts={counts.data} pathname={pathname} />}
       />
       <NewRunSheet
         open={newRun || askedNewRun}
@@ -121,8 +122,7 @@ export function RunsView({
         workspaceId={workspaceId}
         baseUrl={baseUrl}
       />
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <RunViewTabs query={query} counts={counts.data} pathname={pathname} />
+      <div className="flex flex-col gap-3">
         <RunFiltersBar
           filters={query}
           onChange={setQuery}
@@ -180,7 +180,7 @@ function EmptyView({ query, onClear }: { query: RunsQuery; onClear: () => void }
         icon={FilterXIcon}
         message="No runs match these filters."
         action={
-          <Button type="button" variant="outline" onClick={onClear}>
+          <Button type="button" onClick={onClear}>
             Clear filters
           </Button>
         }
@@ -194,7 +194,7 @@ function EmptyView({ query, onClear }: { query: RunsQuery; onClear: () => void }
         icon={icon}
         message={message}
         action={
-          <Button asChild variant="outline">
+          <Button asChild>
             <Link href="/runs" scroll={false}>
               Show all runs
             </Link>

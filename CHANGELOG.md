@@ -277,6 +277,15 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- Phase 11.9 Design language v2 ([#144](https://github.com/KsiProgramming/agentic-dev/pull/144)): every screen follows the new [`specs/design-language.md`](specs/design-language.md), now part of the constitution:
+  - **Tokens.** An ink (near-black) primary replaces indigo; three text levels (`foreground`, `foreground-secondary`, `muted-foreground`) plus `placeholder`; tinted surfaces (`surface-sunken`, `surface-subtle`), `border-strong`, `divider`, an edge per status (`--status-*-border`) and colours per finding severity (`--severity-*`); UI text 13 px, Inter `cv11`/`ss01`, `text-kbd`. A test checks every text level is ≥ 4.5:1 on every surface, light and dark.
+  - **Components.** Underline tabs (segmented only for a view switch or a form choice), badges with edges, bordered tables with a 36 px tinted header, inputs with a stronger edge, outlined and solid red destructive buttons, sheets and panes with header rows, `StatStrip` (stat tiles as one strip), `TruncatedPath` (paths cut from the left), filter chips with "+ Filter", a new `EmptyState` and `Kbd`.
+  - **Shell.** A tinted sidebar with a white current item, a 48 px top bar, 32 px page padding and a header band that holds page tabs.
+  - **Runs and Audit.** Filters are chips with "+ Filter"; metadata in the secondary text level; a run that called no model shows "$0.00" (No model calls).
+  - **Run console.** A template icon in the header; the figures as one strip, the wait in amber, Output naming the artifact a report-only run wrote; bordered panes with header rows; tree lines in the step list; the selected step as a full-height sheet on phones; step lines that say what a scan or review found ("Linted 6 modules · 2 findings", "Answered with 3 findings").
+  - **Run map.** The Graph tab is a tree of cards like Claude Code's agent map: steps top to bottom, branches and routes to the right (under on a phone), no pan or zoom.
+  - **Findings.** Severities in their own colours, the counts on one line with quiet zeros, cards when the pane is narrow, "2 of 6 scans" instead of a confidence %, and a deduplicated "Checked" grid with "repo root".
+  - **Checks.** `no-raw-colors` also rejects arbitrary text sizes; axe runs at 768 px too; the layout screenshots add dark at 375 px.
 - Roadmap: phase 4.7 ("Audit codebase" template) is merged into 4.6 (`router` primitive), which now reads "An audit run branches on a condition and produces findings.json + a readable report". The number 4.7 is retired, and every reference to it in `specs/` and the code points to 4.6. "Next up" moves to Milestone 4 at 4.6, since Milestone 11 is done. The plan is in `specs/2026-10-28-router-audit-template/` ([#142](https://github.com/KsiProgramming/agentic-dev/pull/142)).
 - Pages use the full content width up to 1600 px instead of centred columns, and agent output is capped at 72 characters a line. The brand accent stays indigo. The dialog overlay uses the `--overlay` token. `CLAUDE.md` and `specs/tech-stack.md` (Look, Layout, a new Display values section, decisions log) carry the new rules, and the UI v2 Foundations section moved into them (phase 11.1, [#129](https://github.com/KsiProgramming/agentic-dev/pull/129)).
 - The `CHANGELOG.md updated` check runs on every PR and needs lines added to the file; the `skip-changelog` label no longer skips it ([#29](https://github.com/KsiProgramming/agentic-dev/pull/29)).
@@ -299,6 +308,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `PostgresEventSink` no longer creates the `runs` row: create it with `create_run` first, and `run_started` moves it from `queued` to `running`.
 
 ### Removed
+- The React Flow run graph and its ELK layout (`@xyflow/react`, `elkjs`): the Graph tab is the run map (11.9).
 - `ANTHROPIC_API_KEY`: the worker no longer reads a Claude key from the environment (settings, compose and `.env.example`). Store it on the Settings page or with `PUT /workspaces/{id}/connections/claude`.
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 

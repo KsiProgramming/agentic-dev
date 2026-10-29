@@ -39,7 +39,7 @@ export function IdChip({
         <Link
           href={href}
           aria-label={`${name} ${short}`}
-          className={cn(CHIP, "text-primary hover:underline", className)}
+          className={cn(CHIP, "text-foreground hover:underline", className)}
         >
           {short}
         </Link>

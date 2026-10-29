@@ -3,7 +3,7 @@
 import { ExternalLinkIcon, ShieldCheckIcon } from "lucide-react";
 import { useId, useState } from "react";
 
-import { Percent, RelativeTime, StatTile } from "@/components/display";
+import { RelativeTime, TruncatedPath } from "@/components/display";
 import { EmptyState } from "@/components/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,25 +35,61 @@ import {
 /** Rows shown before "Show all". */
 export const FINDINGS_SHOWN = 50;
 
-/** A severity as an icon and a word, in neutral colours: severity is not a run status. */
+/** Each severity's own hue (design-language.md → Severity colours), never a status's. Class
+ * names are written out in full so Tailwind sees them. */
+const SEVERITY_TONE: Record<Severity, string> = {
+  critical: "border-severity-critical-border bg-severity-critical-muted text-severity-critical",
+  high: "border-severity-high-border bg-severity-high-muted text-severity-high",
+  medium: "border-severity-medium-border bg-severity-medium-muted text-severity-medium",
+  low: "border-severity-low-border bg-severity-low-muted text-severity-low",
+  info: "border-severity-info-border bg-severity-info-muted text-severity-info",
+};
+
+/** A severity as an icon and a word on its own colour; each severity's icon has its own shape,
+ * so colour is never the only cue. */
 export function SeverityBadge({ severity }: { severity: Severity }) {
   const { label, icon: Icon } = SEVERITY_DISPLAY[severity];
   return (
-    <Badge variant="outline" data-severity={severity}>
+    <Badge data-severity={severity} className={SEVERITY_TONE[severity]}>
       <Icon aria-hidden="true" />
       {label}
     </Badge>
   );
 }
 
+/** The counts by severity on one line: those with findings as coloured badges, most severe
+ * first, then the zeros as quiet text (design-language.md → Content rules, "Zeros are quiet"). */
+function SeverityCounts({ counts }: { counts: FindingsReport["counts"] }) {
+  const found = SEVERITIES.filter((s) => (counts[s] ?? 0) > 0);
+  const zero = SEVERITIES.filter((s) => (counts[s] ?? 0) === 0);
+  return (
+    <p data-testid="severity-counts" className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      {found.map((severity) => {
+        const { label, icon: Icon } = SEVERITY_DISPLAY[severity];
+        return (
+          <Badge key={severity} data-severity={severity} className={SEVERITY_TONE[severity]}>
+            <Icon aria-hidden="true" />
+            {formatCount(counts[severity] ?? 0)} {label}
+          </Badge>
+        );
+      })}
+      {zero.length > 0 ? (
+        <span className="text-caption text-placeholder">
+          {zero.map((s) => `0 ${SEVERITY_DISPLAY[s].label}`).join(" · ")}
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
 function Rule({ finding }: { finding: Finding }) {
-  if (!finding.help_url) return <span className="font-mono break-all">{finding.rule}</span>;
+  if (!finding.help_url) return <span className="font-mono whitespace-nowrap">{finding.rule}</span>;
   return (
     <a
       href={finding.help_url}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-1 font-mono break-all text-primary underline-offset-4 hover:underline"
+      className="inline-flex items-center gap-1 font-mono whitespace-nowrap text-foreground underline-offset-4 hover:underline"
     >
       {finding.rule}
       <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0" />
@@ -70,7 +106,7 @@ function Message({ finding, sources }: { finding: Finding; sources?: number }) {
     <span className="flex min-w-0 flex-col gap-0.5">
       <span className="break-words">{finding.message}</span>
       {finding.category === "dependency" ? (
-        <span className="text-caption text-muted-foreground">
+        <span className="text-caption text-foreground-secondary">
           {fixed.length > 0 ? `Fixed in ${fixed.join(", ")}` : "No fixed version yet"}
           {finding.aliases?.length ? ` · ${finding.aliases.join(", ")}` : ""}
         </span>
@@ -82,8 +118,8 @@ function Message({ finding, sources }: { finding: Finding; sources?: number }) {
       ) : null}
       {sources !== undefined && finding.sources?.length ? (
         <span data-testid="finding-sources" className="text-caption text-muted-foreground">
-          Found by {finding.sources.length} of {sources}:{" "}
-          <span className="font-mono break-all">{finding.sources.join(", ")}</span>
+          {finding.sources.length} of {sources} scans:{" "}
+          <span className="font-mono">{finding.sources.join(", ")}</span>
         </span>
       ) : null}
     </span>
@@ -100,11 +136,10 @@ function FindingsTable({
   sources?: number;
 }) {
   return (
-    <Table aria-label={label} className="text-meta">
+    <Table aria-label={label}>
       <TableHeader>
-        <TableRow className="hover:bg-transparent">
+        <TableRow>
           <TableHead>Severity</TableHead>
-          {sources !== undefined ? <TableHead>Confidence</TableHead> : null}
           <TableHead>Where</TableHead>
           <TableHead>Rule</TableHead>
           <TableHead>Finding</TableHead>
@@ -116,15 +151,10 @@ function FindingsTable({
             <TableCell className="align-top">
               <SeverityBadge severity={finding.severity} />
             </TableCell>
-            {sources !== undefined ? (
-              <TableCell className="align-top">
-                {finding.confidence != null ? <Percent value={finding.confidence} /> : "—"}
-              </TableCell>
-            ) : null}
-            <TableCell className="max-w-56 align-top font-mono break-all whitespace-normal">
-              {location(finding)}
+            <TableCell className="max-w-56 align-top">
+              <TruncatedPath path={location(finding)} focusable={false} />
             </TableCell>
-            <TableCell className="max-w-48 align-top whitespace-normal">
+            <TableCell className="align-top">
               <Rule finding={finding} />
             </TableCell>
             <TableCell className="min-w-56 align-top whitespace-normal">
@@ -157,13 +187,12 @@ function FindingCards({
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <SeverityBadge severity={finding.severity} />
             <Rule finding={finding} />
-            {sources !== undefined && finding.confidence != null ? (
-              <span className="text-caption text-muted-foreground">
-                <Percent value={finding.confidence} /> confidence
-              </span>
-            ) : null}
           </span>
-          <span className="font-mono break-all text-muted-foreground">{location(finding)}</span>
+          <TruncatedPath
+            path={location(finding)}
+            focusable={false}
+            className="text-foreground-secondary"
+          />
           <Message finding={finding} sources={sources} />
         </li>
       ))}
@@ -171,23 +200,42 @@ function FindingCards({
   );
 }
 
-/** What was checked where: one line per check, with why anything was skipped. */
+/** The checks once each: a merged report repeats every source's (same path, kind and tool). */
+export function uniqueChecks(checks: Check[]): Check[] {
+  const seen = new Set<string>();
+  return checks.filter((check) => {
+    const key = [check.path, check.kind, check.tool ?? ""].join("\n");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** What was checked where, as a grid that lines up (path, kind, then tool and config or why it
+ * was skipped); the root reads "repo root" (design-language.md → Content rules). */
 function Checked({ checks }: { checks: Check[] }) {
-  if (checks.length === 0) return null;
+  const unique = uniqueChecks(checks);
+  if (unique.length === 0) return null;
   return (
-    <section aria-label="Checked" className="flex flex-col gap-1">
+    <section aria-label="Checked" className="flex flex-col gap-1.5">
       <h3 className="text-caption font-medium text-muted-foreground">Checked</h3>
-      <ul className="flex flex-col gap-0.5 text-meta">
-        {checks.map((check, index) => (
+      <ul className="flex flex-col gap-2 text-meta sm:grid sm:grid-cols-[minmax(0,auto)_auto_minmax(0,1fr)] sm:gap-x-4 sm:gap-y-1">
+        {unique.map((check) => (
           <li
-            key={`${index} ${check.path} ${check.tool ?? check.kind}`}
+            key={[check.path, check.kind, check.tool ?? ""].join(" ")}
             data-testid="scan-check"
             data-status={check.status}
-            className="flex min-w-0 flex-wrap gap-x-2"
+            className="flex min-w-0 flex-col sm:col-span-3 sm:grid sm:grid-cols-subgrid sm:items-baseline"
           >
-            <span className="font-mono break-all">{check.path}</span>
-            <span className="text-muted-foreground">{check.kind}</span>
-            <span className={check.status === "ran" ? undefined : "text-muted-foreground"}>
+            <span className="min-w-0">
+              <TruncatedPath path={check.path} focusable={false} />
+            </span>
+            <span className="text-foreground-secondary">{check.kind}</span>
+            <span
+              className={
+                check.status === "ran" ? "text-foreground-secondary" : "text-status-waiting"
+              }
+            >
               {checkLine(check)}
             </span>
           </li>
@@ -200,7 +248,7 @@ function Checked({ checks }: { checks: Check[] }) {
 /** The reports a merged report was made from, by id (mono), with how many findings each gave. */
 function MergedFrom({ sources }: { sources: Source[] }) {
   return (
-    <p data-testid="merged-from" className="text-meta text-muted-foreground">
+    <p data-testid="merged-from" className="text-meta text-foreground-secondary">
       Merged from {sources.length === 1 ? "1 source" : `${sources.length} sources`}:{" "}
       {sources.map((source, i) => (
         <span key={source.id}>
@@ -229,15 +277,7 @@ export function FindingsView({ report, label }: { report: FindingsReport; label:
   const sources = report.sources ? report.sources.length : undefined;
   return (
     <div data-testid="findings-view" className="flex min-w-0 flex-col gap-4">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-        {SEVERITIES.map((severity) => (
-          <StatTile
-            key={severity}
-            label={SEVERITY_DISPLAY[severity].label}
-            value={formatCount(report.counts[severity] ?? 0)}
-          />
-        ))}
-      </div>
+      <SeverityCounts counts={report.counts} />
       {report.sources?.length ? <MergedFrom sources={report.sources} /> : null}
       <Checked checks={report.checks} />
       {report.db_as_of ? (
@@ -248,11 +288,12 @@ export function FindingsView({ report, label }: { report: FindingsReport; label:
       {findings.length === 0 ? (
         <EmptyState icon={ShieldCheckIcon} message={`${scanner}: no findings.`} />
       ) : (
-        <div id={listId} className="flex min-w-0 flex-col gap-2">
-          <div className="hidden md:block">
+        // A table where this box is 720 px or wider, cards below: by the pane, not the screen.
+        <div id={listId} className="@container flex min-w-0 flex-col gap-2">
+          <div className="hidden @min-[720px]:block">
             <FindingsTable findings={shown} label={label} sources={sources} />
           </div>
-          <div className="md:hidden">
+          <div className="@min-[720px]:hidden">
             <FindingCards findings={shown} label={label} sources={sources} />
           </div>
           {report.truncated ? (

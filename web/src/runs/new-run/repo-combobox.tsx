@@ -99,7 +99,7 @@ export function RepoCombobox({
                   {repo.private ? (
                     <LockIcon aria-label="Private" className="size-3.5 shrink-0" />
                   ) : null}
-                  <span className="flex shrink-0 items-center gap-1 font-mono text-xs text-muted-foreground">
+                  <span className="flex shrink-0 items-center gap-1 font-mono text-caption text-foreground-secondary">
                     <GitBranchIcon aria-hidden="true" className="size-3" />
                     {repo.default_branch}
                   </span>

@@ -99,8 +99,9 @@ describe("FindingsView", () => {
     const badge = rows[0]!.querySelector("[data-severity]")!;
     expect(badge.textContent).toBe("Critical");
     expect(badge.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
-    // Severity is not a status: no status colour on it.
-    expect(badge.getAttribute("data-variant")).toBe("outline");
+    // Severity has its own colours, never a status's (design-language.md → Severity colours).
+    expect(badge.className).toContain("text-severity-critical");
+    expect(badge.className).toContain("border-severity-critical-border");
     expect(badge.className).not.toMatch(/status-/);
     const link = within(rows[0]!).getByRole("link", { name: /F401/ });
     expect(link.getAttribute("href")).toBe("https://docs.astral.sh/ruff/rules/unused-import");
@@ -192,19 +193,20 @@ describe("a merged findings report (4.5)", () => {
     expect(sortFindings(MERGED.findings).map((f) => f.fingerprint)).toEqual(["both", "one"]);
   });
 
-  it("shows its sources, each finding's confidence and who found it", () => {
+  it("shows its sources and who found each finding, once (no confidence %)", () => {
     render(<FindingsView report={MERGED} label="Findings" />);
 
     expect(screen.getByTestId("merged-from").textContent).toBe(
       "Merged from 3 sources: lint (2), reviewer (1), secrets (0)",
     );
     const table = screen.getByRole("table", { name: "Findings" });
-    expect(within(table).getByRole("columnheader", { name: "Confidence" })).toBeTruthy();
+    // "Say each fact once": the share of scans, not a confidence beside it.
+    expect(within(table).queryByRole("columnheader", { name: "Confidence" })).toBeNull();
     const [first, second] = within(table).getAllByTestId("finding-row");
-    expect(first!.textContent).toContain("67%");
-    expect(first!.textContent).toContain("Found by 2 of 3: lint, reviewer");
-    expect(second!.textContent).toContain("33%");
-    expect(screen.getAllByTestId("finding-card")[0]!.textContent).toContain("67% confidence");
+    expect(first!.textContent).toContain("2 of 3 scans: lint, reviewer");
+    expect(first!.textContent).not.toContain("%");
+    expect(second!.textContent).toContain("1 of 3 scans: lint");
+    expect(screen.getAllByTestId("finding-card")[0]!.textContent).not.toContain("confidence");
   });
 
   it("shows a scanner's report without the merge columns", () => {
@@ -259,5 +261,23 @@ describe("an agent review's findings (4.6)", () => {
     render(<FindingsView report={REVIEW as never} label="Findings of security" />);
 
     expect(screen.getAllByText("sql-injection", { exact: false }).length).toBeGreaterThan(0);
+  });
+});
+
+describe("counts and checks", () => {
+  it("puts severities with findings first and keeps the zeros quiet", () => {
+    render(<FindingsView report={LINT} label="Findings" />);
+    const counts = screen.getByTestId("severity-counts");
+    const badges = [...counts.querySelectorAll("[data-severity]")].map((b) => b.textContent);
+    expect(badges[0]).toMatch(/Critical$/);
+    expect(counts.textContent).toMatch(/0 Info/);
+  });
+
+  it("lists each check once and names the root", () => {
+    const check = { path: ".", kind: "repo", tool: "ruff", status: "ran" as const };
+    render(<FindingsView report={{ ...LINT, checks: [check, check] }} label="Findings" />);
+    const checks = screen.getAllByTestId("scan-check");
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.textContent).toContain("repo root");
   });
 });

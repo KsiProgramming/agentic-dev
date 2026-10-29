@@ -174,7 +174,10 @@ test("choosing a template puts it in the URL", async () => {
   show();
   await screen.findByRole("table", { name: "All runs" });
 
-  fireEvent.change(screen.getByLabelText("Template"), { target: { value: "generate-docs" } });
+  // "+ Filter", then the filter, then its value.
+  fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Template" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Generate docs" }));
 
   expect(nav.replace).toHaveBeenCalledWith("/runs?template=generate-docs", { scroll: false });
 });

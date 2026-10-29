@@ -50,7 +50,7 @@ function PrLink({ url }: { url: string }) {
       target="_blank"
       rel="noreferrer"
       aria-label={`Pull request ${label} (opens in a new tab)`}
-      className="relative z-10 inline-flex items-center gap-1 rounded-sm text-primary tabular-nums outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="relative z-10 inline-flex items-center gap-1 rounded-sm text-foreground tabular-nums outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
     >
       {label}
       <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
@@ -142,7 +142,7 @@ function Started({ run, now }: { run: RunSummary; now: number }) {
       now={now}
       detail={wallClockLine(runTimes(run, now).wallMs, isLive(run.status))}
       focusable={false}
-      className={IN_ROW}
+      className={`${IN_ROW} text-foreground-secondary`}
     />
   );
 }
@@ -153,10 +153,10 @@ function RunTime({ run, now }: { run: RunSummary; now: number }) {
   const { activeMs, waitingMs } = runTimes(run, now);
   const waiting = run.status === "waiting";
   return (
-    <span data-testid="run-time" className="tabular-nums">
+    <span data-testid="run-time" className="text-foreground-secondary tabular-nums">
       <Duration ms={activeMs} />
       {waitingMs > 0 || waiting ? (
-        <span className="text-muted-foreground">
+        <span className={waiting ? "text-status-waiting" : "text-foreground-secondary"}>
           {" · "}
           <WaitingTime ms={waitingMs} live={waiting} />
         </span>
@@ -165,21 +165,39 @@ function RunTime({ run, now }: { run: RunSummary; now: number }) {
   );
 }
 
-/** What the run cost so far; "—" before any usage is logged. */
+/** What the run cost so far: "—" before any usage is logged; "$0.00" for a run that ended
+ * without calling a model (only tool steps), which cost nothing rather than nothing yet. */
 function Cost({ run }: { run: RunSummary }) {
   const usage = usageOfRun(run.usage);
   if (usage.inputTokens + usage.outputTokens === 0) {
-    return <span className="text-muted-foreground">—</span>;
+    if (!isLive(run.status) && run.finished_at && run.usage.cost_complete) {
+      return (
+        <span title="No model calls" className="text-foreground-secondary">
+          <Money data-testid="run-cost" usd={0} />
+        </span>
+      );
+    }
+    return <span className="text-placeholder">—</span>;
   }
-  return <Money data-testid="run-cost" usage={usage} focusable={false} className={IN_ROW} />;
+  return (
+    <Money
+      data-testid="run-cost"
+      usage={usage}
+      focusable={false}
+      className={`${IN_ROW} text-foreground-secondary`}
+    />
+  );
 }
 
 /** The repo (mono), with the branch the run works on under it when it is not the default. */
 function Repo({ run }: { run: RunSummary }) {
-  if (!run.repo) return <span className="text-muted-foreground">—</span>;
+  if (!run.repo) return <span className="text-placeholder">—</span>;
   return (
     <div className="flex max-w-64 min-w-0 flex-col">
-      <span title={run.repo.url} className="truncate font-mono text-xs">
+      <span
+        title={run.repo.url}
+        className="truncate font-mono text-caption text-foreground-secondary"
+      >
         {repoLabel(run.repo.url)}
       </span>
       {run.branch ? (
@@ -195,7 +213,7 @@ function Repo({ run }: { run: RunSummary }) {
 
 /** A date header sticks under the top bar (`h-14`) while its rows scroll by. */
 const DATE_HEADER =
-  "sticky top-14 z-20 bg-background text-caption font-medium text-muted-foreground";
+  "sticky top-12 z-20 bg-background text-caption font-medium text-muted-foreground";
 
 /** Runs as a table, from `md` (768 px), under their date headers. A row opens the run. From
  * `lg` the table fits the page, so it drops its scroll box and the headers stick. */
@@ -211,9 +229,9 @@ export function RunsTable({
   baseUrl?: string;
 }) {
   return (
-    <Table aria-label={label} className="text-meta" containerClassName="lg:overflow-x-visible">
+    <Table aria-label={label} containerClassName="lg:overflow-x-visible">
       <TableHeader>
-        <TableRow className="hover:bg-transparent">
+        <TableRow>
           <TableHead>Status</TableHead>
           <TableHead>Run</TableHead>
           <TableHead>Repository</TableHead>
@@ -257,7 +275,7 @@ export function RunsTable({
                 {run.pr_url ? (
                   <PrLink url={run.pr_url} />
                 ) : (
-                  <span className="text-muted-foreground">—</span>
+                  <span className="text-placeholder">—</span>
                 )}
               </TableCell>
               <TableCell className="text-right">
@@ -283,7 +301,7 @@ export function RunCard({ run, now, baseUrl }: { run: RunSummary; now: number; b
         </div>
       </div>
       <Repo run={run} />
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-foreground-secondary">
         <Started run={run} now={now} />
         <span>
           <span className="sr-only">Duration </span>

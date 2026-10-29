@@ -1,4 +1,5 @@
 import type { Branch, Iteration, MapItem, MessageTurn, Step, StepStatus } from "../timeline";
+import { isFindingsReport, SEVERITIES, type FindingsReport } from "../findings/findings";
 import { itemName } from "./item-name";
 import { describeTool } from "./tool-describe";
 
@@ -223,6 +224,52 @@ function count(n: number, word: string, plural = `${word}s`): string {
   return `${n} ${n === 1 ? word : plural}`;
 }
 
+const SCANNED: Record<FindingsReport["scanner"], string> = {
+  lint: "Linted",
+  secrets: "Scanned for secrets",
+  dependencies: "Checked dependencies",
+  agent: "Reviewed",
+  merged: "Merged",
+};
+
+/** A findings report in `text`, as a scan tool returns it or an agent answers with it (one
+ * fenced block allowed); `null` when it is not one. */
+function findingsIn(text: string | null): FindingsReport | null {
+  const body = text
+    ?.trim()
+    .replace(/^```(?:json)?\s*/, "")
+    .replace(/\s*```$/, "");
+  if (!body?.startsWith("{")) return null;
+  try {
+    const value: unknown = JSON.parse(body);
+    return isFindingsReport(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What a scan or a review found, so two scans read differently: "Linted 6 modules · 2
+ * findings", "Scanned for secrets · no findings", "Skipped 6 modules: dotnet is not supported". */
+function findingsLine(report: FindingsReport, agent: boolean): string {
+  const total = SEVERITIES.reduce((sum, s) => sum + (report.counts[s] ?? 0), 0);
+  const found = total === 0 ? "no findings" : count(total, "finding");
+  if (agent) return total === 0 ? "Answered: no findings" : `Answered with ${found}`;
+  const ran = report.checks.filter((c) => c.status === "ran").length;
+  const skipped = report.checks.filter((c) => c.status !== "ran");
+  if (ran === 0 && skipped.length > 0) {
+    const reason = skipped[0]!.reason;
+    return `Skipped ${count(skipped.length, "module")}${reason ? `: ${reason}` : ""}`;
+  }
+  const where = ran > 1 ? ` ${count(ran, "module")}` : "";
+  const rest = skipped.length > 0 ? ` · ${skipped.length} skipped` : "";
+  return `${SCANNED[report.scanner]}${where} · ${found}${rest}`;
+}
+
+/** Whether `text` is a JSON answer (an agent with an output schema), not prose. */
+function isJson(text: string): boolean {
+  return /^(?:```(?:json)?\s*)?[{[]/.test(text.trim());
+}
+
 /** One line on what a step did, for its row: the agent's answer, the tool's call, the gate's
  * decision, or how far a container got. Plain text: it comes from agent and repo content. */
 export function stepOutline(step: Step): string | null {
@@ -257,8 +304,13 @@ export function stepOutline(step: Step): string | null {
   if (step.prUrl) return `Opened pull request #${step.prUrl.split("/").at(-1)}`;
   if (step.createdRepo) return `Created ${step.createdRepo.fullName}`;
   const message = lastMessage(step);
-  if (message && message.text.trim()) return firstLine(message.text);
   const tool = step.turns.findLast((t) => t.kind === "tool");
+  // A scan's or a review's result says what it found, not the call it made or the JSON's "{".
+  const report = findingsIn(message?.text ?? null) ?? findingsIn(tool?.output ?? null);
+  if (report) return findingsLine(report, message !== null && findingsIn(message.text) !== null);
+  if (message && message.text.trim()) {
+    return isJson(message.text) ? "Answered in JSON" : firstLine(message.text);
+  }
   if (tool) {
     const d = describeTool(tool.name, tool.arguments);
     return d.target ? `${d.done} ${d.target}` : d.done;

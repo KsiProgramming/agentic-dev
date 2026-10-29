@@ -9,7 +9,6 @@ import { useId, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 
 export type ConnectionStatus = "connected" | "missing" | "attention" | "unavailable";
 
@@ -18,29 +17,29 @@ const STATUS: Record<ConnectionStatus, { label: string; icon: LucideIcon; classN
   connected: {
     label: "Connected",
     icon: CircleCheckIcon,
-    className: "bg-status-succeeded-muted text-status-succeeded",
+    className: "border-status-succeeded-border bg-status-succeeded-muted text-status-succeeded",
   },
   missing: {
     label: "Not connected",
     icon: CircleDashedIcon,
-    className: "bg-status-queued-muted text-status-queued",
+    className: "border-status-queued-border bg-status-queued-muted text-status-queued",
   },
   attention: {
     label: "Needs attention",
     icon: CircleAlertIcon,
-    className: "bg-status-waiting-muted text-status-waiting",
+    className: "border-status-waiting-border bg-status-waiting-muted text-status-waiting",
   },
   unavailable: {
     label: "Unavailable",
     icon: CircleMinusIcon,
-    className: "bg-status-queued-muted text-status-queued",
+    className: "border-status-queued-border bg-status-queued-muted text-status-queued",
   },
 };
 
 export function ConnectionBadge({ status }: { status: ConnectionStatus }) {
   const { label, icon: Icon, className } = STATUS[status];
   return (
-    <Badge data-status={status} className={cn("h-6 px-2 text-xs", className)}>
+    <Badge data-status={status} className={className}>
       <Icon aria-hidden="true" data-icon="inline-start" />
       {label}
     </Badge>
@@ -74,8 +73,8 @@ export function ConnectionCard({
     <Card role="region" aria-labelledby={headingId} data-testid={testId}>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted/40">
-            <Icon aria-hidden="true" className="size-4" />
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-surface-subtle">
+            <Icon aria-hidden="true" className="size-4 text-foreground-secondary" />
           </span>
           <div className="flex min-w-0 flex-col gap-1">
             <CardTitle className="flex flex-wrap items-center gap-2">
@@ -83,12 +82,14 @@ export function ConnectionCard({
               {status ? <ConnectionBadge status={status} /> : null}
             </CardTitle>
             <CardDescription>{purpose}</CardDescription>
-            {detail ? <div className="text-sm">{detail}</div> : null}
+            {detail ? <div className="text-meta text-foreground-secondary">{detail}</div> : null}
           </div>
         </div>
         {actions ? <div className="flex flex-wrap gap-2 sm:shrink-0">{actions}</div> : null}
       </CardHeader>
-      {children ? <CardContent className="flex flex-col gap-3">{children}</CardContent> : null}
+      {children ? (
+        <CardContent className="@container flex flex-col gap-3">{children}</CardContent>
+      ) : null}
     </Card>
   );
 }

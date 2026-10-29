@@ -14,6 +14,8 @@ describe("StatusBadge", () => {
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("aria-hidden")).toBe("true");
     expect(badge.className).toContain(`text-status-${status}`);
+    // The edge is not optional (design-language.md → Components).
+    expect(badge.className).toContain(`border-status-${status}-border`);
   });
 
   it("can say something else while keeping the status", () => {

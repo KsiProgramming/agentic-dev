@@ -6,29 +6,34 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-/** A data view with nothing to show: an icon, one sentence and, if there is one, the action. */
+/** A data view with nothing to show (design-language.md → `EmptyState`): an icon in a tile, one
+ * sentence as its title, an optional line under it and, if there is one, the action. */
 export function EmptyState({
   icon: Icon,
   message,
+  description,
   action,
   className,
 }: {
   icon: LucideIcon;
   message: ReactNode;
+  description?: ReactNode;
   action?: ReactNode;
   className?: string;
 }) {
   return (
     <div
       data-slot="empty-state"
-      className={cn(
-        "flex flex-col items-center gap-3 rounded-lg border border-dashed px-4 py-8 text-center",
-        className,
-      )}
+      className={cn("flex flex-col items-center gap-3 px-4 py-10 text-center", className)}
     >
-      <Icon aria-hidden="true" className="size-6 text-muted-foreground" />
-      <p className="text-muted-foreground">{message}</p>
-      {action}
+      <span className="flex size-10 items-center justify-center rounded-lg border bg-surface-subtle">
+        <Icon aria-hidden="true" className="size-5 text-muted-foreground" />
+      </span>
+      <div className="flex max-w-prose flex-col gap-1">
+        <p className="text-section font-semibold text-foreground">{message}</p>
+        {description ? <p className="text-meta text-foreground-secondary">{description}</p> : null}
+      </div>
+      {action ? <div className="mt-1">{action}</div> : null}
     </div>
   );
 }
@@ -67,10 +72,10 @@ export function ErrorState({
     // Only the message is announced, not the Retry label: the alert role sits on the message.
     <Alert variant="destructive" role={undefined} data-slot="error-state" className={className}>
       <CircleAlertIcon aria-hidden="true" />
-      <AlertDescription className="flex flex-wrap items-center justify-between gap-2 text-destructive">
+      <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
         <span role="alert">{message}</span>
         {onRetry ? (
-          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          <Button type="button" variant="outline" onClick={onRetry}>
             <RotateCwIcon aria-hidden="true" data-icon="inline-start" />
             Retry
           </Button>

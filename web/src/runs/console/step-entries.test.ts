@@ -251,3 +251,53 @@ describe("routers (4.6)", () => {
     expect(progress).toMatchObject({ total: 3, done: 2, running: 0 });
   });
 });
+
+describe("stepOutline of scans and reviews", () => {
+  const report = (scanner: string, checks: object[], counts: object) =>
+    JSON.stringify({ scanner, checks, findings: [], counts });
+  const ran = (path: string) => ({ path, kind: "python", tool: "ruff", status: "ran" });
+  const outline = (events: RunEvent[]) =>
+    stepOutline(stepRows(stepEntries(buildTimeline(events).steps))[0]!.step);
+  const tool = (node: string, output: string): RunEvent[] => [
+    on(node, runEvent(1, "node_started")),
+    on(
+      node,
+      runEvent(2, "tool_call", { call_id: "c1", name: "scan.lint", arguments: { path: "." } }),
+    ),
+    on(node, runEvent(3, "tool_result", { call_id: "c1", output })),
+    on(node, runEvent(4, "node_completed")),
+  ];
+
+  it("says what a scan found, so two scans of the repo read differently", () => {
+    expect(outline(tool("lint", report("lint", [ran("a"), ran("b")], { medium: 2 })))).toBe(
+      "Linted 2 modules · 2 findings",
+    );
+    expect(outline(tool("secrets", report("secrets", [ran(".")], {})))).toBe(
+      "Scanned for secrets · no findings",
+    );
+  });
+
+  it("says when every module was skipped, and why", () => {
+    const skipped = { path: "src", kind: "dotnet", tool: null, status: "skipped" };
+    const reason = { ...skipped, reason: "no supported linter for dotnet" };
+    expect(outline(tool("lint", report("lint", [reason, skipped], {})))).toBe(
+      "Skipped 2 modules: no supported linter for dotnet",
+    );
+  });
+
+  it("reads an agent's findings answer, not its first JSON line", () => {
+    const answer = "```json\n" + report("agent", [ran(".")], { high: 1, low: 2 }) + "\n```";
+    expect(
+      outline([
+        on("security_1", runEvent(1, "node_started")),
+        on("security_1", runEvent(2, "message", { text: answer })),
+      ]),
+    ).toBe("Answered with 3 findings");
+    expect(
+      outline([
+        on("pick", runEvent(1, "node_started")),
+        on("pick", runEvent(2, "message", { text: '{"route": "fix"}' })),
+      ]),
+    ).toBe("Answered in JSON");
+  });
+});

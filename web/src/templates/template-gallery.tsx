@@ -4,12 +4,11 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
-  FileTextIcon,
   LayoutTemplateIcon,
   PlayIcon,
-  ScanSearchIcon,
-  type LucideIcon,
 } from "lucide-react";
+
+import { createElement } from "react";
 
 import { useTemplates, type Template } from "@/api/queries";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -18,13 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { templateIcon } from "@/templates/icons";
 import { REQUIREMENT_LABEL, type ConnectionState, type Readiness } from "@/runs/new-run/readiness";
-
-/** Icons for the templates we know; others get a generic one. */
-const ICONS: Record<string, LucideIcon> = {
-  "generate-docs": FileTextIcon,
-  "audit-codebase": ScanSearchIcon,
-};
 
 function RequirementChip({ label, state }: { label: string; state: ConnectionState }) {
   const ok = state === "ready";
@@ -34,7 +28,7 @@ function RequirementChip({ label, state }: { label: string; state: ConnectionSta
     <Badge
       variant="outline"
       data-state={state}
-      className={cn("h-6 gap-1 px-2", ok ? "text-status-succeeded" : "text-muted-foreground")}
+      className={cn(ok ? "text-status-succeeded" : "text-muted-foreground")}
     >
       <Icon aria-hidden="true" data-icon="inline-start" />
       <span className="text-foreground">{label}</span>
@@ -52,7 +46,6 @@ function TemplateCard({
   readiness: Readiness;
   onStart: (id: string) => void;
 }) {
-  const Icon = ICONS[template.id] ?? LayoutTemplateIcon;
   const headingId = `template-${template.id}`;
   return (
     <Card
@@ -62,8 +55,8 @@ function TemplateCard({
       className="flex flex-col"
     >
       <CardHeader className="flex flex-1 flex-col gap-3">
-        <span className="flex size-9 items-center justify-center rounded-md border bg-muted/40">
-          <Icon aria-hidden="true" className="size-4" />
+        <span className="flex size-9 items-center justify-center rounded-md border bg-surface-subtle">
+          {createElement(templateIcon(template.id), { "aria-hidden": true, className: "size-4" })}
         </span>
         <CardTitle>
           <h2 id={headingId}>{template.name}</h2>
@@ -73,7 +66,7 @@ function TemplateCard({
       <CardFooter className="flex flex-wrap items-center justify-between gap-3">
         {template.requires.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-muted-foreground">Requires</span>
+            <span className="text-caption font-medium text-muted-foreground">Requires</span>
             {template.requires.map((r) => (
               <RequirementChip key={r} label={REQUIREMENT_LABEL[r]} state={readiness.state[r]} />
             ))}

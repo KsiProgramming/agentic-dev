@@ -78,7 +78,7 @@ export function InboxView({
           icon={InboxIcon}
           message="Nothing waits for your approval."
           action={
-            <Button asChild variant="outline">
+            <Button asChild>
               <Link href="/runs">
                 <HistoryIcon aria-hidden="true" data-icon="inline-start" />
                 Show all runs
@@ -87,14 +87,14 @@ export function InboxView({
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)] lg:items-start">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[var(--container-inbox-list)_minmax(0,1fr)] lg:items-start">
           {runs.length > 0 ? (
             <InboxList runs={runs} selectedId={selectedId} now={now} pathname={pathname} />
           ) : (
             <EmptyState icon={InboxIcon} message="Nothing else waits for your approval." />
           )}
           {selectedId ? (
-            <div ref={review} className="min-w-0 scroll-mt-20">
+            <div ref={review} className="min-w-0 scroll-mt-16">
               {selected ? (
                 <InboxReview
                   run={selected}
@@ -133,7 +133,7 @@ function InboxList({
 }) {
   return (
     <nav aria-label="Waiting gates" className="min-w-0">
-      <ul className="flex flex-col divide-y rounded-lg border bg-card">
+      <ul className="flex flex-col divide-y divide-divider overflow-hidden rounded-lg border bg-card">
         {runs.map((run) => {
           const current = run.id === selectedId;
           const expiresAt = run.waiting_gate?.expires_at;
@@ -144,23 +144,29 @@ function InboxList({
                 scroll={false}
                 aria-current={current ? "true" : undefined}
                 className={cn(
-                  "flex flex-col gap-1 px-4 py-3 outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset",
-                  current && "bg-muted",
+                  "flex flex-col gap-1 px-4 py-3 hover:bg-muted focus-visible:-outline-offset-2",
+                  // Selected: a tint and a 2 px ink bar on the left (design-language.md → Rows).
+                  current &&
+                    "bg-surface-subtle shadow-[inset_2px_0_0_var(--primary)] hover:bg-muted",
                 )}
               >
-                <span className="truncate font-medium">
+                <span className="truncate text-meta font-medium">
                   {run.waiting_gate?.title ?? "Approve?"}
                 </span>
-                <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-meta text-muted-foreground">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2 text-meta text-foreground-secondary">
                   <span className="truncate">{run.workflow.name}</span>
                   {run.repo ? (
-                    <span title={run.repo.url} className="truncate font-mono">
+                    <span title={run.repo.url} className="truncate font-mono text-caption">
                       {repoLabel(run.repo.url)}
                     </span>
                   ) : null}
                 </span>
-                <span className="flex flex-wrap items-center gap-x-2 text-meta text-muted-foreground">
-                  <WaitingTime ms={runTimes(run, now).waitingMs} live />
+                <span className="flex flex-wrap items-center gap-x-2 text-caption text-foreground-secondary">
+                  <WaitingTime
+                    ms={runTimes(run, now).waitingMs}
+                    live
+                    className="text-status-waiting"
+                  />
                   {expiresAt ? (
                     <>
                       <span aria-hidden="true">·</span>

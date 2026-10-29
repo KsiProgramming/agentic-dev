@@ -17,11 +17,13 @@ import { useConsoleWaiting } from "@/components/shell/attention";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import type { RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { ArtifactsView } from "../artifacts/artifacts-view";
 import { pendingGate, type PendingGate } from "../gates";
-import { RunGraph } from "../graph/run-graph";
+import { RunMap } from "../graph/run-map";
 import { allSpecNodes, type NodeKind } from "../graph/spec-graph";
 import { displayStatus } from "../status";
 import { badgeStatus, runTimes, statusLabel, wallClockLine } from "../summaries";
@@ -29,6 +31,7 @@ import { usageOfRun } from "../cost";
 import { specParents } from "../spec-parents";
 import { buildTimeline, clockAt, stepsUsage, type Step, type Timeline } from "../timeline";
 import type { ReceivedRunEvent, StreamStatus } from "../types";
+import { PHONE, useMediaQuery } from "@/lib/use-media-query";
 import { useFollowScroll } from "../use-follow-scroll";
 import { useNow } from "../use-now";
 import { runDetailKey, useRunDetail, type RunDetail } from "../use-run-detail";
@@ -150,7 +153,6 @@ function WaitingMarker() {
         type="button"
         variant="link"
         size="sm"
-        className="h-auto px-0"
         onClick={() => document.getElementById(DOCK_ID)?.focus()}
       >
         Go to the decision
@@ -257,12 +259,23 @@ function Console({
   );
   const kindOf = useCallback((nodeId: string) => kinds.get(nodeId) ?? null, [kinds]);
 
+  // On a phone the selected step opens as a full-height sheet over the list
+  // (design-language.md → Mobile); from 768 px it is beside or below the list.
+  const phone = useMediaQuery(PHONE);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const showStep = useCallback(
+    (focus: boolean) => {
+      if (window.matchMedia?.(PHONE).matches) setSheetOpen(true);
+      else revealPanel(focus);
+    },
+    [setSheetOpen],
+  );
   const select = useCallback(
     (key: string) => {
       update({ step: key });
-      revealPanel(false);
+      showStep(false);
     },
-    [update],
+    [update, showStep],
   );
   const openNode = useCallback(
     (nodeId: string) => {
@@ -334,6 +347,15 @@ function Console({
         budget={run?.usage.budget_usd ?? null}
         progress={spec ? stepsProgress(spec, timeline.steps) : null}
         createdRepo={rows.find((r) => r.step.createdRepo)?.step.createdRepo ?? null}
+        runId={runId}
+        written={written}
+        baseUrl={baseUrl}
+        noModelCalls={
+          (timeline.endedAt ?? run?.finished_at ?? null) !== null &&
+          run !== undefined &&
+          run.usage.input_tokens + run.usage.output_tokens === 0 &&
+          run.usage.cost_complete
+        }
       />
 
       {banner ? (
@@ -341,7 +363,7 @@ function Console({
           banner={banner}
           onGoToStep={(key) => {
             update({ step: key, tab: null });
-            revealPanel(true);
+            showStep(true);
           }}
         />
       ) : null}
@@ -350,13 +372,23 @@ function Console({
         <ErrorState message="Lost the connection to the event stream." onRetry={onRetry} />
       ) : null}
 
-      <div className="flex min-w-0 flex-col gap-6 xl:grid xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] xl:items-start">
+      {/* The map reads left to right, so it gets the wider pane; the list and artifacts the
+          narrower one. */}
+      <div
+        className={cn(
+          "flex min-w-0 flex-col gap-6 xl:grid xl:items-start",
+          view === "graph"
+            ? "xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]"
+            : "xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]",
+        )}
+      >
         <Tabs
           value={view}
           onValueChange={(next) => update({ view: next === "list" ? null : next })}
-          className="min-w-0"
+          // A pane: bordered like the step panel, its tab row the header (design-language.md).
+          className="min-w-0 gap-0 overflow-hidden rounded-lg border bg-card"
         >
-          <TabsList aria-label="Run views">
+          <TabsList aria-label="Run views" className="bg-surface-subtle px-4">
             <TabsTrigger value="list">
               <ListTreeIcon aria-hidden="true" />
               Steps
@@ -371,7 +403,7 @@ function Console({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="list" className="pt-2">
+          <TabsContent value="list" className="p-2">
             {entries.length === 0 ? (
               live ? (
                 <EmptyState icon={RadioIcon} message="Waiting for the run to start…" />
@@ -390,13 +422,14 @@ function Console({
             )}
           </TabsContent>
 
-          <TabsContent value="graph" className="pt-2">
+          <TabsContent value="graph">
             {spec ? (
-              <RunGraph
+              <RunMap
                 spec={spec}
                 steps={timeline.steps}
                 selected={selected?.step.id ?? null}
                 onOpen={openNode}
+                now={now}
               />
             ) : detail.isError ? (
               <ErrorState message="Could not load the workflow." onRetry={() => detail.refetch()} />
@@ -405,7 +438,7 @@ function Console({
             )}
           </TabsContent>
 
-          <TabsContent value="artifacts" className="pt-2">
+          <TabsContent value="artifacts" className="p-3">
             <ArtifactsView
               runId={runId}
               written={written}
@@ -418,28 +451,62 @@ function Console({
         </Tabs>
 
         {selected && kind ? (
-          <div id={PANEL_ID} tabIndex={-1} className="min-w-0 scroll-mt-20 outline-none">
-            <StepPanel
-              runId={runId}
-              baseUrl={baseUrl}
-              row={selected}
-              kind={kind}
-              entries={entries}
-              spec={spec}
-              runInput={run?.input ?? null}
-              first={rows[0]?.key === selected.key}
-              events={events}
-              now={now}
-              tab={tab}
-              onTab={(next) => update({ tab: next === "output" ? null : next })}
-              onSelect={select}
-              extra={
-                gate && selected.step.id === gate.nodeId && selected.step.status === "waiting" ? (
-                  <WaitingMarker />
-                ) : null
-              }
-            />
-          </div>
+          phone ? (
+            <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+              <SheetContent side="bottom" className="h-svh gap-0 p-0" aria-describedby={undefined}>
+                <SheetHeader>
+                  <SheetTitle className="truncate font-mono">{selected.name}</SheetTitle>
+                </SheetHeader>
+                <div id={PANEL_ID} className="min-h-0 flex-1 overflow-y-auto p-3">
+                  <StepPanel
+                    runId={runId}
+                    baseUrl={baseUrl}
+                    row={selected}
+                    kind={kind}
+                    entries={entries}
+                    spec={spec}
+                    runInput={run?.input ?? null}
+                    first={rows[0]?.key === selected.key}
+                    events={events}
+                    now={now}
+                    tab={tab}
+                    onTab={(next) => update({ tab: next === "output" ? null : next })}
+                    onSelect={select}
+                    extra={
+                      gate &&
+                      selected.step.id === gate.nodeId &&
+                      selected.step.status === "waiting" ? (
+                        <WaitingMarker />
+                      ) : null
+                    }
+                  />
+                </div>
+              </SheetContent>
+            </Sheet>
+          ) : (
+            <div id={PANEL_ID} tabIndex={-1} className="min-w-0 scroll-mt-16 outline-none">
+              <StepPanel
+                runId={runId}
+                baseUrl={baseUrl}
+                row={selected}
+                kind={kind}
+                entries={entries}
+                spec={spec}
+                runInput={run?.input ?? null}
+                first={rows[0]?.key === selected.key}
+                events={events}
+                now={now}
+                tab={tab}
+                onTab={(next) => update({ tab: next === "output" ? null : next })}
+                onSelect={select}
+                extra={
+                  gate && selected.step.id === gate.nodeId && selected.step.status === "waiting" ? (
+                    <WaitingMarker />
+                  ) : null
+                }
+              />
+            </div>
+          )
         ) : null}
       </div>
 

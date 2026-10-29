@@ -7,11 +7,12 @@ import {
   GitPullRequestIcon,
   LinkIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { createElement, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { IdChip, RelativeTime, shortId } from "@/components/display";
 import { PageHeader } from "@/components/page-header";
+import { templateIcon } from "@/templates/icons";
 import { StatusBadge, type RunStatus } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -125,8 +126,10 @@ export function RunHeader({
   const repo = run?.repo ?? null;
   const branch = run?.branch ?? repo?.ref ?? null;
   return (
+    // The template's icon, as on its gallery card; a generic one for a run without a template.
     <PageHeader
       title={facts.workflowName ?? run?.workflow.name ?? "Run"}
+      icon={createElement(templateIcon(run?.template_id))}
       aside={
         <>
           <span aria-live="polite">
@@ -143,10 +146,12 @@ export function RunHeader({
         <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-meta">
           {repo ? (
             <li className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-mono text-foreground">{repoLabel(repo.url)}</span>
+              <span className="truncate font-mono">{repoLabel(repo.url)}</span>
               {branch ? (
                 <span className="flex min-w-0 items-center gap-1 font-mono">
-                  <span aria-hidden="true">›</span>
+                  <span aria-hidden="true" className="text-placeholder">
+                    ›
+                  </span>
                   <GitBranchIcon aria-hidden="true" className="size-3.5 shrink-0" />
                   <span className="truncate">{branch}</span>
                 </span>

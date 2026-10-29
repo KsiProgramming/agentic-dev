@@ -22,7 +22,7 @@ import {
 } from "./work-blocks";
 
 const HEADER =
-  "flex w-full min-w-0 items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-left text-meta text-muted-foreground outline-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50";
+  "flex w-full min-w-0 items-center gap-2 rounded-md border bg-surface-subtle px-2.5 py-1.5 text-left text-meta text-muted-foreground outline-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50";
 
 /** The marker of a tool row: a spinner while a call runs, a cross if one failed, a dot. */
 function ToolsMarker({ turns }: { turns: ToolTurn[] }) {
@@ -111,7 +111,7 @@ function Elapsed({ since }: { since: string }) {
       aria-hidden="true"
       data-testid="work-elapsed"
       ms={Math.max(0, now - Date.parse(since))}
-      className="text-xs"
+      className="text-caption"
     />
   );
 }
@@ -176,7 +176,7 @@ export function WorkBlock({
         {summary.failed > 0 ? (
           <span className="shrink-0 text-status-failed">· {summary.failed} failed</span>
         ) : null}{" "}
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs tabular-nums">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-caption tabular-nums">
           {current ? (
             <Elapsed since={startedAt} />
           ) : (

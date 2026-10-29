@@ -13,7 +13,7 @@ const VIEWPORTS = {
   "desktop-1440": { width: 1440, height: 900 },
 };
 
-// Layout checks run at every width; a11y at the narrowest and widest. Functional specs run once.
+// Layout checks run at every width; a11y at 375, 768 and 1440 px. Functional specs run once.
 // The journey changes the E2E workspace's connections, so it runs alone, after every other project.
 const LAYOUT = /layout\.spec\.ts/;
 const A11Y = /a11y\.spec\.ts/;
@@ -44,7 +44,7 @@ export default defineConfig({
     ...Object.entries(VIEWPORTS).map(([name, viewport]) => ({
       name,
       use: { ...devices["Desktop Chrome"], viewport },
-      testMatch: name === "mobile-375" || name === "desktop-1440" ? [LAYOUT, A11Y] : [LAYOUT],
+      testMatch: name === "laptop-1024" ? [LAYOUT] : [LAYOUT, A11Y],
     })),
     {
       name: "journey",

@@ -30,7 +30,9 @@ export function ActivityLine({ activity }: { activity: Activity }) {
         …
       </span>
       {activity.running > 1 ? (
-        <span className="ml-auto shrink-0 text-xs tabular-nums">{activity.running} running</span>
+        <span className="ml-auto shrink-0 text-caption tabular-nums">
+          {activity.running} running
+        </span>
       ) : null}
     </div>
   );

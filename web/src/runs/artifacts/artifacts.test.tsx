@@ -360,7 +360,7 @@ describe("a merging reduce's output (4.5)", () => {
 
     expect(await screen.findByTestId("merged-from")).toBeTruthy();
     expect(screen.getAllByTestId("finding-sources")[0]!.textContent).toContain(
-      "Found by 2 of 2: lint_repo, lint_packages",
+      "2 of 2 scans: lint_repo, lint_packages",
     );
   });
 

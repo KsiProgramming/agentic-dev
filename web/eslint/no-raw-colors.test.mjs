@@ -24,6 +24,9 @@ tester.run("no-raw-colors", plugin.rules["no-raw-colors"], {
     `const help = "Choose a color(s) for the chart";`,
     `const path = "src/to-red/file.ts";`,
     `<div className="text-meta tabular-nums max-w-[72ch]" />`,
+    // Sizes from the scale, relative sizes and a hidden count.
+    `<code className="text-[0.85em] text-kbd" />`,
+    `<span className="text-[0px]" />`,
   ],
   invalid: [
     raw(`<div className="bg-red-100" />`),
@@ -39,5 +42,8 @@ tester.run("no-raw-colors", plugin.rules["no-raw-colors"], {
     raw(`const accent = "#fff";`),
     raw(`<div style={{ background: "rgb(0 0 0 / 10%)" }} />`),
     raw(`const ink = "oklch(0.21 0.006 285.885)";`),
+    raw(`<div className="text-[13px]" />`),
+    raw(`<div className="flex md:text-[0.8rem]" />`),
+    raw(`<div className="leading-[18px]" />`),
   ],
 });

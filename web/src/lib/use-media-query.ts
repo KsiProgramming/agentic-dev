@@ -19,6 +19,10 @@ export function useMediaQuery(query: string): boolean {
 /** From 768 px: side sheets; below, bottom sheets and stacked actions (tech-stack → Layout). */
 export const MD_UP = "(min-width: 768px)";
 
+/** Below 768 px: a phone, where a selected step opens as a full-height sheet. Asked this way
+ * round so that where `matchMedia` is missing (jsdom) the page is not a phone. */
+export const PHONE = "(max-width: 767px)";
+
 /** From 1024 px: the gate review sheet's file list and side-by-side diff (tech-stack → Review
  * sheet). */
 export const LG_UP = "(min-width: 1024px)";

@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/states";
 import { StatusBadge } from "@/components/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { kindLabel } from "../graph/graph-nodes";
+import { kindLabel } from "../graph/node-kinds";
 import type { NodeKind, WorkflowSpec } from "../graph/spec-graph";
 import { stepUsage } from "../timeline";
 import type { ReceivedRunEvent } from "../types";
@@ -76,17 +76,14 @@ export function StepPanel({
       aria-labelledby="step-panel-title"
       data-testid="step-panel"
       data-key={row.key}
-      className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4"
+      className="flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card"
     >
-      <header className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-        <h2
-          id="step-panel-title"
-          className="min-w-0 font-mono text-section font-semibold break-all"
-        >
+      <header className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface-subtle px-4 py-3">
+        <h2 id="step-panel-title" className="min-w-0 truncate font-mono text-section font-semibold">
           {row.name}
         </h2>
         <StatusBadge status={badge.status} label={badge.label} />
-        <span className="text-meta text-muted-foreground">
+        <span className="text-meta text-foreground-secondary">
           {kindLabel(kind)}
           {row.name !== step.id ? (
             <>
@@ -95,7 +92,7 @@ export function StepPanel({
             </>
           ) : null}
         </span>
-        <span className="ml-auto flex items-center gap-3 text-meta text-muted-foreground">
+        <span className="ml-auto flex items-center gap-3 text-meta text-foreground-secondary">
           {step.gate ? (
             <WaitingTime ms={ms} live={step.status === "waiting"} />
           ) : (
@@ -104,15 +101,15 @@ export function StepPanel({
           {usage ? <Money usage={usage} /> : null}
         </span>
       </header>
-      <Tabs value={tab} onValueChange={(next) => onTab(next as StepTab)}>
-        <TabsList aria-label="Step views" className="max-w-full overflow-x-auto">
+      <Tabs value={tab} onValueChange={(next) => onTab(next as StepTab)} className="gap-0">
+        <TabsList aria-label="Step views" className="px-4">
           {STEP_TABS.map((t) => (
             <TabsTrigger key={t} value={t}>
               {LABELS[t]}
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="output" className="pt-3">
+        <TabsContent value="output" className="p-4">
           <StepOutput
             runId={runId}
             baseUrl={baseUrl}
@@ -124,14 +121,14 @@ export function StepPanel({
             onSelect={onSelect}
           />
         </TabsContent>
-        <TabsContent value="activity" className="pt-3">
+        <TabsContent value="activity" className="p-4">
           {step.turns.length > 0 ? (
             <TurnsRail step={step} />
           ) : (
             <EmptyState icon={ActivityIcon} message="This step made no tool calls." />
           )}
         </TabsContent>
-        <TabsContent value="input" className="pt-3">
+        <TabsContent value="input" className="p-4">
           <StepInput
             runId={runId}
             baseUrl={baseUrl}
@@ -141,10 +138,10 @@ export function StepPanel({
             first={first}
           />
         </TabsContent>
-        <TabsContent value="usage" className="pt-3">
+        <TabsContent value="usage" className="p-4">
           <StepUsage step={step} items={children} />
         </TabsContent>
-        <TabsContent value="events" className="pt-3">
+        <TabsContent value="events" className="p-4">
           <RawEvents key={step.id} events={events} node={step.id} />
         </TabsContent>
       </Tabs>

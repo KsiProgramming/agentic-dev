@@ -22,7 +22,7 @@ import type { FieldSpec } from "./schema";
 /** A field's error under it, with an icon, announced when it appears. */
 export function FieldMessage({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <p id={id} role="alert" className="flex items-start gap-1.5 text-sm text-destructive">
+    <p id={id} role="alert" className="flex items-start gap-1.5 text-caption text-status-failed">
       <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
       <span>{children}</span>
     </p>

@@ -25,17 +25,20 @@ function Action({ event }: { event: AuditEvent }) {
   const { label, icon: Icon } = actionInfo(event.action);
   return (
     <span className="inline-flex items-center gap-1.5 font-medium">
-      {Icon ? <Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" /> : null}
+      {Icon ? (
+        <Icon aria-hidden="true" className="size-4 shrink-0 text-foreground-secondary" />
+      ) : null}
       {label}
     </span>
   );
 }
 
 function Actor({ event }: { event: AuditEvent }) {
-  if (event.actor.type === "system") return <span>System</span>;
-  if (event.actor.id) return <span className="font-mono text-xs">{event.actor.id}</span>;
+  if (event.actor.type === "system")
+    return <span className="text-foreground-secondary">System</span>;
+  if (event.actor.id) return <span className="font-mono text-caption">{event.actor.id}</span>;
   return (
-    <span title={NO_ACTOR} className="text-muted-foreground">
+    <span title={NO_ACTOR} className="text-placeholder">
       —<span className="sr-only">{NO_ACTOR}</span>
     </span>
   );
@@ -43,15 +46,15 @@ function Actor({ event }: { event: AuditEvent }) {
 
 /** The entry's run, linked to its console, with its template and repo; "—" for settings. */
 function RunRef({ event }: { event: AuditEvent }) {
-  if (!event.run_id) return <span className="text-muted-foreground">—</span>;
+  if (!event.run_id) return <span className="text-placeholder">—</span>;
   const context = [event.run?.template_id, event.run?.repo_url && repoLabel(event.run.repo_url)]
     .filter(Boolean)
     .join(" · ");
   return (
     <span className="flex min-w-0 flex-col">
-      <IdChip id={event.run_id} label="run" href={`/runs/${event.run_id}`} className="text-xs" />
+      <IdChip id={event.run_id} label="run" href={`/runs/${event.run_id}`} />
       {context ? (
-        <span className="truncate text-xs text-muted-foreground" title={context}>
+        <span className="truncate text-caption text-foreground-secondary" title={context}>
           {context}
         </span>
       ) : null}
@@ -63,7 +66,7 @@ function RunRef({ event }: { event: AuditEvent }) {
 function Details({ event }: { event: AuditEvent }) {
   const line = describe(event);
   return (
-    <span className="line-clamp-2 break-words" title={line}>
+    <span className="line-clamp-2 break-words text-foreground-secondary" title={line}>
       {line}
     </span>
   );
@@ -72,9 +75,9 @@ function Details({ event }: { event: AuditEvent }) {
 /** The audit log as a table, from `md` (768 px). */
 export function AuditTable({ events, now }: { events: AuditEvent[]; now: number }) {
   return (
-    <Table aria-label="Audit log" className="text-meta">
+    <Table aria-label="Audit log">
       <TableHeader>
-        <TableRow className="hover:bg-transparent">
+        <TableRow>
           <TableHead className="w-28">Time</TableHead>
           <TableHead className="w-44">Action</TableHead>
           <TableHead className="w-20">Actor</TableHead>
@@ -85,7 +88,7 @@ export function AuditTable({ events, now }: { events: AuditEvent[]; now: number 
       <TableBody>
         {events.map((event) => (
           <TableRow key={event.id} data-audit-id={event.id} data-action={event.action}>
-            <TableCell>
+            <TableCell className="text-foreground-secondary">
               <Time event={event} now={now} />
             </TableCell>
             <TableCell>
@@ -113,14 +116,14 @@ export function AuditCard({ event, now }: { event: AuditEvent; now: number }) {
     <Card size="sm" data-audit-id={event.id} data-action={event.action} className="gap-1.5 px-3">
       <div className="flex items-start justify-between gap-2">
         <Action event={event} />
-        <span className="shrink-0 text-xs text-muted-foreground">
+        <span className="shrink-0 text-caption text-foreground-secondary">
           <Time event={event} now={now} />
         </span>
       </div>
-      <p className="text-sm">
+      <p className="text-meta">
         <Details event={event} />
       </p>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-foreground-secondary">
         <span>
           <span className="sr-only">Actor </span>
           <Actor event={event} />

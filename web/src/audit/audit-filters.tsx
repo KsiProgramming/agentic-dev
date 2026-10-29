@@ -1,77 +1,130 @@
 "use client";
 
-import { CircleAlertIcon, XIcon } from "lucide-react";
+import { CircleAlertIcon } from "lucide-react";
 import { useId, useState } from "react";
 
+import { shortId } from "@/components/display";
+import { AddFilter, FilterChip, FilterChoices, type FilterOption } from "@/components/filters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { dateFormat } from "@/lib/locale";
 
 import { AUDIT_CATEGORIES, type AuditCategory } from "./actions";
 import { isAuditFiltered, isRunId, NO_AUDIT_FILTERS, type AuditFilters } from "./filters";
 
-/** A run id, applied on Enter or when the field loses focus; empty clears it. Keyed by `value`,
- * so a change from the URL starts it again. */
-function RunFilter({
-  value,
-  onChange,
-}: {
-  value: string | null;
-  onChange: (run: string | null) => void;
-}) {
+/** A run id, applied on Enter or with Apply; it must be a full id. */
+function RunFilter({ value, onApply }: { value: string | null; onApply: (run: string) => void }) {
   const id = useId();
   const errorId = useId();
   const [draft, setDraft] = useState(value ?? "");
   const [invalid, setInvalid] = useState(false);
 
-  const apply = () => {
-    const run = draft.trim().toLowerCase();
-    if (run === "") {
-      setInvalid(false);
-      if (value !== null) onChange(null);
-    } else if (isRunId(run)) {
-      setInvalid(false);
-      if (run !== value) onChange(run);
-    } else {
-      setInvalid(true);
-    }
-  };
-
   return (
     <form
-      className="flex flex-col gap-1"
+      className="flex flex-col gap-2 p-3"
       onSubmit={(e) => {
         e.preventDefault();
-        apply();
+        const run = draft.trim().toLowerCase();
+        if (isRunId(run)) {
+          setInvalid(false);
+          onApply(run);
+        } else {
+          setInvalid(true);
+        }
       }}
     >
-      <Label htmlFor={id} className="sr-only">
-        Run id
-      </Label>
+      <Label htmlFor={id}>Run id</Label>
       <Input
         id={id}
+        autoFocus
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={apply}
-        placeholder="Run id"
+        placeholder="00000000-0000-…"
         spellCheck={false}
         autoComplete="off"
         aria-invalid={invalid || undefined}
         aria-describedby={invalid ? errorId : undefined}
-        className="h-8 w-full font-mono text-xs sm:w-80"
+        className="font-mono"
       />
       {invalid ? (
-        <p id={errorId} className="flex items-center gap-1 text-xs text-destructive">
-          <CircleAlertIcon aria-hidden="true" className="size-3.5" />
+        <p id={errorId} className="flex items-center gap-1 text-caption text-status-failed">
+          <CircleAlertIcon aria-hidden="true" className="size-3" />
           Enter a full run id.
         </p>
       ) : null}
+      <Button type="submit" size="sm" className="self-end">
+        Apply
+      </Button>
     </form>
   );
 }
 
-/** Narrow the audit log by category, run and dates. */
+/** From and to dates (either may be left empty), applied together. */
+function DatesFilter({
+  from,
+  to,
+  onApply,
+}: {
+  from: string | null;
+  to: string | null;
+  onApply: (from: string | null, to: string | null) => void;
+}) {
+  const fromId = useId();
+  const toId = useId();
+  const [start, setStart] = useState(from ?? "");
+  const [end, setEnd] = useState(to ?? "");
+  return (
+    <form
+      className="flex flex-col gap-2 p-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onApply(start || null, end || null);
+      }}
+    >
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={fromId}>From</Label>
+          <Input
+            id={fromId}
+            type="date"
+            value={start}
+            max={end || undefined}
+            onChange={(e) => setStart(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={toId}>To</Label>
+          <Input
+            id={toId}
+            type="date"
+            value={end}
+            min={start || undefined}
+            onChange={(e) => setEnd(e.target.value)}
+          />
+        </div>
+      </div>
+      <Button type="submit" size="sm" className="self-end">
+        Apply
+      </Button>
+    </form>
+  );
+}
+
+/** A `YYYY-MM-DD` day in the display locale ("Oct 20"), read as a calendar day (UTC). */
+function day(iso: string): string {
+  return dateFormat({ month: "short", day: "numeric", timeZone: "UTC" }).format(
+    new Date(`${iso}T00:00:00Z`),
+  );
+}
+
+function datesLabel(from: string | null, to: string | null): string {
+  if (from && to) return `${day(from)} – ${day(to)}`;
+  return from ? `From ${day(from)}` : `Until ${day(to!)}`;
+}
+
+/** Narrow the audit log by category, run and dates: a chip per filter that is on, then
+ * "+ Filter" (design-language.md → Components). The filters live in the URL. */
 export function AuditFiltersBar({
   filters,
   onChange,
@@ -79,61 +132,78 @@ export function AuditFiltersBar({
   filters: AuditFilters;
   onChange: (filters: AuditFilters) => void;
 }) {
-  const categoryId = useId();
-  const fromId = useId();
-  const toId = useId();
+  const category = AUDIT_CATEGORIES.find((c) => c.id === filters.category);
+  const options: FilterOption[] = [
+    {
+      id: "category",
+      label: "Category",
+      control: (done) => (
+        <FilterChoices
+          label="Category"
+          choices={AUDIT_CATEGORIES}
+          value={filters.category}
+          onPick={(id) => {
+            onChange({ ...filters, category: id as AuditCategory });
+            done();
+          }}
+        />
+      ),
+    },
+    {
+      id: "run",
+      label: "Run",
+      control: (done) => (
+        <RunFilter
+          value={filters.run}
+          onApply={(run) => {
+            onChange({ ...filters, run });
+            done();
+          }}
+        />
+      ),
+    },
+    {
+      id: "dates",
+      label: "Dates",
+      control: (done) => (
+        <DatesFilter
+          from={filters.from}
+          to={filters.to}
+          onApply={(from, to) => {
+            onChange({ ...filters, from, to });
+            done();
+          }}
+        />
+      ),
+    },
+  ];
   return (
-    <div role="group" aria-label="Filters" className="flex flex-wrap items-start gap-2">
-      <Label htmlFor={categoryId} className="sr-only">
-        Category
-      </Label>
-      <NativeSelect
-        id={categoryId}
-        size="sm"
-        value={filters.category ?? ""}
-        onChange={(e) =>
-          onChange({ ...filters, category: (e.target.value || null) as AuditCategory | null })
-        }
-      >
-        <NativeSelectOption value="">All activity</NativeSelectOption>
-        {AUDIT_CATEGORIES.map((c) => (
-          <NativeSelectOption key={c.id} value={c.id}>
-            {c.label}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-      <RunFilter
-        key={filters.run ?? ""}
-        value={filters.run}
-        onChange={(run) => onChange({ ...filters, run })}
-      />
-      <div className="flex items-center gap-1.5">
-        <Label htmlFor={fromId} className="text-xs text-muted-foreground">
-          From
-        </Label>
-        <Input
-          id={fromId}
-          type="date"
-          value={filters.from ?? ""}
-          max={filters.to ?? undefined}
-          onChange={(e) => onChange({ ...filters, from: e.target.value || null })}
-          className="h-8 w-auto text-xs"
+    <div role="group" aria-label="Filters" className="flex flex-wrap items-center gap-2">
+      {category ? (
+        <FilterChip
+          label="Category"
+          value={category.label}
+          onRemove={() => onChange({ ...filters, category: null })}
         />
-        <Label htmlFor={toId} className="text-xs text-muted-foreground">
-          To
-        </Label>
-        <Input
-          id={toId}
-          type="date"
-          value={filters.to ?? ""}
-          min={filters.from ?? undefined}
-          onChange={(e) => onChange({ ...filters, to: e.target.value || null })}
-          className="h-8 w-auto text-xs"
+      ) : null}
+      {filters.run ? (
+        <FilterChip
+          label="Run"
+          value={shortId(filters.run)}
+          mono
+          onRemove={() => onChange({ ...filters, run: null })}
         />
-      </div>
+      ) : null}
+      {filters.from || filters.to ? (
+        <FilterChip
+          label="Dates"
+          value={datesLabel(filters.from, filters.to)}
+          onRemove={() => onChange({ ...filters, from: null, to: null })}
+        />
+      ) : null}
+      <AddFilter options={options} />
       {isAuditFiltered(filters) ? (
         <Button type="button" variant="ghost" size="sm" onClick={() => onChange(NO_AUDIT_FILTERS)}>
-          <XIcon aria-hidden="true" data-icon="inline-start" />
           Clear filters
         </Button>
       ) : null}

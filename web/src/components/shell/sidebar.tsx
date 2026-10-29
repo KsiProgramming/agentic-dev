@@ -58,9 +58,9 @@ function WaitingBadge({ count, rail }: { count: number; rail: boolean }) {
         aria-hidden="true"
         data-testid="inbox-waiting-badge"
         className={cn(
-          "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-status-waiting-muted px-1.5 text-xs font-semibold text-status-waiting tabular-nums",
+          "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full border border-status-waiting-border bg-status-waiting-muted px-1.5 text-caption font-medium text-status-waiting tabular-nums",
           rail &&
-            "lg:max-xl:absolute lg:max-xl:top-1 lg:max-xl:right-1 lg:max-xl:h-2 lg:max-xl:min-w-2 lg:max-xl:bg-status-waiting lg:max-xl:p-0 lg:max-xl:text-[0px]",
+            "lg:max-xl:absolute lg:max-xl:top-1 lg:max-xl:right-1 lg:max-xl:h-2 lg:max-xl:min-w-2 lg:max-xl:border-0 lg:max-xl:bg-status-waiting lg:max-xl:p-0 lg:max-xl:text-[0px]",
         )}
       >
         {countLabel(count)}
@@ -84,8 +84,10 @@ function NavLinks({ pathname, rail, onNavigate }: NavLinksProps & { pathname: st
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "relative flex h-9 items-center gap-2.5 rounded-md px-2.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-              active && "bg-muted text-foreground",
+              "relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-meta font-medium text-foreground-secondary transition-colors hover:bg-muted hover:text-foreground",
+              // The current section: a white pill with a 1 px ring (design-language.md → Sidebar).
+              active &&
+                "bg-background text-foreground shadow-xs ring-1 ring-border hover:bg-background",
               rail && "lg:max-xl:justify-center",
             )}
           >
@@ -134,17 +136,20 @@ export function Sidebar({
   const railHidden = rail ? "lg:max-xl:sr-only" : undefined;
 
   return (
-    <div className="flex h-full flex-col gap-4 py-3">
+    <div className="flex h-full flex-col gap-4 bg-surface-sunken py-3">
       <div className={cn("flex items-center gap-2 px-4", rail && "lg:max-xl:justify-center")}>
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <WorkflowIcon aria-hidden="true" className="size-4" />
         </span>
         <div className={cn("flex min-w-0 flex-col", railHidden)}>
-          <span className="font-semibold tracking-tight">Agentic Dev</span>
+          <span className="text-meta font-semibold tracking-tight">Agentic Dev</span>
           {workspace.state === "loading" ? (
             <Skeleton aria-hidden="true" className="h-3.5 w-24" />
           ) : workspace.name ? (
-            <span data-testid="workspace-name" className="truncate text-xs text-muted-foreground">
+            <span
+              data-testid="workspace-name"
+              className="truncate text-caption text-muted-foreground"
+            >
               {workspace.name}
             </span>
           ) : null}

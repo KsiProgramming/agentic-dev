@@ -66,10 +66,13 @@ export function ConnectionChecklist({
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
-      <h3 id={headingId} className="text-sm font-medium">
+      <h3 id={headingId} className="text-meta font-medium">
         Before you start
       </h3>
-      <ul className="flex flex-col divide-y rounded-lg border" data-testid="connection-checklist">
+      <ul
+        className="flex flex-col divide-y divide-divider rounded-lg border"
+        data-testid="connection-checklist"
+      >
         {requires.map((requirement) => {
           const state = readiness.state[requirement];
           const { icon: Icon, className, text } = ROW[state];
@@ -86,7 +89,7 @@ export function ConnectionChecklist({
                     {REQUIREMENT_LABEL[requirement]}
                     <span className="sr-only">: {text}</span>
                   </span>
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-meta text-foreground-secondary">
                     {state === "ready"
                       ? "Connected."
                       : state === "attention"

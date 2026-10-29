@@ -74,7 +74,10 @@ function RepoList({ repos }: { repos: Repo[] }) {
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ul className="mt-2 flex flex-col divide-y rounded-lg border" aria-label="Repositories">
+        <ul
+          className="mt-2 flex flex-col divide-y divide-divider rounded-lg border"
+          aria-label="Repositories"
+        >
           {repos.map((repo) => (
             <li key={repo.id} className="flex min-w-0 items-center gap-2 px-3 py-2">
               <a
@@ -91,7 +94,7 @@ function RepoList({ repos }: { repos: Repo[] }) {
                   className="size-3.5 shrink-0 text-muted-foreground"
                 />
               ) : null}
-              <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-xs text-muted-foreground">
+              <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-caption text-foreground-secondary">
                 <GitBranchIcon aria-hidden="true" className="size-3" />
                 {repo.default_branch}
               </span>
@@ -252,9 +255,7 @@ export function GithubConnection({
           ) : (
             <CircleAlertIcon aria-hidden="true" />
           )}
-          <AlertDescription className={banner.ok ? "text-foreground" : undefined}>
-            {banner.text}
-          </AlertDescription>
+          <AlertDescription>{banner.text}</AlertDescription>
         </Alert>
       ) : null}
       {card}
