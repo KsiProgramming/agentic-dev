@@ -107,7 +107,7 @@ A review of the screens shipped in Milestones 2 and 3 found that they work but r
 | 5.4 | Side panel from parameter JSON Schema | Role, instructions, provider, tools, budget (optional) are editable | ✅ Done ([#149](https://github.com/KsiProgramming/agentic-dev/pull/149)) |
 | 5.5 | Container nodes (map, parallel, loop) drawn with children inside | Nested flow is editable visually | ✅ Done ([#150](https://github.com/KsiProgramming/agentic-dev/pull/150)) |
 | 5.6 | Live validation on canvas (incompatible ports blocked, errors on nodes) | Invalid connections cannot be made | ✅ Done ([#151](https://github.com/KsiProgramming/agentic-dev/pull/151)) |
-| 5.7 | Versions: history, visual diff, restore, run any version | User restores and runs an older version | — |
+| 5.7 | Versions: history, visual diff, restore, run any version | User restores and runs an older version | ✅ Done ([#152](https://github.com/KsiProgramming/agentic-dev/pull/152)) |
 | 5.8 | Start screen v2: provider picker and "Blank canvas" added to the 2.6 start screen | A user starts a canvas workflow without touching JSON | — |
 
 ## Milestone 6: Dynamic orchestration and composites
