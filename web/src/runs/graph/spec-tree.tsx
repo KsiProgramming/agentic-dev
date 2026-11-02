@@ -53,13 +53,14 @@ function chain(node: SpecNode): MapNode[] {
 export const CARD =
   "flex h-14 w-52 shrink-0 flex-col justify-center gap-0.5 rounded-lg border bg-card px-3 text-left transition-colors";
 
-/** Cards one under the other, joined by a line down their left side (run order). */
-function Chain({ cards }: { cards: ReactNode[] }) {
+/** Cards one under the other, joined by a line down their left side (run order). Keyed by node
+ * id, so a card's state (an open menu) stays with its node when the builder moves it. */
+function Chain({ cards }: { cards: [string, ReactNode][] }) {
   return (
     <ol className="flex flex-col gap-3">
-      {cards.map((card, i) => (
+      {cards.map(([id, card], i) => (
         <li
-          key={i}
+          key={id}
           className={cn(
             "relative",
             i < cards.length - 1 &&
@@ -107,9 +108,9 @@ export function SpecTree({
   const render = (node: MapNode): ReactNode => (
     <Branch card={renderCard(node)}>
       {node.children.map((nodes, i) => (
-        <Chain key={i} cards={nodes.map(render)} />
+        <Chain key={i} cards={nodes.map((n) => [n.id, render(n)])} />
       ))}
     </Branch>
   );
-  return <Chain cards={chain(spec.root).map(render)} />;
+  return <Chain cards={chain(spec.root).map((n) => [n.id, render(n)])} />;
 }

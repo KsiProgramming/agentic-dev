@@ -5,13 +5,14 @@ import {
   EllipsisIcon,
   PencilIcon,
   PlusIcon,
+  ReplaceIcon,
   RotateCwIcon,
   SlidersHorizontalIcon,
   Undo2Icon,
   WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { ApiError, detailOf } from "@/api/errors";
@@ -54,7 +55,20 @@ import { CARD, SpecTree, type MapNode } from "@/runs/graph/spec-tree";
 import { useWorkspaceId } from "@/workspace";
 
 import { useSaveWorkflow, useWorkflow, type WorkflowVersion } from "./api";
-import { addStep, moveStep, removeStep, rootSteps, subtreeSize, type Edit } from "./edits";
+import {
+  addBranch,
+  addStep,
+  moveStep,
+  moveTargets,
+  moveTo,
+  placeOf,
+  removeStep,
+  replaceNode,
+  stayReason,
+  subtreeSize,
+  type Edit,
+  type MoveTarget,
+} from "./edits";
 import { ManifestIcon, paletteGroups, useNodeTypes, type NodeManifest } from "./node-types";
 import { applyOps, OpError } from "./ops";
 import { NodePanel, WorkflowPanel } from "./side-panel";
@@ -66,8 +80,8 @@ interface Refusal {
 }
 
 /**
- * The builder (5.2): a stored workflow drawn as the run map's cards, edited through each root
- * step's menu and the side panel (5.4), where the selected node's parameters, or the workflow's
+ * The builder (5.2): a stored workflow drawn as the run map's cards, edited through each node's
+ * menu, at any depth (5.5), and the side panel (5.4), where the selected node's parameters, or the workflow's
  * own fields, are edited. Edits are graph operations kept here until Save sends them as one
  * `PATCH /workflows/{id}`; what is drawn is the stored version with them applied.
  */
@@ -114,7 +128,9 @@ function Editor({
 }) {
   const [edits, setEdits] = useState<Edit[]>([]);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const [removing, setRemoving] = useState<SpecNode | null>(null);
+  const [removing, setRemoving] = useState<Removal | null>(null);
+  // The card to focus once an edit drew it: menus close, and a replaced node's card is gone.
+  const focusNext = useRef<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   // The node whose parameters the panel shows; none: the workflow's own fields. A node that is
   // gone (removed, undone) is no longer selected. Below 1024 px the panel is a sheet.
@@ -144,8 +160,6 @@ function Editor({
     }
   }, [base, ops]);
   const dirty = edits.length > 0;
-  const steps = rootSteps(spec);
-  const rootIds = new Set(steps.map((s) => s.id));
   const selected = selectedId
     ? (allSpecNodes(spec).find((n) => n.id === selectedId) ?? null)
     : null;
@@ -156,6 +170,17 @@ function Editor({
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
+
+  useEffect(() => {
+    const id = focusNext.current;
+    if (!id) return;
+    focusNext.current = null;
+    // After the menu has given the focus back to its trigger.
+    const timer = setTimeout(() =>
+      document.querySelector<HTMLElement>(`[data-select="${CSS.escape(id)}"]`)?.focus(),
+    );
+    return () => clearTimeout(timer);
+  }, [spec]);
 
   function apply(edit: Edit | null) {
     if (!edit) return;
@@ -168,6 +193,7 @@ function Editor({
       return;
     }
     setRefusal(null);
+    focusNext.current = edit.focus ?? null;
     // Typing in one field of the panel is one undo step: the newer edit replaces the last.
     setEdits((current) =>
       edit.key && current.at(-1)?.key === edit.key
@@ -233,7 +259,8 @@ function Editor({
   }
 
   function renderCard(node: MapNode): ReactNode {
-    const editable = rootIds.has(node.id);
+    // Every node is edited where it is; a route's card is not a node.
+    const place = node.kind === "route" ? null : placeOf(spec, node.id);
     const failed = refusal?.nodeId === node.id ? refusal.message : null;
     const isSelected = selected?.id === node.id;
     const kind = node.kind === "route" ? null : (node.kind as NodeKind);
@@ -274,17 +301,22 @@ function Editor({
               className="ml-auto size-3.5 shrink-0 text-muted-foreground"
             />
           ) : null}
-          {editable ? (
+          {place ? (
             <StepMenu
-              node={node}
+              node={place.node}
               canMoveUp={moveStep(spec, node.id, "up") !== null}
               canMoveDown={moveStep(spec, node.id, "down") !== null}
-              canRemove={steps.length > 1}
+              stayReason={stayReason(place)}
+              canReplace={place.parent !== null}
+              targets={moveTargets(spec, node.id)}
               palette={palette}
               onEditParams={() => select(node.id)}
               onAdd={(k) => apply(addStep(spec, node.id, k, manifests))}
+              onAddBranch={(k) => apply(addBranch(spec, node.id, k, manifests))}
               onMove={(d) => apply(moveStep(spec, node.id, d))}
-              onRemove={() => setRemoving(steps.find((s) => s.id === node.id) ?? null)}
+              onMoveTo={(target) => apply(moveTo(spec, node.id, target))}
+              onReplace={(k) => setRemoving({ node: place.node, replaceWith: k })}
+              onRemove={(n) => setRemoving({ node: n })}
             />
           ) : null}
         </span>
@@ -397,11 +429,6 @@ function Editor({
           <div className="@container overflow-auto p-4" data-testid="builder-canvas">
             <SpecTree spec={spec} renderCard={renderCard} />
           </div>
-          {spec.root.type === "sequence" ? null : (
-            <p className="border-t px-4 py-2 text-caption text-muted-foreground">
-              Only a workflow whose root is a sequence can be edited here yet.
-            </p>
-          )}
         </section>
         {wide ? (
           <aside
@@ -433,11 +460,13 @@ function Editor({
       )}
 
       <RemoveDialog
-        node={removing}
+        removal={removing}
         onCancel={() => setRemoving(null)}
-        onConfirm={(node) => {
+        onConfirm={({ node, replaceWith }) => {
           setRemoving(null);
-          apply(removeStep(node.id));
+          apply(
+            replaceWith ? replaceNode(spec, node.id, replaceWith, manifests) : removeStep(node.id),
+          );
         }}
       />
       <AlertDialog open={discarding} onOpenChange={setDiscarding}>
@@ -486,7 +515,7 @@ interface Palette {
 
 function AddItems({ palette, onAdd }: { palette: Palette; onAdd: (kind: string) => void }) {
   if (palette.pending) {
-    return <DropdownMenuItem disabled>Loading node types�</DropdownMenuItem>;
+    return <DropdownMenuItem disabled>Loading node types…</DropdownMenuItem>;
   }
   if (palette.error) {
     return (
@@ -555,31 +584,66 @@ function AddMenu({
   );
 }
 
+/** A menu item that cannot be used, and why, under its label. */
+function Unavailable({ label, reason }: { label: string; reason: string }) {
+  return (
+    <DropdownMenuItem disabled>
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        <span className="max-w-56 text-caption text-muted-foreground">{reason}</span>
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
+/** A parallel's branch by what it shows: its id, or a sequence's first step and how many more. */
+function branchName(branch: SpecNode): string {
+  if (branch.type !== "sequence") return branch.id;
+  const more = branch.steps.length - 1;
+  return more > 0 ? `${branch.steps[0].id} + ${more} more` : branch.steps[0].id;
+}
+
 function StepMenu({
   node,
   canMoveUp,
   canMoveDown,
-  canRemove,
+  stayReason,
+  canReplace,
+  targets,
   palette,
   onEditParams,
   onAdd,
+  onAddBranch,
   onMove,
+  onMoveTo,
+  onReplace,
   onRemove,
 }: {
-  node: MapNode;
+  node: SpecNode;
   canMoveUp: boolean;
   canMoveDown: boolean;
-  canRemove: boolean;
+  /** Why the node cannot be removed or moved away; `null` when it can. */
+  stayReason: string | null;
+  canReplace: boolean;
+  targets: MoveTarget[];
   palette: Palette;
   onEditParams: () => void;
   onAdd: (kind: string) => void;
+  onAddBranch: (kind: string) => void;
   onMove: (direction: "up" | "down") => void;
-  onRemove: () => void;
+  onMoveTo: (target: MoveTarget) => void;
+  onReplace: (kind: string) => void;
+  onRemove: (node: SpecNode) => void;
 }) {
+  // A branch that is a sequence has no card of its own: its parallel's menu removes it.
+  const removableBranches =
+    node.type === "parallel" && node.branches.length > 2
+      ? node.branches.filter((b) => b.type === "sequence")
+      : [];
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="ghost" size="icon-xs" aria-label={`Edit step ${node.name}`}>
+        <Button type="button" variant="ghost" size="icon-xs" aria-label={`Edit step ${node.id}`}>
           <EllipsisIcon aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
@@ -597,6 +661,17 @@ function StepMenu({
             <AddItems palette={palette} onAdd={onAdd} />
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {node.type === "parallel" ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <PlusIcon aria-hidden="true" />
+              Add a branch
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <AddItems palette={palette} onAdd={onAddBranch} />
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={!canMoveUp} onSelect={() => onMove("up")}>
           Move up
@@ -604,41 +679,105 @@ function StepMenu({
         <DropdownMenuItem disabled={!canMoveDown} onSelect={() => onMove("down")}>
           Move down
         </DropdownMenuItem>
+        {stayReason ? (
+          <Unavailable label="Move to…" reason={stayReason} />
+        ) : (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger disabled={targets.length === 0}>
+              Move to…
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
+              {targets.map((target) => {
+                const [prefix, id] =
+                  "after" in target ? ["After", target.after] : ["New branch of", target.branchOf];
+                return (
+                  <DropdownMenuItem key={`${prefix} ${id}`} onSelect={() => onMoveTo(target)}>
+                    <span>
+                      {prefix} <span className="font-mono">{id}</span>
+                    </span>
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" disabled={!canRemove} onSelect={onRemove}>
-          Remove
-        </DropdownMenuItem>
+        {canReplace ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <ReplaceIcon aria-hidden="true" />
+              Replace with…
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <AddItems palette={palette} onAdd={onReplace} />
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ) : null}
+        {removableBranches.length > 0 ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>Remove a branch</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {removableBranches.map((branch) => (
+                <DropdownMenuItem
+                  key={branch.id}
+                  variant="destructive"
+                  onSelect={() => onRemove(branch)}
+                >
+                  <span className="font-mono">{branchName(branch)}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ) : null}
+        {stayReason ? (
+          <Unavailable label="Remove" reason={stayReason} />
+        ) : (
+          <DropdownMenuItem variant="destructive" onSelect={() => onRemove(node)}>
+            Remove
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
+/** A node to remove, or to replace with a new node of `replaceWith`'s kind. */
+interface Removal {
+  node: SpecNode;
+  replaceWith?: string;
+}
+
 function RemoveDialog({
-  node,
+  removal,
   onCancel,
   onConfirm,
 }: {
-  node: SpecNode | null;
+  removal: Removal | null;
   onCancel: () => void;
-  onConfirm: (node: SpecNode) => void;
+  onConfirm: (removal: Removal) => void;
 }) {
+  const node = removal?.node;
+  const verb = removal?.replaceWith ? "Replace" : "Remove";
   const under = node ? subtreeSize(node) - 1 : 0;
+  // A branch that is a sequence is named by its steps, as its parallel's menu names it.
+  const name = node ? branchName(node) : "";
   return (
-    <AlertDialog open={node !== null} onOpenChange={(open) => (open ? null : onCancel())}>
+    <AlertDialog open={removal !== null} onOpenChange={(open) => (open ? null : onCancel())}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            Remove <span className="font-mono">{node?.id}</span>?
+            {verb} <span className="font-mono">{name}</span>?
           </AlertDialogTitle>
           <AlertDialogDescription>
+            {removal?.replaceWith ? `A new ${removal.replaceWith} takes its place. ` : null}
             {under > 0 ? `The ${under} ${under === 1 ? "node" : "nodes"} under it go too. ` : null}
             Undo brings it back until you save.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={() => node && onConfirm(node)}>
-            Remove
+          <AlertDialogAction variant="destructive" onClick={() => removal && onConfirm(removal)}>
+            {verb}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

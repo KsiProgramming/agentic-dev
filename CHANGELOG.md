@@ -9,6 +9,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 5.5 container nodes drawn with children inside:
+  - **Nested editing.** In the builder every node card has its menu, inside maps, loops, parallels and router routes too: add a step after it (a lone body or branch grows into a new sequence), add a branch to a parallel, move up or down in its own sequence, "Move to…" after any other node or into a new branch, "Replace with…" another kind (so a body or route is never empty), and remove. What would leave a container empty, or a parallel with one branch, is disabled with the reason. Each is one undo step made of the existing graph operations; no engine or API change.
 - Phase 5.4 side panel from parameter JSON Schema ([#149](https://github.com/KsiProgramming/agentic-dev/pull/149)):
   - **Side panel.** In the builder, a card's name or "Edit parameters" selects a node, nested ones included, and its parameters are edited in a form drawn from its manifest (`@rjsf/core` with our own theme): text, textareas, choices, the tools an agent may use as checkboxes, port schemas as JSON text in an "Advanced" group. Each accepted change is a `setParam` edit (typing in one field is one undo step); a refused value shows on its field. A pane from 1024 px, a sheet below. With nothing selected, and from "Edit details", it edits the workflow's name, description and budget; the details dialog is gone.
   - **Workflow budget.** The spec takes an optional `budget_usd`; a run's budget is its own, else the workflow's, else the workspace's default (`POST /runs`, rerun and validate). `setParam` without a node sets it.
