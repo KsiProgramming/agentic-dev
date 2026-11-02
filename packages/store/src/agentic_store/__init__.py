@@ -107,6 +107,7 @@ from agentic_store.summaries import (
 )
 from agentic_store.workflows import (
     AlreadyLatestError,
+    StoredWorkflowSummary,
     StoredWorkflowVersion,
     VersionConflictError,
     WorkflowExistsError,
@@ -114,6 +115,7 @@ from agentic_store.workflows import (
     create_workflow,
     get_workflow_version,
     list_workflow_versions,
+    list_workflows,
     restore_workflow,
     update_workflow,
 )
@@ -158,6 +160,7 @@ __all__ = [
     "RunUsageRow",
     "StoredArtifact",
     "StoredRun",
+    "StoredWorkflowSummary",
     "StoredWorkflowVersion",
     "VersionConflictError",
     "Workflow",
@@ -200,6 +203,7 @@ __all__ = [
     "list_run_events",
     "list_run_summaries",
     "list_workflow_versions",
+    "list_workflows",
     "list_workspaces",
     "listen",
     "load_secret",

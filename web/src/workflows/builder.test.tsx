@@ -873,3 +873,16 @@ test("Run opens the run sheet for the version shown, and waits for a save", asyn
     "Save your changes first.",
   );
 });
+
+test("?node= opens with that node selected (a new blank workflow's starter agent)", async () => {
+  navigation.search = new URLSearchParams({ node: "a" });
+  show({});
+  await screen.findByRole("heading", { name: "Flow" });
+
+  expect(
+    screen.getByRole("button", { name: "Edit parameters of a" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("button", { name: "Edit parameters of inner" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+});

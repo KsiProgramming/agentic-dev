@@ -211,3 +211,19 @@ test("commands and pages are filtered by what is typed; New run opens its sheet"
   fireEvent.click(await within(dialog).findByRole("option", { name: "New run" }));
   expect(nav.push).toHaveBeenCalledWith("/runs?new=1");
 });
+
+test("New workflow opens the blank workflow dialog; Workflows is a place to go", async () => {
+  render(<AppShell>page</AppShell>);
+  const dialog = await openPalette();
+
+  type(dialog, "workflow");
+  await waitFor(() =>
+    expect(
+      within(dialog)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["New workflow", "Workflows"]),
+  );
+  fireEvent.click(within(dialog).getByRole("option", { name: "New workflow" }));
+  expect(nav.push).toHaveBeenCalledWith("/workflows?blank=1");
+});

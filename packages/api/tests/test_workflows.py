@@ -1,7 +1,7 @@
 """`POST /workflows/{id}/validate`: every reason a workflow cannot run in a workspace, without
 running it (3.4). Stored workflows (5.1): `POST /workflows`, `GET /workflows/{id}` and its
 versions, and `PATCH /workflows/{id}`, where graph operations make a new, immutable version.
-Restoring an older version as the latest (5.7)."""
+Restoring an older version as the latest (5.7). A blank workflow and the list (5.8)."""
 
 import json
 from collections.abc import AsyncIterator
@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_api import create_app
 from agentic_api.settings import Settings
 from agentic_engine.policy import PolicyOverrides
-from agentic_store import Run, RunEventRow, Workspace, replace_policy_overrides
+from agentic_store import AuditEvent, Run, RunEventRow, Workspace, replace_policy_overrides
 
 pytestmark = pytest.mark.integration
 
@@ -449,6 +449,119 @@ async def test_a_template_needs_known_id_valid_options_and_no_spec(
     ]
 
     assert [r.status_code for r in responses] == [422] * 4
+
+
+async def test_a_blank_workflow_is_one_starter_agent_named_from_its_title(
+    client: AsyncClient, workspace: UUID, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    params = {"workspace_id": str(workspace)}
+
+    response = await client.post(
+        "/workflows", params=params, json={"blank": {"name": "Release notes"}}
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert (body["workflow_id"], body["version"], body["valid"]) == ("release-notes", 1, True)
+    assert body["spec"] == {
+        "spec_version": "0",
+        "id": "release-notes",
+        "name": "Release notes",
+        "root": {
+            "type": "sequence",
+            "id": "sequence_1",
+            "steps": [
+                {
+                    "type": "agent",
+                    "id": "agent_1",
+                    "role": "Agent",
+                    "instructions": "Describe what this agent does.",
+                }
+            ],
+        },
+    }
+    again = await client.post(
+        "/workflows", params=params, json={"blank": {"name": "Release notes"}}
+    )
+    assert again.status_code == 409
+    assert again.json()["detail"]["workflow_id"] == "release-notes"
+    async with sessions() as session:
+        actions = await session.scalars(
+            select(AuditEvent.action).where(AuditEvent.workspace_id == workspace)
+        )
+        assert list(actions) == ["workflow.created"]
+
+
+async def test_a_blank_workflow_keeps_its_id_description_and_provider(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    blank = {"name": "Notes", "id": "my-notes", "description": "Notes.", "provider": "claude"}
+
+    response = await client.post(
+        "/workflows", params={"workspace_id": str(workspace)}, json={"blank": blank}
+    )
+
+    assert response.status_code == 201, response.text
+    spec = response.json()["spec"]
+    assert (spec["id"], spec["description"]) == ("my-notes", "Notes.")
+    assert spec["root"]["steps"][0]["provider"] == "claude"
+
+
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        ({"blank": {"name": "Notes", "provider": "copilot"}}, "provider"),
+        ({"blank": {"name": "Notes", "id": "Not An Id"}}, "id"),
+        ({"blank": {"name": ""}}, "name"),
+    ],
+)
+async def test_a_blank_workflow_names_the_field_it_refuses(
+    client: AsyncClient, workspace: UUID, body: dict[str, Any], field: str
+) -> None:
+    response = await client.post("/workflows", params={"workspace_id": str(workspace)}, json=body)
+
+    assert response.status_code == 422
+    assert [e["loc"][-1] for e in response.json()["detail"]] == [field]
+
+
+async def test_blank_goes_alone(client: AsyncClient, workspace: UUID) -> None:
+    response = await client.post(
+        "/workflows",
+        params={"workspace_id": str(workspace)},
+        json={"blank": {"name": "Notes"}, "template": {"id": "generate-docs"}},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_list_has_each_workflow_by_its_last_change(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    params = {"workspace_id": str(workspace)}
+    assert (await client.get("/workflows", params=params)).json() == {"items": []}
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+    await client.post("/workflows", params=params, json={"blank": {"name": "Notes"}})
+    await patch(client, workspace, "review-loop", 1, SET_PUBLISH)
+
+    response = await client.get("/workflows", params=params)
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    assert [(i["workflow_id"], i["latest_version"]) for i in items] == [
+        ("review-loop", 2),
+        ("notes", 1),
+    ]
+    assert set(items[1]) == {
+        "workflow_id",
+        "name",
+        "description",
+        "latest_version",
+        "created_at",
+        "updated_at",
+    }
+    assert (items[1]["name"], items[1]["description"]) == ("Notes", None)
+    unknown = await client.get("/workflows", params={"workspace_id": str(uuid4())})
+    assert unknown.status_code == 404
 
 
 async def test_unknown_workflows_versions_and_workspaces_are_not_found(

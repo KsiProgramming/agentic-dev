@@ -10,13 +10,14 @@ import { NewRunSheet } from "@/runs/new-run/new-run-sheet";
 import { useReadiness } from "@/runs/new-run/readiness";
 import { installResult } from "@/settings/github-connection";
 import { useWorkflowFromTemplate } from "@/workflows/api";
+import { NewWorkflowSheet } from "@/workflows/new-workflow";
 import { useWorkspaceId } from "@/workspace";
 
 import { TemplateGallery } from "./template-gallery";
 
 /**
- * The start screen: the template gallery, and the "New run" sheet of the template named by
- * `?template=`. GitHub's install comes back here with `&github=connected|error` when it was
+ * The start screen: a blank canvas and the template gallery, the "New run" sheet of the template
+ * named by `?template=`, and the new workflow sheet with `?blank=1` (5.8). GitHub's install comes back here with `&github=connected|error` when it was
  * started from the sheet.
  */
 export function TemplatesView({
@@ -32,6 +33,7 @@ export function TemplatesView({
   const pathname = usePathname();
   const readiness = useReadiness({ workspaceId, baseUrl });
   const templateId = searchParams.get("template");
+  const blank = searchParams.get("blank") === "1";
   const banner = installResult(
     searchParams.get("github") ?? undefined,
     searchParams.get("reason") ?? undefined,
@@ -40,6 +42,7 @@ export function TemplatesView({
   const open = (id: string) =>
     router.replace(`${pathname}?template=${encodeURIComponent(id)}`, { scroll: false });
   const close = () => router.replace(pathname, { scroll: false });
+  const openBlank = () => router.replace(`${pathname}?blank=1`, { scroll: false });
   const fromTemplate = useWorkflowFromTemplate(workspaceId, baseUrl);
   const edit = (id: string) =>
     fromTemplate.mutate(id, {
@@ -50,8 +53,8 @@ export function TemplatesView({
   return (
     <div className="flex w-full flex-col gap-6">
       <PageHeader
-        title="Start a run"
-        description="Pick a template. Every change lands as a pull request you review."
+        title="Start"
+        description="Pick a template, or start from a blank canvas. Every change lands as a pull request you review."
       />
       {banner ? (
         <Alert
@@ -71,6 +74,7 @@ export function TemplatesView({
         readiness={readiness}
         onStart={open}
         onEdit={edit}
+        onBlank={openBlank}
         editing={fromTemplate.isPending ? (fromTemplate.variables ?? null) : null}
         baseUrl={baseUrl}
       />
@@ -78,6 +82,12 @@ export function TemplatesView({
         open={templateId !== null}
         onOpenChange={(next) => (next ? undefined : close())}
         templateId={templateId}
+        workspaceId={workspaceId}
+        baseUrl={baseUrl}
+      />
+      <NewWorkflowSheet
+        open={blank}
+        onOpenChange={(next) => (next ? undefined : close())}
         workspaceId={workspaceId}
         baseUrl={baseUrl}
       />

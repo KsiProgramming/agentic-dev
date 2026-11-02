@@ -22,6 +22,7 @@ from agentic_store import (
     create_workspace,
     get_workflow_version,
     list_workflow_versions,
+    list_workflows,
     restore_workflow,
     update_workflow,
 )
@@ -120,6 +121,30 @@ async def test_ids_are_per_workspace(sessions: async_sessionmaker[AsyncSession])
         await get_workflow_version(sessions, one, "docs", 9)
     with pytest.raises(WorkspaceNotFoundError):
         await create_workflow(sessions, uuid4(), spec("docs"))
+
+
+async def test_the_list_has_each_workflow_by_its_last_change(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id, other = await new_workspace(sessions), await new_workspace(sessions)
+    assert await list_workflows(sessions, workspace_id) == []
+    await create_workflow(sessions, workspace_id, spec("docs"))
+    await create_workflow(sessions, workspace_id, spec("audit"))
+    await create_workflow(sessions, other, spec("elsewhere"))
+    renamed = ops(
+        {"op": "setParam", "path": "name", "value": "Docs v2"},
+        {"op": "setParam", "path": "description", "value": "Writes the docs."},
+    )
+    second = await update_workflow(sessions, workspace_id, "docs", 1, renamed)
+
+    listed = await list_workflows(sessions, workspace_id)
+
+    assert [(w.workflow_id, w.latest_version) for w in listed] == [("docs", 2), ("audit", 1)]
+    docs = listed[0]
+    assert (docs.name, docs.description) == ("Docs v2", "Writes the docs.")
+    assert docs.updated_at == second.created_at
+    assert docs.created_at <= docs.updated_at
+    assert (listed[1].name, listed[1].description) == ("Docs", None)
 
 
 async def test_versions_cannot_change(sessions: async_sessionmaker[AsyncSession]) -> None:

@@ -592,13 +592,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List All
+         * @description The workspace's workflows, the most recently changed first, with their latest version's
+         *     name and description.
+         */
+        get: operations["listWorkflows"];
         put?: never;
         /**
          * Create
          * @description Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It
          *     must match the schema; its other issues (structure, run limits) are returned with it. With
-         *     `template`, the spec is the one the template builds from its parameters.
+         *     `template`, the spec is the one the template builds from its parameters; with `blank`, a
+         *     sequence with one starter agent.
          */
         post: operations["createWorkflow"];
         delete?: never;
@@ -920,6 +926,23 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * BlankWorkflow
+         * @description A new workflow with one starter agent, for the builder to grow (5.8).
+         */
+        BlankWorkflow: {
+            /** Name */
+            name: string;
+            /**
+             * Id
+             * @description Default: the name as a slug (`release-notes`).
+             */
+            id?: string | null;
+            /** Description */
+            description?: string | null;
+            /** @description The provider the starter agent runs on. Unset means the workspace default. */
+            provider?: components["schemas"]["Provider"] | null;
+        };
         /** CancelResponse */
         CancelResponse: {
             /**
@@ -1071,6 +1094,8 @@ export interface components {
             } | null;
             /** @description Instead of `spec`: a template (`GET /templates`) whose spec, built from `parameters` (its defaults when unset), is stored as version 1 (5.2). */
             template?: components["schemas"]["TemplateRun"] | null;
+            /** @description Instead of `spec`: a new workflow whose root is a sequence with one starter agent (5.8). */
+            blank?: components["schemas"]["BlankWorkflow"] | null;
         };
         /**
          * Disconnect
@@ -1541,6 +1566,8 @@ export interface components {
             model: string;
             price: components["schemas"]["Price"];
         };
+        /** @constant */
+        Provider: "claude";
         /** PutClaudeConnection */
         PutClaudeConnection: {
             /**
@@ -2578,6 +2605,34 @@ export interface components {
             /** Root */
             root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
         };
+        /** WorkflowSummary */
+        WorkflowSummary: {
+            /** Workflow Id */
+            workflow_id: string;
+            /**
+             * Name
+             * @description The latest version's name.
+             */
+            name: string;
+            /**
+             * Description
+             * @description The latest version's description.
+             */
+            description: string | null;
+            /** Latest Version */
+            latest_version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When the latest version was made.
+             */
+            updated_at: string;
+        };
         /** WorkflowVersionItem */
         WorkflowVersionItem: {
             /** Version */
@@ -2651,6 +2706,14 @@ export interface components {
         WorkflowVersionsResponse: {
             /** Items */
             items: components["schemas"]["WorkflowVersionItem"][];
+        };
+        /**
+         * WorkflowsResponse
+         * @description The workspace's workflows, the most recently changed first (5.8).
+         */
+        WorkflowsResponse: {
+            /** Items */
+            items: components["schemas"]["WorkflowSummary"][];
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -3999,6 +4062,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TemplateOut"][];
+                };
+            };
+        };
+    };
+    listWorkflows: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowsResponse"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

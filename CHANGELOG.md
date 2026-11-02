@@ -9,6 +9,9 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 5.8 start screen v2: provider picker and "Blank canvas" ([#153](https://github.com/KsiProgramming/agentic-dev/pull/153)):
+  - **Blank canvas.** The start screen (`/templates`, now titled "Start") opens with a Blank canvas card. Its sheet takes a name, an id (a slug of the name until edited), an optional description and the provider the first agent runs on. GitHub Copilot is listed but not available until the Copilot adapter ships. Create workflow opens the builder with the starter agent selected. `POST /workflows` takes `{blank: {name, id?, description?, provider?}}`.
+  - **Workflows list.** `GET /workflows` and a `/workflows` page in the sidebar list the workspace's workflows by last change. The builder's "Workflows" breadcrumb links to it. The command palette has "New workflow".
 - Phase 5.7 workflow versions: history, visual diff, restore, run any version ([#152](https://github.com/KsiProgramming/agentic-dev/pull/152)):
   - **History.** In the builder, "History" lists every version of the workflow (what made it, when, the latest marked); an older version opens read-only at `?version=n`, with Back to latest, Restore this version and Run this version. Leaving unsaved edits for another version asks first.
   - **Compare.** "Compare with" in the status line marks the cards added, changed or moved since another version (unsaved edits included), lists every change, removed steps and the workflow's own fields too, and shows a changed step's values before and after at the top of its side panel.

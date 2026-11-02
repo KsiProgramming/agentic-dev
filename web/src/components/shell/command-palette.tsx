@@ -6,6 +6,7 @@ import {
   ExternalLinkIcon,
   LoaderCircleIcon,
   MoonIcon,
+  PencilRulerIcon,
   PlusIcon,
   SearchIcon,
   type LucideIcon,
@@ -158,6 +159,12 @@ export function CommandPalette({
 
   const actions: PaletteCommand[] = [
     { id: "new-run", label: "New run", icon: PlusIcon, href: "/runs?new=1" },
+    {
+      id: "new-workflow",
+      label: "New workflow",
+      icon: PencilRulerIcon,
+      href: "/workflows?blank=1",
+    },
     {
       id: "theme",
       label: resolvedTheme === "dark" ? "Switch to light theme" : "Switch to dark theme",

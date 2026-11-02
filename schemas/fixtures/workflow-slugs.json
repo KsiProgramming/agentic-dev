@@ -1,0 +1,16 @@
+{
+  "$comment": "Workflow ids made from names, which the engine (`workflow_slug`, test_blank_workflow.py) and the start screen's mirror (`slugify`, `@/workflows/new-workflow`) both give (5.8).",
+  "cases": [
+    { "name": "Release notes", "slug": "release-notes" },
+    { "name": "  Docs: v2 (draft)!  ", "slug": "docs-v2-draft" },
+    { "name": "Revue de sécurité", "slug": "revue-de-securite" },
+    { "name": "2026 audit", "slug": "w-2026-audit" },
+    { "name": "snake_case name", "slug": "snake-case-name" },
+    { "name": "!!!", "slug": "workflow" },
+    { "name": "日本語", "slug": "workflow" },
+    {
+      "name": "A very long workflow name that keeps going well past the sixty three character limit",
+      "slug": "a-very-long-workflow-name-that-keeps-going-well-past-the-sixty"
+    }
+  ]
+}

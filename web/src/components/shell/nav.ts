@@ -4,6 +4,7 @@ import {
   LayoutTemplateIcon,
   ScrollTextIcon,
   SettingsIcon,
+  WorkflowIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -20,6 +21,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/inbox", label: "Inbox", icon: InboxIcon },
   { href: "/runs", label: "Runs", icon: HistoryIcon },
+  { href: "/workflows", label: "Workflows", icon: WorkflowIcon },
   { href: "/templates", label: "Templates", icon: LayoutTemplateIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
   { href: "/audit", label: "Audit log", icon: ScrollTextIcon },
@@ -43,20 +45,12 @@ export interface Crumb {
 /** Ids longer than this are cut to their first 8 characters in breadcrumbs. */
 const LONG_SEGMENT = 12;
 
-/** Sections with pages but no list of their own, so not in the sidebar: their crumb is not a
- * link (`Workflows › generate-docs`, 5.2). */
-const UNLISTED_SECTIONS: readonly { href: string; label: string }[] = [
-  { href: "/workflows", label: "Workflows" },
-];
+/** Sections whose ids are readable slugs, shown in full (`Workflows › generate-docs`, 5.8). */
+const READABLE_IDS: readonly string[] = ["/workflows"];
 
 /** Breadcrumbs for a path: the section, then the item inside it, if any (`Runs › 1a2b3c4d`, or
  * `Settings › Integrations` for a settings sub-page). */
 export function breadcrumbsFor(pathname: string): Crumb[] {
-  const unlisted = UNLISTED_SECTIONS.find((item) => pathname.startsWith(`${item.href}/`));
-  if (unlisted) {
-    const segment = decodeURIComponent(pathname.slice(unlisted.href.length + 1).split("/")[0]);
-    return [{ label: unlisted.label }, { label: segment, mono: true }];
-  }
   const section = NAV_ITEMS.find((item) => isActive(pathname, item.href));
   if (!section) return [];
   const rest = pathname.slice(section.href.length + 1).split("/")[0];
@@ -64,7 +58,8 @@ export function breadcrumbsFor(pathname: string): Crumb[] {
   const segment = decodeURIComponent(rest);
   const page = section.href === "/settings" && SETTINGS_PAGES.find((p) => p.segment === segment);
   if (page) return [{ label: section.label, href: section.href }, { label: page.label }];
-  const short = segment.length > LONG_SEGMENT ? shortId(segment) : segment;
+  const readable = READABLE_IDS.includes(section.href);
+  const short = !readable && segment.length > LONG_SEGMENT ? shortId(segment) : segment;
   return [
     { label: section.label, href: section.href },
     { label: short, title: short === segment ? undefined : segment, mono: true },

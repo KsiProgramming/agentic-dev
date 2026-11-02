@@ -237,3 +237,51 @@ function existingWorkflow(error: unknown): string | null {
   }
   return null;
 }
+
+/** A workflow in the workspace's list (5.8), named as its latest version names it. */
+export type WorkflowSummary = components["schemas"]["WorkflowSummary"];
+
+function workflowsKey(workspaceId: string) {
+  return ["workspace", workspaceId, "workflows"] as const;
+}
+
+/** `GET /workflows`: the workspace's workflows, the most recently changed first. */
+export function useWorkflows(workspaceId: string, baseUrl = apiBaseUrl()) {
+  return useQuery({
+    queryKey: workflowsKey(workspaceId),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workflows", {
+          params: { query: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the workflows");
+      return data.items;
+    },
+  });
+}
+
+/** What a new blank workflow is made from (5.8). */
+export type BlankWorkflow = components["schemas"]["BlankWorkflow"];
+
+/** `POST /workflows {blank}`: a new workflow with one starter agent, stored as version 1. A
+ * refusal is an `ApiError`: `workflow_exists` (409) or the fields it refuses (422). */
+export function useCreateBlankWorkflow(workspaceId: string, baseUrl = apiBaseUrl()) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (blank: BlankWorkflow) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).POST("/workflows", {
+          params: { query: { workspace_id: workspaceId } },
+          body: { blank },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not create the workflow");
+      return data;
+    },
+    onSuccess: (version) => {
+      queryClient.setQueryData(workflowKey(workspaceId, version.workflow_id), version);
+      void queryClient.invalidateQueries({ queryKey: workflowsKey(workspaceId) });
+    },
+  });
+}
