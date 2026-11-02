@@ -102,6 +102,16 @@ test("templates", async ({ page }) => {
   await checkPage(page, "templates");
 });
 
+test("workflows", async ({ page, request }) => {
+  await workflowFromTemplate(request, "generate-docs");
+  await page.goto("/workflows");
+  await expect(page.locator("[data-workflow-id]").filter({ visible: true }).first()).toBeVisible();
+  await checkPage(page, "workflows");
+  await page.goto("/workflows?blank=1");
+  await expect(page.getByTestId("new-workflow-sheet").getByRole("radio").first()).toBeVisible();
+  await checkPage(page, "new-workflow-sheet");
+});
+
 test("workflow builder", async ({ page, request }) => {
   const id = await workflowFromTemplate(request, "audit-codebase");
   await page.goto(`/workflows/${id}`);

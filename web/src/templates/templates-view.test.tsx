@@ -433,3 +433,27 @@ test("Edit in builder stores the template as a workflow, or opens the one alread
   fireEvent.click(card.getByRole("button", { name: /Edit in builder/ }));
   await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/workflows/generate-docs"));
 });
+
+test("a blank canvas comes first and opens the new workflow sheet", async () => {
+  stubApi({ ...connected(), "GET /node-types": () => json(200, []) });
+  show();
+
+  const cards = await screen.findAllByRole("article");
+  expect(cards[0]?.getAttribute("data-testid")).toBe("blank-canvas-card");
+  fireEvent.click(within(cards[0]!).getByRole("button", { name: /blank workflow/ }));
+  expect(navigation.replace).toHaveBeenCalledWith("/templates?blank=1", { scroll: false });
+});
+
+test("?blank=1 opens the new workflow sheet, and the blank canvas shows with no templates", async () => {
+  stubApi({
+    ...connected(),
+    "GET /templates": () => json(200, []),
+    "GET /node-types": () => json(200, []),
+  });
+  navigation.search = new URLSearchParams({ blank: "1" });
+  renderWithQueries(<TemplatesView baseUrl="http://api.test" />);
+
+  expect(await screen.findByTestId("new-workflow-sheet")).toBeDefined();
+  expect(await screen.findByTestId("blank-canvas-card")).toBeDefined();
+  expect(screen.queryByText("No templates are available yet.")).toBeNull();
+});

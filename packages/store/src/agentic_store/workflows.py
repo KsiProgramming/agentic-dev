@@ -52,6 +52,19 @@ class StoredWorkflowVersion(BaseModel):
     restored_from: int | None = None
 
 
+class StoredWorkflowSummary(BaseModel):
+    """A workflow in a workspace's list (5.8): its latest version's name and description."""
+
+    model_config = ConfigDict(frozen=True)
+
+    workflow_id: str
+    name: str
+    description: str | None
+    latest_version: int
+    created_at: datetime
+    updated_at: datetime
+
+
 async def create_workflow(
     sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, spec: Mapping[str, JsonValue]
 ) -> StoredWorkflowVersion:
@@ -216,6 +229,38 @@ async def list_workflow_versions(
     if not rows:
         raise WorkflowNotFoundError(workflow_id)
     return [_stored(row) for row in rows]
+
+
+async def list_workflows(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
+) -> list[StoredWorkflowSummary]:
+    """The workspace's workflows, the most recently changed first (by when their latest version
+    was made), with their latest version's name and description."""
+    async with sessions() as session:
+        rows = (
+            await session.execute(
+                select(Workflow, WorkflowVersion)
+                .join(
+                    WorkflowVersion,
+                    (WorkflowVersion.workspace_id == Workflow.workspace_id)
+                    & (WorkflowVersion.workflow_id == Workflow.id)
+                    & (WorkflowVersion.version == Workflow.latest_version),
+                )
+                .where(Workflow.workspace_id == workspace_id)
+                .order_by(WorkflowVersion.created_at.desc(), Workflow.id)
+            )
+        ).all()
+    return [
+        StoredWorkflowSummary(
+            workflow_id=workflow.id,
+            name=cast(str, latest.spec.get("name", workflow.id)),
+            description=cast(str | None, latest.spec.get("description")),
+            latest_version=workflow.latest_version,
+            created_at=workflow.created_at,
+            updated_at=latest.created_at,
+        )
+        for workflow, latest in rows
+    ]
 
 
 def _stored(row: WorkflowVersion) -> StoredWorkflowVersion:

@@ -56,6 +56,21 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoSeriousIssues(page);
     });
 
+    test("workflows and the new workflow sheet have no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      await workflowFromTemplate(request, "generate-docs");
+      await open(page, "/workflows");
+      await expect(
+        page.locator("[data-workflow-id]").filter({ visible: true }).first(),
+      ).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await open(page, "/workflows?blank=1");
+      await expect(page.getByTestId("new-workflow-sheet").getByRole("radio").first()).toBeVisible();
+      await expectNoSeriousIssues(page);
+    });
+
     test("the New run sheet has no serious a11y issues", async ({ page }) => {
       await open(page, "/templates?template=generate-docs");
       const sheet = page.getByTestId("new-run-sheet");

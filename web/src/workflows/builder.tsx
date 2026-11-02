@@ -120,7 +120,7 @@ function versionParam(value: string | null): number | null {
  * `PATCH /workflows/{id}`; what is drawn is the stored version with them applied.
  *
  * `?version=n` shows an older version read-only, to restore or run (5.7); `?compare=m` marks
- * what differs from version m on the cards.
+ * what differs from version m on the cards; `?node=<id>` opens with that node selected.
  */
 export function WorkflowBuilder({ workflowId }: { workflowId: string }) {
   const workspaceId = useWorkspaceId();
@@ -219,8 +219,10 @@ function Editor({
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [runOpen, setRunOpen] = useState(false);
   // The node whose parameters the panel shows; none: the workflow's own fields. A node that is
-  // gone (removed, undone) is no longer selected. Below 1024 px the panel is a sheet.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // gone (removed, undone) is no longer selected. Below 1024 px the panel is a sheet. `?node=`
+  // selects one on arrival (a new blank workflow's starter agent, 5.8).
+  const startNode = useSearchParams().get("node");
+  const [selectedId, setSelectedId] = useState<string | null>(startNode);
   const [sheetOpen, setSheetOpen] = useState(false);
   const wide = useMediaQuery(LG_UP);
   const save = useSaveWorkflow(workspaceId, version.workflow_id);

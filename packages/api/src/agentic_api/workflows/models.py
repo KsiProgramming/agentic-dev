@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agentic_api.runs.models import TemplateRun
 from agentic_api.workspaces.models import RunLimits, budget_field
-from agentic_engine.spec import MAX_OPS, GraphOp, OpErrorCode, ValidationIssue
+from agentic_engine.nodes import Provider, blank_spec
+from agentic_engine.spec import MAX_OPS, GraphOp, NodeId, OpErrorCode, ValidationIssue
 
 
 class ValidateWorkflowRequest(BaseModel):
@@ -41,6 +42,22 @@ class ValidateWorkflowResponse(BaseModel):
     policy: RunLimits = Field(description="The limits the workflow was checked against.")
 
 
+class BlankWorkflow(BaseModel):
+    """A new workflow with one starter agent, for the builder to grow (5.8)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    id: NodeId | None = Field(
+        default=None, description="Default: the name as a slug (`release-notes`)."
+    )
+    description: str | None = Field(default=None, max_length=2000)
+    provider: Provider | None = Field(
+        default=None,
+        description="The provider the starter agent runs on. Unset means the workspace default.",
+    )
+
+
 class CreateWorkflowRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -54,13 +71,23 @@ class CreateWorkflowRequest(BaseModel):
         description="Instead of `spec`: a template (`GET /templates`) whose spec, built from "
         "`parameters` (its defaults when unset), is stored as version 1 (5.2).",
     )
+    blank: BlankWorkflow | None = Field(
+        default=None,
+        description="Instead of `spec`: a new workflow whose root is a sequence with one "
+        "starter agent (5.8).",
+    )
 
     @model_validator(mode="after")
     def _one_spec(self) -> Self:
-        if (self.spec is None) == (self.template is None):
-            raise ValueError("give either `spec` or `template`")
+        given = [b for b in (self.spec, self.template, self.blank) if b is not None]
+        if len(given) != 1:
+            raise ValueError("give one of `spec`, `template` or `blank`")
         if self.template is not None:
             self.spec = self.template.build_spec().model_dump(mode="json", exclude_none=True)
+        if self.blank is not None:
+            b = self.blank
+            spec = blank_spec(b.name, id=b.id, description=b.description, provider=b.provider)
+            self.spec = spec.model_dump(mode="json", exclude_defaults=True)
         return self
 
 
@@ -120,6 +147,21 @@ class WorkflowVersionsResponse(BaseModel):
     """Every version of a workflow, newest first."""
 
     items: list[WorkflowVersionItem]
+
+
+class WorkflowSummary(BaseModel):
+    workflow_id: str
+    name: str = Field(description="The latest version's name.")
+    description: str | None = Field(description="The latest version's description.")
+    latest_version: int
+    created_at: datetime
+    updated_at: datetime = Field(description="When the latest version was made.")
+
+
+class WorkflowsResponse(BaseModel):
+    """The workspace's workflows, the most recently changed first (5.8)."""
+
+    items: list[WorkflowSummary]
 
 
 class OpErrorDetail(BaseModel):

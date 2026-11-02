@@ -3,6 +3,8 @@ node the palette adds. The builder's palette, cards and side panel (5.4) are dra
 (`GET /node-types`), so a primitive the engine knows needs no web change. Manifests are code for
 now; composites (6.6) and plugins (10.1) add theirs to the same list."""
 
+import re
+import unicodedata
 from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_serializer
@@ -21,6 +23,7 @@ from agentic_engine.spec import (
     RouterNode,
     SequenceNode,
     ToolNode,
+    WorkflowSpec,
 )
 
 type Category = Literal["step", "flow", "combine"]
@@ -383,3 +386,47 @@ def node_kinds() -> list[str]:
     """The `type` of each member of the `Node` union, so a test can ask each for a manifest."""
     union = get_args(Node)[0]
     return [get_args(m.model_fields["type"].annotation)[0] for m in get_args(union)]
+
+
+type Provider = Literal["claude"]
+"""A provider an agent may run on: the values of an agent's `provider` (Copilot comes in 8.2)."""
+
+STARTER_STEP_ID = "agent_1"
+"""The id of the one agent a blank workflow starts with, as the palette would name it."""
+
+
+def workflow_slug(name: str) -> str:
+    """A workflow id from its name (5.8): lower case ASCII, every run of other characters a `-`,
+    `w-` in front when it does not start with a letter, at most 63 characters, so it is a
+    `NodeId`. A name with nothing to keep is `workflow`."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-") or "workflow"
+    if not slug[0].isalpha():
+        slug = f"w-{slug}"
+    return slug[:63].rstrip("-")
+
+
+def blank_spec(
+    name: str,
+    id: str | None = None,
+    description: str | None = None,
+    provider: Provider | None = None,
+) -> WorkflowSpec:
+    """A new workflow with nothing in it yet (5.8): a root sequence with the one agent the
+    palette would add, on `provider` when given. A sequence cannot be empty, so this is the
+    least a workflow can be."""
+    agent = manifest_for("agent")
+    assert agent is not None, "every primitive has a manifest"
+    update: dict[str, Any] = {"id": STARTER_STEP_ID}
+    if provider is not None:
+        update["provider"] = provider
+    step = agent.default.model_copy(update=update)
+    return WorkflowSpec.model_validate(
+        {
+            "spec_version": "0",
+            "id": id or workflow_slug(name),
+            "name": name,
+            "description": description,
+            "root": {"type": "sequence", "id": "sequence_1", "steps": [step]},
+        }
+    )

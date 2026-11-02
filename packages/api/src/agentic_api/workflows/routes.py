@@ -14,6 +14,8 @@ from agentic_api.workflows.models import (
     ValidateWorkflowRequest,
     ValidateWorkflowResponse,
     WorkflowErrorDetail,
+    WorkflowsResponse,
+    WorkflowSummary,
     WorkflowVersionItem,
     WorkflowVersionResponse,
     WorkflowVersionsResponse,
@@ -32,6 +34,7 @@ from agentic_store import (
     create_workflow,
     get_workflow_version,
     list_workflow_versions,
+    list_workflows,
     restore_workflow,
     update_workflow,
 )
@@ -60,7 +63,8 @@ async def create(
 ) -> WorkflowVersionResponse:
     """Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It
     must match the schema; its other issues (structure, run limits) are returned with it. With
-    `template`, the spec is the one the template builds from its parameters."""
+    `template`, the spec is the one the template builds from its parameters; with `blank`, a
+    sequence with one starter agent."""
     assert body.spec is not None, "validated: built from the template if not given"
     if issues := schema_issues(body.spec):
         detail = WorkflowErrorDetail(
@@ -77,6 +81,18 @@ async def create(
         )
         raise HTTPException(status.HTTP_409_CONFLICT, detail.model_dump()) from e
     return await _response(request, workspace_id, stored)
+
+
+@router.get(
+    "",
+    operation_id="listWorkflows",
+    responses={404: {"description": "No workspace with this id"}},
+)
+async def list_all(request: Request, workspace_id: Workspace) -> WorkflowsResponse:
+    """The workspace's workflows, the most recently changed first, with their latest version's
+    name and description."""
+    stored = await list_workflows(_sessions(request), workspace_id)
+    return WorkflowsResponse(items=[WorkflowSummary.model_validate(w.model_dump()) for w in stored])
 
 
 @router.get(

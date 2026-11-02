@@ -1918,7 +1918,7 @@
           "workflows"
         ],
         "summary": "Create",
-        "description": "Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It\nmust match the schema; its other issues (structure, run limits) are returned with it. With\n`template`, the spec is the one the template builds from its parameters.",
+        "description": "Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It\nmust match the schema; its other issues (structure, run limits) are returned with it. With\n`template`, the spec is the one the template builds from its parameters; with `blank`, a\nsequence with one starter agent.",
         "operationId": "createWorkflow",
         "parameters": [
           {
@@ -1981,6 +1981,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkflowErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "List All",
+        "description": "The workspace's workflows, the most recently changed first, with their latest version's\nname and description.",
+        "operationId": "listWorkflows",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2897,6 +2951,59 @@
         "title": "AuditRunRef",
         "description": "The entry's run as it is now."
       },
+      "BlankWorkflow": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Default: the name as a slug (`release-notes`)."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider the starter agent runs on. Unset means the workspace default."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "BlankWorkflow",
+        "description": "A new workflow with one starter agent, for the builder to grow (5.8)."
+      },
       "CancelResponse": {
         "properties": {
           "run_id": {
@@ -3221,6 +3328,17 @@
               }
             ],
             "description": "Instead of `spec`: a template (`GET /templates`) whose spec, built from `parameters` (its defaults when unset), is stored as version 1 (5.2)."
+          },
+          "blank": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlankWorkflow"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Instead of `spec`: a new workflow whose root is a sequence with one starter agent (5.8)."
           }
         },
         "additionalProperties": false,
@@ -4365,6 +4483,10 @@
           "price"
         ],
         "title": "PriceOverride"
+      },
+      "Provider": {
+        "type": "string",
+        "const": "claude"
       },
       "PutClaudeConnection": {
         "properties": {
@@ -6752,6 +6874,56 @@
         "title": "WorkflowSpec",
         "description": "A versioned workflow document with a single root node."
       },
+      "WorkflowSummary": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The latest version's name."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "The latest version's description."
+          },
+          "latest_version": {
+            "type": "integer",
+            "title": "Latest Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "When the latest version was made."
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "name",
+          "description",
+          "latest_version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkflowSummary"
+      },
       "WorkflowVersionItem": {
         "properties": {
           "version": {
@@ -6908,6 +7080,23 @@
         ],
         "title": "WorkflowVersionsResponse",
         "description": "Every version of a workflow, newest first."
+      },
+      "WorkflowsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WorkflowsResponse",
+        "description": "The workspace's workflows, the most recently changed first (5.8)."
       },
       "WorkspaceOut": {
         "properties": {
