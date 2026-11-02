@@ -101,7 +101,7 @@ A review of the screens shipped in Milestones 2 and 3 found that they work but r
 
 | # | Phase | Done when | Status |
 |---|---|---|---|
-| 5.1 | Graph operations model (`addNode`, `removeNode`, `connect`, `disconnect`, `setParam`) + `PATCH /workflows/{id}` creates a version | Applying ops produces a new immutable version | — |
+| 5.1 | Graph operations model (`addNode`, `removeNode`, `connect`, `disconnect`, `setParam`) + `PATCH /workflows/{id}` creates a version | Applying ops produces a new immutable version | ✅ Done ([#146](https://github.com/KsiProgramming/agentic-dev/pull/146)) |
 | 5.2 | Canvas renders a spec; edits emit graph operations | Editing on canvas round-trips to the stored spec | — |
 | 5.3 | Node manifests + palette generated from them | A new primitive appears in the palette with no frontend change | — |
 | 5.4 | Side panel from parameter JSON Schema | Role, instructions, provider, tools, budget (optional) are editable | — |
