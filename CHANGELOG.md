@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 5.7 workflow versions: history, visual diff, restore, run any version:
+- Phase 5.7 workflow versions: history, visual diff, restore, run any version ([#152](https://github.com/KsiProgramming/agentic-dev/pull/152)):
   - **History.** In the builder, "History" lists every version of the workflow (what made it, when, the latest marked); an older version opens read-only at `?version=n`, with Back to latest, Restore this version and Run this version. Leaving unsaved edits for another version asks first.
   - **Compare.** "Compare with" in the status line marks the cards added, changed or moved since another version (unsaved edits included), lists every change, removed steps and the workflow's own fields too, and shows a changed step's values before and after at the top of its side panel.
   - **Restore.** `POST /workflows/{id}/restore {base_version, version}` stores an older version's spec as the next version (`restored_from`, audited as `workflow.restored`); versions never change. The builder confirms it in a dialog and opens the new latest.
