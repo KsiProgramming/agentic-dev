@@ -45,6 +45,17 @@ describe("RunMap", () => {
     expect(screen.getByTestId("run-map").textContent).toContain("0 of");
   });
 
+  it("draws a kind the engine added after this app as a plain card", () => {
+    const echo = { type: "echo", id: "shout", text: "hi" } as unknown as WorkflowSpec["root"];
+    const withEcho: WorkflowSpec = {
+      ...withRouter,
+      root: { type: "sequence", id: "main", steps: [agent("triage"), echo] },
+    };
+    render(<RunMap spec={withEcho} steps={[]} onOpen={() => {}} now={0} />);
+    const card = screen.getAllByTestId("map-node").find((c) => c.textContent?.includes("shout"));
+    expect(card?.textContent).toContain("echo");
+  });
+
   it("hangs a router's routes off it, the default last", () => {
     render(<RunMap spec={withRouter} steps={[]} onOpen={() => {}} now={0} />);
     const routes = screen.getAllByTestId("map-route").map((r) => r.textContent);

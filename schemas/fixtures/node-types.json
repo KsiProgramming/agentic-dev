@@ -1,0 +1,877 @@
+[
+  {
+    "kind": "agent",
+    "label": "Agent",
+    "description": "One agent turn: a role and instructions run on a model.",
+    "category": "step",
+    "icon": "bot",
+    "parameters": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "description": "One agent turn: a role and instructions run on a provider.",
+      "properties": {
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its input must be JSON that matches this, or it does not start.",
+          "title": "Input Schema"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.",
+          "title": "Output Schema"
+        },
+        "reads": {
+          "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
+          "items": {
+            "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+            "examples": [
+              "findings.json"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Reads",
+          "type": "array"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "role",
+        "instructions"
+      ],
+      "title": "AgentNode",
+      "type": "object"
+    },
+    "slots": [],
+    "default": {
+      "type": "agent",
+      "id": "agent",
+      "role": "Agent",
+      "instructions": "Describe what this agent does.",
+      "tools": [],
+      "reads": []
+    },
+    "fill": {}
+  },
+  {
+    "kind": "tool",
+    "label": "Tool",
+    "description": "Calls one platform tool with fixed arguments; no model is involved.",
+    "category": "step",
+    "icon": "wrench",
+    "parameters": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "description": "One call of a platform tool with fixed arguments; no model is involved. Its output is the\nnext node's input, and an error result fails the node.",
+      "properties": {
+        "tool": {
+          "description": "The platform tool to call, e.g. `repo.list_files`.",
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "The tool's arguments.",
+          "title": "Args",
+          "type": "object"
+        },
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its input must be JSON that matches this, or it does not run.",
+          "title": "Input Schema"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its structured result (else its text as JSON) must match this, or it fails.",
+          "title": "Output Schema"
+        },
+        "reads": {
+          "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
+          "items": {
+            "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+            "examples": [
+              "findings.json"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Reads",
+          "type": "array"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "tool"
+      ],
+      "title": "ToolNode",
+      "type": "object"
+    },
+    "slots": [],
+    "default": {
+      "type": "tool",
+      "id": "tool",
+      "tool": "repo.list_files",
+      "args": {},
+      "reads": []
+    },
+    "fill": {}
+  },
+  {
+    "kind": "gate",
+    "label": "Gate",
+    "description": "Pauses the run until someone approves or rejects.",
+    "category": "step",
+    "icon": "shield-check",
+    "parameters": {
+      "additionalProperties": false,
+      "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged.",
+      "properties": {
+        "title": {
+          "description": "What the approver is asked to decide.",
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "More guidance for the approver, shown with the input.",
+          "title": "Prompt"
+        },
+        "ttl_s": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset.",
+          "title": "Ttl S"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "GateNode",
+      "type": "object"
+    },
+    "slots": [],
+    "default": {
+      "type": "gate",
+      "id": "gate",
+      "title": "Approve"
+    },
+    "fill": {}
+  },
+  {
+    "kind": "sequence",
+    "label": "Sequence",
+    "description": "Runs its steps in order.",
+    "category": "flow",
+    "icon": "list-ordered",
+    "parameters": {
+      "additionalProperties": false,
+      "description": "Runs its steps in order.",
+      "properties": {},
+      "required": [],
+      "title": "SequenceNode",
+      "type": "object"
+    },
+    "slots": [
+      "steps"
+    ],
+    "default": {
+      "type": "sequence",
+      "id": "sequence",
+      "steps": [
+        {
+          "type": "agent",
+          "id": "agent",
+          "role": "Agent",
+          "instructions": "Describe what this agent does.",
+          "tools": [],
+          "reads": []
+        }
+      ]
+    },
+    "fill": {}
+  },
+  {
+    "kind": "parallel",
+    "label": "Parallel",
+    "description": "Runs its branches at the same time and joins them.",
+    "category": "flow",
+    "icon": "split",
+    "parameters": {
+      "additionalProperties": false,
+      "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. `settled` (4.6) never decides early: it\nwaits for every branch to end and completes if at least one completed, so one failed branch\ndoes not cancel the others. Its output is the completed branches' outputs in branch order.\nA branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a\nreduce that writes nothing), its id names the branch, and it holds no gate, writer or\npublisher. Every agent in the branches counts toward the run's `agents_spawned` limit when\nthe parallel starts.",
+      "properties": {
+        "join": {
+          "enum": [
+            "all",
+            "any",
+            "quorum",
+            "settled"
+          ],
+          "title": "Join",
+          "type": "string"
+        },
+        "quorum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`quorum` only, and required: how many branches must complete.",
+          "title": "Quorum"
+        }
+      },
+      "required": [
+        "join"
+      ],
+      "title": "ParallelNode",
+      "type": "object"
+    },
+    "slots": [
+      "branches"
+    ],
+    "default": {
+      "type": "parallel",
+      "id": "parallel",
+      "branches": [
+        {
+          "type": "agent",
+          "id": "agent",
+          "role": "Agent",
+          "instructions": "Describe what this agent does.",
+          "tools": [],
+          "reads": []
+        },
+        {
+          "type": "agent",
+          "id": "agent_b",
+          "role": "Agent",
+          "instructions": "Describe what this agent does.",
+          "tools": [],
+          "reads": []
+        }
+      ],
+      "join": "all"
+    },
+    "fill": {}
+  },
+  {
+    "kind": "router",
+    "label": "Router",
+    "description": "Runs one of its routes, chosen by a rule or a classifier agent.",
+    "category": "flow",
+    "icon": "signpost",
+    "parameters": {
+      "additionalProperties": false,
+      "description": "Runs exactly one of its routes, on the router's input, and outputs what that route outputs.\n\nIn rule mode every route has `when`, a CEL condition over `last` (the router's input),\n`results` and `artifacts` (as for a loop's `until`); the first route whose condition is true\nruns, else `default`. In classifier mode no route has `when`: one agent (`classifier`)\nchooses a route id, `default` included when there is one, and says why. A router with no\nmatching route and no `default` fails. The routes not taken never start. A route is one\n`agent`, `tool` or `sequence` node, and it may hold what the router's own place allows.",
+      "properties": {
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Routes",
+          "type": "array"
+        },
+        "classifier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RouterClassifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Classifier mode: the agent that chooses the route."
+        }
+      },
+      "required": [
+        "routes"
+      ],
+      "title": "RouterNode",
+      "type": "object",
+      "$defs": {
+        "Route": {
+          "additionalProperties": false,
+          "description": "One way a router can go: `then` runs when this route is chosen.",
+          "properties": {
+            "id": {
+              "description": "The route's name, shown in the console and the events.",
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "title": "Id",
+              "type": "string"
+            },
+            "when": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Rule mode, and required there: the CEL condition that picks this route.",
+              "examples": [
+                "artifacts[\"findings.json\"].findings.size() == 0"
+              ],
+              "title": "When"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "What the route is for; a classifier is shown it to choose.",
+              "title": "Description"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "title": "Route",
+          "type": "object"
+        },
+        "RouterClassifier": {
+          "additionalProperties": false,
+          "description": "The agent that chooses a router's route (classifier mode), as for an `agent` node. It\nanswers with one of the router's route ids and a reason, through a typed output the engine\nmakes (`classifier_schema`).",
+          "properties": {
+            "instructions": {
+              "minLength": 1,
+              "title": "Instructions",
+              "type": "string"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "const": "claude",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Unset means the workspace default.",
+              "title": "Provider"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model"
+            }
+          },
+          "required": [
+            "instructions"
+          ],
+          "title": "RouterClassifier",
+          "type": "object"
+        }
+      }
+    },
+    "slots": [
+      "routes[].then",
+      "default"
+    ],
+    "default": {
+      "type": "router",
+      "id": "router",
+      "routes": [
+        {
+          "id": "match",
+          "when": "true",
+          "then": {
+            "type": "agent",
+            "id": "agent",
+            "role": "Agent",
+            "instructions": "Describe what this agent does.",
+            "tools": [],
+            "reads": []
+          }
+        }
+      ],
+      "default": {
+        "type": "agent",
+        "id": "agent_b",
+        "role": "Agent",
+        "instructions": "Describe what this agent does.",
+        "tools": [],
+        "reads": []
+      }
+    },
+    "fill": {}
+  },
+  {
+    "kind": "loop",
+    "label": "Loop",
+    "description": "Runs its body again until a condition holds, a set number of times at most.",
+    "category": "flow",
+    "icon": "repeat",
+    "parameters": {
+      "additionalProperties": false,
+      "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration.",
+      "properties": {
+        "until": {
+          "description": "CEL condition checked after each iteration; true stops the loop.",
+          "examples": [
+            "last.contains(\"APPROVED\")"
+          ],
+          "minLength": 1,
+          "title": "Until",
+          "type": "string"
+        },
+        "max_iterations": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Max Iterations",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "until",
+        "max_iterations"
+      ],
+      "title": "LoopNode",
+      "type": "object"
+    },
+    "slots": [
+      "body"
+    ],
+    "default": {
+      "type": "loop",
+      "id": "loop",
+      "body": {
+        "type": "agent",
+        "id": "agent",
+        "role": "Agent",
+        "instructions": "Describe what this agent does.",
+        "tools": [],
+        "reads": []
+      },
+      "until": "iteration >= 3",
+      "max_iterations": 3
+    },
+    "fill": {}
+  },
+  {
+    "kind": "map",
+    "label": "Map",
+    "description": "Runs its body once per item of a list.",
+    "category": "flow",
+    "icon": "layers",
+    "parameters": {
+      "additionalProperties": false,
+      "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. Its items' agents count toward the\nrun's `agents_spawned` limit; one item that does not complete fails the map.",
+      "properties": {
+        "over": {
+          "description": "CEL expression that evaluates to the list of items.",
+          "examples": [
+            "results.list_modules.data.modules"
+          ],
+          "minLength": 1,
+          "title": "Over",
+          "type": "string"
+        },
+        "max_concurrency": {
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Max Concurrency",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "over",
+        "max_concurrency"
+      ],
+      "title": "MapNode",
+      "type": "object"
+    },
+    "slots": [
+      "body"
+    ],
+    "default": {
+      "type": "map",
+      "id": "map",
+      "over": "[last]",
+      "body": {
+        "type": "agent",
+        "id": "agent",
+        "role": "Agent",
+        "instructions": "Describe what this agent does.",
+        "tools": [],
+        "reads": []
+      },
+      "max_concurrency": 4
+    },
+    "fill": {}
+  },
+  {
+    "kind": "reduce",
+    "label": "Reduce",
+    "description": "Combines the outputs of the map or parallel before it.",
+    "category": "combine",
+    "icon": "merge",
+    "parameters": {
+      "$defs": {
+        "ReduceAgent": {
+          "additionalProperties": false,
+          "description": "The agent a `reduce` node with the `agent` strategy runs, as for an `agent` node.",
+          "properties": {
+            "role": {
+              "minLength": 1,
+              "title": "Role",
+              "type": "string"
+            },
+            "instructions": {
+              "minLength": 1,
+              "title": "Instructions",
+              "type": "string"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "const": "claude",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Unset means the workspace default.",
+              "title": "Provider"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model"
+            }
+          },
+          "required": [
+            "role",
+            "instructions"
+          ],
+          "title": "ReduceAgent",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Combines the outputs of the map or parallel `from`, which runs before it: a map's items in\nitem order, a parallel's completed branches in branch order.\n\n`concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON\narray `[{\"item\": …, \"output\": …}]` (data, never instructions; a branch's item is its id).\n`dedupe` and `vote` (4.5) merge findings reports with no model: one finding per issue, with\nthe highest severity, the sources that reported it and a confidence; `vote` keeps only the\nissues `min_votes` sources reported. Their output is a findings report.",
+      "properties": {
+        "from": {
+          "description": "The map or parallel whose outputs are combined.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "From",
+          "type": "string"
+        },
+        "strategy": {
+          "enum": [
+            "concat",
+            "agent",
+            "dedupe",
+            "vote"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "separator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`concat` only: what goes between outputs (default two newlines).",
+          "title": "Separator"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReduceAgent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`agent` only, and required."
+        },
+        "min_votes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`vote` only: how many sources must report an issue to keep it (default a majority of the sources that completed).",
+          "title": "Min Votes"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "from",
+        "strategy"
+      ],
+      "title": "ReduceNode",
+      "type": "object"
+    },
+    "slots": [],
+    "default": {
+      "type": "reduce",
+      "id": "reduce",
+      "from": "parallel",
+      "strategy": "concat"
+    },
+    "fill": {
+      "from": "previous_step"
+    }
+  }
+]

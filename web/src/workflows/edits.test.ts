@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import type { WorkflowSpec } from "@/runs/graph/spec-graph";
@@ -11,7 +14,12 @@ import {
   setDocument,
   subtreeSize,
 } from "./edits";
+import type { NodeManifest } from "./node-types";
 import { applyOps } from "./ops";
+
+const NODE_TYPES = JSON.parse(
+  readFileSync(resolve(__dirname, "../../../schemas/fixtures/node-types.json"), "utf8"),
+) as NodeManifest[];
 
 const agent = (id: string) => ({ type: "agent" as const, id, role: id, instructions: `Do ${id}.` });
 
@@ -34,13 +42,55 @@ const ids = (spec: WorkflowSpec) => rootSteps(spec).map((s) => s.id);
 
 describe("builder edits", () => {
   it("names a new node with the first free id of its kind, anywhere in the spec", () => {
-    expect(newNode(SPEC, "agent").id).toBe("agent_2");
-    expect(newNode(SPEC, "gate")).toEqual({ type: "gate", id: "gate_1", title: "Approve" });
+    expect(newNode(SPEC, "agent", NODE_TYPES).id).toBe("agent_2");
+    expect(newNode(SPEC, "gate", NODE_TYPES)).toEqual({
+      type: "gate",
+      id: "gate_1",
+      title: "Approve",
+    });
+  });
+
+  it("gives every node of a container a fresh id, and leaves route ids alone", () => {
+    const router = newNode(SPEC, "router", NODE_TYPES) as unknown as {
+      id: string;
+      routes: { id: string; then: { id: string } }[];
+      default: { id: string };
+    };
+    expect(router.id).toBe("router_1");
+    expect(router.routes[0].id).toBe("match");
+    expect([router.routes[0].then.id, router.default.id]).toEqual(["agent_2", "agent_3"]);
+    const parallel = applyOps(SPEC, addStep(SPEC, "c", "parallel", NODE_TYPES).ops);
+    expect(ids(parallel)).toEqual(["a", "l", "c", "parallel_1"]);
+  });
+
+  it("fills a reduce's source with the step it is added after", () => {
+    expect(newNode(SPEC, "reduce", NODE_TYPES, "c")).toMatchObject({ id: "reduce_1", from: "c" });
+  });
+
+  it("adds a kind it only knows from its manifest", () => {
+    const echo: NodeManifest = {
+      kind: "echo",
+      label: "Echo",
+      description: "Says its text back.",
+      category: "step",
+      icon: "megaphone",
+      parameters: {},
+      slots: [],
+      default: { type: "echo", id: "echo", text: "hi" },
+      fill: {},
+    };
+    const edit = addStep(SPEC, "a", "echo", [...NODE_TYPES, echo]);
+    expect(edit.ops).toEqual([
+      { op: "addNode", node: { type: "echo", id: "echo_1", text: "hi" }, at: { after: "a" } },
+    ]);
+    expect(() => newNode(SPEC, "nope", NODE_TYPES)).toThrow("There is no node type nope.");
   });
 
   it("adds a step after another, or first", () => {
-    expect(ids(applyOps(SPEC, addStep(SPEC, "a", "tool").ops))).toEqual(["a", "tool_1", "l", "c"]);
-    expect(ids(applyOps(SPEC, addStep(SPEC, null, "gate").ops))).toEqual(["gate_1", "a", "l", "c"]);
+    const add = (after: string | null, kind: string) =>
+      ids(applyOps(SPEC, addStep(SPEC, after, kind, NODE_TYPES).ops));
+    expect(add("a", "tool")).toEqual(["a", "tool_1", "l", "c"]);
+    expect(add(null, "gate")).toEqual(["gate_1", "a", "l", "c"]);
   });
 
   it("moves a step with one connect, at either end too", () => {

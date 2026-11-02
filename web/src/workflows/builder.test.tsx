@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -7,6 +10,7 @@ import { DEFAULT_WORKSPACE_ID } from "@/workspace";
 import type { WorkflowVersion } from "./api";
 import { applyOps, type GraphOp } from "./ops";
 import { WorkflowBuilder } from "./builder";
+import type { NodeManifest } from "./node-types";
 
 vi.mock("@/api/client", async (original) => ({
   ...(await original<typeof import("@/api/client")>()),
@@ -22,6 +26,22 @@ afterEach(() => {
 });
 
 const PATH = `/workflows/flow?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+// The engine's manifests, as `GET /node-types` answers them (`scripts/export_workflow_schema.py`).
+const NODE_TYPES = JSON.parse(
+  readFileSync(resolve(__dirname, "../../../schemas/fixtures/node-types.json"), "utf8"),
+) as NodeManifest[];
+// A primitive this app has never heard of: the palette and the cards still show it (5.3).
+const ECHO: NodeManifest = {
+  kind: "echo",
+  label: "Echo",
+  description: "Says its text back.",
+  category: "step",
+  icon: "megaphone",
+  parameters: { type: "object", properties: { text: { type: "string" } } },
+  slots: [],
+  default: { type: "echo", id: "echo", text: "hello" },
+  fill: {},
+};
 const agent = (id: string) => ({ type: "agent", id, role: id, instructions: `Do ${id}.` });
 
 const SPEC = {
@@ -53,7 +73,11 @@ function version(n: number, spec: object = SPEC): WorkflowVersion {
 }
 
 function show(routes: Routes) {
-  const fetch = stubApi({ [`GET ${PATH}`]: () => json(200, version(1)), ...routes });
+  const fetch = stubApi({
+    [`GET ${PATH}`]: () => json(200, version(1)),
+    "GET /node-types": () => json(200, NODE_TYPES),
+    ...routes,
+  });
   renderWithQueries(<WorkflowBuilder workflowId="flow" />);
   return fetch;
 }
@@ -62,6 +86,27 @@ const cards = () => screen.getAllByTestId("builder-node").map((c) => c.dataset.n
 
 function menu(nodeId: string) {
   fireEvent.keyDown(screen.getByRole("button", { name: `Edit step ${nodeId}` }), { key: "Enter" });
+}
+
+/** Opens `nodeId`'s "Add a step after" palette and waits for it. */
+async function openPalette(nodeId: string) {
+  menu(nodeId);
+  const trigger = screen.getByRole("menuitem", { name: "Add a step after" });
+  fireEvent.keyDown(trigger, { key: "ArrowRight" });
+  return waitFor(() => {
+    const menus = screen.getAllByRole("menu");
+    expect(menus).toHaveLength(2);
+    return within(menus[1]);
+  });
+}
+
+/** Picks `kind` in `nodeId`'s palette. */
+async function add(nodeId: string, kind: string) {
+  const palette = await openPalette(nodeId);
+  const item = palette.getAllByRole("menuitem").find((i) => i.dataset.kind === kind);
+  expect(item).toBeDefined();
+  fireEvent.click(item!);
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
 }
 
 async function patched(fetch: ReturnType<typeof stubApi>) {
@@ -88,8 +133,7 @@ test("edits are drawn at once and saved as one PATCH of their ops", async () => 
   });
   await screen.findByRole("heading", { name: "Flow" });
 
-  menu("a");
-  fireEvent.click(screen.getByRole("menuitem", { name: "Agent" }));
+  await add("a", "agent");
   menu("a");
   fireEvent.click(screen.getByRole("menuitem", { name: "Move down" }));
   expect(cards()).toEqual(["agent_1", "a", "l", "inner", "c"]);
@@ -110,6 +154,8 @@ test("edits are drawn at once and saved as one PATCH of their ops", async () => 
           id: "agent_1",
           role: "Agent",
           instructions: "Describe what this agent does.",
+          tools: [],
+          reads: [],
         },
         at: { after: "a" },
       },
@@ -149,14 +195,14 @@ test("removing a step asks first and names what goes with it", async () => {
 test("after a conflict the edits are applied to the latest version and kept", async () => {
   const routes: Routes = {
     [`GET ${PATH}`]: () => json(200, version(1)),
+    "GET /node-types": () => json(200, NODE_TYPES),
     [`PATCH ${PATH}`]: () =>
       json(409, { detail: { code: "version_conflict", message: "stale", latest_version: 2 } }),
   };
   stubApi(routes);
   renderWithQueries(<WorkflowBuilder workflowId="flow" />);
   await screen.findByRole("heading", { name: "Flow" });
-  menu("a");
-  fireEvent.click(screen.getByRole("menuitem", { name: "Gate" }));
+  await add("a", "gate");
 
   routes[`GET ${PATH}`] = () => json(200, version(2, { ...SPEC, name: "Renamed elsewhere" }));
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -190,6 +236,64 @@ test("a refused batch is shown on the card it names", async () => {
   });
   expect(card).toBeDefined();
   expect(toast.error).toHaveBeenCalledWith("agent 'a' needs a role");
+});
+
+test("the palette lists the engine's node types by category, a new one included", async () => {
+  show({ "GET /node-types": () => json(200, [...NODE_TYPES, ECHO]) });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  await add("a", "echo");
+
+  expect(cards()).toEqual(["a", "echo_1", "l", "inner", "c"]);
+  const card = screen.getAllByTestId("builder-node").find((c) => c.dataset.node === "echo_1");
+  expect(card?.textContent).toContain("Echo");
+
+  const groups = (await openPalette("c")).getAllByRole("group");
+  expect(groups.map((g) => g.textContent?.split(/(?=[A-Z])/)[0])).toEqual([
+    "Steps",
+    "Flow",
+    "Combine",
+  ]);
+  expect(within(groups[0]).getByRole("menuitem", { name: /^Echo/ })).toBeDefined();
+});
+
+test("a container comes with its children, every one under a fresh id", async () => {
+  const fetch = show({
+    [`PATCH ${PATH}`]: async (request) => {
+      const body = (await request.clone().json()) as { ops: GraphOp[] };
+      return json(201, version(2, applyOps(SPEC, body.ops)));
+    },
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  await add("c", "parallel");
+  await add("parallel_1", "reduce");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  const { ops } = await waitFor(() => patched(fetch));
+  expect(ops[0]).toMatchObject({
+    node: { type: "parallel", id: "parallel_1", branches: [{ id: "agent_1" }, { id: "agent_2" }] },
+  });
+  expect(ops[1]).toMatchObject({ node: { type: "reduce", id: "reduce_1", from: "parallel_1" } });
+});
+
+test("the palette says when the node types cannot load, and retries", async () => {
+  const routes: Routes = {
+    [`GET ${PATH}`]: () => json(200, version(1)),
+    "GET /node-types": () => json(500, { detail: "down" }),
+  };
+  stubApi(routes);
+  renderWithQueries(<WorkflowBuilder workflowId="flow" />);
+  await screen.findByRole("heading", { name: "Flow" });
+  const failed = await openPalette("a");
+  await waitFor(() => expect(failed.getByRole("menuitem", { name: "Retry" })).toBeDefined());
+  expect(failed.getByText("down")).toBeDefined();
+
+  routes["GET /node-types"] = () => json(200, []);
+  fireEvent.click(failed.getByRole("menuitem", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
+  const empty = await openPalette("a");
+  await waitFor(() => expect(empty.getByText("No node types available")).toBeDefined());
 });
 
 test("an unknown workflow says so and leads to the templates", async () => {

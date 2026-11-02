@@ -2267,6 +2267,32 @@
           }
         }
       }
+    },
+    "/node-types": {
+      "get": {
+        "tags": [
+          "node-types"
+        ],
+        "summary": "List Node Types",
+        "description": "Every primitive's manifest, in palette order: the builder draws its palette and cards\nfrom them, so a primitive the engine knows needs no web change.",
+        "operationId": "listNodeTypes",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NodeManifest"
+                  },
+                  "type": "array",
+                  "title": "Response Listnodetypes"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2805,6 +2831,14 @@
         ],
         "title": "CancelResponse"
       },
+      "Category": {
+        "type": "string",
+        "enum": [
+          "step",
+          "flow",
+          "combine"
+        ]
+      },
       "ChangeStatus": {
         "type": "string",
         "enum": [
@@ -3260,6 +3294,10 @@
         ],
         "title": "FileEdit",
         "description": "The approver's new text for an editable file of a writer's branch."
+      },
+      "Fill": {
+        "type": "string",
+        "const": "previous_step"
       },
       "GateArtifact": {
         "properties": {
@@ -3909,6 +3947,74 @@
           "name"
         ],
         "title": "NewWorkspace"
+      },
+      "NodeManifest": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "The node's `type`."
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Its name in the palette and on its card: `Agent`."
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One sentence on what it does."
+          },
+          "category": {
+            "$ref": "#/components/schemas/Category"
+          },
+          "icon": {
+            "type": "string",
+            "title": "Icon",
+            "description": "A lucide icon name in kebab case, e.g. `bot`."
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters",
+            "description": "JSON Schema of its editable fields: the node's schema without `type`, `id` and the slots that hold nodes."
+          },
+          "slots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Slots",
+            "description": "The fields that hold child nodes, a node or a list of them: `steps`, `body`, `routes[].then` (each route's `then`). Empty for a leaf."
+          },
+          "default": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Default",
+            "description": "A whole node the palette adds, children included; the palette gives each node in it a fresh id."
+          },
+          "fill": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Fill"
+            },
+            "type": "object",
+            "title": "Fill",
+            "description": "Parameters the palette sets when it adds the node, e.g. `from` to the previous step's id."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "label",
+          "description",
+          "category",
+          "icon",
+          "parameters",
+          "slots",
+          "default"
+        ],
+        "title": "NodeManifest"
       },
       "NotEditable": {
         "type": "string",

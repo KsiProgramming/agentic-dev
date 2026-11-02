@@ -5,6 +5,7 @@ import {
   EllipsisIcon,
   PencilIcon,
   PlusIcon,
+  RotateCwIcon,
   Undo2Icon,
   WorkflowIcon,
 } from "lucide-react";
@@ -37,16 +38,20 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { KindIcon, kindLabel } from "@/runs/graph/node-kinds";
+import { isKnownKind, KindIcon, kindLabel } from "@/runs/graph/node-kinds";
 import type { NodeKind, SpecNode, WorkflowSpec } from "@/runs/graph/spec-graph";
 import { CARD, SpecTree, type MapNode } from "@/runs/graph/spec-tree";
 import { useWorkspaceId } from "@/workspace";
@@ -55,14 +60,13 @@ import { useSaveWorkflow, useWorkflow, type WorkflowVersion } from "./api";
 import {
   addStep,
   moveStep,
-  NEW_KINDS,
   removeStep,
   rootSteps,
   setDocument,
   subtreeSize,
   type Edit,
-  type NewKind,
 } from "./edits";
+import { ManifestIcon, paletteGroups, useNodeTypes, type NodeManifest } from "./node-types";
 import { applyOps, OpError, type GraphOp } from "./ops";
 
 /** A refusal shown on the card of the node it is about, until the edits change. */
@@ -70,8 +74,6 @@ interface Refusal {
   nodeId: string | null;
   message: string;
 }
-
-const KIND_NAMES: Record<NewKind, string> = { agent: "Agent", tool: "Tool", gate: "Gate" };
 
 /**
  * The builder (5.2): a stored workflow drawn as the run map's cards, edited through each root
@@ -125,6 +127,15 @@ function Editor({
   const [editingDetails, setEditingDetails] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const save = useSaveWorkflow(workspaceId, version.workflow_id);
+  const nodeTypes = useNodeTypes();
+  const manifests = useMemo(() => nodeTypes.data ?? [], [nodeTypes.data]);
+  const palette: Palette = {
+    groups: paletteGroups(manifests),
+    pending: nodeTypes.isPending,
+    error: nodeTypes.isError ? nodeTypes.error.message : null,
+    retry: () => void nodeTypes.refetch(),
+  };
+  const manifestOf = (kind: string) => manifests.find((m) => m.kind === kind);
 
   const ops = useMemo(() => edits.flatMap((e) => e.ops), [edits]);
   const base = version.spec as unknown as WorkflowSpec;
@@ -205,6 +216,9 @@ function Editor({
     const editable = rootIds.has(node.id);
     const failed = refusal?.nodeId === node.id ? refusal.message : null;
     const kind = node.kind === "route" ? null : (node.kind as NodeKind);
+    // A kind the web has no icon or name for is drawn from its manifest (5.3).
+    const manifest = kind ? manifestOf(kind) : undefined;
+    const known = kind !== null && isKnownKind(kind);
     return (
       <div
         data-testid="builder-node"
@@ -217,8 +231,13 @@ function Editor({
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-mono text-meta font-medium">{node.name}</span>
-          {kind ? (
+          {kind && known ? (
             <KindIcon kind={kind} className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+          ) : kind ? (
+            <ManifestIcon
+              name={manifest?.icon ?? ""}
+              className="ml-auto size-3.5 shrink-0 text-muted-foreground"
+            />
           ) : null}
           {editable ? (
             <StepMenu
@@ -226,7 +245,8 @@ function Editor({
               canMoveUp={moveStep(spec, node.id, "up") !== null}
               canMoveDown={moveStep(spec, node.id, "down") !== null}
               canRemove={steps.length > 1}
-              onAdd={(k) => apply(addStep(spec, node.id, k))}
+              palette={palette}
+              onAdd={(k) => apply(addStep(spec, node.id, k, manifests))}
               onMove={(d) => apply(moveStep(spec, node.id, d))}
               onRemove={() => setRemoving(steps.find((s) => s.id === node.id) ?? null)}
             />
@@ -241,7 +261,9 @@ function Editor({
           </span>
         ) : (
           <span className="truncate text-caption text-foreground-secondary">
-            {node.kind === "route" ? "Route" : node.detail || kindLabel(node.kind)}
+            {node.kind === "route"
+              ? "Route"
+              : node.detail || (known ? kindLabel(node.kind) : (manifest?.label ?? node.kind))}
           </span>
         )}
       </div>
@@ -312,7 +334,11 @@ function Editor({
         <div className="flex items-center justify-between gap-2 border-b bg-surface-subtle px-4 py-2">
           <h2 className="text-caption font-medium text-muted-foreground">Steps</h2>
           {spec.root.type === "sequence" ? (
-            <AddMenu label="Add first step" onAdd={(k) => apply(addStep(spec, null, k))} />
+            <AddMenu
+              label="Add first step"
+              palette={palette}
+              onAdd={(k) => apply(addStep(spec, null, k, manifests))}
+            />
           ) : null}
         </div>
         <div className="@container overflow-auto p-4" data-testid="builder-canvas">
@@ -379,16 +405,70 @@ function opErrorNode(err: unknown): string | null {
   return null;
 }
 
-function AddItems({ onAdd }: { onAdd: (kind: NewKind) => void }) {
-  return NEW_KINDS.map((kind) => (
-    <DropdownMenuItem key={kind} onSelect={() => onAdd(kind)}>
-      <KindIcon kind={kind} className="size-4" />
-      {KIND_NAMES[kind]}
-    </DropdownMenuItem>
+/** The palette: the node types from `GET /node-types`, by category. */
+interface Palette {
+  groups: { label: string; items: NodeManifest[] }[];
+  pending: boolean;
+  error: string | null;
+  retry: () => void;
+}
+
+function AddItems({ palette, onAdd }: { palette: Palette; onAdd: (kind: string) => void }) {
+  if (palette.pending) {
+    return <DropdownMenuItem disabled>Loading node types�</DropdownMenuItem>;
+  }
+  if (palette.error) {
+    return (
+      <>
+        <DropdownMenuItem disabled className="text-status-failed">
+          <CircleAlertIcon aria-hidden="true" />
+          {palette.error}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={palette.retry}>
+          <RotateCwIcon aria-hidden="true" />
+          Retry
+        </DropdownMenuItem>
+      </>
+    );
+  }
+  if (palette.groups.length === 0) {
+    return <DropdownMenuItem disabled>No node types available</DropdownMenuItem>;
+  }
+  return palette.groups.map((group, i) => (
+    <DropdownMenuGroup key={group.label}>
+      {i > 0 ? <DropdownMenuSeparator /> : null}
+      <DropdownMenuLabel className="text-caption text-muted-foreground">
+        {group.label}
+      </DropdownMenuLabel>
+      {group.items.map((m) => (
+        <DropdownMenuItem
+          key={m.kind}
+          data-kind={m.kind}
+          title={m.description}
+          onSelect={() => onAdd(m.kind)}
+        >
+          <ManifestIcon name={m.icon} className="size-4" />
+          <span className="flex min-w-0 flex-col">
+            <span>{m.label}</span>
+            <span className="max-w-56 truncate text-caption text-muted-foreground">
+              {m.description}
+            </span>
+          </span>
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuGroup>
   ));
 }
 
-function AddMenu({ label, onAdd }: { label: string; onAdd: (kind: NewKind) => void }) {
+function AddMenu({
+  label,
+  palette,
+  onAdd,
+}: {
+  label: string;
+  palette: Palette;
+  onAdd: (kind: string) => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -398,7 +478,7 @@ function AddMenu({ label, onAdd }: { label: string; onAdd: (kind: NewKind) => vo
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <AddItems onAdd={onAdd} />
+        <AddItems palette={palette} onAdd={onAdd} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -409,6 +489,7 @@ function StepMenu({
   canMoveUp,
   canMoveDown,
   canRemove,
+  palette,
   onAdd,
   onMove,
   onRemove,
@@ -417,7 +498,8 @@ function StepMenu({
   canMoveUp: boolean;
   canMoveDown: boolean;
   canRemove: boolean;
-  onAdd: (kind: NewKind) => void;
+  palette: Palette;
+  onAdd: (kind: string) => void;
   onMove: (direction: "up" | "down") => void;
   onRemove: () => void;
 }) {
@@ -429,8 +511,15 @@ function StepMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel>Add a step after</DropdownMenuLabel>
-        <AddItems onAdd={onAdd} />
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <PlusIcon aria-hidden="true" />
+            Add a step after
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <AddItems palette={palette} onAdd={onAdd} />
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={!canMoveUp} onSelect={() => onMove("up")}>
           Move up

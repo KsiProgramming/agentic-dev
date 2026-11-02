@@ -1,12 +1,14 @@
 """Write the workflow spec's JSON Schema to schemas/workflow-spec.v0.json, and the scan tools'
 findings report (4.4) to schemas/findings.v1.json, and the graph operations (5.1) to
-schemas/graph-ops.v1.json."""
+schemas/graph-ops.v1.json; and the node manifests (5.3) to schemas/fixtures/node-types.json, which
+the web's palette tests read as `GET /node-types` answers."""
 
 import json
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from agentic_engine.nodes import NODE_MANIFESTS
 from agentic_engine.spec import GraphOps, WorkflowSpec
 from agentic_runtime.findings import FindingsReport
 
@@ -31,6 +33,11 @@ def build(
     }
 
 
+def node_types() -> str:
+    manifests = [m.model_dump(mode="json") for m in NODE_MANIFESTS]
+    return json.dumps(manifests, indent=2, ensure_ascii=False) + "\n"
+
+
 def main() -> None:
     SCHEMAS.mkdir(exist_ok=True)
     for name, (model, _) in OUTPUTS.items():
@@ -38,6 +45,9 @@ def main() -> None:
         text = json.dumps(build(model, name), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
         out.write_text(text, encoding="utf-8", newline="\n")
         print(f"wrote {out}")
+    out = SCHEMAS / "fixtures" / "node-types.json"
+    out.write_text(node_types(), encoding="utf-8", newline="\n")
+    print(f"wrote {out}")
 
 
 if __name__ == "__main__":
