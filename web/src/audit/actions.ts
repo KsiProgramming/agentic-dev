@@ -4,6 +4,8 @@ import {
   CircleXIcon,
   CoinsIcon,
   FlagIcon,
+  FilePenIcon,
+  FilePlusIcon,
   FolderPlusIcon,
   GaugeIcon,
   PlayIcon,
@@ -26,7 +28,7 @@ export type AuditPage = components["schemas"]["AuditPage"];
 export type AuditAction = AuditEvent["action"];
 
 /** What the filter groups actions by. */
-export type AuditCategory = "runs" | "approvals" | "settings";
+export type AuditCategory = "runs" | "approvals" | "workflows" | "settings";
 
 interface ActionInfo {
   label: string;
@@ -43,6 +45,8 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "gate.approved": { label: "Gate approved", icon: CircleCheckIcon, category: "approvals" },
   "gate.rejected": { label: "Gate rejected", icon: CircleXIcon, category: "approvals" },
   "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
+  "workflow.created": { label: "Workflow created", icon: FilePlusIcon, category: "workflows" },
+  "workflow.updated": { label: "Workflow changed", icon: FilePenIcon, category: "workflows" },
   "connection.added": { label: "Connection added", icon: PlugIcon, category: "settings" },
   "connection.removed": { label: "Connection removed", icon: UnplugIcon, category: "settings" },
   "policy.updated": { label: "Run limits changed", icon: GaugeIcon, category: "settings" },
@@ -52,6 +56,7 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
 export const AUDIT_CATEGORIES: readonly { id: AuditCategory; label: string }[] = [
   { id: "runs", label: "Runs" },
   { id: "approvals", label: "Approvals" },
+  { id: "workflows", label: "Workflows" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -186,6 +191,16 @@ export function describe(event: AuditEvent): string {
         `${event.node_id ?? "A gate"} expired with no decision; the run was cancelled`,
         at && `due ${formatAbsolute(at)}`,
       );
+    }
+    case "workflow.created":
+    case "workflow.updated": {
+      const workflow = text(d, "workflow_id") ?? "A workflow";
+      const version = count(d, "version");
+      const at = version > 0 ? ` v${version}` : "";
+      if (event.action === "workflow.created") return `Created ${workflow}${at}`;
+      const ops = count(d, "op_count");
+      const edits = ops > 0 ? ` · ${ops} ${ops === 1 ? "edit" : "edits"}` : "";
+      return `Changed ${workflow}${at}${edits}`;
     }
     case "connection.added":
     case "connection.removed": {

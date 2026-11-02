@@ -1,9 +1,14 @@
+"""Checking workflow specs before they run, and storing them as versions changed by graph
+operations (5.1)."""
+
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agentic_api.workspaces.models import RunLimits, budget_field
-from agentic_engine.spec import ValidationIssue
+from agentic_engine.spec import MAX_OPS, GraphOp, OpErrorCode, ValidationIssue
 
 
 class ValidateWorkflowRequest(BaseModel):
@@ -32,3 +37,78 @@ class ValidateWorkflowResponse(BaseModel):
         "While the spec does not match the schema, only `schema` issues are listed."
     )
     policy: RunLimits = Field(description="The limits the workflow was checked against.")
+
+
+class CreateWorkflowRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    spec: dict[str, JsonValue] = Field(
+        description="The workflow spec, stored as version 1 under its `id`. It must match the "
+        "schema; other issues are returned with it."
+    )
+
+
+class UpdateWorkflowRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_version: int = Field(
+        ge=1, description="The version the ops were made against; it must be the latest."
+    )
+    ops: list[GraphOp] = Field(
+        min_length=1,
+        max_length=MAX_OPS,
+        description="Graph operations, applied in order, all or nothing.",
+    )
+
+
+class WorkflowVersionResponse(BaseModel):
+    """One version of a stored workflow, with what keeps it from running now."""
+
+    workflow_id: str
+    version: int
+    base_version: int | None = Field(description="The version it was made from; unset for 1.")
+    created_at: datetime
+    spec: dict[str, JsonValue]
+    ops: list[JsonValue] | None = Field(
+        description="The graph operations that made it from `base_version`; unset for 1."
+    )
+    valid: bool = Field(description="Whether it could run in the workspace now.")
+    issues: list[ValidationIssue] = Field(
+        description="Why it could not run now, as `POST /workflows/{id}/validate` gives them. "
+        "A version is stored with its issues; a run of it is refused until they are fixed."
+    )
+
+
+class WorkflowVersionItem(BaseModel):
+    version: int
+    base_version: int | None
+    created_at: datetime
+    op_count: int = Field(description="Graph operations that made it; 0 for version 1.")
+
+
+class WorkflowVersionsResponse(BaseModel):
+    """Every version of a workflow, newest first."""
+
+    items: list[WorkflowVersionItem]
+
+
+class OpErrorDetail(BaseModel):
+    """The `detail` of a batch of graph operations that cannot apply: the op at `op_index` (unset
+    when it is the batch's result: a node left detached, an empty slot, a spec off the schema)
+    and the node it is about. Nothing was stored."""
+
+    code: OpErrorCode
+    message: str
+    op_index: int | None
+    node_id: str | None
+
+
+class WorkflowErrorDetail(BaseModel):
+    """The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`
+    (`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does
+    not match the schema, with its `issues`)."""
+
+    code: Literal["workflow_exists", "version_conflict", "schema"]
+    message: str
+    latest_version: int | None = None
+    issues: list[ValidationIssue] = Field(default_factory=list[ValidationIssue])

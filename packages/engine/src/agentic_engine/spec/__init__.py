@@ -1,5 +1,6 @@
 """Workflow spec models (v0: `agent`, `tool`, `gate`, `sequence`, `loop`, `map`, `reduce`,
-`parallel` and `router`), and `validate_workflow`, which reports every reason a spec cannot run."""
+`parallel` and `router`), `validate_workflow`, which reports every reason a spec cannot run, and
+the graph operations that change a stored spec (`apply_ops`, 5.1)."""
 
 from agentic_engine.spec.models import (
     ARTIFACT_TOOLS,
@@ -65,7 +66,22 @@ from agentic_engine.spec.models import (
     within,
     writer_node_ids,
 )
-from agentic_engine.spec.validate import validate_workflow
+from agentic_engine.spec.ops import (
+    MAX_OPS,
+    AddNode,
+    After,
+    Connect,
+    Disconnect,
+    GraphOp,
+    GraphOps,
+    Into,
+    OpError,
+    OpErrorCode,
+    RemoveNode,
+    SetParam,
+    apply_ops,
+)
+from agentic_engine.spec.validate import schema_issues, validate_workflow
 
 __all__ = [
     "ARTIFACT_TOOLS",
@@ -75,6 +91,7 @@ __all__ = [
     "MAX_AGENTS_ALIVE",
     "MAX_AGENTS_SPAWNED",
     "MAX_LOOP_ITERATIONS",
+    "MAX_OPS",
     "MAX_ROUTES",
     "PLATFORM_TOOLS",
     "PUBLISH_TOOLS",
@@ -82,28 +99,40 @@ __all__ = [
     "REPO_TOOL_PREFIXES",
     "SCAN_TOOLS",
     "WRITE_TOOLS",
+    "AddNode",
+    "After",
     "AgentNode",
     "ArtifactName",
     "ArtifactWriter",
+    "Connect",
+    "Disconnect",
     "GateNode",
+    "GraphOp",
+    "GraphOps",
+    "Into",
     "IssueCode",
     "LoopNode",
     "MapNode",
     "Node",
     "NodeId",
+    "OpError",
+    "OpErrorCode",
     "ParallelNode",
     "PortNode",
     "PortProducer",
     "ReduceAgent",
     "ReduceNode",
+    "RemoveNode",
     "Route",
     "RouterClassifier",
     "RouterNode",
     "SequenceNode",
+    "SetParam",
     "ToolNode",
     "ValidationIssue",
     "WorkflowSpec",
     "agents_spawned",
+    "apply_ops",
     "artifact_issues",
     "artifact_writers",
     "budget_errors",
@@ -127,6 +156,7 @@ __all__ = [
     "publish_gate_errors",
     "router_issues",
     "router_routes",
+    "schema_issues",
     "scope_of",
     "tool_issues",
     "validate_workflow",
