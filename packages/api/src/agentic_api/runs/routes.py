@@ -330,9 +330,9 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
     refused with `422`. So is one above the workspace's run limits (`GET
     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
-    created with. Its budget is `budget_usd`, else the workspace's default; with a budget, every
-    agent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the
-    same way.
+    created with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),
+    else the workspace's default; with a budget, every agent's model must have a price (`GET
+    /workspaces/{id}/pricing`), or the run is refused the same way.
 
     With `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub
     App is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and
@@ -434,9 +434,9 @@ async def rerun(
     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
     not changed. The spec is the one the original ran, even if its template has changed since;
     the limits are the workspace's as they are now, and a spec above them is refused with
-    `422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the
-    original run's spend does not count. A run that created its repo is not rerun: the repo
-    exists now, so start a run on it instead."""
+    `422`. The budget is `budget_usd` if given, else the workflow's own, else the workspace's
+    default as it is now; the original run's spend does not count. A run that created its repo
+    is not rerun: the repo exists now, so start a run on it instead."""
     sessions = _sessions(request)
     original = await get_run(sessions, run_id)
     if original is None:

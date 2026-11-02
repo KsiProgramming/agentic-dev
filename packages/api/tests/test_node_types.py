@@ -29,3 +29,15 @@ async def test_lists_the_node_manifests_in_palette_order() -> None:
     assert reduce["fill"] == {"from": "previous_step"}
     router = next(m for m in body if m["kind"] == "router")
     assert router["slots"] == ["routes[].then", "default"]
+    assert router["ui"]["routes"]["ui:options"]["addable"] is False
+
+
+async def test_parameters_are_ready_for_the_side_panel() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        agent = (await client.get("/node-types")).json()[0]
+
+    provider = agent["parameters"]["properties"]["provider"]
+    assert "anyOf" not in provider and provider["enum"] == ["claude"]
+    assert "github.openPR" not in agent["parameters"]["properties"]["tools"]["items"]["enum"]
+    assert agent["ui"]["instructions"] == {"ui:widget": "textarea"}

@@ -9,6 +9,10 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 5.4 side panel from parameter JSON Schema ([#149](https://github.com/KsiProgramming/agentic-dev/pull/149)):
+  - **Side panel.** In the builder, a card's name or "Edit parameters" selects a node, nested ones included, and its parameters are edited in a form drawn from its manifest (`@rjsf/core` with our own theme): text, textareas, choices, the tools an agent may use as checkboxes, port schemas as JSON text in an "Advanced" group. Each accepted change is a `setParam` edit (typing in one field is one undo step); a refused value shows on its field. A pane from 1024 px, a sheet below. With nothing selected, and from "Edit details", it edits the workflow's name, description and budget; the details dialog is gone.
+  - **Workflow budget.** The spec takes an optional `budget_usd`; a run's budget is its own, else the workflow's, else the workspace's default (`POST /runs`, rerun and validate). `setParam` without a node sets it.
+  - **Manifests.** `parameters` is ready for a form (no nullable `anyOf`, sentence-case titles, tool choices as `enum`s); a new `ui` field gives each primitive's layout. The spec schema is unchanged apart from `budget_usd`.
 - Phase 5.3 node manifests and a palette generated from them ([#148](https://github.com/KsiProgramming/agentic-dev/pull/148)):
   - **Manifests.** `agentic_engine.nodes`: one manifest per primitive (label, description, category, icon, parameters as JSON Schema from the node's model, child slots, a default node, fill hints); a test fails when a primitive has none. `GET /node-types` serves them; `schemas/fixtures/node-types.json` holds the same list for the web's tests.
   - **Palette.** The builder's "Add a step after" is a submenu drawn from `GET /node-types`, grouped as Steps, Flow and Combine; it adds any of the nine primitives, containers with their children under fresh ids, and a reduce whose `from` is the step before it. A kind the engine adds appears with no web change; a card of a kind the web does not know is drawn from its manifest, or as a box.

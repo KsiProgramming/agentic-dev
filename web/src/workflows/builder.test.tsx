@@ -305,3 +305,99 @@ test("an unknown workflow says so and leads to the templates", async () => {
     "/templates",
   );
 });
+
+/** Below 1024 px (and in jsdom) the panel is a sheet over the page: close it. */
+async function closeSheet() {
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+}
+
+test("a nested agent's instructions are edited in the panel, typed as one undo step, and saved", async () => {
+  const fetch = show({
+    [`PATCH ${PATH}`]: async (request) => {
+      const body = (await request.clone().json()) as { ops: GraphOp[] };
+      return json(201, version(2, applyOps(SPEC, body.ops)));
+    },
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit parameters of inner" }));
+  const panel = await screen.findByTestId("node-panel");
+  expect(panel.dataset.node).toBe("inner");
+  const instructions = within(panel).getByLabelText("Instructions");
+  fireEvent.change(instructions, { target: { value: "Do" } });
+  fireEvent.change(instructions, { target: { value: "Do it well." } });
+  expect(screen.getByTestId("builder-status").textContent).toContain("1 unsaved change");
+
+  await closeSheet();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("builder-status").textContent).toContain("Version 2"),
+  );
+  expect(await patched(fetch)).toEqual({
+    base_version: 1,
+    ops: [{ op: "setParam", node_id: "inner", path: "instructions", value: "Do it well." }],
+  });
+});
+
+test("undo brings a parameter back in the panel", async () => {
+  show({});
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("a");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit parameters" }));
+  const panel = await screen.findByTestId("node-panel");
+  fireEvent.change(within(panel).getByLabelText("Role"), { target: { value: "Editor" } });
+  expect(screen.getByTestId("builder-status").textContent).toContain("1 unsaved change");
+
+  await closeSheet();
+  fireEvent.click(screen.getByRole("button", { name: /^Undo/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit parameters of a" }));
+  const again = await screen.findByTestId("node-panel");
+  expect((within(again).getByLabelText("Role") as HTMLInputElement).value).toBe("a");
+});
+
+test("the workflow's budget is set from Edit details, and sent without a node", async () => {
+  const fetch = show({
+    [`PATCH ${PATH}`]: async (request) => {
+      const body = (await request.clone().json()) as { ops: GraphOp[] };
+      return json(201, version(2, applyOps(SPEC, body.ops)));
+    },
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+  const panel = await screen.findByTestId("workflow-panel");
+  fireEvent.change(within(panel).getByLabelText(/^Budget/), { target: { value: "2" } });
+  await closeSheet();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(screen.getByTestId("builder-status").textContent).toContain("Version 2"),
+  );
+  expect(await patched(fetch)).toEqual({
+    base_version: 1,
+    ops: [{ op: "setParam", path: "budget_usd", value: 2 }],
+  });
+});
+
+test("Escape and Close close the panel; with nothing selected it shows the workflow", async () => {
+  show({});
+  await screen.findByRole("heading", { name: "Flow" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit parameters of c" }));
+  await screen.findByTestId("node-panel");
+  fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByTestId("node-panel")).toBeNull());
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit parameters of c" }));
+  await screen.findByTestId("node-panel");
+  await closeSheet();
+  menu("c");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+  const dialog = within(await screen.findByRole("alertdialog"));
+  fireEvent.click(dialog.getByRole("button", { name: "Remove" }));
+  expect(cards()).toEqual(["a", "l", "inner"]);
+  fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
+  expect(await screen.findByTestId("workflow-panel")).toBeTruthy();
+});

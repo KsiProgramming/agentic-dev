@@ -6,6 +6,7 @@ import {
   PencilIcon,
   PlusIcon,
   RotateCwIcon,
+  SlidersHorizontalIcon,
   Undo2Icon,
   WorkflowIcon,
 } from "lucide-react";
@@ -28,14 +29,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -47,27 +40,24 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { LG_UP, useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { isKnownKind, KindIcon, kindLabel } from "@/runs/graph/node-kinds";
-import type { NodeKind, SpecNode, WorkflowSpec } from "@/runs/graph/spec-graph";
+import {
+  allSpecNodes,
+  type NodeKind,
+  type SpecNode,
+  type WorkflowSpec,
+} from "@/runs/graph/spec-graph";
 import { CARD, SpecTree, type MapNode } from "@/runs/graph/spec-tree";
 import { useWorkspaceId } from "@/workspace";
 
 import { useSaveWorkflow, useWorkflow, type WorkflowVersion } from "./api";
-import {
-  addStep,
-  moveStep,
-  removeStep,
-  rootSteps,
-  setDocument,
-  subtreeSize,
-  type Edit,
-} from "./edits";
+import { addStep, moveStep, removeStep, rootSteps, subtreeSize, type Edit } from "./edits";
 import { ManifestIcon, paletteGroups, useNodeTypes, type NodeManifest } from "./node-types";
-import { applyOps, OpError, type GraphOp } from "./ops";
+import { applyOps, OpError } from "./ops";
+import { NodePanel, WorkflowPanel } from "./side-panel";
 
 /** A refusal shown on the card of the node it is about, until the edits change. */
 interface Refusal {
@@ -77,7 +67,8 @@ interface Refusal {
 
 /**
  * The builder (5.2): a stored workflow drawn as the run map's cards, edited through each root
- * step's menu. Edits are graph operations kept here until Save sends them as one
+ * step's menu and the side panel (5.4), where the selected node's parameters, or the workflow's
+ * own fields, are edited. Edits are graph operations kept here until Save sends them as one
  * `PATCH /workflows/{id}`; what is drawn is the stored version with them applied.
  */
 export function WorkflowBuilder({ workflowId }: { workflowId: string }) {
@@ -124,8 +115,12 @@ function Editor({
   const [edits, setEdits] = useState<Edit[]>([]);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [removing, setRemoving] = useState<SpecNode | null>(null);
-  const [editingDetails, setEditingDetails] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  // The node whose parameters the panel shows; none: the workflow's own fields. A node that is
+  // gone (removed, undone) is no longer selected. Below 1024 px the panel is a sheet.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const wide = useMediaQuery(LG_UP);
   const save = useSaveWorkflow(workspaceId, version.workflow_id);
   const nodeTypes = useNodeTypes();
   const manifests = useMemo(() => nodeTypes.data ?? [], [nodeTypes.data]);
@@ -151,6 +146,9 @@ function Editor({
   const dirty = edits.length > 0;
   const steps = rootSteps(spec);
   const rootIds = new Set(steps.map((s) => s.id));
+  const selected = selectedId
+    ? (allSpecNodes(spec).find((n) => n.id === selectedId) ?? null)
+    : null;
 
   useEffect(() => {
     if (!dirty) return;
@@ -170,7 +168,29 @@ function Editor({
       return;
     }
     setRefusal(null);
-    setEdits((current) => [...current, edit]);
+    // Typing in one field of the panel is one undo step: the newer edit replaces the last.
+    setEdits((current) =>
+      edit.key && current.at(-1)?.key === edit.key
+        ? [...current.slice(0, -1), edit]
+        : [...current, edit],
+    );
+  }
+
+  function select(nodeId: string | null) {
+    setSelectedId(nodeId);
+    setSheetOpen(true);
+  }
+
+  /** Close the panel and give the focus back to the card it was about. */
+  function closePanel() {
+    const id = selectedId;
+    setSelectedId(null);
+    setSheetOpen(false);
+    if (id) {
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>(`[data-select="${CSS.escape(id)}"]`)?.focus(),
+      );
+    }
   }
 
   function undo() {
@@ -215,6 +235,7 @@ function Editor({
   function renderCard(node: MapNode): ReactNode {
     const editable = rootIds.has(node.id);
     const failed = refusal?.nodeId === node.id ? refusal.message : null;
+    const isSelected = selected?.id === node.id;
     const kind = node.kind === "route" ? null : (node.kind as NodeKind);
     // A kind the web has no icon or name for is drawn from its manifest (5.3).
     const manifest = kind ? manifestOf(kind) : undefined;
@@ -227,10 +248,24 @@ function Editor({
           CARD,
           node.kind === "route" && "border-dashed bg-surface-subtle",
           failed && "border-status-failed-border",
+          isSelected && "ring-2 ring-primary",
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-mono text-meta font-medium">{node.name}</span>
+          {kind ? (
+            <button
+              type="button"
+              data-select={node.id}
+              aria-pressed={isSelected}
+              aria-label={`Edit parameters of ${node.name}`}
+              onClick={() => select(node.id)}
+              className="min-w-0 truncate rounded-sm text-left font-mono text-meta font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {node.name}
+            </button>
+          ) : (
+            <span className="truncate font-mono text-meta font-medium">{node.name}</span>
+          )}
           {kind && known ? (
             <KindIcon kind={kind} className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
           ) : kind ? (
@@ -246,6 +281,7 @@ function Editor({
               canMoveDown={moveStep(spec, node.id, "down") !== null}
               canRemove={steps.length > 1}
               palette={palette}
+              onEditParams={() => select(node.id)}
               onAdd={(k) => apply(addStep(spec, node.id, k, manifests))}
               onMove={(d) => apply(moveStep(spec, node.id, d))}
               onRemove={() => setRemoving(steps.find((s) => s.id === node.id) ?? null)}
@@ -270,6 +306,22 @@ function Editor({
     );
   }
 
+  function panel(onClose: (() => void) | undefined): ReactNode {
+    if (!selected) return <WorkflowPanel spec={spec} onEdit={apply} onClose={onClose} />;
+    return (
+      <NodePanel
+        node={selected}
+        manifests={manifests}
+        pending={nodeTypes.isPending}
+        error={nodeTypes.isError ? nodeTypes.error.message : null}
+        retry={() => void nodeTypes.refetch()}
+        refusal={refusal?.nodeId === selected.id ? refusal.message : null}
+        onEdit={apply}
+        onClose={onClose}
+      />
+    );
+  }
+
   const issues = version.issues.length;
   return (
     <>
@@ -283,7 +335,7 @@ function Editor({
         description={spec.description ?? "No description."}
         actions={
           <>
-            <Button type="button" variant="ghost" onClick={() => setEditingDetails(true)}>
+            <Button type="button" variant="ghost" onClick={() => select(null)}>
               <PencilIcon aria-hidden="true" data-icon="inline-start" />
               Edit details
             </Button>
@@ -327,29 +379,58 @@ function Editor({
           </span>
         ) : null}
       </p>
-      <section
-        aria-label="Workflow canvas"
-        className="flex flex-col overflow-hidden rounded-lg border bg-background"
-      >
-        <div className="flex items-center justify-between gap-2 border-b bg-surface-subtle px-4 py-2">
-          <h2 className="text-caption font-medium text-muted-foreground">Steps</h2>
-          {spec.root.type === "sequence" ? (
-            <AddMenu
-              label="Add first step"
-              palette={palette}
-              onAdd={(k) => apply(addStep(spec, null, k, manifests))}
-            />
-          ) : null}
-        </div>
-        <div className="@container overflow-auto p-4" data-testid="builder-canvas">
-          <SpecTree spec={spec} renderCard={renderCard} />
-        </div>
-        {spec.root.type === "sequence" ? null : (
-          <p className="border-t px-4 py-2 text-caption text-muted-foreground">
-            Only a workflow whose root is a sequence can be edited here yet.
-          </p>
-        )}
-      </section>
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
+        <section
+          aria-label="Workflow canvas"
+          className="flex min-w-0 flex-col overflow-hidden rounded-lg border bg-background"
+        >
+          <div className="flex items-center justify-between gap-2 border-b bg-surface-subtle px-4 py-2">
+            <h2 className="text-caption font-medium text-muted-foreground">Steps</h2>
+            {spec.root.type === "sequence" ? (
+              <AddMenu
+                label="Add first step"
+                palette={palette}
+                onAdd={(k) => apply(addStep(spec, null, k, manifests))}
+              />
+            ) : null}
+          </div>
+          <div className="@container overflow-auto p-4" data-testid="builder-canvas">
+            <SpecTree spec={spec} renderCard={renderCard} />
+          </div>
+          {spec.root.type === "sequence" ? null : (
+            <p className="border-t px-4 py-2 text-caption text-muted-foreground">
+              Only a workflow whose root is a sequence can be edited here yet.
+            </p>
+          )}
+        </section>
+        {wide ? (
+          <aside
+            aria-label="Parameters"
+            className="sticky top-4 flex max-h-[calc(100svh-2rem)] min-w-0 flex-col overflow-hidden rounded-lg border bg-background"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && selected) {
+                event.stopPropagation();
+                closePanel();
+              }
+            }}
+          >
+            {panel(selected ? closePanel : undefined)}
+          </aside>
+        ) : null}
+      </div>
+      {wide ? null : (
+        <Sheet open={sheetOpen} onOpenChange={(open) => (open ? null : closePanel())}>
+          <SheetContent side="right" size="md" showCloseButton={false} className="gap-0 p-0">
+            <SheetTitle className="sr-only">
+              {selected ? `Parameters of ${selected.id}` : "Workflow"}
+            </SheetTitle>
+            <SheetDescription className="sr-only">
+              Changes are kept as unsaved edits until you save.
+            </SheetDescription>
+            {panel(closePanel)}
+          </SheetContent>
+        </Sheet>
+      )}
 
       <RemoveDialog
         node={removing}
@@ -359,16 +440,6 @@ function Editor({
           apply(removeStep(node.id));
         }}
       />
-      {editingDetails ? (
-        <DetailsDialog
-          spec={spec}
-          onClose={() => setEditingDetails(false)}
-          onSave={(edit) => {
-            setEditingDetails(false);
-            apply(edit);
-          }}
-        />
-      ) : null}
       <AlertDialog open={discarding} onOpenChange={setDiscarding}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -490,6 +561,7 @@ function StepMenu({
   canMoveDown,
   canRemove,
   palette,
+  onEditParams,
   onAdd,
   onMove,
   onRemove,
@@ -499,6 +571,7 @@ function StepMenu({
   canMoveDown: boolean;
   canRemove: boolean;
   palette: Palette;
+  onEditParams: () => void;
   onAdd: (kind: string) => void;
   onMove: (direction: "up" | "down") => void;
   onRemove: () => void;
@@ -511,6 +584,10 @@ function StepMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onEditParams}>
+          <SlidersHorizontalIcon aria-hidden="true" />
+          Edit parameters
+        </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <PlusIcon aria-hidden="true" />
@@ -566,70 +643,5 @@ function RemoveDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
-}
-
-/** The workflow's name and description; both changes are one edit. Mounted while open, so it
- * starts from the workflow as drawn. */
-function DetailsDialog({
-  spec,
-  onClose,
-  onSave,
-}: {
-  spec: WorkflowSpec;
-  onClose: () => void;
-  onSave: (edit: Edit) => void;
-}) {
-  const [name, setName] = useState(spec.name);
-  const [description, setDescription] = useState(spec.description ?? "");
-
-  const ops: GraphOp[] = [];
-  if (name.trim() && name !== spec.name) ops.push(...setDocument("name", name).ops);
-  if (description !== (spec.description ?? "")) {
-    ops.push(...setDocument("description", description).ops);
-  }
-
-  return (
-    <Dialog open onOpenChange={(next) => (next ? null : onClose())}>
-      <DialogContent>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (ops.length > 0) onSave({ label: "Edit the details", ops });
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Workflow details</DialogTitle>
-            <DialogDescription>The name and description shown for this workflow.</DialogDescription>
-          </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor="workflow-name">Name</FieldLabel>
-            <Input
-              id="workflow-name"
-              value={name}
-              required
-              onChange={(event) => setName(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="workflow-description">Description</FieldLabel>
-            <Textarea
-              id="workflow-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </Field>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={ops.length === 0}>
-              Apply
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }

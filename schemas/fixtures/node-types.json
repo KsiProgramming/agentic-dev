@@ -23,94 +23,76 @@
           "type": "string"
         },
         "provider": {
-          "anyOf": [
-            {
-              "const": "claude",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
+          "type": "string",
           "description": "Unset means the workspace default.",
-          "title": "Provider"
+          "title": "Provider",
+          "enum": [
+            "claude"
+          ]
         },
         "model": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
+          "minLength": 1,
+          "type": "string",
           "title": "Model"
         },
         "tools": {
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "artifacts.list",
+              "artifacts.read",
+              "repo.commit",
+              "repo.list_files",
+              "repo.list_modules",
+              "repo.read_file",
+              "repo.search",
+              "repo.write_file",
+              "scan.dependencies",
+              "scan.lint",
+              "scan.secrets"
+            ]
           },
           "title": "Tools",
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         },
         "input_schema": {
-          "anyOf": [
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "Its input must be JSON that matches this, or it does not start.",
+          "examples": [
             {
-              "additionalProperties": {
-                "$ref": "#/$defs/JsonValue"
+              "properties": {
+                "findings": {}
               },
-              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
-              "examples": [
-                {
-                  "properties": {
-                    "findings": {}
-                  },
-                  "required": [
-                    "findings"
-                  ],
-                  "type": "object"
-                }
+              "required": [
+                "findings"
               ],
               "type": "object"
-            },
-            {
-              "type": "null"
             }
           ],
-          "default": null,
-          "description": "Its input must be JSON that matches this, or it does not start.",
-          "title": "Input Schema"
+          "type": "object",
+          "title": "Input schema"
         },
         "output_schema": {
-          "anyOf": [
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.",
+          "examples": [
             {
-              "additionalProperties": {
-                "$ref": "#/$defs/JsonValue"
+              "properties": {
+                "findings": {}
               },
-              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
-              "examples": [
-                {
-                  "properties": {
-                    "findings": {}
-                  },
-                  "required": [
-                    "findings"
-                  ],
-                  "type": "object"
-                }
+              "required": [
+                "findings"
               ],
               "type": "object"
-            },
-            {
-              "type": "null"
             }
           ],
-          "default": null,
-          "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.",
-          "title": "Output Schema"
+          "type": "object",
+          "title": "Output schema"
         },
         "reads": {
           "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
@@ -127,21 +109,12 @@
           "type": "array"
         },
         "writes": {
-          "anyOf": [
-            {
-              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
-              "examples": [
-                "findings.json"
-              ],
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
           "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "type": "string",
           "title": "Writes"
         }
       },
@@ -161,7 +134,48 @@
       "tools": [],
       "reads": []
     },
-    "fill": {}
+    "fill": {},
+    "ui": {
+      "ui:order": [
+        "role",
+        "instructions",
+        "provider",
+        "model",
+        "tools",
+        "*"
+      ],
+      "instructions": {
+        "ui:widget": "textarea"
+      },
+      "model": {
+        "ui:placeholder": "The workspace's default"
+      },
+      "tools": {
+        "ui:widget": "checkboxes"
+      },
+      "input_schema": {
+        "ui:field": "json",
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "output_schema": {
+        "ui:field": "json",
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "reads": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "writes": {
+        "ui:options": {
+          "advanced": true
+        }
+      }
+    }
   },
   {
     "kind": "tool",
@@ -180,7 +194,22 @@
           "description": "The platform tool to call, e.g. `repo.list_files`.",
           "minLength": 1,
           "title": "Tool",
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "artifacts.list",
+            "artifacts.read",
+            "github.createRepo",
+            "github.openPR",
+            "repo.commit",
+            "repo.list_files",
+            "repo.list_modules",
+            "repo.read_file",
+            "repo.search",
+            "repo.write_file",
+            "scan.dependencies",
+            "scan.lint",
+            "scan.secrets"
+          ]
         },
         "args": {
           "additionalProperties": {
@@ -191,60 +220,42 @@
           "type": "object"
         },
         "input_schema": {
-          "anyOf": [
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "Its input must be JSON that matches this, or it does not run.",
+          "examples": [
             {
-              "additionalProperties": {
-                "$ref": "#/$defs/JsonValue"
+              "properties": {
+                "findings": {}
               },
-              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
-              "examples": [
-                {
-                  "properties": {
-                    "findings": {}
-                  },
-                  "required": [
-                    "findings"
-                  ],
-                  "type": "object"
-                }
+              "required": [
+                "findings"
               ],
               "type": "object"
-            },
-            {
-              "type": "null"
             }
           ],
-          "default": null,
-          "description": "Its input must be JSON that matches this, or it does not run.",
-          "title": "Input Schema"
+          "type": "object",
+          "title": "Input schema"
         },
         "output_schema": {
-          "anyOf": [
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "Its structured result (else its text as JSON) must match this, or it fails.",
+          "examples": [
             {
-              "additionalProperties": {
-                "$ref": "#/$defs/JsonValue"
+              "properties": {
+                "findings": {}
               },
-              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
-              "examples": [
-                {
-                  "properties": {
-                    "findings": {}
-                  },
-                  "required": [
-                    "findings"
-                  ],
-                  "type": "object"
-                }
+              "required": [
+                "findings"
               ],
               "type": "object"
-            },
-            {
-              "type": "null"
             }
           ],
-          "default": null,
-          "description": "Its structured result (else its text as JSON) must match this, or it fails.",
-          "title": "Output Schema"
+          "type": "object",
+          "title": "Output schema"
         },
         "reads": {
           "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
@@ -261,21 +272,12 @@
           "type": "array"
         },
         "writes": {
-          "anyOf": [
-            {
-              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
-              "examples": [
-                "findings.json"
-              ],
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
           "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "type": "string",
           "title": "Writes"
         }
       },
@@ -293,7 +295,34 @@
       "args": {},
       "reads": []
     },
-    "fill": {}
+    "fill": {},
+    "ui": {
+      "args": {
+        "ui:field": "json"
+      },
+      "input_schema": {
+        "ui:field": "json",
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "output_schema": {
+        "ui:field": "json",
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "reads": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "writes": {
+        "ui:options": {
+          "advanced": true
+        }
+      }
+    }
   },
   {
     "kind": "gate",
@@ -312,31 +341,15 @@
           "type": "string"
         },
         "prompt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
+          "type": "string",
           "description": "More guidance for the approver, shown with the input.",
           "title": "Prompt"
         },
         "ttl_s": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
+          "minimum": 1,
+          "type": "integer",
           "description": "Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset.",
-          "title": "Ttl S"
+          "title": "Time to live (seconds)"
         }
       },
       "required": [
@@ -351,7 +364,17 @@
       "id": "gate",
       "title": "Approve"
     },
-    "fill": {}
+    "fill": {},
+    "ui": {
+      "prompt": {
+        "ui:widget": "textarea"
+      },
+      "ttl_s": {
+        "ui:options": {
+          "advanced": true
+        }
+      }
+    }
   },
   {
     "kind": "sequence",
@@ -384,7 +407,8 @@
         }
       ]
     },
-    "fill": {}
+    "fill": {},
+    "ui": {}
   },
   {
     "kind": "parallel",
@@ -407,15 +431,7 @@
           "type": "string"
         },
         "quorum": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
+          "type": "integer",
           "description": "`quorum` only, and required: how many branches must complete.",
           "title": "Quorum"
         }
@@ -452,7 +468,12 @@
       ],
       "join": "all"
     },
-    "fill": {}
+    "fill": {},
+    "ui": {
+      "quorum": {
+        "ui:placeholder": "With the quorum join only"
+      }
+    }
   },
   {
     "kind": "router",
@@ -474,16 +495,9 @@
           "type": "array"
         },
         "classifier": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RouterClassifier"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Classifier mode: the agent that chooses the route."
+          "$ref": "#/$defs/RouterClassifier",
+          "description": "Classifier mode: the agent that chooses the route.",
+          "title": "Classifier"
         }
       },
       "required": [
@@ -503,16 +517,8 @@
               "type": "string"
             },
             "when": {
-              "anyOf": [
-                {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
+              "minLength": 1,
+              "type": "string",
               "description": "Rule mode, and required there: the CEL condition that picks this route.",
               "examples": [
                 "artifacts[\"findings.json\"].findings.size() == 0"
@@ -520,16 +526,8 @@
               "title": "When"
             },
             "description": {
-              "anyOf": [
-                {
-                  "maxLength": 300,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
+              "maxLength": 300,
+              "type": "string",
               "description": "What the route is for; a classifier is shown it to choose.",
               "title": "Description"
             }
@@ -550,30 +548,16 @@
               "type": "string"
             },
             "provider": {
-              "anyOf": [
-                {
-                  "const": "claude",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
+              "type": "string",
               "description": "Unset means the workspace default.",
-              "title": "Provider"
+              "title": "Provider",
+              "enum": [
+                "claude"
+              ]
             },
             "model": {
-              "anyOf": [
-                {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
+              "minLength": 1,
+              "type": "string",
               "title": "Model"
             }
           },
@@ -615,7 +599,35 @@
         "reads": []
       }
     },
-    "fill": {}
+    "fill": {},
+    "ui": {
+      "routes": {
+        "ui:options": {
+          "addable": false,
+          "removable": false,
+          "orderable": false
+        },
+        "items": {
+          "id": {
+            "ui:readonly": true
+          },
+          "when": {
+            "ui:placeholder": "A CEL condition, e.g. last.contains(\"bug\")"
+          },
+          "description": {
+            "ui:widget": "textarea"
+          }
+        }
+      },
+      "classifier": {
+        "instructions": {
+          "ui:widget": "textarea"
+        },
+        "model": {
+          "ui:placeholder": "The workspace's default"
+        }
+      }
+    }
   },
   {
     "kind": "loop",
@@ -639,7 +651,7 @@
         "max_iterations": {
           "maximum": 5,
           "minimum": 1,
-          "title": "Max Iterations",
+          "title": "Max iterations",
           "type": "integer"
         }
       },
@@ -667,7 +679,12 @@
       "until": "iteration >= 3",
       "max_iterations": 3
     },
-    "fill": {}
+    "fill": {},
+    "ui": {
+      "until": {
+        "ui:placeholder": "A CEL condition, e.g. iteration >= 3"
+      }
+    }
   },
   {
     "kind": "map",
@@ -691,7 +708,7 @@
         "max_concurrency": {
           "maximum": 8,
           "minimum": 1,
-          "title": "Max Concurrency",
+          "title": "Max concurrency",
           "type": "integer"
         }
       },
@@ -719,7 +736,12 @@
       },
       "max_concurrency": 4
     },
-    "fill": {}
+    "fill": {},
+    "ui": {
+      "over": {
+        "ui:placeholder": "A CEL list, e.g. results.modules.data.modules"
+      }
+    }
   },
   {
     "kind": "reduce",
@@ -744,30 +766,16 @@
               "type": "string"
             },
             "provider": {
-              "anyOf": [
-                {
-                  "const": "claude",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
+              "type": "string",
               "description": "Unset means the workspace default.",
-              "title": "Provider"
+              "title": "Provider",
+              "enum": [
+                "claude"
+              ]
             },
             "model": {
-              "anyOf": [
-                {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
+              "minLength": 1,
+              "type": "string",
               "title": "Model"
             }
           },
@@ -785,7 +793,7 @@
         "from": {
           "description": "The map or parallel whose outputs are combined.",
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
-          "title": "From",
+          "title": "From step",
           "type": "string"
         },
         "strategy": {
@@ -799,60 +807,28 @@
           "type": "string"
         },
         "separator": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
+          "type": "string",
           "description": "`concat` only: what goes between outputs (default two newlines).",
           "title": "Separator"
         },
         "agent": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ReduceAgent"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "`agent` only, and required."
+          "$ref": "#/$defs/ReduceAgent",
+          "description": "`agent` only, and required.",
+          "title": "Agent"
         },
         "min_votes": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
+          "minimum": 1,
+          "type": "integer",
           "description": "`vote` only: how many sources must report an issue to keep it (default a majority of the sources that completed).",
-          "title": "Min Votes"
+          "title": "Min votes"
         },
         "writes": {
-          "anyOf": [
-            {
-              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
-              "examples": [
-                "findings.json"
-              ],
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
           "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "type": "string",
           "title": "Writes"
         }
       },
@@ -872,6 +848,26 @@
     },
     "fill": {
       "from": "previous_step"
+    },
+    "ui": {
+      "ui:order": [
+        "from",
+        "strategy",
+        "*"
+      ],
+      "agent": {
+        "instructions": {
+          "ui:widget": "textarea"
+        },
+        "model": {
+          "ui:placeholder": "The workspace's default"
+        }
+      },
+      "writes": {
+        "ui:options": {
+          "advanced": true
+        }
+      }
     }
   }
 ]

@@ -218,7 +218,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workspace's default; with a budget, every\nagent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the\nsame way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.",
+        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -482,7 +482,7 @@
           "runs"
         ],
         "summary": "Rerun",
-        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the\noriginal run's spend does not count. A run that created its repo is not rerun: the repo\nexists now, so start a run on it instead.",
+        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`. The budget is `budget_usd` if given, else the workflow's own, else the workspace's\ndefault as it is now; the original run's spend does not count. A run that created its repo\nis not rerun: the repo exists now, so start a run on it instead.",
         "operationId": "rerunRun",
         "parameters": [
           {
@@ -4000,6 +4000,12 @@
             "type": "object",
             "title": "Fill",
             "description": "Parameters the palette sets when it adds the node, e.g. `from` to the previous step's id."
+          },
+          "ui": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ui",
+            "description": "How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, `orderable`)."
           }
         },
         "additionalProperties": false,
@@ -5923,7 +5929,7 @@
           "value"
         ],
         "title": "SetParam",
-        "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`). `null` unsets it. Ids, types and the slots that hold nodes change through the\nother ops."
+        "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`). `null` unsets it. Ids, types and the slots that hold nodes\nchange through the other ops."
       },
       "StartInstall": {
         "properties": {
@@ -6219,7 +6225,7 @@
               }
             ],
             "title": "Budget Usd",
-            "description": "The budget a run would set. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget."
+            "description": "The budget a run would set. Unset: the workflow's own `budget_usd`, else the workspace's default budget. From $0.01 to $1,000,000; unset is no budget."
           }
         },
         "additionalProperties": false,
@@ -6510,6 +6516,20 @@
               }
             ],
             "title": "Description"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000.0,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd",
+            "description": "USD a run of this workflow may spend, a hard stop once reached. A run's own budget replaces it; unset, the workspace's default applies (or none)."
           },
           "root": {
             "oneOf": [

@@ -6,7 +6,8 @@ resumes included. Specs are checked against it before the run starts (`policy_er
 `agentic_engine.spec`), and the engine and worker enforce it while the run executes.
 
 The budget is the one optional limit: no budget means no cost cap. It has no platform ceiling;
-a workspace's budget is a default that a run may replace (`with_budget`).
+a workspace's budget is a default that a workflow (its spec's `budget_usd`) and then a run may
+replace (`with_budget`).
 """
 
 from decimal import Decimal
@@ -26,6 +27,10 @@ type PolicyLimit = Literal[
 
 Limit = Annotated[int, Field(ge=1)]
 Usd = Annotated[Decimal, Field(gt=0, max_digits=16, decimal_places=8)]
+
+BUDGET_MIN_USD: Final = 0.01
+BUDGET_MAX_USD: Final = 1_000_000
+"""The range of a budget, wherever it is set (workspace, workflow, run)."""
 
 APPROVAL_TTL_S: Final = 72 * 60 * 60
 """How long a gate waits for a decision by default, and at most: 72 h."""
@@ -90,8 +95,13 @@ def effective_policy(overrides: PolicyOverrides | None = None) -> Policy:
     return Policy.model_validate(base)
 
 
-def with_budget(policy: Policy, budget_usd: Decimal | None) -> Policy:
-    """`policy` with the run's own budget in place of the workspace's, if the run set one."""
+def with_budget(
+    policy: Policy, budget_usd: Decimal | None, workflow_budget_usd: float | None = None
+) -> Policy:
+    """`policy` with the run's own budget in place of the workspace's, if the run set one, else
+    the workflow's (its spec's `budget_usd`), if it set one."""
+    if budget_usd is None and workflow_budget_usd is not None:
+        budget_usd = Decimal(str(round(workflow_budget_usd, 8)))
     return policy if budget_usd is None else policy.model_copy(update={"budget_usd": budget_usd})
 
 

@@ -1237,6 +1237,42 @@ async def test_a_run_budget_replaces_the_workspace_default(
     assert listed["usage"]["budget_usd"] == 0.5
 
 
+async def test_a_workflow_budget_sits_between_the_run_and_the_workspace(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workspace_id = await policy_workspace(sessions, budget_usd=Decimal("2"))
+    workflow = {**spec_json("valid/single-agent.json"), "budget_usd": 4}
+    body = {"workflow": workflow, "workspace_id": str(workspace_id)}
+
+    async with api(postgres_url, redis_url) as client:
+        workflows = await ended_run(sessions, client, redis_url, body, "completed")
+        own = (await client.post("/runs", json={**body, "budget_usd": 0.5})).json()["run_id"]
+        rerun = (await client.post(f"/runs/{workflows}/rerun")).json()["run_id"]
+    for run_id in (own, rerun):
+        await unqueue(redis_url, run_id)
+
+    budgets = [
+        run.policy.budget_usd
+        for run_id in (workflows, own, rerun)
+        if (run := await get_run(sessions, UUID(run_id))) is not None
+    ]
+    assert budgets == [Decimal("4"), Decimal("0.5"), Decimal("4")]
+
+
+async def test_a_workflow_budget_on_an_unpriced_model_is_refused(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workspace_id = await policy_workspace(sessions)
+    workflow = with_model(spec_json("valid/single-agent.json"), "no-such-model")
+    body = {"workflow": {**workflow, "budget_usd": 1}, "workspace_id": str(workspace_id)}
+
+    async with api(postgres_url, redis_url) as client:
+        refused = await client.post("/runs", json=body)
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["code"] == "policy_limits"
+
+
 async def test_a_run_without_a_budget_has_none(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
 ) -> None:
