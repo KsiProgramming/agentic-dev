@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 5.4 side panel from parameter JSON Schema:
+- Phase 5.4 side panel from parameter JSON Schema ([#149](https://github.com/KsiProgramming/agentic-dev/pull/149)):
   - **Side panel.** In the builder, a card's name or "Edit parameters" selects a node, nested ones included, and its parameters are edited in a form drawn from its manifest (`@rjsf/core` with our own theme): text, textareas, choices, the tools an agent may use as checkboxes, port schemas as JSON text in an "Advanced" group. Each accepted change is a `setParam` edit (typing in one field is one undo step); a refused value shows on its field. A pane from 1024 px, a sheet below. With nothing selected, and from "Edit details", it edits the workflow's name, description and budget; the details dialog is gone.
   - **Workflow budget.** The spec takes an optional `budget_usd`; a run's budget is its own, else the workflow's, else the workspace's default (`POST /runs`, rerun and validate). `setParam` without a node sets it.
   - **Manifests.** `parameters` is ready for a form (no nullable `anyOf`, sentence-case titles, tool choices as `enum`s); a new `ui` field gives each primitive's layout. The spec schema is unchanged apart from `budget_usd`.
