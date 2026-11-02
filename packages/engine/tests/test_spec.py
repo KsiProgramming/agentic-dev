@@ -239,4 +239,4 @@ def test_exported_schema_has_discriminated_node_union() -> None:
     assert reduce["properties"]["strategy"]["enum"] == ["concat", "agent", "dedupe", "vote"]
     parallel = schema["$defs"]["ParallelNode"]["properties"]
     assert (parallel["branches"]["minItems"], parallel["branches"]["maxItems"]) == (2, 8)
-    assert parallel["join"]["enum"] == ["all", "any", "quorum"]
+    assert parallel["join"]["enum"] == ["all", "any", "quorum", "settled"]

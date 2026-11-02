@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0023_run_artifacts"
+    assert version == "0024_workflows"
     assert {
         "runs",
         "run_events",
@@ -51,6 +51,8 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         "workspace_policies",
         "audit_events",
         "run_artifacts",
+        "workflows",
+        "workflow_versions",
     } | CHECKPOINT_TABLES <= set(table_names)
     # The migrations match the `agentic_store` models.
     await asyncio.to_thread(command.check, config)
@@ -406,6 +408,39 @@ async def test_audit_events_are_append_only(postgres_url: str) -> None:
     assert "audit_events" not in await table_names(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
     assert "audit_events" in await table_names(postgres_url)
+
+
+async def test_workflow_versions_are_append_only(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO workflows (workspace_id, id, latest_version) "
+                "VALUES ('00000000-0000-0000-0000-000000000001', 'append-only', 1)"
+            )
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO workflow_versions (workspace_id, workflow_id, version, spec) "
+                "VALUES ('00000000-0000-0000-0000-000000000001', 'append-only', 1, '{}')"
+            )
+        )
+    for statement in (
+        "UPDATE workflow_versions SET spec = '{\"x\": 1}'",
+        "DELETE FROM workflow_versions",
+    ):
+        with pytest.raises(DBAPIError, match="append-only"):
+            async with engine.begin() as conn:
+                await conn.execute(text(statement))
+    await engine.dispose()
+
+    await asyncio.to_thread(command.downgrade, config, "0023_run_artifacts")
+    assert not {"workflows", "workflow_versions"} & await table_names(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert {"workflows", "workflow_versions"} <= await table_names(postgres_url)
 
 
 async def test_the_time_revision_fills_live_runs_from_their_events(postgres_url: str) -> None:

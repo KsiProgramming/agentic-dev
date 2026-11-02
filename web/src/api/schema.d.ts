@@ -584,6 +584,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create
+         * @description Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It
+         *     must match the schema; its other issues (structure, run limits) are returned with it.
+         */
+        post: operations["createWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get
+         * @description One version of a workflow, the latest by default, with why it could not run now.
+         */
+        get: operations["getWorkflow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update
+         * @description Apply graph operations to version `base_version`, which must be the latest, and store the
+         *     result as the next version. Versions never change. The ops apply all or nothing: one that
+         *     cannot apply, or a result with a node left detached, an empty slot, or off the schema,
+         *     stores nothing. The result's other issues (structure, run limits) are returned with it.
+         */
+        patch: operations["updateWorkflow"];
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Versions
+         * @description Every version of a workflow, newest first, without their specs.
+         */
+        get: operations["listWorkflowVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/validate": {
         parameters: {
             query?: never;
@@ -613,6 +681,36 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AddNode
+         * @description Add a node, with any nodes under it, all with new ids. Without `at` it is detached, and
+         *     must be placed (`connect`) or removed later in the same batch.
+         */
+        AddNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "addNode";
+            /** Node */
+            node: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+            /**
+             * At
+             * @description Where it goes; unset: detached.
+             */
+            at?: components["schemas"]["After"] | components["schemas"]["Into"] | null;
+        };
+        /**
+         * After
+         * @description Right after a step of a sequence.
+         */
+        After: {
+            /**
+             * After
+             * @description The step the node follows.
+             */
+            after: string;
+        };
         /**
          * AgentNode
          * @description One agent turn: a role and instructions run on a provider.
@@ -743,7 +841,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -794,6 +892,28 @@ export interface components {
         };
         /** @enum {string} */
         ChangeStatus: "added" | "modified" | "deleted" | "renamed";
+        /**
+         * Connect
+         * @description Place `to` (detached, or moved from where it is, with everything under it) right after
+         *     `from`. When `from` is not a step of a sequence, `sequence_id` names a new sequence that
+         *     takes `from`'s place and runs `from`, then `to`.
+         */
+        Connect: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "connect";
+            /** From */
+            from: string;
+            /** To */
+            to: string;
+            /**
+             * Sequence Id
+             * @description The id of the sequence to wrap `from` in, when it is not a sequence's step.
+             */
+            sequence_id?: string | null;
+        };
         /**
          * ConnectionErrorDetail
          * @description The `detail` of a refused connection: `code` says what went wrong (`invalid_key`,
@@ -890,6 +1010,32 @@ export interface components {
             status: "queued";
             /** Events Url */
             events_url: string;
+        };
+        /** CreateWorkflowRequest */
+        CreateWorkflowRequest: {
+            /**
+             * Spec
+             * @description The workflow spec, stored as version 1 under its `id`. It must match the schema; other issues are returned with it.
+             */
+            spec: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /**
+         * Disconnect
+         * @description Detach `to`, the step right after `from`, with everything under it; the step after `to`
+         *     now follows `from`. `to` must be placed again or removed in the same batch.
+         */
+        Disconnect: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "disconnect";
+            /** From */
+            from: string;
+            /** To */
+            to: string;
         };
         /** @enum {string} */
         EditErrorCode: "edit_not_allowed" | "edits_with_reject" | "edit_too_large" | "duplicate_edit";
@@ -1030,6 +1176,28 @@ export interface components {
         InstallUrlOut: {
             /** Install Url */
             install_url: string;
+        };
+        /**
+         * Into
+         * @description Into a container: a sequence's step or a parallel's branch at `index`; a loop's or map's
+         *     body, which must be empty; a router route's `then`, or its `default`, which must be empty.
+         */
+        Into: {
+            /**
+             * Parent
+             * @description The container.
+             */
+            parent: string;
+            /**
+             * Index
+             * @description Sequence and parallel only: the position (default last).
+             */
+            index?: number | null;
+            /**
+             * Route
+             * @description Router only, and required there: the route's id, or `default`.
+             */
+            route?: string | null;
         };
         /** @enum {string} */
         IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router";
@@ -1177,6 +1345,23 @@ export interface components {
         };
         /** @enum {string} */
         NotEditable: "binary" | "too_large" | "deleted" | "renamed" | "over_limit";
+        /** @enum {string} */
+        OpErrorCode: "unknown_node" | "duplicate_node_id" | "root_node" | "invalid_placement" | "slot_taken" | "invalid_move" | "not_in_sequence" | "not_connected" | "not_a_param" | "invalid_path" | "detached_nodes" | "missing_child" | "schema";
+        /**
+         * OpErrorDetail
+         * @description The `detail` of a batch of graph operations that cannot apply: the op at `op_index` (unset
+         *     when it is the batch's result: a node left detached, an empty slot, a spec off the schema)
+         *     and the node it is about. Nothing was stored.
+         */
+        OpErrorDetail: {
+            code: components["schemas"]["OpErrorCode"];
+            /** Message */
+            message: string;
+            /** Op Index */
+            op_index: number | null;
+            /** Node Id */
+            node_id: string | null;
+        };
         /**
          * ParallelNode
          * @description Runs its branches at the same time, each on the parallel's input, and joins them.
@@ -1344,6 +1529,20 @@ export interface components {
              * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
              */
             writes?: string | null;
+        };
+        /**
+         * RemoveNode
+         * @description Remove a node and everything under it. Its sequence's neighbours join up. A loop's or
+         *     map's body, or a route's `then`, must be given another node in the same batch.
+         */
+        RemoveNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "removeNode";
+            /** Node Id */
+            node_id: string;
         };
         /**
          * RepoOut
@@ -1943,6 +2142,32 @@ export interface components {
             /** Steps */
             steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"])[];
         };
+        /**
+         * SetParam
+         * @description Set one parameter of a node, or of the document without `node_id` (`name`,
+         *     `description`). `null` unsets it. Ids, types and the slots that hold nodes change through the
+         *     other ops.
+         */
+        SetParam: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "setParam";
+            /**
+             * Node Id
+             * @description Unset: the document.
+             */
+            node_id?: string | null;
+            /**
+             * Path
+             * @description The parameter, by its JSON field names, e.g. `instructions`, `classifier.instructions`, `routes[1].when`.
+             * @example instructions
+             * @example routes[1].when
+             */
+            path: string;
+            value: components["schemas"]["JsonValue"];
+        };
         /** StartInstall */
         StartInstall: {
             /**
@@ -2039,6 +2264,19 @@ export interface components {
              * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
              */
             writes?: string | null;
+        };
+        /** UpdateWorkflowRequest */
+        UpdateWorkflowRequest: {
+            /**
+             * Base Version
+             * @description The version the ops were made against; it must be the latest.
+             */
+            base_version: number;
+            /**
+             * Ops
+             * @description Graph operations, applied in order, all or nothing.
+             */
+            ops: (components["schemas"]["AddNode"] | components["schemas"]["RemoveNode"] | components["schemas"]["Connect"] | components["schemas"]["Disconnect"] | components["schemas"]["SetParam"])[];
         };
         /** ValidateWorkflowRequest */
         ValidateWorkflowRequest: {
@@ -2140,6 +2378,25 @@ export interface components {
              */
             expires_at?: string | null;
         };
+        /**
+         * WorkflowErrorDetail
+         * @description The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`
+         *     (`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does
+         *     not match the schema, with its `issues`).
+         */
+        WorkflowErrorDetail: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "workflow_exists" | "version_conflict" | "schema";
+            /** Message */
+            message: string;
+            /** Latest Version */
+            latest_version?: number | null;
+            /** Issues */
+            issues?: components["schemas"]["ValidationIssue"][];
+        };
         /** WorkflowRef */
         WorkflowRef: {
             /** Id */
@@ -2165,6 +2422,70 @@ export interface components {
             description?: string | null;
             /** Root */
             root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+        };
+        /** WorkflowVersionItem */
+        WorkflowVersionItem: {
+            /** Version */
+            version: number;
+            /** Base Version */
+            base_version: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Op Count
+             * @description Graph operations that made it; 0 for version 1.
+             */
+            op_count: number;
+        };
+        /**
+         * WorkflowVersionResponse
+         * @description One version of a stored workflow, with what keeps it from running now.
+         */
+        WorkflowVersionResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Version */
+            version: number;
+            /**
+             * Base Version
+             * @description The version it was made from; unset for 1.
+             */
+            base_version: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Spec */
+            spec: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Ops
+             * @description The graph operations that made it from `base_version`; unset for 1.
+             */
+            ops: components["schemas"]["JsonValue"][] | null;
+            /**
+             * Valid
+             * @description Whether it could run in the workspace now.
+             */
+            valid: boolean;
+            /**
+             * Issues
+             * @description Why it could not run now, as `POST /workflows/{id}/validate` gives them. A version is stored with its issues; a run of it is refused until they are fixed.
+             */
+            issues: components["schemas"]["ValidationIssue"][];
+        };
+        /**
+         * WorkflowVersionsResponse
+         * @description Every version of a workflow, newest first.
+         */
+        WorkflowVersionsResponse: {
+            /** Items */
+            items: components["schemas"]["WorkflowVersionItem"][];
         };
         /** WorkspaceOut */
         WorkspaceOut: {
@@ -3224,7 +3545,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -3513,6 +3834,196 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TemplateOut"][];
+                };
+            };
+        };
+    };
+    createWorkflow: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowVersionResponse"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `workflow_exists` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowErrorDetail"];
+                };
+            };
+            /** @description `schema`: the spec is not one */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowErrorDetail"];
+                };
+            };
+        };
+    };
+    getWorkflow: {
+        parameters: {
+            query?: {
+                /** @description Default: the latest. */
+                version?: number | null;
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowVersionResponse"];
+                };
+            };
+            /** @description No such workspace, workflow or version */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateWorkflow: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowVersionResponse"];
+                };
+            };
+            /** @description No such workspace or workflow */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `version_conflict` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowErrorDetail"];
+                };
+            };
+            /** @description The ops cannot apply; nothing is stored */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpErrorDetail"];
+                };
+            };
+        };
+    };
+    listWorkflowVersions: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowVersionsResponse"];
+                };
+            };
+            /** @description No such workspace or workflow */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

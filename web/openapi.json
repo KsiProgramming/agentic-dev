@@ -1459,7 +1459,9 @@
                       "connection.added",
                       "connection.removed",
                       "policy.updated",
-                      "pricing.updated"
+                      "pricing.updated",
+                      "workflow.created",
+                      "workflow.updated"
                     ],
                     "type": "string"
                   }
@@ -1909,6 +1911,314 @@
         }
       }
     },
+    "/workflows": {
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Create",
+        "description": "Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It\nmust match the schema; its other issues (structure, run limits) are returned with it.",
+        "operationId": "createWorkflow",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowVersionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "409": {
+            "description": "`workflow_exists`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`schema`: the spec is not one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Get",
+        "description": "One version of a workflow, the latest by default, with why it could not run now.",
+        "operationId": "getWorkflow",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the latest.",
+              "title": "Version"
+            },
+            "description": "Default: the latest."
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowVersionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, workflow or version"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Update",
+        "description": "Apply graph operations to version `base_version`, which must be the latest, and store the\nresult as the next version. Versions never change. The ops apply all or nothing: one that\ncannot apply, or a result with a node left detached, an empty slot, or off the schema,\nstores nothing. The result's other issues (structure, run limits) are returned with it.",
+        "operationId": "updateWorkflow",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowVersionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace or workflow"
+          },
+          "409": {
+            "description": "`version_conflict`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The ops cannot apply; nothing is stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/versions": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Versions",
+        "description": "Every version of a workflow, newest first, without their specs.",
+        "operationId": "listWorkflowVersions",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowVersionsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace or workflow"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflows/{workflow_id}/validate": {
       "post": {
         "tags": [
@@ -1961,6 +2271,101 @@
   },
   "components": {
     "schemas": {
+      "AddNode": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "addNode",
+            "title": "Op"
+          },
+          "node": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentNode"
+              },
+              {
+                "$ref": "#/components/schemas/ToolNode"
+              },
+              {
+                "$ref": "#/components/schemas/GateNode"
+              },
+              {
+                "$ref": "#/components/schemas/SequenceNode"
+              },
+              {
+                "$ref": "#/components/schemas/LoopNode"
+              },
+              {
+                "$ref": "#/components/schemas/MapNode"
+              },
+              {
+                "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
+              },
+              {
+                "$ref": "#/components/schemas/RouterNode"
+              }
+            ],
+            "title": "Node",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "agent": "#/components/schemas/AgentNode",
+                "gate": "#/components/schemas/GateNode",
+                "loop": "#/components/schemas/LoopNode",
+                "map": "#/components/schemas/MapNode",
+                "parallel": "#/components/schemas/ParallelNode",
+                "reduce": "#/components/schemas/ReduceNode",
+                "router": "#/components/schemas/RouterNode",
+                "sequence": "#/components/schemas/SequenceNode",
+                "tool": "#/components/schemas/ToolNode"
+              }
+            }
+          },
+          "at": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/After"
+              },
+              {
+                "$ref": "#/components/schemas/Into"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At",
+            "description": "Where it goes; unset: detached."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "node"
+        ],
+        "title": "AddNode",
+        "description": "Add a node, with any nodes under it, all with new ids. Without `at` it is detached, and\nmust be placed (`connect`) or removed later in the same batch."
+      },
+      "After": {
+        "properties": {
+          "after": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "After",
+            "description": "The step the node follows."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "after"
+        ],
+        "title": "After",
+        "description": "Right after a step of a sequence."
+      },
       "AgentNode": {
         "properties": {
           "type": {
@@ -2252,7 +2657,9 @@
               "connection.added",
               "connection.removed",
               "policy.updated",
-              "pricing.updated"
+              "pricing.updated",
+              "workflow.created",
+              "workflow.updated"
             ],
             "title": "Action"
           },
@@ -2406,6 +2813,47 @@
           "deleted",
           "renamed"
         ]
+      },
+      "Connect": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "connect",
+            "title": "Op"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "To"
+          },
+          "sequence_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence Id",
+            "description": "The id of the sequence to wrap `from` in, when it is not a sequence's step."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "from",
+          "to"
+        ],
+        "title": "Connect",
+        "description": "Place `to` (detached, or moved from where it is, with everything under it) right after\n`from`. When `from` is not a step of a sequence, `sequence_id` names a new sequence that\ntakes `from`'s place and runs `from`, then `to`."
       },
       "ConnectionErrorDetail": {
         "properties": {
@@ -2613,6 +3061,52 @@
           "events_url"
         ],
         "title": "CreateRunResponse"
+      },
+      "CreateWorkflowRequest": {
+        "properties": {
+          "spec": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Spec",
+            "description": "The workflow spec, stored as version 1 under its `id`. It must match the schema; other issues are returned with it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "spec"
+        ],
+        "title": "CreateWorkflowRequest"
+      },
+      "Disconnect": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "disconnect",
+            "title": "Op"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "from",
+          "to"
+        ],
+        "title": "Disconnect",
+        "description": "Detach `to`, the step right after `from`, with everything under it; the step after `to`\nnow follows `from`. `to` must be placed again or removed in the same batch."
       },
       "EditErrorCode": {
         "type": "string",
@@ -2917,6 +3411,49 @@
         ],
         "title": "InstallUrlOut",
         "description": "Where to send the browser to install the GitHub App. The URL is valid for 10 minutes."
+      },
+      "Into": {
+        "properties": {
+          "parent": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Parent",
+            "description": "The container."
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index",
+            "description": "Sequence and parallel only: the position (default last)."
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route",
+            "description": "Router only, and required there: the route's id, or `default`."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent"
+        ],
+        "title": "Into",
+        "description": "Into a container: a sequence's step or a parallel's branch at `index`; a loop's or map's\nbody, which must be empty; a router route's `then`, or its `default`, which must be empty."
       },
       "IssueCode": {
         "type": "string",
@@ -3368,6 +3905,66 @@
           "over_limit"
         ]
       },
+      "OpErrorCode": {
+        "type": "string",
+        "enum": [
+          "unknown_node",
+          "duplicate_node_id",
+          "root_node",
+          "invalid_placement",
+          "slot_taken",
+          "invalid_move",
+          "not_in_sequence",
+          "not_connected",
+          "not_a_param",
+          "invalid_path",
+          "detached_nodes",
+          "missing_child",
+          "schema"
+        ]
+      },
+      "OpErrorDetail": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/OpErrorCode"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "op_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Op Index"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "op_index",
+          "node_id"
+        ],
+        "title": "OpErrorDetail",
+        "description": "The `detail` of a batch of graph operations that cannot apply: the op at `op_index` (unset\nwhen it is the batch's result: a node left detached, an empty slot, a spec off the schema)\nand the node it is about. Nothing was stored."
+      },
       "ParallelNode": {
         "properties": {
           "type": {
@@ -3756,6 +4353,28 @@
         ],
         "title": "ReduceNode",
         "description": "Combines the outputs of the map or parallel `from`, which runs before it: a map's items in\nitem order, a parallel's completed branches in branch order.\n\n`concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON\narray `[{\"item\": \u2026, \"output\": \u2026}]` (data, never instructions; a branch's item is its id).\n`dedupe` and `vote` (4.5) merge findings reports with no model: one finding per issue, with\nthe highest severity, the sources that reported it and a confidence; `vote` keeps only the\nissues `min_votes` sources reported. Their output is a findings report."
+      },
+      "RemoveNode": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "removeNode",
+            "title": "Op"
+          },
+          "node_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Node Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "node_id"
+        ],
+        "title": "RemoveNode",
+        "description": "Remove a node and everything under it. Its sequence's neighbours join up. A loop's or\nmap's body, or a route's `then`, must be given another node in the same batch."
       },
       "RepoOut": {
         "properties": {
@@ -5142,6 +5761,49 @@
         "title": "SequenceNode",
         "description": "Runs its steps in order."
       },
+      "SetParam": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "setParam",
+            "title": "Op"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id",
+            "description": "Unset: the document."
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "The parameter, by its JSON field names, e.g. `instructions`, `classifier.instructions`, `routes[1].when`.",
+            "examples": [
+              "instructions",
+              "routes[1].when"
+            ]
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "path",
+          "value"
+        ],
+        "title": "SetParam",
+        "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`). `null` unsets it. Ids, types and the slots that hold nodes change through the\nother ops."
+      },
       "StartInstall": {
         "properties": {
           "return_to": {
@@ -5347,6 +6009,59 @@
         ],
         "title": "ToolNode",
         "description": "One call of a platform tool with fixed arguments; no model is involved. Its output is the\nnext node's input, and an error result fails the node."
+      },
+      "UpdateWorkflowRequest": {
+        "properties": {
+          "base_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Base Version",
+            "description": "The version the ops were made against; it must be the latest."
+          },
+          "ops": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AddNode"
+                },
+                {
+                  "$ref": "#/components/schemas/RemoveNode"
+                },
+                {
+                  "$ref": "#/components/schemas/Connect"
+                },
+                {
+                  "$ref": "#/components/schemas/Disconnect"
+                },
+                {
+                  "$ref": "#/components/schemas/SetParam"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "op",
+                "mapping": {
+                  "addNode": "#/components/schemas/AddNode",
+                  "connect": "#/components/schemas/Connect",
+                  "disconnect": "#/components/schemas/Disconnect",
+                  "removeNode": "#/components/schemas/RemoveNode",
+                  "setParam": "#/components/schemas/SetParam"
+                }
+              }
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Ops",
+            "description": "Graph operations, applied in order, all or nothing."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "base_version",
+          "ops"
+        ],
+        "title": "UpdateWorkflowRequest"
       },
       "ValidateWorkflowRequest": {
         "properties": {
@@ -5575,6 +6290,48 @@
         ],
         "title": "WaitingGate"
       },
+      "WorkflowErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "workflow_exists",
+              "version_conflict",
+              "schema"
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "latest_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Version"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "WorkflowErrorDetail",
+        "description": "The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`\n(`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does\nnot match the schema, with its `issues`)."
+      },
       "WorkflowRef": {
         "properties": {
           "id": {
@@ -5678,6 +6435,137 @@
         ],
         "title": "WorkflowSpec",
         "description": "A versioned workflow document with a single root node."
+      },
+      "WorkflowVersionItem": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "base_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "op_count": {
+            "type": "integer",
+            "title": "Op Count",
+            "description": "Graph operations that made it; 0 for version 1."
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "base_version",
+          "created_at",
+          "op_count"
+        ],
+        "title": "WorkflowVersionItem"
+      },
+      "WorkflowVersionResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "base_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Version",
+            "description": "The version it was made from; unset for 1."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "spec": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Spec"
+          },
+          "ops": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ops",
+            "description": "The graph operations that made it from `base_version`; unset for 1."
+          },
+          "valid": {
+            "type": "boolean",
+            "title": "Valid",
+            "description": "Whether it could run in the workspace now."
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "type": "array",
+            "title": "Issues",
+            "description": "Why it could not run now, as `POST /workflows/{id}/validate` gives them. A version is stored with its issues; a run of it is refused until they are fixed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "version",
+          "base_version",
+          "created_at",
+          "spec",
+          "ops",
+          "valid",
+          "issues"
+        ],
+        "title": "WorkflowVersionResponse",
+        "description": "One version of a stored workflow, with what keeps it from running now."
+      },
+      "WorkflowVersionsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowVersionItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WorkflowVersionsResponse",
+        "description": "Every version of a workflow, newest first."
       },
       "WorkspaceOut": {
         "properties": {

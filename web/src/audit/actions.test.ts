@@ -108,6 +108,19 @@ describe("describe", () => {
       },
       "added a; changed b, c",
     ],
+    [
+      "workflow created",
+      { action: "workflow.created", details: { workflow_id: "docs", version: 1 } },
+      "Created docs v1",
+    ],
+    [
+      "workflow changed",
+      {
+        action: "workflow.updated",
+        details: { workflow_id: "docs", version: 3, base_version: 2, op_count: 4 },
+      },
+      "Changed docs v3 · 4 edits",
+    ],
   ])("%s", (_, overrides, expected) => {
     expect(line(overrides)).toBe(expected);
   });
@@ -148,6 +161,7 @@ test("each category has its actions", () => {
     "repo.created",
   ]);
   expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
+  expect(actionsOf("workflows")).toEqual(["workflow.created", "workflow.updated"]);
   expect(actionsOf("settings")).toEqual([
     "connection.added",
     "connection.removed",

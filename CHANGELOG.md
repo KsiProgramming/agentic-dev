@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 5.1 graph operations and workflow versions ([#146](https://github.com/KsiProgramming/agentic-dev/pull/146)):
+  - **Ops.** `agentic_engine.spec.ops`: `addNode`, `removeNode`, `connect`, `disconnect` and `setParam` over the spec's tree, nodes addressed by id, an edge being sequence order. `apply_ops` applies a batch all or nothing; a node may be detached inside a batch but not at its end. Errors name the code, the op's index and the node. JSON Schema in `schemas/graph-ops.v1.json`.
+  - **Storage.** `workflows` and the append-only `workflow_versions` (Alembic `0024_workflows`, a trigger refuses updates and deletes); each version keeps its spec, the ops that made it and its base version.
+  - **API.** `POST /workflows` (version 1), `GET /workflows/{id}` (`?version=`), `GET /workflows/{id}/versions` and `PATCH /workflows/{id}` (`base_version` and `ops`, `201` with the new version; `409 version_conflict` on a stale base, `422` when the ops cannot apply). A version must match the schema; its other issues come back with it.
+  - **Audit.** `workflow.created` and `workflow.updated` (version, base, op count, never the spec), shown in the audit log under a new "Workflows" filter.
+  - **Test fix.** `test_spec.py` expected the exported `join` enum without `settled` (added in 4.6, when CI could not run).
 - Phase 4.6 `router` primitive and the "Audit codebase" template ([#142](https://github.com/KsiProgramming/agentic-dev/pull/142)):
   - **Spec.** A `router` node runs one of its routes: the first whose CEL `when` holds (`last`, `results`, `artifacts`), or the one its `classifier` agent picks, else `default`; no match and no default fails it. New issue code `invalid_router` (a route that is not an agent, tool or sequence node). An artifact is written after a router only when every route writes it.
   - **Engine.** The classifier answers through a typed output the engine makes (an enum of the route ids and a reason), so it cannot invent a route. A new `route_chosen` event (`route`, `mode`, `reason`). At the top of a run the choice is checkpointed (`RunState.routes`), so a resumed run goes on in its route without asking again.

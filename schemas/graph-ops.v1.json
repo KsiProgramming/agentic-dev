@@ -1,0 +1,1392 @@
+{
+  "$defs": {
+    "AddNode": {
+      "additionalProperties": false,
+      "description": "Add a node, with any nodes under it, all with new ids. Without `at` it is detached, and\nmust be placed (`connect`) or removed later in the same batch.",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/After"
+            },
+            {
+              "$ref": "#/$defs/Into"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where it goes; unset: detached.",
+          "title": "At"
+        },
+        "node": {
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentNode",
+              "gate": "#/$defs/GateNode",
+              "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "parallel": "#/$defs/ParallelNode",
+              "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
+              "sequence": "#/$defs/SequenceNode",
+              "tool": "#/$defs/ToolNode"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentNode"
+            },
+            {
+              "$ref": "#/$defs/ToolNode"
+            },
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/SequenceNode"
+            },
+            {
+              "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
+            }
+          ],
+          "title": "Node"
+        },
+        "op": {
+          "const": "addNode",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "node"
+      ],
+      "title": "AddNode",
+      "type": "object"
+    },
+    "After": {
+      "additionalProperties": false,
+      "description": "Right after a step of a sequence.",
+      "properties": {
+        "after": {
+          "description": "The step the node follows.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "After",
+          "type": "string"
+        }
+      },
+      "required": [
+        "after"
+      ],
+      "title": "After",
+      "type": "object"
+    },
+    "AgentNode": {
+      "additionalProperties": false,
+      "description": "One agent turn: a role and instructions run on a provider.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its input must be JSON that matches this, or it does not start.",
+          "title": "Input Schema"
+        },
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.",
+          "title": "Output Schema"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        },
+        "reads": {
+          "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
+          "items": {
+            "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+            "examples": [
+              "findings.json"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Reads",
+          "type": "array"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "type": {
+          "const": "agent",
+          "title": "Type",
+          "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "role",
+        "instructions"
+      ],
+      "title": "AgentNode",
+      "type": "object"
+    },
+    "Connect": {
+      "additionalProperties": false,
+      "description": "Place `to` (detached, or moved from where it is, with everything under it) right after\n`from`. When `from` is not a step of a sequence, `sequence_id` names a new sequence that\ntakes `from`'s place and runs `from`, then `to`.",
+      "properties": {
+        "from": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "From",
+          "type": "string"
+        },
+        "op": {
+          "const": "connect",
+          "title": "Op",
+          "type": "string"
+        },
+        "sequence_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The id of the sequence to wrap `from` in, when it is not a sequence's step.",
+          "title": "Sequence Id"
+        },
+        "to": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "from",
+        "to"
+      ],
+      "title": "Connect",
+      "type": "object"
+    },
+    "Disconnect": {
+      "additionalProperties": false,
+      "description": "Detach `to`, the step right after `from`, with everything under it; the step after `to`\nnow follows `from`. `to` must be placed again or removed in the same batch.",
+      "properties": {
+        "from": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "From",
+          "type": "string"
+        },
+        "op": {
+          "const": "disconnect",
+          "title": "Op",
+          "type": "string"
+        },
+        "to": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "from",
+        "to"
+      ],
+      "title": "Disconnect",
+      "type": "object"
+    },
+    "GateNode": {
+      "additionalProperties": false,
+      "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "More guidance for the approver, shown with the input.",
+          "title": "Prompt"
+        },
+        "title": {
+          "description": "What the approver is asked to decide.",
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "ttl_s": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset.",
+          "title": "Ttl S"
+        },
+        "type": {
+          "const": "gate",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "title"
+      ],
+      "title": "GateNode",
+      "type": "object"
+    },
+    "Into": {
+      "additionalProperties": false,
+      "description": "Into a container: a sequence's step or a parallel's branch at `index`; a loop's or map's\nbody, which must be empty; a router route's `then`, or its `default`, which must be empty.",
+      "properties": {
+        "index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sequence and parallel only: the position (default last).",
+          "title": "Index"
+        },
+        "parent": {
+          "description": "The container.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Parent",
+          "type": "string"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Router only, and required there: the route's id, or `default`.",
+          "title": "Route"
+        }
+      },
+      "required": [
+        "parent"
+      ],
+      "title": "Into",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "LoopNode": {
+      "additionalProperties": false,
+      "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration.",
+      "properties": {
+        "body": {
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentNode",
+              "gate": "#/$defs/GateNode",
+              "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "parallel": "#/$defs/ParallelNode",
+              "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
+              "sequence": "#/$defs/SequenceNode",
+              "tool": "#/$defs/ToolNode"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentNode"
+            },
+            {
+              "$ref": "#/$defs/ToolNode"
+            },
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/SequenceNode"
+            },
+            {
+              "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
+            }
+          ],
+          "title": "Body"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "max_iterations": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Max Iterations",
+          "type": "integer"
+        },
+        "type": {
+          "const": "loop",
+          "title": "Type",
+          "type": "string"
+        },
+        "until": {
+          "description": "CEL condition checked after each iteration; true stops the loop.",
+          "examples": [
+            "last.contains(\"APPROVED\")"
+          ],
+          "minLength": 1,
+          "title": "Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "body",
+        "until",
+        "max_iterations"
+      ],
+      "title": "LoopNode",
+      "type": "object"
+    },
+    "MapNode": {
+      "additionalProperties": false,
+      "description": "Runs its body once per item of the list `over` evaluates to, at most `max_concurrency` at\na time, and outputs the items' outputs in item order.\n\n`over` is a CEL expression over `last` (the map's input) and `results` (as for a loop's\n`until`), e.g. `results.list_modules.data.modules`. Each item is its body's input: a string\nas is, any other value as JSON. The body can only hold agent, tool and sequence nodes: the\nothers are keyed by node id, which repeats for every item. Its items' agents count toward the\nrun's `agents_spawned` limit; one item that does not complete fails the map.",
+      "properties": {
+        "body": {
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentNode",
+              "gate": "#/$defs/GateNode",
+              "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "parallel": "#/$defs/ParallelNode",
+              "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
+              "sequence": "#/$defs/SequenceNode",
+              "tool": "#/$defs/ToolNode"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentNode"
+            },
+            {
+              "$ref": "#/$defs/ToolNode"
+            },
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/SequenceNode"
+            },
+            {
+              "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
+            }
+          ],
+          "title": "Body"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "max_concurrency": {
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Max Concurrency",
+          "type": "integer"
+        },
+        "over": {
+          "description": "CEL expression that evaluates to the list of items.",
+          "examples": [
+            "results.list_modules.data.modules"
+          ],
+          "minLength": 1,
+          "title": "Over",
+          "type": "string"
+        },
+        "type": {
+          "const": "map",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "over",
+        "body",
+        "max_concurrency"
+      ],
+      "title": "MapNode",
+      "type": "object"
+    },
+    "ParallelNode": {
+      "additionalProperties": false,
+      "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. `settled` (4.6) never decides early: it\nwaits for every branch to end and completes if at least one completed, so one failed branch\ndoes not cancel the others. Its output is the completed branches' outputs in branch order.\nA branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a\nreduce that writes nothing), its id names the branch, and it holds no gate, writer or\npublisher. Every agent in the branches counts toward the run's `agents_spawned` limit when\nthe parallel starts.",
+      "properties": {
+        "branches": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "agent": "#/$defs/AgentNode",
+                "gate": "#/$defs/GateNode",
+                "loop": "#/$defs/LoopNode",
+                "map": "#/$defs/MapNode",
+                "parallel": "#/$defs/ParallelNode",
+                "reduce": "#/$defs/ReduceNode",
+                "router": "#/$defs/RouterNode",
+                "sequence": "#/$defs/SequenceNode",
+                "tool": "#/$defs/ToolNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AgentNode"
+              },
+              {
+                "$ref": "#/$defs/ToolNode"
+              },
+              {
+                "$ref": "#/$defs/GateNode"
+              },
+              {
+                "$ref": "#/$defs/SequenceNode"
+              },
+              {
+                "$ref": "#/$defs/LoopNode"
+              },
+              {
+                "$ref": "#/$defs/MapNode"
+              },
+              {
+                "$ref": "#/$defs/ReduceNode"
+              },
+              {
+                "$ref": "#/$defs/ParallelNode"
+              },
+              {
+                "$ref": "#/$defs/RouterNode"
+              }
+            ]
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Branches",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "join": {
+          "enum": [
+            "all",
+            "any",
+            "quorum",
+            "settled"
+          ],
+          "title": "Join",
+          "type": "string"
+        },
+        "quorum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`quorum` only, and required: how many branches must complete.",
+          "title": "Quorum"
+        },
+        "type": {
+          "const": "parallel",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "branches",
+        "join"
+      ],
+      "title": "ParallelNode",
+      "type": "object"
+    },
+    "ReduceAgent": {
+      "additionalProperties": false,
+      "description": "The agent a `reduce` node with the `agent` strategy runs, as for an `agent` node.",
+      "properties": {
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "instructions"
+      ],
+      "title": "ReduceAgent",
+      "type": "object"
+    },
+    "ReduceNode": {
+      "additionalProperties": false,
+      "description": "Combines the outputs of the map or parallel `from`, which runs before it: a map's items in\nitem order, a parallel's completed branches in branch order.\n\n`concat` joins them with `separator`. `agent` runs one agent turn whose input is the JSON\narray `[{\"item\": …, \"output\": …}]` (data, never instructions; a branch's item is its id).\n`dedupe` and `vote` (4.5) merge findings reports with no model: one finding per issue, with\nthe highest severity, the sources that reported it and a confidence; `vote` keeps only the\nissues `min_votes` sources reported. Their output is a findings report.",
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReduceAgent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`agent` only, and required."
+        },
+        "from": {
+          "description": "The map or parallel whose outputs are combined.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "From",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "min_votes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`vote` only: how many sources must report an issue to keep it (default a majority of the sources that completed).",
+          "title": "Min Votes"
+        },
+        "separator": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`concat` only: what goes between outputs (default two newlines).",
+          "title": "Separator"
+        },
+        "strategy": {
+          "enum": [
+            "concat",
+            "agent",
+            "dedupe",
+            "vote"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "type": {
+          "const": "reduce",
+          "title": "Type",
+          "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "from",
+        "strategy"
+      ],
+      "title": "ReduceNode",
+      "type": "object"
+    },
+    "RemoveNode": {
+      "additionalProperties": false,
+      "description": "Remove a node and everything under it. Its sequence's neighbours join up. A loop's or\nmap's body, or a route's `then`, must be given another node in the same batch.",
+      "properties": {
+        "node_id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "op": {
+          "const": "removeNode",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "node_id"
+      ],
+      "title": "RemoveNode",
+      "type": "object"
+    },
+    "Route": {
+      "additionalProperties": false,
+      "description": "One way a router can go: `then` runs when this route is chosen.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the route is for; a classifier is shown it to choose.",
+          "title": "Description"
+        },
+        "id": {
+          "description": "The route's name, shown in the console and the events.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "then": {
+          "description": "What runs on this route: one agent, tool or sequence node.",
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentNode",
+              "gate": "#/$defs/GateNode",
+              "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "parallel": "#/$defs/ParallelNode",
+              "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
+              "sequence": "#/$defs/SequenceNode",
+              "tool": "#/$defs/ToolNode"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentNode"
+            },
+            {
+              "$ref": "#/$defs/ToolNode"
+            },
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/SequenceNode"
+            },
+            {
+              "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
+            }
+          ],
+          "title": "Then"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rule mode, and required there: the CEL condition that picks this route.",
+          "examples": [
+            "artifacts[\"findings.json\"].findings.size() == 0"
+          ],
+          "title": "When"
+        }
+      },
+      "required": [
+        "id",
+        "then"
+      ],
+      "title": "Route",
+      "type": "object"
+    },
+    "RouterClassifier": {
+      "additionalProperties": false,
+      "description": "The agent that chooses a router's route (classifier mode), as for an `agent` node. It\nanswers with one of the router's route ids and a reason, through a typed output the engine\nmakes (`classifier_schema`).",
+      "properties": {
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        }
+      },
+      "required": [
+        "instructions"
+      ],
+      "title": "RouterClassifier",
+      "type": "object"
+    },
+    "RouterNode": {
+      "additionalProperties": false,
+      "description": "Runs exactly one of its routes, on the router's input, and outputs what that route outputs.\n\nIn rule mode every route has `when`, a CEL condition over `last` (the router's input),\n`results` and `artifacts` (as for a loop's `until`); the first route whose condition is true\nruns, else `default`. In classifier mode no route has `when`: one agent (`classifier`)\nchooses a route id, `default` included when there is one, and says why. A router with no\nmatching route and no `default` fails. The routes not taken never start. A route is one\n`agent`, `tool` or `sequence` node, and it may hold what the router's own place allows.",
+      "properties": {
+        "classifier": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RouterClassifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Classifier mode: the agent that chooses the route."
+        },
+        "default": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "agent": "#/$defs/AgentNode",
+                  "gate": "#/$defs/GateNode",
+                  "loop": "#/$defs/LoopNode",
+                  "map": "#/$defs/MapNode",
+                  "parallel": "#/$defs/ParallelNode",
+                  "reduce": "#/$defs/ReduceNode",
+                  "router": "#/$defs/RouterNode",
+                  "sequence": "#/$defs/SequenceNode",
+                  "tool": "#/$defs/ToolNode"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AgentNode"
+                },
+                {
+                  "$ref": "#/$defs/ToolNode"
+                },
+                {
+                  "$ref": "#/$defs/GateNode"
+                },
+                {
+                  "$ref": "#/$defs/SequenceNode"
+                },
+                {
+                  "$ref": "#/$defs/LoopNode"
+                },
+                {
+                  "$ref": "#/$defs/MapNode"
+                },
+                {
+                  "$ref": "#/$defs/ReduceNode"
+                },
+                {
+                  "$ref": "#/$defs/ParallelNode"
+                },
+                {
+                  "$ref": "#/$defs/RouterNode"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What runs when no route is chosen.",
+          "title": "Default"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Routes",
+          "type": "array"
+        },
+        "type": {
+          "const": "router",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "routes"
+      ],
+      "title": "RouterNode",
+      "type": "object"
+    },
+    "SequenceNode": {
+      "additionalProperties": false,
+      "description": "Runs its steps in order.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "agent": "#/$defs/AgentNode",
+                "gate": "#/$defs/GateNode",
+                "loop": "#/$defs/LoopNode",
+                "map": "#/$defs/MapNode",
+                "parallel": "#/$defs/ParallelNode",
+                "reduce": "#/$defs/ReduceNode",
+                "router": "#/$defs/RouterNode",
+                "sequence": "#/$defs/SequenceNode",
+                "tool": "#/$defs/ToolNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AgentNode"
+              },
+              {
+                "$ref": "#/$defs/ToolNode"
+              },
+              {
+                "$ref": "#/$defs/GateNode"
+              },
+              {
+                "$ref": "#/$defs/SequenceNode"
+              },
+              {
+                "$ref": "#/$defs/LoopNode"
+              },
+              {
+                "$ref": "#/$defs/MapNode"
+              },
+              {
+                "$ref": "#/$defs/ReduceNode"
+              },
+              {
+                "$ref": "#/$defs/ParallelNode"
+              },
+              {
+                "$ref": "#/$defs/RouterNode"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        },
+        "type": {
+          "const": "sequence",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "steps"
+      ],
+      "title": "SequenceNode",
+      "type": "object"
+    },
+    "SetParam": {
+      "additionalProperties": false,
+      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`). `null` unsets it. Ids, types and the slots that hold nodes change through the\nother ops.",
+      "properties": {
+        "node_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset: the document.",
+          "title": "Node Id"
+        },
+        "op": {
+          "const": "setParam",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "description": "The parameter, by its JSON field names, e.g. `instructions`, `classifier.instructions`, `routes[1].when`.",
+          "examples": [
+            "instructions",
+            "routes[1].when"
+          ],
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "op",
+        "path",
+        "value"
+      ],
+      "title": "SetParam",
+      "type": "object"
+    },
+    "ToolNode": {
+      "additionalProperties": false,
+      "description": "One call of a platform tool with fixed arguments; no model is involved. Its output is the\nnext node's input, and an error result fails the node.",
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "The tool's arguments.",
+          "title": "Args",
+          "type": "object"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its input must be JSON that matches this, or it does not run.",
+          "title": "Input Schema"
+        },
+        "output_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+              "examples": [
+                {
+                  "properties": {
+                    "findings": {}
+                  },
+                  "required": [
+                    "findings"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its structured result (else its text as JSON) must match this, or it fails.",
+          "title": "Output Schema"
+        },
+        "reads": {
+          "description": "Take these run artifacts as input, instead of the previous output: one artifact's content, or an object by name for several.",
+          "items": {
+            "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+            "examples": [
+              "findings.json"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Reads",
+          "type": "array"
+        },
+        "tool": {
+          "description": "The platform tool to call, e.g. `repo.list_files`.",
+          "minLength": 1,
+          "title": "Tool",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool",
+          "title": "Type",
+          "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "tool"
+      ],
+      "title": "ToolNode",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/KsiProgramming/agentic-dev/schemas/graph-ops.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A batch of graph operations, applied in order, all or nothing.",
+  "properties": {
+    "ops": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "addNode": "#/$defs/AddNode",
+            "connect": "#/$defs/Connect",
+            "disconnect": "#/$defs/Disconnect",
+            "removeNode": "#/$defs/RemoveNode",
+            "setParam": "#/$defs/SetParam"
+          },
+          "propertyName": "op"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AddNode"
+          },
+          {
+            "$ref": "#/$defs/RemoveNode"
+          },
+          {
+            "$ref": "#/$defs/Connect"
+          },
+          {
+            "$ref": "#/$defs/Disconnect"
+          },
+          {
+            "$ref": "#/$defs/SetParam"
+          }
+        ]
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Ops",
+      "type": "array"
+    }
+  },
+  "required": [
+    "ops"
+  ],
+  "title": "Graph operations v1",
+  "type": "object"
+}

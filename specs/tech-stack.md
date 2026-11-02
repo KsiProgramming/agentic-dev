@@ -240,7 +240,7 @@ Each kind of value has one component (`@/components/display`), used everywhere a
 - **Page (`/audit`):** the workspace's activity, newest first: page header (title, one-line description, Refresh), filters, then the list. It does not update live; Refresh reloads it.
 - **List:** a table from 768 px with Time, Action, Actor, Run and Details; stacked cards below. Time is relative with the exact time in a tooltip (`tabular-nums`). Action is icon + label. Actor is "System" for the worker, else "—" with a tooltip saying names come with sign-in. Run is the run's id8 in mono, linking to its console, with the template and repo under it.
 - **Details:** one line of text per action, built by a formatter from `details` ("Approved `approve` with edits to 2 files · "looks good""). Never rendered as HTML or Markdown. An unknown action shows its name.
-- **Filters:** chips with "+ Filter", as on Runs: category (Runs, Approvals, Settings), run id (a full id, checked in its popover) and a date range ("Oct 20 – Oct 28"), kept in the URL. "Load more" fetches the next page.
+- **Filters:** chips with "+ Filter", as on Runs: category (Runs, Approvals, Workflows, Settings), run id (a full id, checked in its popover) and a date range ("Oct 20 – Oct 28"), kept in the URL. "Load more" fetches the next page.
 
 ### Interaction and accessibility
 
@@ -285,13 +285,33 @@ A rule an agent can break without noticing will be broken. So each one is either
 - `POST /workflows/{id}/validate` checks a spec without running it.
   - Body: `workflow` (raw JSON), optional `workspace_id` and `budget_usd`.
   - Answer: `200 {valid, issues, policy}`. An invalid spec is a normal answer, not an error. `404` means an unknown workspace, and `422` a malformed request.
-  - It stores nothing and needs no connection. Until 5.1 stores workflows, `{id}` must equal the spec's `id` (`id_mismatch` otherwise).
+  - It stores nothing and needs no connection. `{id}` must equal the spec's `id` (`id_mismatch` otherwise); it checks the spec sent, not a stored workflow (see "Workflows and graph operations").
 - One validator, `agentic_engine.spec.validate_workflow`, serves the endpoint, the spec model and `POST /runs`.
   - Each issue has a stable `code`, the spec `path` (`root.steps[1].body`), the `node_id` to fix and a `message`. Policy issues also have `limit`, `value` and `observed`.
   - Codes: `schema`, `id_mismatch`, `duplicate_node_id`, `invalid_expression`, `not_allowed_in_loop`, `not_allowed_in_map`, `not_allowed_in_parallel`, `reference`, `publish_not_tool_node`, `publish_without_gate`, `create_not_tool_node`, `create_without_gate`, `create_not_first`, `unknown_tool`, `policy_limit`, `budget_unpriced_model`, `invalid_schema`, `port_mismatch`, `artifact_unknown`, `artifact_conflict`, `invalid_vote`.
   - A spec off the schema gets only `schema` issues. Otherwise every issue is listed, in run order.
 - Tool names must be platform tools (`PLATFORM_TOOLS`); the tool servers register exactly these, and a test keeps them in sync. `POST /runs` refuses an unknown one with `422`.
 - `POST /runs` and rerun put the same issues in their `policy_limits` detail (`issues`), next to `errors`.
+
+## Workflows and graph operations (API contract)
+
+- **Stored workflows (5.1):** a workflow is keyed by its workspace and its spec's `id`. Each change makes a new **version** (1, 2, …), and a version never changes: `workflow_versions` is append-only (a trigger refuses `UPDATE` and `DELETE`, Alembic `0024_workflows`) and keeps the spec, `base_version` and the `ops` that made it (both unset for version 1). `workflows.latest_version` is the version a change must start from.
+- **Graph operations** (`agentic_engine.spec.ops`, `schemas/graph-ops.v1.json`): the one way the canvas, the side panel and the Flow Architect change a stored spec (mission principle 1). The spec stays a tree: nodes are addressed by id, and an edge `from → to` is sequence order (`to` is the step right after `from`).
+  - `addNode {node, at?}`: a node with any nodes under it, every id new. `at` is `{after: <id>}` (a sequence step) or `{parent: <id>, index?, route?}`: a sequence's step or a parallel's branch at `index` (default last), a loop's or map's empty body, a router route's empty `then` (`route: <id>`) or its `default` (`route: "default"`). No `at`: detached.
+  - `removeNode {node_id}`: the node and everything under it; its sequence's neighbours join up. Not the root.
+  - `connect {from, to, sequence_id?}`: `to` (detached, or moved with its subtree) goes right after `from`. When `from` is not a sequence's step, `sequence_id` names a new sequence that takes `from`'s place and runs `from`, then `to`.
+  - `disconnect {from, to}`: `to` must be the step right after `from`; it is detached, and the step after it follows `from`.
+  - `setParam {node_id?, path, value}`: one parameter by its JSON path (`instructions`, `classifier.instructions`, `routes[1].when`), `null` unsets it; without `node_id`, the document's `name` or `description`. Never `id`, `type` or a slot that holds nodes (`steps`, `branches`, `body`, `default`, a route's `then`, the `routes` list).
+  - A batch (1 to 200 ops) applies in order, all or nothing (`apply_ops`). A node may be detached while it runs, never at its end. The first failure refuses it: `{code, message, op_index, node_id}`, `op_index` unset for the result. Codes: `unknown_node`, `duplicate_node_id`, `root_node`, `invalid_placement`, `slot_taken`, `invalid_move`, `not_in_sequence`, `not_connected`, `not_a_param`, `invalid_path`, `detached_nodes`, `missing_child` (a loop or map with no body, a route with nothing on it), `schema`.
+- **What a version must be:** a spec that matches the schema (`schema_issues`). Its other issues (`validate_workflow` under the workspace's limits: structure, ports, artifacts, policy) are returned with it as `valid` and `issues`; it is stored anyway, so an editor saves work in progress. `POST /runs` still refuses a spec with issues.
+- **API** (workspace from `?workspace_id=`, the default workspace otherwise):
+  - `POST /workflows {spec}`: version 1, `201`. `409` `workflow_exists`; `422` `schema` with its `issues`.
+  - `GET /workflows/{id}` (`?version=n`, default the latest): `{workflow_id, version, base_version, created_at, spec, ops, valid, issues}`.
+  - `GET /workflows/{id}/versions`: `{items: [{version, base_version, created_at, op_count}]}`, newest first.
+  - `PATCH /workflows/{id} {base_version, ops}`: `201` with the new version. `409` `version_conflict` (with `latest_version`) when `base_version` is not the latest; `422` with the op error, and nothing stored.
+  - `404` for an unknown workspace, workflow or version.
+- **Audit:** `workflow.created` (`workflow_id`, `version`) and `workflow.updated` (`workflow_id`, `version`, `base_version`, `op_count`, `ops`: the count of each kind), written with the version. Never the spec.
+- Not yet: running a stored version, history, diff and restore (5.7); adding or removing router routes, renaming ids, `wrap` and `extract` (6.6); listing and deleting workflows.
 
 ## Typed ports (API contract)
 
@@ -392,6 +412,8 @@ A rule an agent can break without noticing will be broken. So each one is either
   | `connection.added`, `connection.removed` | the connection writers | `provider`, `key_hint` or `account_login` |
   | `policy.updated` | `replace_policy_overrides` | `before`, `after` (the workspace's overrides) |
   | `pricing.updated` | `replace_price_overrides` | `added`, `changed`, `removed` (model names) |
+  | `workflow.created` | `create_workflow` | `workflow_id`, `version` |
+  | `workflow.updated` | `update_workflow` | `workflow_id`, `version`, `base_version`, `op_count`, `ops` (count per kind) |
 
 - `details` never holds file contents or secrets: edited paths, not edits; key hints, not keys. USD amounts are decimal strings.
 - Runs and approvals made before the table existed are backfilled by its migration. Older settings changes are not recorded.
@@ -504,6 +526,11 @@ A rule an agent can break without noticing will be broken. So each one is either
 | Primary colour (11.9) | Ink (`#18181b`, dark `#fafafa`) for primary buttons, focus, the selected tab and row | With colour kept for status, indigo was the only hue that was not one, and it read as decoration on links and ids. Ink focus is 17.7:1 on white (indigo's was 4.6:1). |
 | Look (11.9) | One file, `design-language.md`, holds the exact look; tech-stack says what each screen shows | The screens passed contrast checks but looked faded: two text levels, every surface white, badges with no edge. Exact values in one place keep agents from guessing. |
 | Severity colour (11.9) | Own `--severity-*` tokens, distinct from the status colours | Grey severities did not stand out (user review); separate hues keep "colour means status" true for statuses and never make a Critical finding look like a Failed run. |
+| Graph operations (5.1) | Ops over the spec's tree, nodes by id, an edge being sequence order; not a nodes-and-edges form, not JSON Patch | One spec (mission principle 1): the engine, the validator and the run map already read the tree, and a second form would have to be kept in sync. Ids stay put as the tree changes; JSON Patch's array positions shift. The Architect (9.3) gets a small typed schema. |
+| Detached nodes (5.1) | Allowed inside a batch, refused at its end | "Drop a node, then draw its edge" is one batch, and every stored version is still a whole spec. |
+| Version validity (5.1) | A version must match the schema; its other issues are returned, not refused | An editor saves work in progress (a loop over a limit, a port mismatch) and shows what to fix (5.6); runs still refuse it, so nothing unsafe runs (mission principle 2). |
+| Version concurrency (5.1) | `base_version` must be the latest, else `409` | Two editors, or the canvas and the Architect, never overwrite each other silently; the client applies its ops to the latest version. |
+| Versions keep their ops (5.1) | Each version stores the batch that made it and its base, append-only | History, diff and undo (5.7) and the Architect's edit distance (9.x) need what changed, not only the result; immutability means a run of version 3 can always be explained. |
 | Run graph (11.9) | A tree of cards (agent-map style), no React Flow or ELK | The canvas was hard to handle (pan and zoom inside a box). Chains top to bottom with containers to the right read like the step list, need no layout engine and drop two dependencies. |
 | Size lint (11.9) | `no-raw-colors` also rejects arbitrary text sizes | Keeps the type scale mechanical; `em` sizes and `text-[0px]` stay allowed. |
 | Step detail on phones (11.9) | A full-height bottom sheet below 768 px; stacked from 768 to 1279 px | The stacked panel pushed the step's content far below the list on a phone. |

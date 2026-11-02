@@ -1,11 +1,183 @@
-from fastapi import APIRouter, HTTPException, Request, status
+from typing import Annotated
+from uuid import UUID
 
-from agentic_api.workflows.models import ValidateWorkflowRequest, ValidateWorkflowResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import JsonValue
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from agentic_api.runs.routes import existing_workspace
+from agentic_api.workflows.models import (
+    CreateWorkflowRequest,
+    OpErrorDetail,
+    UpdateWorkflowRequest,
+    ValidateWorkflowRequest,
+    ValidateWorkflowResponse,
+    WorkflowErrorDetail,
+    WorkflowVersionItem,
+    WorkflowVersionResponse,
+    WorkflowVersionsResponse,
+)
 from agentic_api.workspaces.models import RunLimits, to_usd
-from agentic_engine.spec import ValidationIssue
-from agentic_store import DEFAULT_WORKSPACE_ID, WorkspaceNotFoundError, check_workflow
+from agentic_engine.spec import OpError, ValidationIssue, schema_issues
+from agentic_store import (
+    DEFAULT_WORKSPACE_ID,
+    StoredWorkflowVersion,
+    VersionConflictError,
+    WorkflowExistsError,
+    WorkflowNotFoundError,
+    WorkspaceNotFoundError,
+    check_workflow,
+    create_workflow,
+    get_workflow_version,
+    list_workflow_versions,
+    update_workflow,
+)
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
+
+Workspace = Annotated[UUID, Depends(existing_workspace)]
+
+
+def _sessions(request: Request) -> async_sessionmaker[AsyncSession]:
+    return request.app.state.sessions
+
+
+@router.post(
+    "",
+    operation_id="createWorkflow",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "No workspace with this id"},
+        409: {"model": WorkflowErrorDetail, "description": "`workflow_exists`"},
+        422: {"model": WorkflowErrorDetail, "description": "`schema`: the spec is not one"},
+    },
+)
+async def create(
+    body: CreateWorkflowRequest, request: Request, workspace_id: Workspace
+) -> WorkflowVersionResponse:
+    """Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It
+    must match the schema; its other issues (structure, run limits) are returned with it."""
+    if issues := schema_issues(body.spec):
+        detail = WorkflowErrorDetail(
+            code="schema", message="the spec does not match the schema", issues=issues
+        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump())
+    try:
+        stored = await create_workflow(_sessions(request), workspace_id, body.spec)
+    except WorkflowExistsError as e:
+        detail = WorkflowErrorDetail(
+            code="workflow_exists",
+            message=f"workflow {e} already exists; change it with PATCH /workflows/{e}",
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail.model_dump()) from e
+    return await _response(request, workspace_id, stored)
+
+
+@router.get(
+    "/{workflow_id}",
+    operation_id="getWorkflow",
+    responses={404: {"description": "No such workspace, workflow or version"}},
+)
+async def get(
+    workflow_id: str,
+    request: Request,
+    workspace_id: Workspace,
+    version: Annotated[int | None, Query(ge=1, description="Default: the latest.")] = None,
+) -> WorkflowVersionResponse:
+    """One version of a workflow, the latest by default, with why it could not run now."""
+    try:
+        stored = await get_workflow_version(_sessions(request), workspace_id, workflow_id, version)
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, version)) from e
+    return await _response(request, workspace_id, stored)
+
+
+@router.get(
+    "/{workflow_id}/versions",
+    operation_id="listWorkflowVersions",
+    responses={404: {"description": "No such workspace or workflow"}},
+)
+async def versions(
+    workflow_id: str, request: Request, workspace_id: Workspace
+) -> WorkflowVersionsResponse:
+    """Every version of a workflow, newest first, without their specs."""
+    try:
+        rows = await list_workflow_versions(_sessions(request), workspace_id, workflow_id)
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, None)) from e
+    return WorkflowVersionsResponse(
+        items=[
+            WorkflowVersionItem(
+                version=row.version,
+                base_version=row.base_version,
+                created_at=row.created_at,
+                op_count=len(row.ops or []),
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.patch(
+    "/{workflow_id}",
+    operation_id="updateWorkflow",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "No such workspace or workflow"},
+        409: {"model": WorkflowErrorDetail, "description": "`version_conflict`"},
+        422: {"model": OpErrorDetail, "description": "The ops cannot apply; nothing is stored"},
+    },
+)
+async def update(
+    workflow_id: str, body: UpdateWorkflowRequest, request: Request, workspace_id: Workspace
+) -> WorkflowVersionResponse:
+    """Apply graph operations to version `base_version`, which must be the latest, and store the
+    result as the next version. Versions never change. The ops apply all or nothing: one that
+    cannot apply, or a result with a node left detached, an empty slot, or off the schema,
+    stores nothing. The result's other issues (structure, run limits) are returned with it."""
+    try:
+        stored = await update_workflow(
+            _sessions(request), workspace_id, workflow_id, body.base_version, body.ops
+        )
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, None)) from e
+    except VersionConflictError as e:
+        detail = WorkflowErrorDetail(
+            code="version_conflict",
+            message=f"version {body.base_version} is not the latest ({e.latest_version}); "
+            "apply the ops to the latest version",
+            latest_version=e.latest_version,
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail.model_dump()) from e
+    except OpError as e:
+        detail = OpErrorDetail(
+            code=e.code, message=e.message, op_index=e.op_index, node_id=e.node_id
+        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
+    return await _response(request, workspace_id, stored)
+
+
+def _not_found(workflow_id: str, version: int | None) -> str:
+    if version is None:
+        return f"workflow {workflow_id} not found"
+    return f"workflow {workflow_id} has no version {version}"
+
+
+async def _response(
+    request: Request, workspace_id: UUID, stored: StoredWorkflowVersion
+) -> WorkflowVersionResponse:
+    _, issues = await check_workflow(_sessions(request), workspace_id, stored.spec)
+    ops: list[JsonValue] | None = stored.ops
+    return WorkflowVersionResponse(
+        workflow_id=stored.workflow_id,
+        version=stored.version,
+        base_version=stored.base_version,
+        created_at=stored.created_at,
+        spec=stored.spec,
+        ops=ops,
+        valid=not issues,
+        issues=issues,
+    )
 
 
 @router.post(
@@ -28,7 +200,7 @@ async def validate(
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
     try:
         policy, issues = await check_workflow(
-            request.app.state.sessions, workspace_id, body.workflow, to_usd(body.budget_usd)
+            _sessions(request), workspace_id, body.workflow, to_usd(body.budget_usd)
         )
     except WorkspaceNotFoundError:
         raise HTTPException(

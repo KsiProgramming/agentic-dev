@@ -41,18 +41,32 @@ def validate_workflow(
     its nodes. Otherwise the issues are its structure (`structure_issues`), unknown tools, the
     policy's limits and, with a budget, agents on models `priced` does not know (an agent with no
     `model` runs on `default_model`), in run order."""
+    root = _parse_root(raw)
+    if isinstance(root, list):
+        return root
+    issues = structure_issues(root) + tool_issues(root, known_tools)
+    issues += policy_issues(root, policy)
+    issues += budget_issues(root, policy, priced, default_model)
+    return in_run_order(root, issues)
+
+
+def schema_issues(raw: object) -> list[ValidationIssue]:
+    """The `schema` issues of the decoded JSON document `raw`: why it is not a workflow spec at
+    all. Empty when it is one, even if it could not run (`validate_workflow` says why)."""
+    root = _parse_root(raw)
+    return root if isinstance(root, list) else []
+
+
+def _parse_root(raw: object) -> Node | list[ValidationIssue]:
+    """The root node of `raw`, or its `schema` issues when it does not match the schema."""
     try:
-        root = WorkflowSpec.model_validate(raw).root
+        return WorkflowSpec.model_validate(raw).root
     except ValidationError as e:
         errors = e.errors()
         if not all(error["type"] == "value_error" and not error["loc"] for error in errors):
             return [_schema_issue(raw, error) for error in errors]
         # Only the document's own validators failed, so its nodes are well formed.
-        root = _NODE.validate_python(cast(Mapping[str, object], raw)["root"])
-    issues = structure_issues(root) + tool_issues(root, known_tools)
-    issues += policy_issues(root, policy)
-    issues += budget_issues(root, policy, priced, default_model)
-    return in_run_order(root, issues)
+        return _NODE.validate_python(cast(Mapping[str, object], raw)["root"])
 
 
 def _schema_issue(raw: object, error: ErrorDetails) -> ValidationIssue:

@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -244,6 +245,42 @@ class RunArtifact(Base):
     content: Mapped[str] = mapped_column(Text)
     # The writer's `output_schema`, if it had one.
     output_schema: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Workflow(Base):
+    """A stored workflow (5.1), keyed by its workspace and its spec's `id`. Its versions are in
+    `workflow_versions`; `latest_version` is the one a change must start from."""
+
+    __tablename__ = "workflows"
+
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), primary_key=True)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    latest_version: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkflowVersion(Base):
+    """One version of a workflow, append only (a trigger refuses `UPDATE` and `DELETE`): the spec,
+    and the graph operations that made it from `base_version` (both unset for version 1)."""
+
+    __tablename__ = "workflow_versions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "workflow_id"],
+            ["workflows.workspace_id", "workflows.id"],
+            name="fk_workflow_versions_workflow",
+        ),
+        CheckConstraint("version >= 1", name="ck_workflow_versions_version"),
+    )
+
+    workspace_id: Mapped[UUID] = mapped_column(primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    spec: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    base_version: Mapped[int | None] = mapped_column(Integer)
+    ops: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -1,5 +1,6 @@
 """`POST /workflows/{id}/validate`: every reason a workflow cannot run in a workspace, without
-running it (3.4)."""
+running it (3.4). Stored workflows (5.1): `POST /workflows`, `GET /workflows/{id}` and its
+versions, and `PATCH /workflows/{id}`, where graph operations make a new, immutable version."""
 
 import json
 from collections.abc import AsyncIterator
@@ -220,3 +221,182 @@ async def test_typed_ports_are_checked_before_a_run(client: AsyncClient, workspa
         "output_schema of 'triage' does not declare"
     )
     assert typed["valid"] is True
+
+
+# Stored workflows (5.1)
+
+
+async def create(client: AsyncClient, workspace: UUID, spec: dict[str, Any]) -> dict[str, Any]:
+    response = await client.post(
+        "/workflows", params={"workspace_id": str(workspace)}, json={"spec": spec}
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def patch(
+    client: AsyncClient, workspace: UUID, workflow_id: str, base: int, *ops: dict[str, Any]
+) -> Any:
+    return await client.patch(
+        f"/workflows/{workflow_id}",
+        params={"workspace_id": str(workspace)},
+        json={"base_version": base, "ops": list(ops)},
+    )
+
+
+SET_PUBLISH = {
+    "op": "setParam",
+    "node_id": "publish",
+    "path": "instructions",
+    "value": "Format it as Markdown with a title.",
+}
+
+
+async def test_applying_ops_produces_a_new_immutable_version(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    original = spec_json("valid/review-loop.json")
+    first = await create(client, workspace, original)
+    assert (first["version"], first["base_version"], first["ops"]) == (1, None, None)
+    assert (first["valid"], first["spec"]) == (True, original)
+
+    added = {
+        "type": "agent",
+        "id": "check",
+        "role": "Checker",
+        "instructions": "Check the links.",
+    }
+    response = await patch(
+        client,
+        workspace,
+        "review-loop",
+        1,
+        {"op": "addNode", "node": added, "at": {"after": "publish"}},
+        SET_PUBLISH,
+    )
+
+    assert response.status_code == 201, response.text
+    second = response.json()
+    assert (second["version"], second["base_version"], second["valid"]) == (2, 1, True)
+    assert [s["id"] for s in second["spec"]["root"]["steps"]] == ["revise", "publish", "check"]
+    assert second["ops"] == [
+        {"op": "addNode", "node": added, "at": {"after": "publish"}},
+        SET_PUBLISH,
+    ]
+    params = {"workspace_id": str(workspace)}
+    old = await client.get("/workflows/review-loop", params={**params, "version": 1})
+    assert old.json()["spec"] == original
+    latest = await client.get("/workflows/review-loop", params=params)
+    assert latest.json()["version"] == 2
+    versions = await client.get("/workflows/review-loop/versions", params=params)
+    assert versions.json()["items"] == [
+        {"version": 2, "base_version": 1, "created_at": second["created_at"], "op_count": 2},
+        {"version": 1, "base_version": None, "created_at": first["created_at"], "op_count": 0},
+    ]
+
+
+async def test_a_version_is_stored_with_its_issues(client: AsyncClient, workspace: UUID) -> None:
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+    gate = {"type": "gate", "id": "check", "title": "Looks right?"}
+
+    response = await patch(
+        client,
+        workspace,
+        "review-loop",
+        1,
+        {"op": "addNode", "node": gate, "at": {"after": "review"}},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["valid"] is False
+    assert where(body) == [("not_allowed_in_loop", "root.steps[0].body.steps[2]", "check")]
+
+
+async def test_a_stale_base_version_is_a_conflict(client: AsyncClient, workspace: UUID) -> None:
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+    assert (await patch(client, workspace, "review-loop", 1, SET_PUBLISH)).status_code == 201
+
+    response = await patch(client, workspace, "review-loop", 1, SET_PUBLISH)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "version_conflict",
+        "message": "version 1 is not the latest (2); apply the ops to the latest version",
+        "latest_version": 2,
+        "issues": [],
+    }
+
+
+async def test_ops_that_cannot_apply_are_refused_with_the_op(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+
+    response = await patch(
+        client,
+        workspace,
+        "review-loop",
+        1,
+        SET_PUBLISH,
+        {"op": "removeNode", "node_id": "main"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "root_node",
+        "message": "'main' is the workflow's root; it cannot be removed or moved",
+        "op_index": 1,
+        "node_id": "main",
+    }
+    versions = await client.get(
+        "/workflows/review-loop/versions", params={"workspace_id": str(workspace)}
+    )
+    assert [v["version"] for v in versions.json()["items"]] == [1]
+
+
+async def test_a_malformed_op_is_refused(client: AsyncClient, workspace: UUID) -> None:
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+
+    unknown = await patch(client, workspace, "review-loop", 1, {"op": "explode"})
+    empty = await patch(client, workspace, "review-loop", 1)
+
+    assert (unknown.status_code, empty.status_code) == (422, 422)
+
+
+async def test_creating_a_workflow_twice_or_off_the_schema_is_refused(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+    params = {"workspace_id": str(workspace)}
+
+    again = await client.post(
+        "/workflows", params=params, json={"spec": spec_json("valid/review-loop.json")}
+    )
+    off = await client.post(
+        "/workflows", params=params, json={"spec": spec_json("invalid/gate-missing-title.json")}
+    )
+
+    assert again.status_code == 409
+    assert again.json()["detail"]["code"] == "workflow_exists"
+    assert off.status_code == 422
+    assert off.json()["detail"]["code"] == "schema"
+    assert where(off.json()["detail"]) == [("schema", "root.steps[1].title", "gate")]
+
+
+async def test_unknown_workflows_versions_and_workspaces_are_not_found(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+    params = {"workspace_id": str(workspace)}
+
+    responses = [
+        await client.get("/workflows/nope", params=params),
+        await client.get("/workflows/review-loop", params={**params, "version": 7}),
+        await client.get("/workflows/nope/versions", params=params),
+        await patch(client, workspace, "nope", 1, SET_PUBLISH),
+        await client.get("/workflows/review-loop", params={"workspace_id": str(uuid4())}),
+        await patch(client, uuid4(), "review-loop", 1, SET_PUBLISH),
+    ]
+
+    assert [r.status_code for r in responses] == [404] * 6
