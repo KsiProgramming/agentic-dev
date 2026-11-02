@@ -68,3 +68,43 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 - **Already covered:** In part. 9.4 turns a plain-language goal into a draft (typed text, not a file). 7.4–7.5 feed Jira fields to the spec writer. 5.4 generates the side-panel forms from JSON Schema. There is no file upload, and no extraction of a manifest from Markdown.
 - **Open questions:** Where does the uploaded file live: a run artifact (4.3), a stored version, or both? The content is untrusted data, never instructions (principle 5), so how is it shown and quoted to agents? What are the size limits, and can a file reference images or other files? Should a file from the repo also be accepted (e.g. `docs/spec.md`), not only an upload?
 - **Links:** roadmap 4.3, 5.4, 7.4, 7.5, 9.4; the tool and skill ideas above
+
+### Workflows that work on several repos
+
+- **Status:** 💡 Raw
+- **Added:** 2026-11-02
+- **Problem:** A run works on exactly one repo: `POST /runs` takes `repo` or `new_repo`, the sandbox clones that one checkout, and every `repo.*`, `scan.*` and `github.*` call acts on it. A team cannot draw "agent A studies the API repo, agent B studies the web repo, a third agent combines their findings", which is common for cross-service changes, audits and migrations.
+- **Idea:** A run takes named repos (`repos: {api: …, web: …}`) and a node picks one (`repo: "api"`); a node with none uses the first. The sandbox clones each into its own folder; the repo tools act on the node's repo; each writer's branch and pull request target its own repo, and each still passes a gate. The fan-in already exists: a `parallel` of agents, then a `reduce` (`agent`, `dedupe` or `vote`). The run sheet asks for each repo, the side panel gets a repo picker per node, and the console shows which repo a step worked on.
+- **Already covered:** Nothing. 6.5 `subflow` calls another workflow, but on the parent's repo. 4.5 merges findings from several sources within one repo.
+- **Open questions:** Does a workflow declare the repo roles it needs (like a template's parameters), or does the run name them freely? One sandbox with several checkouts, or one sandbox per repo? How do the GitHub App's installation and repo access apply per repo? How does the Flow Architect (9.x) choose repos? Must it behave the same on Copilot (AC-6)?
+- **Links:** roadmap 4.5, 6.3, 6.5, 9.x; seen while testing 5.8 on GildedRoseKata
+
+### Publish a stored workflow as a template
+
+- **Status:** 💡 Raw
+- **Added:** 2026-11-02
+- **Problem:** Saving a workflow in the builder makes a new version (5.1), listed under Workflows (5.8), but never a template: templates are Python code (`agentic_engine.templates`) served read-only by `GET /templates`. A tech lead who builds a good flow cannot offer it on the start screen to the rest of the team, although the mission names "publishing templates" as the tech lead's entry point.
+- **Idea:** "Publish as template" on a stored version: a name, description, icon, the connections it requires (worked out from the spec, as `workflowRequires` does), and which parameters a user fills in when starting it (for example an agent's instructions or a list of paths). The template is stored per workspace, versioned (draft → published, as 6.6 does for composites), and shown in the gallery beside the built-in ones; updating it publishes a new version.
+- **Already covered:** In part. 9.9 promotes highly rated flows to templates automatically (the Architect's learning loop), not on a user's request. 6.6 sets the draft → published pattern for composites. 5.2 opens a template in the builder, the other direction.
+- **Open questions:** How are a template's parameters bound to the spec (JSON paths, as `setParam` uses)? Workspace-only, or shared across workspaces? Who may publish? Do built-in templates move to the same storage?
+- **Links:** roadmap 5.1, 5.2, 5.8, 6.6, 9.9; mission "Who we serve"
+
+### Later agents can read what earlier writers changed
+
+- **Status:** 💡 Raw
+- **Added:** 2026-11-02
+- **Problem:** Each writer commits in its own worktree and branch (`agent/<run>/<node>`); a later agent has only the base checkout. A reviewer agent placed after a test writer and a refactoring writer cannot read either branch, and their replies are not kept unless the spec gives them `writes`. Only the gate's review sheet shows the diffs, to the human. Testing 5.8, a review agent guessed artifact names and reviewed nothing.
+- **Idea:** Give agents read access to the run's writer branches: `repo.diff {node}` (the files a writer changed and the diff against its base) and `repo.read_file {path, node}` to read a file as a writer left it. Optionally, a writer's final reply is kept as an artifact by default (`<node>-report.md`). The node's input says which writers ran before it.
+- **Already covered:** In part. 6.3 merges worker branches into an integration branch before the final PR, which a later agent could then read. 3.6 and the gate review sheet show the diffs to the approver. 4.3 artifacts carry what a spec declares with `writes`.
+- **Open questions:** Is this enough once 6.3 exists, or still needed between writers in sequence? Read-only for every later agent, or only for ones granted it? How large may a diff be before it is cut (the 256 KB artifact cap)?
+- **Links:** roadmap 3.6, 4.3, 6.3, 6.4
+
+### Recover runs lost between the queue and the worker
+
+- **Status:** 💡 Raw
+- **Added:** 2026-11-02
+- **Problem:** A worker pops a run id from Redis, then claims the run in Postgres. If it crashes between the two, or while parsing the stored spec (seen on 2026-11-02: a worker older than 5.4 could not parse `budget_usd`), the id is gone from the queue and the run has no lease, so `reclaim_expired_run` never sees it. The run stays "Queued" for good, and the console shows "Waiting for the run to start…" with nothing to explain why.
+- **Idea:** Treat Postgres as the queue's source of truth: on startup and on a timer, the worker re-enqueues runs that have been `queued` with no lease for longer than a threshold. A run that fails to load (a spec this worker cannot parse) is failed with a clear `failure_reason` rather than crashing the worker. The console could show "Queued for N min" and a hint once that passes the threshold.
+- **Already covered:** In part. Leases and `reclaim_expired_run` (1.3) resume only runs a worker stopped mid-way, not runs it never claimed. Rerun (2.6) lets a user start over by hand.
+- **Open questions:** Is a version check between API and worker (refusing to claim a spec from a newer schema) needed as well? What threshold avoids re-enqueuing a run another worker is about to claim? Should the API, not the worker, do the sweep?
+- **Links:** `agentic_worker.main._next_run`, `agentic_store.lease`; principle 9 (nothing is lost)
