@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 5.1 graph operations and workflow versions ([plan](specs/2026-11-02-graph-operations-versions/requirements.md)):
+- Phase 5.1 graph operations and workflow versions ([#146](https://github.com/KsiProgramming/agentic-dev/pull/146)):
   - **Ops.** `agentic_engine.spec.ops`: `addNode`, `removeNode`, `connect`, `disconnect` and `setParam` over the spec's tree, nodes addressed by id, an edge being sequence order. `apply_ops` applies a batch all or nothing; a node may be detached inside a batch but not at its end. Errors name the code, the op's index and the node. JSON Schema in `schemas/graph-ops.v1.json`.
   - **Storage.** `workflows` and the append-only `workflow_versions` (Alembic `0024_workflows`, a trigger refuses updates and deletes); each version keeps its spec, the ops that made it and its base version.
   - **API.** `POST /workflows` (version 1), `GET /workflows/{id}` (`?version=`), `GET /workflows/{id}/versions` and `PATCH /workflows/{id}` (`base_version` and `ops`, `201` with the new version; `409 version_conflict` on a stale base, `422` when the ops cannot apply). A version must match the schema; its other issues come back with it.
