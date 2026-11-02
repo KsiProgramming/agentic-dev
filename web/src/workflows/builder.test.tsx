@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { json, renderWithQueries, stubApi, type Routes } from "@/testing/api";
+import { json, renderWithQueries, requested, stubApi, type Routes } from "@/testing/api";
 import { DEFAULT_WORKSPACE_ID } from "@/workspace";
 
 import type { WorkflowVersion } from "./api";
@@ -508,4 +508,150 @@ test("a parallel gets a branch, and loses one only while two are left", async ()
   fireEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
   fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
   expect(cards()).toEqual(["p", "b2", "agent_1"]);
+});
+
+// 5.6: `a` gives `a`, `b` gives `b`, and `c` needs `b`; `c` cannot follow `a`.
+const typed = (id: string, ports: object) => ({ ...agent(id), ...ports });
+const TYPED = {
+  ...SPEC,
+  root: {
+    type: "sequence",
+    id: "main",
+    steps: [
+      typed("a", { output_schema: { type: "object", properties: { a: { type: "string" } } } }),
+      typed("b", { output_schema: { type: "object", properties: { b: { type: "string" } } } }),
+      typed("c", {
+        input_schema: { type: "object", properties: { b: { type: "string" } }, required: ["b"] },
+      }),
+    ],
+  },
+};
+const VALIDATE = "POST /workflows/flow/validate";
+const C_NEEDS_B =
+  "The input_schema of 'c' requires 'b', which the output_schema of 'a' does not declare.";
+
+function disabledItem(name: string) {
+  const item = screen
+    .getAllByRole("menuitem")
+    .find((i) => i.textContent?.startsWith(name) && i.hasAttribute("data-disabled"));
+  expect(item, `${name} disabled`).toBeDefined();
+  return item!;
+}
+
+test("an edit that would connect ports that do not fit is not offered, and says why", async () => {
+  show({ [`GET ${PATH}`]: () => json(200, version(1, TYPED)) });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("b");
+  expect(disabledItem("Remove").textContent).toContain(C_NEEDS_B);
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+  menu("c");
+  expect(disabledItem("Move up").textContent).toContain(C_NEEDS_B);
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Move to…" }), { key: "ArrowRight" });
+  await waitFor(() => expect(screen.getAllByRole("menu")).toHaveLength(2));
+  expect(disabledItem("After a").textContent).toContain(C_NEEDS_B);
+  fireEvent.keyDown(screen.getAllByRole("menu")[0], { key: "Escape" });
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
+
+  // Replacing `b` with an untyped agent breaks the edge instead: allowed.
+  menu("b");
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Replace with…" }), { key: "ArrowRight" });
+  const palette = await waitFor(() => {
+    const menus = screen.getAllByRole("menu");
+    expect(menus).toHaveLength(2);
+    return within(menus[1]);
+  });
+  const item = (kind: string) =>
+    palette.getAllByRole("menuitem").find((i) => i.dataset.kind === kind)!;
+  expect(item("agent").hasAttribute("data-disabled")).toBe(false);
+  expect(cards()).toEqual(["a", "b", "c"]);
+});
+
+test("live issues show on their node's card, in the count and in the list", async () => {
+  const fetch = show({
+    [VALIDATE]: () =>
+      json(200, {
+        valid: false,
+        issues: [
+          {
+            code: "port_mismatch",
+            path: "root.steps[1]",
+            node_id: "c",
+            message: "agent 'c' at root.steps[1]: input_schema requires 'x'",
+          },
+          { code: "policy_limit", path: "root", node_id: null, message: "Too many agents." },
+        ],
+        policy: {},
+      }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+  expect(requested(fetch)).not.toContain(VALIDATE);
+
+  menu("c");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+
+  const status = screen.getByTestId("builder-status");
+  await waitFor(() => expect(status.textContent).toContain("2 issues"));
+  expect(requested(fetch).filter((r) => r === VALIDATE)).toHaveLength(1);
+  const card = screen.getAllByTestId("builder-node").find((c) => c.dataset.node === "c")!;
+  expect(within(card).getByTestId("node-issue").textContent).toContain("input_schema requires 'x'");
+  const body = (await fetch.mock.calls
+    .find(([r]) => r.method === "POST")![0]
+    .clone()
+    .json()) as {
+    workflow: { root: { steps: { id: string }[] } };
+  };
+  expect(body.workflow.root.steps.map((s) => s.id)).toEqual(["a", "c", "l"]);
+
+  fireEvent.click(within(status).getByRole("button", { name: /2 issues/ }));
+  const list = within(screen.getByTestId("issue-list"));
+  expect(list.getByText("Too many agents.")).toBeDefined();
+  fireEvent.click(list.getByRole("button", { name: "c" }));
+  await waitFor(() => expect(screen.getByTestId("node-panel").dataset.node).toBe("c"));
+  expect(
+    within(screen.getByTestId("node-panel")).getByRole("list", { name: "Issues" }),
+  ).toBeDefined();
+});
+
+test("a check that fails says so, with Retry, and blocks nothing", async () => {
+  let fail = true;
+  show({
+    [VALIDATE]: () =>
+      fail ? json(500, { detail: "boom" }) : json(200, { valid: true, issues: [], policy: {} }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("c");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+
+  const status = screen.getByTestId("builder-status");
+  await waitFor(() => expect(status.textContent).toContain("Could not check the workflow."));
+  expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", false);
+  fail = false;
+  fireEvent.click(within(status).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(status.textContent).toContain("Ready to run"));
+});
+
+test("quick edits are checked once, after the last", async () => {
+  const fetch = show({ [VALIDATE]: () => json(200, { valid: true, issues: [], policy: {} }) });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("c");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+  menu("a");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move down" }));
+  expect(screen.getByTestId("builder-status").textContent).toContain("Checking…");
+
+  await waitFor(() =>
+    expect(screen.getByTestId("builder-status").textContent).not.toContain("Checking…"),
+  );
+  expect(requested(fetch).filter((r) => r === VALIDATE)).toHaveLength(1);
+  const body = (await fetch.mock.calls
+    .find(([r]) => r.method === "POST")![0]
+    .clone()
+    .json()) as {
+    workflow: { root: { steps: { id: string }[] } };
+  };
+  expect(body.workflow.root.steps.map((s) => s.id)).toEqual(["c", "a", "l"]);
 });

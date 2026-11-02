@@ -8,13 +8,14 @@ import {
 } from "@/runs/graph/spec-graph";
 
 import type { NodeManifest } from "./node-types";
-import type { GraphOp } from "./ops";
+import { applyOps, type GraphOp } from "./ops";
+import { portMismatches, type Mismatch } from "./ports";
 
 /**
  * The builder's edits (5.2), each made of the graph operations that do it. An edit is one undo
  * step; Save sends every edit's ops as one batch. Any node can be edited, at any depth (5.5); an
  * edit never leaves a container empty or a parallel with one branch, which only the server's schema
- * check would refuse.
+ * check would refuse, and never makes a connection whose ports do not fit (5.6).
  */
 
 export interface Edit {
@@ -322,4 +323,25 @@ export function removeStep(nodeId: string): Edit {
 /** How many nodes go with `node` when it is removed, itself included. */
 export function subtreeSize(node: SpecNode): number {
   return allSpecNodes({ root: node } as WorkflowSpec).length;
+}
+
+const edgeKey = (m: Mismatch) => `${m.producer}>${m.consumer}`;
+
+/** The incompatible connections `edit` would make in `spec` that it does not have yet (5.6); none
+ * when it keeps or removes the ones it has, or does not apply. */
+export function newMismatches(spec: WorkflowSpec, edit: Edit): Mismatch[] {
+  let after: WorkflowSpec;
+  try {
+    after = applyOps(spec, edit.ops);
+  } catch {
+    return [];
+  }
+  const had = new Set(portMismatches(spec).map(edgeKey));
+  return portMismatches(after).filter((m) => !had.has(edgeKey(m)));
+}
+
+/** Why `edit` is not offered, as a sentence for its menu item: the first connection it would make
+ * whose ports do not fit; `null` when it may be made (or when there is no edit). */
+export function blockReason(spec: WorkflowSpec, edit: Edit | null): string | null {
+  return edit ? (newMismatches(spec, edit)[0]?.reason ?? null) : null;
 }

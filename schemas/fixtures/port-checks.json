@@ -1,0 +1,1110 @@
+{
+  "$comment": "Port checks the engine (`port_issues`, test_port_check_fixtures.py) and the builder's mirror (`@/workflows/ports`, ports.test.ts) both run: each case's spec must give `port_mismatch` issues on exactly these nodes, in run order (5.6).",
+  "cases": [
+    {
+      "name": "a typed pair that fits",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "a"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "a required property the producer does not declare",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c"
+      ]
+    },
+    {
+      "name": "a property declared with another top-level type",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "a"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c"
+      ]
+    },
+    {
+      "name": "an integer fits a number",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "n": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "n": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "n"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "a gate is looked through",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "gate",
+              "id": "g",
+              "title": "Approve g"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c"
+      ]
+    },
+    {
+      "name": "nested sequences are flattened",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "sequence",
+              "id": "s1",
+              "steps": [
+                {
+                  "type": "agent",
+                  "id": "x",
+                  "role": "x",
+                  "instructions": "Do x."
+                },
+                {
+                  "type": "agent",
+                  "id": "p",
+                  "role": "p",
+                  "instructions": "Do p.",
+                  "output_schema": {
+                    "type": "object",
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "sequence",
+              "id": "s2",
+              "steps": [
+                {
+                  "type": "agent",
+                  "id": "c",
+                  "role": "c",
+                  "instructions": "Do c.",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "b": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "b"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c"
+      ]
+    },
+    {
+      "name": "an untyped step between breaks the edge",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "m",
+              "role": "m",
+              "instructions": "Do m."
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "a container between breaks the edge, and its body has its own edges",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "until": "true",
+              "max_iterations": 2,
+              "body": {
+                "type": "sequence",
+                "id": "b",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "q",
+                    "role": "q",
+                    "instructions": "Do q.",
+                    "output_schema": {
+                      "type": "object",
+                      "properties": {
+                        "a": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "agent",
+                    "id": "r",
+                    "role": "r",
+                    "instructions": "Do r.",
+                    "input_schema": {
+                      "type": "object",
+                      "properties": {
+                        "b": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "b"
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "r"
+      ]
+    },
+    {
+      "name": "each parallel branch has its own edges",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "parallel",
+          "id": "par",
+          "join": "all",
+          "branches": [
+            {
+              "type": "sequence",
+              "id": "b1",
+              "steps": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1.",
+                  "output_schema": {
+                    "type": "object",
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "agent",
+                  "id": "c1",
+                  "role": "c1",
+                  "instructions": "Do c1.",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "a"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "sequence",
+              "id": "b2",
+              "steps": [
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2.",
+                  "output_schema": {
+                    "type": "object",
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "agent",
+                  "id": "c2",
+                  "role": "c2",
+                  "instructions": "Do c2.",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "b": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "b"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c2"
+      ]
+    },
+    {
+      "name": "a read takes its producer from the artifact's last writer",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "w",
+              "role": "w",
+              "instructions": "Do w.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              },
+              "writes": "a.json"
+            },
+            {
+              "type": "agent",
+              "id": "other",
+              "role": "other",
+              "instructions": "Do other.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              },
+              "reads": [
+                "a.json"
+              ]
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c"
+      ]
+    },
+    {
+      "name": "a read of two artifacts has no producer",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "w1",
+              "role": "w1",
+              "instructions": "Do w1.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              },
+              "writes": "a.json"
+            },
+            {
+              "type": "agent",
+              "id": "w2",
+              "role": "w2",
+              "instructions": "Do w2.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              },
+              "writes": "b.json"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              },
+              "reads": [
+                "a.json",
+                "b.json"
+              ]
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "a merging reduce outputs a findings report",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "map",
+              "id": "m",
+              "over": "input.items",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "scan",
+                "role": "scan",
+                "instructions": "Do scan.",
+                "output_schema": {
+                  "type": "object",
+                  "properties": {
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "dedupe"
+            },
+            {
+              "type": "agent",
+              "id": "ok",
+              "role": "ok",
+              "instructions": "Do ok.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "findings": {
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "findings"
+                ]
+              }
+            },
+            {
+              "type": "agent",
+              "id": "bad",
+              "role": "bad",
+              "instructions": "Do bad.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "findings": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "findings"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "a merging reduce feeds a consumer that wants another shape",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "map",
+              "id": "m",
+              "over": "input.items",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "scan",
+                "role": "scan",
+                "instructions": "Do scan.",
+                "output_schema": {
+                  "type": "object",
+                  "properties": {
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "dedupe"
+            },
+            {
+              "type": "agent",
+              "id": "bad",
+              "role": "bad",
+              "instructions": "Do bad.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "findings": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "findings"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "bad"
+      ]
+    },
+    {
+      "name": "a concat reduce has no typed output",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "map",
+              "id": "m",
+              "over": "input.items",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "scan",
+                "role": "scan",
+                "instructions": "Do scan.",
+                "output_schema": {
+                  "type": "object",
+                  "properties": {
+                    "a": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "concat"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "a merged source must output a findings array",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "parallel",
+              "id": "par",
+              "join": "all",
+              "branches": [
+                {
+                  "type": "sequence",
+                  "id": "b1",
+                  "steps": [
+                    {
+                      "type": "agent",
+                      "id": "good",
+                      "role": "good",
+                      "instructions": "Do good.",
+                      "output_schema": {
+                        "type": "object",
+                        "properties": {
+                          "findings": {
+                            "type": "array"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "gate",
+                      "id": "g1",
+                      "title": "Approve g1"
+                    }
+                  ]
+                },
+                {
+                  "type": "agent",
+                  "id": "nofindings",
+                  "role": "nofindings",
+                  "instructions": "Do nofindings.",
+                  "output_schema": {
+                    "type": "object",
+                    "properties": {
+                      "a": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "par",
+              "strategy": "vote"
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "nofindings"
+      ]
+    },
+    {
+      "name": "a schema whose root is not an object is skipped",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "array"
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "a schema with a remote $ref is skipped",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ],
+                "$defs": {
+                  "x": {
+                    "$ref": "https://example.com/x.json"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
+      "name": "issues come in run order",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c1",
+              "role": "c1",
+              "instructions": "Do c1.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              },
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c2",
+              "role": "c2",
+              "instructions": "Do c2.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "a"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c1",
+        "c2"
+      ]
+    }
+  ]
+}
