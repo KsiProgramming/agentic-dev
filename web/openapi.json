@@ -1917,7 +1917,7 @@
           "workflows"
         ],
         "summary": "Create",
-        "description": "Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It\nmust match the schema; its other issues (structure, run limits) are returned with it.",
+        "description": "Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It\nmust match the schema; its other issues (structure, run limits) are returned with it. With\n`template`, the spec is the one the template builds from its parameters.",
         "operationId": "createWorkflow",
         "parameters": [
           {
@@ -3065,19 +3065,34 @@
       "CreateWorkflowRequest": {
         "properties": {
           "spec": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "type": "object",
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Spec",
             "description": "The workflow spec, stored as version 1 under its `id`. It must match the schema; other issues are returned with it."
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemplateRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Instead of `spec`: a template (`GET /templates`) whose spec, built from `parameters` (its defaults when unset), is stored as version 1 (5.2)."
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "spec"
-        ],
         "title": "CreateWorkflowRequest"
       },
       "Disconnect": {
@@ -6304,6 +6319,18 @@
           "message": {
             "type": "string",
             "title": "Message"
+          },
+          "workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Id",
+            "description": "With `workflow_exists`: the workflow that already exists."
           },
           "latest_version": {
             "anyOf": [

@@ -2,11 +2,12 @@
 operations (5.1)."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from agentic_api.runs.models import TemplateRun
 from agentic_api.workspaces.models import RunLimits, budget_field
 from agentic_engine.spec import MAX_OPS, GraphOp, OpErrorCode, ValidationIssue
 
@@ -42,10 +43,24 @@ class ValidateWorkflowResponse(BaseModel):
 class CreateWorkflowRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    spec: dict[str, JsonValue] = Field(
+    spec: dict[str, JsonValue] | None = Field(
+        default=None,
         description="The workflow spec, stored as version 1 under its `id`. It must match the "
-        "schema; other issues are returned with it."
+        "schema; other issues are returned with it.",
     )
+    template: TemplateRun | None = Field(
+        default=None,
+        description="Instead of `spec`: a template (`GET /templates`) whose spec, built from "
+        "`parameters` (its defaults when unset), is stored as version 1 (5.2).",
+    )
+
+    @model_validator(mode="after")
+    def _one_spec(self) -> Self:
+        if (self.spec is None) == (self.template is None):
+            raise ValueError("give either `spec` or `template`")
+        if self.template is not None:
+            self.spec = self.template.build_spec().model_dump(mode="json", exclude_none=True)
+        return self
 
 
 class UpdateWorkflowRequest(BaseModel):
@@ -110,5 +125,8 @@ class WorkflowErrorDetail(BaseModel):
 
     code: Literal["workflow_exists", "version_conflict", "schema"]
     message: str
+    workflow_id: str | None = Field(
+        default=None, description="With `workflow_exists`: the workflow that already exists."
+    )
     latest_version: int | None = None
     issues: list[ValidationIssue] = Field(default_factory=list[ValidationIssue])

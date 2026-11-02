@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 5.2 builder canvas, edits as graph operations:
+  - **Builder.** `/workflows/[id]` draws a stored workflow as the run map's cards (the card tree is now one `SpecTree` shared by the run map and the builder, no React Flow). Each root step's menu adds an agent, tool or gate after it, moves it up or down, or removes it (confirmed); "Edit details" sets the name and description. Edits are graph operations kept in the page and drawn at once; Undo takes back the last, Discard all of them; Save sends them as one `PATCH /workflows/{id}`. After a `409` the edits are applied to the latest version and kept when they still apply; a refused batch is shown on the card it names. Leaving the page with unsaved edits asks first. Breadcrumbs read "Workflows › <id>".
+  - **Ops in the browser.** `@/workflows/ops` mirrors the engine's `apply_ops` for the preview; `schemas/fixtures/graph-ops.json` holds 43 shared cases that the engine (`test_graph_ops_fixtures.py`) and the web (`ops.test.ts`) both run.
+  - **API.** `POST /workflows` also takes `{template: {id, parameters}}`, storing the spec the template builds; `409 workflow_exists` now names the `workflow_id`.
+  - **Templates.** "Edit in builder" on each template card opens its workflow, storing it first if the workspace has none.
+  - **Fix.** The API's CORS policy now allows `PATCH`; a browser could not call `PATCH /workflows/{id}` (5.1), so the builder could not save.
 - Phase 5.1 graph operations and workflow versions ([#146](https://github.com/KsiProgramming/agentic-dev/pull/146)):
   - **Ops.** `agentic_engine.spec.ops`: `addNode`, `removeNode`, `connect`, `disconnect` and `setParam` over the spec's tree, nodes addressed by id, an edge being sequence order. `apply_ops` applies a batch all or nothing; a node may be detached inside a batch but not at its end. Errors name the code, the op's index and the node. JSON Schema in `schemas/graph-ops.v1.json`.
   - **Storage.** `workflows` and the append-only `workflow_versions` (Alembic `0024_workflows`, a trigger refuses updates and deletes); each version keeps its spec, the ops that made it and its base version.

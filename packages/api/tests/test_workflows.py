@@ -323,6 +323,7 @@ async def test_a_stale_base_version_is_a_conflict(client: AsyncClient, workspace
     assert response.json()["detail"] == {
         "code": "version_conflict",
         "message": "version 1 is not the latest (2); apply the ops to the latest version",
+        "workflow_id": None,
         "latest_version": 2,
         "issues": [],
     }
@@ -379,9 +380,50 @@ async def test_creating_a_workflow_twice_or_off_the_schema_is_refused(
 
     assert again.status_code == 409
     assert again.json()["detail"]["code"] == "workflow_exists"
+    assert again.json()["detail"]["workflow_id"] == "review-loop"
     assert off.status_code == 422
     assert off.json()["detail"]["code"] == "schema"
     assert where(off.json()["detail"]) == [("schema", "root.steps[1].title", "gate")]
+
+
+@pytest.mark.parametrize("template", ["generate-docs", "audit-codebase"])
+async def test_a_template_with_its_defaults_is_stored_as_version_1(
+    client: AsyncClient, workspace: UUID, template: str
+) -> None:
+    params = {"workspace_id": str(workspace)}
+
+    response = await client.post("/workflows", params=params, json={"template": {"id": template}})
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert (body["workflow_id"], body["version"]) == (body["spec"]["id"], 1)
+    assert not any(value is None for value in body["spec"]["root"].values())
+    again = await client.post("/workflows", params=params, json={"template": {"id": template}})
+    assert again.status_code == 409
+    assert again.json()["detail"]["workflow_id"] == body["workflow_id"]
+
+
+async def test_a_template_needs_known_id_valid_options_and_no_spec(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    params = {"workspace_id": str(workspace)}
+
+    responses = [
+        await client.post("/workflows", params=params, json={"template": {"id": "nope"}}),
+        await client.post(
+            "/workflows",
+            params=params,
+            json={"template": {"id": "audit-codebase", "parameters": {"reviewers": 9}}},
+        ),
+        await client.post(
+            "/workflows",
+            params=params,
+            json={"template": {"id": "generate-docs"}, "spec": spec_json("valid/review-loop.json")},
+        ),
+        await client.post("/workflows", params=params, json={}),
+    ]
+
+    assert [r.status_code for r in responses] == [422] * 4
 
 
 async def test_unknown_workflows_versions_and_workspaces_are_not_found(
