@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- `specs/ideas.md`: four ideas from testing 5.8 — workflows that work on several repos, publishing a stored workflow as a template, letting later agents read what earlier writers changed, and recovering runs lost between the queue and the worker.
+- `specs/ideas.md`: four ideas from testing 5.8 — workflows that work on several repos, publishing a stored workflow as a template, letting later agents read what earlier writers changed, and recovering runs lost between the queue and the worker ([#154](https://github.com/KsiProgramming/agentic-dev/pull/154)).
 - Phase 5.8 start screen v2: provider picker and "Blank canvas" ([#153](https://github.com/KsiProgramming/agentic-dev/pull/153)):
   - **Blank canvas.** The start screen (`/templates`, now titled "Start") opens with a Blank canvas card. Its sheet takes a name, an id (a slug of the name until edited), an optional description and the provider the first agent runs on. GitHub Copilot is listed but not available until the Copilot adapter ships. Create workflow opens the builder with the starter agent selected. `POST /workflows` takes `{blank: {name, id?, description?, provider?}}`.
   - **Workflows list.** `GET /workflows` and a `/workflows` page in the sidebar list the workspace's workflows by last change. The builder's "Workflows" breadcrumb links to it. The command palette has "New workflow".
