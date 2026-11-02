@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 5.6 live validation on canvas:
+- Phase 5.6 live validation on canvas ([#151](https://github.com/KsiProgramming/agentic-dev/pull/151)):
   - **Blocked connections.** In the builder, an edit that would make a connection whose typed ports do not fit (a move, a remove, a replace or an add that puts a consumer after a producer whose `output_schema` lacks what its `input_schema` requires) is disabled in its menu, with the reason under it. Edits that keep or remove existing mismatches stay allowed. The browser's check (`@/workflows/ports`) mirrors the engine's `port_mismatch`; `schemas/fixtures/port-checks.json` is run by both so they cannot drift.
   - **Live issues.** Unsaved edits are checked with `POST /workflows/{id}/validate` 400 ms after the last one. Each issue shows on its node's card and at the top of its side panel; the status line counts them and opens a list whose node ids select their card. A failed check says so, with Retry, and blocks nothing.
 - Phase 5.5 container nodes drawn with children inside ([#150](https://github.com/KsiProgramming/agentic-dev/pull/150)):
