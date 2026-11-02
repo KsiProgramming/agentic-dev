@@ -11,7 +11,13 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agentic_engine.expr import ROUTE_VARIABLES, ExpressionError, compile_condition, compile_list
-from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimit
+from agentic_engine.policy import (
+    BUDGET_MAX_USD,
+    BUDGET_MIN_USD,
+    PLATFORM_POLICY,
+    Policy,
+    PolicyLimit,
+)
 from agentic_engine.ports import schema_problem
 from agentic_runtime.findings import FindingsReport
 
@@ -1477,6 +1483,13 @@ class WorkflowSpec(_Base):
     id: NodeId
     name: NonEmptyStr
     description: str | None = None
+    budget_usd: float | None = Field(
+        default=None,
+        ge=BUDGET_MIN_USD,
+        le=BUDGET_MAX_USD,
+        description="USD a run of this workflow may spend, a hard stop once reached. A run's own "
+        "budget replaces it; unset, the workspace's default applies (or none).",
+    )
     root: Node
 
     @model_validator(mode="after")

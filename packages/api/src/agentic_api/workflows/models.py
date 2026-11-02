@@ -25,7 +25,8 @@ class ValidateWorkflowRequest(BaseModel):
         "workspace.",
     )
     budget_usd: float | None = budget_field(
-        "The budget a run would set. Unset: the workspace's default budget."
+        "The budget a run would set. Unset: the workflow's own `budget_usd`, else the workspace's "
+        "default budget."
     )
 
 

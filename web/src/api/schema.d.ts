@@ -66,9 +66,9 @@ export interface paths {
          *     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
          *     refused with `422`. So is one above the workspace's run limits (`GET
          *     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
-         *     created with. Its budget is `budget_usd`, else the workspace's default; with a budget, every
-         *     agent's model must have a price (`GET /workspaces/{id}/pricing`), or the run is refused the
-         *     same way.
+         *     created with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),
+         *     else the workspace's default; with a budget, every agent's model must have a price (`GET
+         *     /workspaces/{id}/pricing`), or the run is refused the same way.
          *
          *     With `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub
          *     App is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and
@@ -162,9 +162,9 @@ export interface paths {
          *     `run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is
          *     not changed. The spec is the one the original ran, even if its template has changed since;
          *     the limits are the workspace's as they are now, and a spec above them is refused with
-         *     `422`. The budget is `budget_usd` if given, else the workspace's default as it is now; the
-         *     original run's spend does not count. A run that created its repo is not rerun: the repo
-         *     exists now, so start a run on it instead.
+         *     `422`. The budget is `budget_usd` if given, else the workflow's own, else the workspace's
+         *     default as it is now; the original run's spend does not count. A run that created its repo
+         *     is not rerun: the repo exists now, so start a run on it instead.
          */
         post: operations["rerunRun"];
         delete?: never;
@@ -1420,6 +1420,13 @@ export interface components {
             fill?: {
                 [key: string]: components["schemas"]["Fill"];
             };
+            /**
+             * Ui
+             * @description How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, `orderable`).
+             */
+            ui?: {
+                [key: string]: unknown;
+            };
         };
         /** @enum {string} */
         NotEditable: "binary" | "too_large" | "deleted" | "renamed" | "over_limit";
@@ -2223,8 +2230,8 @@ export interface components {
         /**
          * SetParam
          * @description Set one parameter of a node, or of the document without `node_id` (`name`,
-         *     `description`). `null` unsets it. Ids, types and the slots that hold nodes change through the
-         *     other ops.
+         *     `description`, `budget_usd`). `null` unsets it. Ids, types and the slots that hold nodes
+         *     change through the other ops.
          */
         SetParam: {
             /**
@@ -2372,7 +2379,7 @@ export interface components {
             workspace_id?: string | null;
             /**
              * Budget Usd
-             * @description The budget a run would set. Unset: the workspace's default budget. From $0.01 to $1,000,000; unset is no budget.
+             * @description The budget a run would set. Unset: the workflow's own `budget_usd`, else the workspace's default budget. From $0.01 to $1,000,000; unset is no budget.
              */
             budget_usd?: number | null;
         };
@@ -2503,6 +2510,11 @@ export interface components {
             name: string;
             /** Description */
             description?: string | null;
+            /**
+             * Budget Usd
+             * @description USD a run of this workflow may spend, a hard stop once reached. A run's own budget replaces it; unset, the workspace's default applies (or none).
+             */
+            budget_usd?: number | null;
             /** Root */
             root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
         };

@@ -5,15 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkflowSpec } from "@/runs/graph/spec-graph";
 
-import {
-  addStep,
-  moveStep,
-  newNode,
-  removeStep,
-  rootSteps,
-  setDocument,
-  subtreeSize,
-} from "./edits";
+import { addStep, moveStep, newNode, removeStep, rootSteps, subtreeSize } from "./edits";
 import type { NodeManifest } from "./node-types";
 import { applyOps } from "./ops";
 
@@ -110,13 +102,5 @@ describe("builder edits", () => {
   it("removes a step with what is under it", () => {
     expect(ids(applyOps(SPEC, removeStep("l").ops))).toEqual(["a", "c"]);
     expect(subtreeSize(rootSteps(SPEC)[1])).toBe(2);
-  });
-
-  it("sets the name, and unsets an empty description", () => {
-    expect(applyOps(SPEC, setDocument("name", "New").ops).name).toBe("New");
-    const withDescription = { ...SPEC, description: "Old" };
-    expect(applyOps(withDescription, setDocument("description", " ").ops)).not.toHaveProperty(
-      "description",
-    );
   });
 });

@@ -178,6 +178,18 @@ async def test_the_workspace_default_budget_applies(
     assert [i["code"] for i in body["issues"]] == ["budget_unpriced_model"]
 
 
+async def test_the_workflow_budget_applies_unless_the_request_sets_one(
+    client: AsyncClient, workspace: UUID, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    await replace_policy_overrides(sessions, workspace, PolicyOverrides(budget_usd=Decimal("5")))
+    workflow = {**spec_json("valid/single-agent.json"), "budget_usd": 3}
+
+    own = await validate(client, workflow, workspace)
+    replaced = await validate(client, workflow, workspace, budget_usd=1)
+
+    assert (own["policy"]["budget_usd"], replaced["policy"]["budget_usd"]) == (3, 1)
+
+
 async def test_an_unknown_workspace_is_not_found(client: AsyncClient) -> None:
     response = await client.post(
         "/workflows/summarize-readme/validate",

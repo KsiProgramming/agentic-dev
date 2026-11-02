@@ -14,6 +14,9 @@ export interface Edit {
   /** What the edit did, for the undo button's label and the toast after a rebase. */
   label: string;
   ops: GraphOp[];
+  /** Edits with the same key in a row are one undo step: the later replaces the earlier (typing
+   * in one field of the side panel). */
+  key?: string;
 }
 
 type AddNode = components["schemas"]["AddNode"];
@@ -104,13 +107,6 @@ export function moveStep(
 
 export function removeStep(nodeId: string): Edit {
   return { label: `Remove ${nodeId}`, ops: [{ op: "removeNode", node_id: nodeId }] };
-}
-
-/** Set the workflow's `name` or `description`; an empty description unsets it. */
-export function setDocument(field: "name" | "description", value: string): Edit {
-  const label = field === "name" ? "Rename the workflow" : "Change the description";
-  const set = field === "description" && value.trim() === "" ? null : value;
-  return { label, ops: [{ op: "setParam", path: field, value: set }] };
 }
 
 /** How many nodes go with `node` when it is removed, itself included. */

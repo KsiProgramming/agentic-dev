@@ -5,7 +5,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, field_validator
 
-from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyOverrides
+from agentic_engine.policy import (
+    BUDGET_MAX_USD,
+    BUDGET_MIN_USD,
+    PLATFORM_POLICY,
+    Policy,
+    PolicyOverrides,
+)
 from agentic_github import installation_settings_url
 from agentic_runtime import ModelPrice
 from agentic_store import AuditAction, AuditEventRow, ConnectionInfo, WorkspaceInfo
@@ -185,10 +191,6 @@ class RunLimits(BaseModel):
     @classmethod
     def of(cls, policy: Policy) -> "RunLimits":
         return cls.model_validate(policy.model_dump())
-
-
-BUDGET_MIN_USD = 0.01
-BUDGET_MAX_USD = 1_000_000
 
 
 def budget_field(what: str) -> Any:

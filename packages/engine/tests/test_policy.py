@@ -2,6 +2,7 @@
 run cleanly with a reason (phase 3.2)."""
 
 import asyncio
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -18,6 +19,7 @@ from agentic_engine.policy import (
     PolicyOverrides,
     effective_policy,
     format_duration,
+    with_budget,
 )
 from agentic_engine.spec import (
     LoopNode,
@@ -106,6 +108,15 @@ def test_a_workspace_can_lower_a_limit_but_never_raise_it() -> None:
     assert lowered.agents_spawned == 10
     assert lowered.wall_time_s == PLATFORM_POLICY.wall_time_s
     assert lowered.agents_alive == PLATFORM_POLICY.agents_alive
+
+
+def test_a_run_budget_replaces_the_workflows_which_replaces_the_workspaces() -> None:
+    workspace = PLATFORM_POLICY.model_copy(update={"budget_usd": Decimal("5")})
+
+    assert with_budget(workspace, None).budget_usd == Decimal("5")
+    assert with_budget(workspace, None, 2.5).budget_usd == Decimal("2.5")
+    assert with_budget(workspace, Decimal("1"), 2.5).budget_usd == Decimal("1")
+    assert with_budget(PLATFORM_POLICY, None, None).budget_usd is None
 
 
 def test_a_limit_is_at_least_one() -> None:

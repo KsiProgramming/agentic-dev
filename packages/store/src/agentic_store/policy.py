@@ -9,7 +9,14 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_engine.policy import Policy, PolicyOverrides, effective_policy, with_budget
+from agentic_engine.policy import (
+    BUDGET_MAX_USD,
+    BUDGET_MIN_USD,
+    Policy,
+    PolicyOverrides,
+    effective_policy,
+    with_budget,
+)
 from agentic_engine.spec import (
     ValidationIssue,
     WorkflowSpec,
@@ -81,10 +88,11 @@ async def run_policy(
     budget_usd: Decimal | None = None,
 ) -> Policy:
     """The policy a new run of `spec` in the workspace gets, with the run's own `budget_usd` in
-    place of the workspace's if it set one. Raises `PolicyViolationError` if the spec is above
-    it, or if it has a budget and an agent's model has no price in the workspace (an agent with
-    no `model` runs on the platform's default)."""
-    policy = with_budget(effective_policy(await _overrides(session, workspace_id)), budget_usd)
+    place of the workspace's if it set one, else the spec's own `budget_usd`. Raises
+    `PolicyViolationError` if the spec is above it, or if it has a budget and an agent's model
+    has no price in the workspace (an agent with no `model` runs on the platform's default)."""
+    overrides = await _overrides(session, workspace_id)
+    policy = with_budget(effective_policy(overrides), budget_usd, spec.budget_usd)
     issues = policy_issues(spec.root, policy)
     if policy.budget_usd is not None:
         prices = await price_table(session, workspace_id)
@@ -102,18 +110,29 @@ async def check_workflow(
 ) -> tuple[Policy, list[ValidationIssue]]:
     """Why the decoded workflow document `raw` could not run in the workspace now
     (`validate_workflow`), with the policy a run of it would get: the workspace's, with
-    `budget_usd` in place of its budget if given. Writes nothing. Raises
+    `budget_usd` in place of its budget if given, else the document's own `budget_usd`. Writes
+    nothing. Raises
     `WorkspaceNotFoundError`."""
     async with sessions() as session:
         if await session.get(Workspace, workspace_id) is None:
             raise WorkspaceNotFoundError(workspace_id)
         overrides = await _overrides(session, workspace_id)
         prices = await price_table(session, workspace_id)
-    policy = with_budget(effective_policy(overrides), budget_usd)
+    policy = with_budget(effective_policy(overrides), budget_usd, _document_budget(raw))
     issues = validate_workflow(
         raw, policy=policy, priced=prices.__contains__, default_model=DEFAULT_MODEL
     )
     return policy, issues
+
+
+def _document_budget(raw: object) -> float | None:
+    """The `budget_usd` a decoded workflow document sets, if it is a number in range; a bad one is
+    left to `validate_workflow` to report."""
+    match raw:
+        case {"budget_usd": int() | float() as usd} if not isinstance(usd, bool):
+            return float(usd) if BUDGET_MIN_USD <= usd <= BUDGET_MAX_USD else None
+        case _:
+            return None
 
 
 async def active_seconds(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> float:

@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -240,3 +241,13 @@ def test_exported_schema_has_discriminated_node_union() -> None:
     parallel = schema["$defs"]["ParallelNode"]["properties"]
     assert (parallel["branches"]["minItems"], parallel["branches"]["maxItems"]) == (2, 8)
     assert parallel["join"]["enum"] == ["all", "any", "quorum", "settled"]
+
+
+def test_a_workflow_budget_is_optional_and_in_range() -> None:
+    spec = cast(dict[str, object], load(FIXTURES / "valid" / "single-agent.json"))
+
+    assert parse_spec(spec).budget_usd is None
+    assert parse_spec({**spec, "budget_usd": 2.5}).budget_usd == 2.5
+    for bad in (0, -1, 0.001, 2_000_000):
+        with pytest.raises(ValidationError):
+            WorkflowSpec.model_validate({**spec, "budget_usd": bad})

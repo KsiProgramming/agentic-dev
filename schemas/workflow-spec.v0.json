@@ -1071,6 +1071,21 @@
   "additionalProperties": false,
   "description": "A versioned workflow document with a single root node.",
   "properties": {
+    "budget_usd": {
+      "anyOf": [
+        {
+          "maximum": 1000000,
+          "minimum": 0.01,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "USD a run of this workflow may spend, a hard stop once reached. A run's own budget replaces it; unset, the workspace's default applies (or none).",
+      "title": "Budget Usd"
+    },
     "description": {
       "anyOf": [
         {
