@@ -406,3 +406,30 @@ test("a run's own budget is sent, and a budget the API refuses is shown on its f
   expect(((await post?.json()) as { budget_usd: number }).budget_usd).toBe(0.5);
   expect(navigation.push).not.toHaveBeenCalled();
 });
+
+test("Edit in builder stores the template as a workflow, or opens the one already stored", async () => {
+  const create = `POST /workflows?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+  const fetch = stubApi(
+    connected({ [create]: () => json(201, { workflow_id: "generate-docs", version: 1 }) }),
+  );
+  show();
+
+  const card = within(await screen.findByTestId("template-card"));
+  fireEvent.click(card.getByRole("button", { name: /Edit in builder/ }));
+
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/workflows/generate-docs"));
+  const body = (await fetch.mock.calls.find(([r]) => r.method === "POST")![0].json()) as unknown;
+  expect(body).toEqual({ template: { id: "generate-docs" } });
+
+  stubApi(
+    connected({
+      [create]: () =>
+        json(409, {
+          detail: { code: "workflow_exists", message: "exists", workflow_id: "generate-docs" },
+        }),
+    }),
+  );
+  navigation.push.mockReset();
+  fireEvent.click(card.getByRole("button", { name: /Edit in builder/ }));
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/workflows/generate-docs"));
+});

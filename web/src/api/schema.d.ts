@@ -596,7 +596,8 @@ export interface paths {
         /**
          * Create
          * @description Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It
-         *     must match the schema; its other issues (structure, run limits) are returned with it.
+         *     must match the schema; its other issues (structure, run limits) are returned with it. With
+         *     `template`, the spec is the one the template builds from its parameters.
          */
         post: operations["createWorkflow"];
         delete?: never;
@@ -1017,9 +1018,11 @@ export interface components {
              * Spec
              * @description The workflow spec, stored as version 1 under its `id`. It must match the schema; other issues are returned with it.
              */
-            spec: {
+            spec?: {
                 [key: string]: components["schemas"]["JsonValue"];
-            };
+            } | null;
+            /** @description Instead of `spec`: a template (`GET /templates`) whose spec, built from `parameters` (its defaults when unset), is stored as version 1 (5.2). */
+            template?: components["schemas"]["TemplateRun"] | null;
         };
         /**
          * Disconnect
@@ -2392,6 +2395,11 @@ export interface components {
             code: "workflow_exists" | "version_conflict" | "schema";
             /** Message */
             message: string;
+            /**
+             * Workflow Id
+             * @description With `workflow_exists`: the workflow that already exists.
+             */
+            workflow_id?: string | null;
             /** Latest Version */
             latest_version?: number | null;
             /** Issues */

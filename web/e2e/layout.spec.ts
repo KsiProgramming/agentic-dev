@@ -15,6 +15,7 @@ import {
   TYPED_WRITER,
   WRITER,
 } from "./runs";
+import { workflowFromTemplate } from "./workflows";
 
 /** Every page renders in the shell with no horizontal page scroll (roadmap 2.2), and the main
  * nav is reachable: full sidebar from 1280 px, icon rail from 1024 px, a drawer below that. */
@@ -99,6 +100,14 @@ test("templates", async ({ page }) => {
   await expect(page.getByTestId("template-card").first()).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0); // the gallery has loaded
   await checkPage(page, "templates");
+});
+
+test("workflow builder", async ({ page, request }) => {
+  const id = await workflowFromTemplate(request, "audit-codebase");
+  await page.goto(`/workflows/${id}`);
+  await expect(page.getByTestId("builder-node").first()).toBeVisible();
+  // The canvas scrolls inside its box, never the page.
+  await checkPage(page, "workflow-builder");
 });
 
 /** The sheet is a dialog over the page: it must fit the viewport too, and scroll inside. */

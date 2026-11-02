@@ -22,6 +22,8 @@ export function Breadcrumbs({ className }: { className?: string }) {
               <Link href={crumb.href} className="rounded-sm hover:text-foreground">
                 {crumb.label}
               </Link>
+            ) : i < crumbs.length - 1 ? (
+              <span className="shrink-0">{crumb.label}</span>
             ) : (
               <span
                 aria-current="page"

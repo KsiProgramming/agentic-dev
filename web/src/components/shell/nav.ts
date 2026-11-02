@@ -43,9 +43,20 @@ export interface Crumb {
 /** Ids longer than this are cut to their first 8 characters in breadcrumbs. */
 const LONG_SEGMENT = 12;
 
+/** Sections with pages but no list of their own, so not in the sidebar: their crumb is not a
+ * link (`Workflows › generate-docs`, 5.2). */
+const UNLISTED_SECTIONS: readonly { href: string; label: string }[] = [
+  { href: "/workflows", label: "Workflows" },
+];
+
 /** Breadcrumbs for a path: the section, then the item inside it, if any (`Runs › 1a2b3c4d`, or
  * `Settings › Integrations` for a settings sub-page). */
 export function breadcrumbsFor(pathname: string): Crumb[] {
+  const unlisted = UNLISTED_SECTIONS.find((item) => pathname.startsWith(`${item.href}/`));
+  if (unlisted) {
+    const segment = decodeURIComponent(pathname.slice(unlisted.href.length + 1).split("/")[0]);
+    return [{ label: unlisted.label }, { label: segment, mono: true }];
+  }
   const section = NAV_ITEMS.find((item) => isActive(pathname, item.href));
   if (!section) return [];
   const rest = pathname.slice(section.href.length + 1).split("/")[0];

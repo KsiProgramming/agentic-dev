@@ -5,6 +5,7 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   LayoutTemplateIcon,
+  PencilRulerIcon,
   PlayIcon,
 } from "lucide-react";
 
@@ -41,10 +42,14 @@ function TemplateCard({
   template,
   readiness,
   onStart,
+  onEdit,
+  editing,
 }: {
   template: Template;
   readiness: Readiness;
   onStart: (id: string) => void;
+  onEdit?: (id: string) => void;
+  editing: boolean;
 }) {
   const headingId = `template-${template.id}`;
   return (
@@ -74,24 +79,44 @@ function TemplateCard({
         ) : (
           <span />
         )}
-        <Button type="button" onClick={() => onStart(template.id)}>
-          <PlayIcon aria-hidden="true" data-icon="inline-start" />
-          Start
-          <span className="sr-only"> {template.name}</span>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {onEdit ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={editing}
+              onClick={() => onEdit(template.id)}
+            >
+              <PencilRulerIcon aria-hidden="true" data-icon="inline-start" />
+              {editing ? "Opening…" : "Edit in builder"}
+              <span className="sr-only"> {template.name}</span>
+            </Button>
+          ) : null}
+          <Button type="button" onClick={() => onStart(template.id)}>
+            <PlayIcon aria-hidden="true" data-icon="inline-start" />
+            Start
+            <span className="sr-only"> {template.name}</span>
+          </Button>
+        </div>
       </CardFooter>
     </Card>
   );
 }
 
-/** One card per template from `GET /templates`. Starting one opens the "New run" sheet. */
+/** One card per template from `GET /templates`. Starting one opens the "New run" sheet; editing
+ * one opens it as a stored workflow in the builder (5.2). */
 export function TemplateGallery({
   readiness,
   onStart,
+  onEdit,
+  editing = null,
   baseUrl,
 }: {
   readiness: Readiness;
   onStart: (id: string) => void;
+  onEdit?: (id: string) => void;
+  /** The template being opened in the builder. */
+  editing?: string | null;
   baseUrl?: string;
 }) {
   const templates = useTemplates({ baseUrl });
@@ -122,6 +147,8 @@ export function TemplateGallery({
           template={template}
           readiness={readiness}
           onStart={onStart}
+          onEdit={onEdit}
+          editing={editing === template.id}
         />
       ))}
     </div>

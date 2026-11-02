@@ -20,6 +20,13 @@ describe("breadcrumbsFor", () => {
     expect(breadcrumbsFor("/inbox")).toEqual([{ label: "Inbox" }]);
   });
 
+  test("a workflow sits under Workflows, which is not a link, with its id in full", () => {
+    expect(breadcrumbsFor("/workflows/audit-codebase")).toEqual([
+      { label: "Workflows" },
+      { label: "audit-codebase", mono: true },
+    ]);
+  });
+
   test("a run links back to Runs and shortens its id", () => {
     const id = "1a2b3c4d-0000-0000-0000-000000000000";
     expect(breadcrumbsFor(`/runs/${id}`)).toEqual([

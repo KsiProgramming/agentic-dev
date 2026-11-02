@@ -15,6 +15,7 @@ import {
   TYPED_WRITER,
   WRITER,
 } from "./runs";
+import { workflowFromTemplate } from "./workflows";
 
 /** WCAG 2.2 AA, as the mission's UI quality target asks. */
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -73,6 +74,13 @@ for (const colorScheme of ["light", "dark"] as const) {
       await open(page, "/templates?template=generate-docs");
       await page.getByRole("button", { name: "Add key" }).click();
       await expect(page.getByLabel("Claude API key")).toBeVisible();
+      await expectNoSeriousIssues(page);
+    });
+
+    test("the workflow builder has no serious a11y issues", async ({ page, request }) => {
+      const id = await workflowFromTemplate(request, "audit-codebase");
+      await open(page, `/workflows/${id}`);
+      await expect(page.getByTestId("builder-node").first()).toBeVisible();
       await expectNoSeriousIssues(page);
     });
 

@@ -56,7 +56,9 @@ async def create(
     body: CreateWorkflowRequest, request: Request, workspace_id: Workspace
 ) -> WorkflowVersionResponse:
     """Store a workflow spec as version 1 of the workflow its `id` names, in the workspace. It
-    must match the schema; its other issues (structure, run limits) are returned with it."""
+    must match the schema; its other issues (structure, run limits) are returned with it. With
+    `template`, the spec is the one the template builds from its parameters."""
+    assert body.spec is not None, "validated: built from the template if not given"
     if issues := schema_issues(body.spec):
         detail = WorkflowErrorDetail(
             code="schema", message="the spec does not match the schema", issues=issues
@@ -68,6 +70,7 @@ async def create(
         detail = WorkflowErrorDetail(
             code="workflow_exists",
             message=f"workflow {e} already exists; change it with PATCH /workflows/{e}",
+            workflow_id=str(e),
         )
         raise HTTPException(status.HTTP_409_CONFLICT, detail.model_dump()) from e
     return await _response(request, workspace_id, stored)
