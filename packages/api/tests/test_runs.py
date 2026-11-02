@@ -33,7 +33,7 @@ from agentic_api.settings import Settings
 from agentic_engine.events import RunEventLog
 from agentic_engine.graph import checkpoint_serde
 from agentic_engine.policy import PolicyOverrides, effective_policy
-from agentic_engine.spec import WorkflowSpec, parse_spec
+from agentic_engine.spec import AgentNode, SequenceNode, WorkflowSpec, parse_spec
 from agentic_runtime import AgentRuntime, Failed
 from agentic_runtime.fake import FakeRuntime
 from agentic_store import (
@@ -678,8 +678,11 @@ async def test_a_template_run_stores_the_spec_it_builds(
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ({**DOCS_RUN, "workflow": spec_json("valid/open-pr.json")}, "either `workflow` or"),
-        ({"repo": GITHUB_REPO}, "either `workflow` or `template`"),
+        (
+            {**DOCS_RUN, "workflow": spec_json("valid/open-pr.json")},
+            "one of `workflow`, `template`",
+        ),
+        ({"repo": GITHUB_REPO}, "one of `workflow`, `template` and `stored_workflow`"),
         ({**DOCS_RUN, "template": {"id": "nope"}}, "unknown template 'nope'"),
         (
             {**DOCS_RUN, "template": {"id": "generate-docs", "parameters": {"output_dir": "../x"}}},
@@ -1098,6 +1101,131 @@ async def test_a_workflow_run_has_no_template_parameters(
 
     row = await stored_row(sessions, run_id)
     assert (row.template_id, row.template_parameters) == (None, None)
+
+
+async def stored_workflow_workspace(
+    sessions: async_sessionmaker[AsyncSession], client: httpx.AsyncClient
+) -> UUID:
+    """A new workspace holding `draft-and-review` at version 2, whose writer is renamed."""
+    workspace_id = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=workspace_id, name="stored"))
+    params = {"workspace_id": str(workspace_id)}
+    created = await client.post(
+        "/workflows", params=params, json={"spec": spec_json("valid/two-step-sequence.json")}
+    )
+    assert created.status_code == 201, created.text
+    rename = {"op": "setParam", "node_id": "writer", "path": "role", "value": "Editor"}
+    patched = await client.patch(
+        "/workflows/draft-and-review", params=params, json={"base_version": 1, "ops": [rename]}
+    )
+    assert patched.status_code == 201, patched.text
+    return workspace_id
+
+
+def writer_role(row: Run) -> str:
+    root = parse_spec(row.spec).root
+    assert isinstance(root, SequenceNode) and isinstance(root.steps[0], AgentNode)
+    return root.steps[0].role
+
+
+async def test_a_stored_workflow_version_is_run_and_recorded(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        workspace_id = await stored_workflow_workspace(sessions, client)
+        older = await ended_run(
+            sessions,
+            client,
+            redis_url,
+            {
+                "stored_workflow": {"id": "draft-and-review", "version": 1},
+                "workspace_id": str(workspace_id),
+                "trigger": "manual",
+            },
+            "completed",
+        )
+        latest = await client.post(
+            "/runs",
+            json={
+                "stored_workflow": {"id": "draft-and-review"},
+                "workspace_id": str(workspace_id),
+            },
+        )
+        latest_id = latest.json()["run_id"]
+        await unqueue(redis_url, latest_id)
+        rerun = await client.post(f"/runs/{older}/rerun")
+        await unqueue(redis_url, rerun.json()["run_id"])
+        detail = (await client.get(f"/runs/{older}")).json()
+        listed = (await client.get("/runs", params={"workspace_id": str(workspace_id)})).json()
+
+    old_row = await stored_row(sessions, older)
+    assert (old_row.workflow_id, old_row.workflow_version) == ("draft-and-review", 1)
+    assert writer_role(old_row) == "Technical writer"
+    assert (old_row.trigger, old_row.template_id) == ("manual", None)
+    latest_row = await stored_row(sessions, latest_id)
+    assert latest_row.workflow_version == 2
+    assert writer_role(latest_row) == "Editor"
+    rerun_row = await stored_row(sessions, rerun.json()["run_id"])
+    assert (rerun_row.workflow_id, rerun_row.workflow_version) == ("draft-and-review", 1)
+    assert detail["workflow"] == {
+        "id": "draft-and-review",
+        "name": "Draft and review",
+        "version": 1,
+    }
+    assert [item["workflow"]["version"] for item in listed["items"]] == [1, 2, 1]
+
+
+async def test_a_stored_workflow_run_is_refused_when_unknown_or_ambiguous(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        workspace_id = await stored_workflow_workspace(sessions, client)
+        before = await count_runs(sessions)
+        ws = {"workspace_id": str(workspace_id)}
+        responses = [
+            await client.post("/runs", json={"stored_workflow": {"id": "nope"}, **ws}),
+            await client.post(
+                "/runs", json={"stored_workflow": {"id": "draft-and-review", "version": 9}, **ws}
+            ),
+            await client.post(
+                "/runs",
+                json={
+                    "stored_workflow": {"id": "draft-and-review"},
+                    "workflow": spec_json("valid/two-step-sequence.json"),
+                    **ws,
+                },
+            ),
+            await client.post("/runs", json={"stored_workflow": {"id": "draft-and-review"}}),
+        ]
+
+    assert [r.status_code for r in responses] == [404, 404, 422, 404]
+    assert responses[1].json()["detail"] == "workflow draft-and-review has no version 9"
+    assert await count_runs(sessions) == before
+
+
+async def test_a_stored_version_with_issues_is_not_run(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        workspace_id = await stored_workflow_workspace(sessions, client)
+        params = {"workspace_id": str(workspace_id)}
+        unknown_tool = {"op": "setParam", "node_id": "writer", "path": "tools", "value": ["nope"]}
+        patched = await client.patch(
+            "/workflows/draft-and-review",
+            params=params,
+            json={"base_version": 2, "ops": [unknown_tool]},
+        )
+        assert patched.status_code == 201, patched.text
+        assert patched.json()["valid"] is False
+        before = await count_runs(sessions)
+        response = await client.post(
+            "/runs", json={"stored_workflow": {"id": "draft-and-review"}, **params}
+        )
+
+    assert response.status_code == 422, response.text
+    assert "version 3 of workflow draft-and-review cannot run" in response.json()["detail"]
+    assert await count_runs(sessions) == before
 
 
 async def policy_workspace(

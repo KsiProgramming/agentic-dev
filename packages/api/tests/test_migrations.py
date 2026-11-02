@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0024_workflows"
+    assert version == "0025_workflow_restore"
     assert {
         "runs",
         "run_events",
@@ -67,6 +67,17 @@ async def test_the_run_repo_revision_downgrades_and_upgrades(postgres_url: str) 
     assert "repo" not in await run_columns(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
     assert "repo" in await run_columns(postgres_url)
+
+
+async def test_the_workflow_version_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+
+    await asyncio.to_thread(command.downgrade, config, "0024_workflows")
+    assert not {"workflow_id", "workflow_version"} & await run_columns(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert {"workflow_id", "workflow_version"} <= await run_columns(postgres_url)
 
 
 async def run_columns(postgres_url: str) -> set[str]:

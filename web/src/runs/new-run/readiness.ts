@@ -1,6 +1,7 @@
 "use client";
 
 import { useConnections, useRepos, type Repo, type Requirement } from "@/api/queries";
+import { allSpecNodes, type WorkflowSpec } from "@/runs/graph/spec-graph";
 
 /** Whether one connection a template needs is there. `attention`: it was, but the GitHub App was
  * uninstalled or lost access. */
@@ -69,3 +70,20 @@ export const REQUIREMENT_LABEL: Record<Requirement, string> = {
   claude: "Claude",
   github: "GitHub",
 };
+
+/** Tools that work on the run's repo, so a run of a node naming one needs GitHub (the engine's
+ * `REPO_TOOL_PREFIXES`). */
+const REPO_TOOL_PREFIXES = ["repo.", "github.", "scan."];
+
+/** The connections a stored workflow needs to run (5.7): Claude for its agents, GitHub when a
+ * tool works on the repo. */
+export function workflowRequires(spec: WorkflowSpec): Requirement[] {
+  const nodes = allSpecNodes(spec);
+  const tools = nodes.flatMap((n) =>
+    n.type === "agent" ? (n.tools ?? []) : n.type === "tool" ? [n.tool] : [],
+  );
+  const requires: Requirement[] = [];
+  if (nodes.some((n) => n.type === "agent")) requires.push("claude");
+  if (tools.some((t) => REPO_TOOL_PREFIXES.some((p) => t.startsWith(p)))) requires.push("github");
+  return requires;
+}

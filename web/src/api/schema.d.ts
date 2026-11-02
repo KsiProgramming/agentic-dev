@@ -61,8 +61,9 @@ export interface paths {
         put?: never;
         /**
          * Create
-         * @description Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first
-         *     node, working on `repo` if given. Stream it from `events_url`. A workflow that publishes
+         * @description Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored
+         *     workflow (`stored_workflow`, which the run records), with `input` for its first node,
+         *     working on `repo` if given. Stream it from `events_url`. A workflow that publishes
          *     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
          *     refused with `422`. So is one above the workspace's run limits (`GET
          *     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
@@ -653,6 +654,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore
+         * @description Store the spec of the older version `version` as the next version, `restored_from` it.
+         *     `base_version` must be the latest, as for `PATCH`; no version changes or goes. Its issues are
+         *     returned with it.
+         */
+        post: operations["restoreWorkflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}/validate": {
         parameters: {
             query?: never;
@@ -863,7 +886,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -988,10 +1011,12 @@ export interface components {
         };
         /** CreateRunRequest */
         CreateRunRequest: {
-            /** @description The workflow to run. Give this or `template`, not both. */
+            /** @description The workflow to run. Give this, `template` or `stored_workflow`, only one. */
             workflow?: components["schemas"]["WorkflowSpec"] | null;
-            /** @description A template to build the workflow from. Give this or `workflow`, not both. */
+            /** @description A template to build the workflow from. Give this, `workflow` or `stored_workflow`, only one. */
             template?: components["schemas"]["TemplateRun"] | null;
+            /** @description A version of a stored workflow of the workspace to run; the run records it. Give this, `workflow` or `template`, only one. */
+            stored_workflow?: components["schemas"]["StoredWorkflowRun"] | null;
             /**
              * Input
              * @default
@@ -1670,6 +1695,19 @@ export interface components {
              */
             budget_usd?: number | null;
         };
+        /** RestoreWorkflowRequest */
+        RestoreWorkflowRequest: {
+            /**
+             * Base Version
+             * @description The latest version, as the client knows it.
+             */
+            base_version: number;
+            /**
+             * Version
+             * @description The older version whose spec becomes the latest.
+             */
+            version: number;
+        };
         /**
          * Route
          * @description One way a router can go: `then` runs when this route is chosen.
@@ -2261,6 +2299,22 @@ export interface components {
              */
             return_to?: string | null;
         };
+        /**
+         * StoredWorkflowRun
+         * @description A stored workflow (`POST /workflows`) to run, at one of its versions (5.7).
+         */
+        StoredWorkflowRun: {
+            /**
+             * Id
+             * @description The workflow's id in the run's workspace.
+             */
+            id: string;
+            /**
+             * Version
+             * @description Default: the latest.
+             */
+            version?: number | null;
+        };
         /** TemplateOut */
         TemplateOut: {
             /** Id */
@@ -2467,14 +2521,15 @@ export interface components {
          * WorkflowErrorDetail
          * @description The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`
          *     (`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does
-         *     not match the schema, with its `issues`).
+         *     not match the schema, with its `issues`), `already_latest` (a restore of the latest
+         *     version).
          */
         WorkflowErrorDetail: {
             /**
              * Code
              * @enum {string}
              */
-            code: "workflow_exists" | "version_conflict" | "schema";
+            code: "workflow_exists" | "version_conflict" | "schema" | "already_latest";
             /** Message */
             message: string;
             /**
@@ -2493,6 +2548,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /**
+             * Version
+             * @description The version of the stored workflow `id` the run was started from (5.7); `null` for a run of a template or of a spec sent with it.
+             */
+            version?: number | null;
         };
         /**
          * WorkflowSpec
@@ -2531,9 +2591,14 @@ export interface components {
             created_at: string;
             /**
              * Op Count
-             * @description Graph operations that made it; 0 for version 1.
+             * @description Graph operations that made it; 0 for version 1 and a restore.
              */
             op_count: number;
+            /**
+             * Restored From
+             * @description The version a restore copied, if one did.
+             */
+            restored_from: number | null;
         };
         /**
          * WorkflowVersionResponse
@@ -2560,9 +2625,14 @@ export interface components {
             };
             /**
              * Ops
-             * @description The graph operations that made it from `base_version`; unset for 1.
+             * @description The graph operations that made it from `base_version`; unset for 1 and for a restore.
              */
             ops: components["schemas"]["JsonValue"][] | null;
+            /**
+             * Restored From
+             * @description The version a restore copied; unset unless a restore made it.
+             */
+            restored_from: number | null;
             /**
              * Valid
              * @description Whether it could run in the workspace now.
@@ -2783,7 +2853,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreateRunResponse"];
                 };
             };
-            /** @description No workspace with this id */
+            /** @description No workspace with this id, or no such stored workflow or version */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3640,7 +3710,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -4119,6 +4189,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restoreWorkflow: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowVersionResponse"];
+                };
+            };
+            /** @description No such workspace, workflow or version */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `version_conflict` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowErrorDetail"];
+                };
+            };
+            /** @description `already_latest` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowErrorDetail"];
                 };
             };
         };

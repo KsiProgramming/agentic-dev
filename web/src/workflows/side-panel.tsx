@@ -12,9 +12,11 @@ import { Button } from "@/components/ui/button";
 import { isKnownKind, KindIcon, kindLabel } from "@/runs/graph/node-kinds";
 import type { NodeKind, SpecNode, WorkflowSpec } from "@/runs/graph/spec-graph";
 
+import type { ValueChange } from "./diff";
 import type { Edit } from "./edits";
 import { formDefaults } from "./form/theme";
 import { ManifestIcon, type NodeManifest } from "./node-types";
+import { ValueChanges } from "./history";
 import { documentParams, nodeParams, paramEdit, sameParams, type Schema } from "./params";
 
 /**
@@ -38,12 +40,15 @@ function ParamForm({
   schema,
   ui,
   values,
+  readOnly = false,
   onChange,
 }: {
   idPrefix: string;
   schema: Schema;
   ui: UiSchema;
   values: Json;
+  /** An older version (5.7): shown, not edited. */
+  readOnly?: boolean;
   onChange: (next: Json) => void;
 }) {
   const [draft, setDraft] = useState(values);
@@ -65,6 +70,7 @@ function ParamForm({
       schema={schema as RJSFSchema}
       uiSchema={{ ...GLOBAL_UI, ...ui }}
       formData={draft}
+      readonly={readOnly}
       validator={validator}
       className="flex flex-col gap-4"
       onChange={(event: IChangeEvent<Json>) => {
@@ -108,6 +114,28 @@ function PanelHeader({
   );
 }
 
+/** What changed in a node or the workflow since the version compared with (5.7). */
+function ChangedSince({ changes, compared }: { changes: ValueChange[]; compared: number }) {
+  return (
+    <section
+      aria-label={`Changed since version ${compared}`}
+      data-testid="panel-changes"
+      className="flex flex-col gap-2 rounded-md border bg-surface-subtle p-3"
+    >
+      <h3 className="text-caption font-medium text-muted-foreground">
+        Changed since version {compared}
+      </h3>
+      <ValueChanges changes={changes} />
+    </section>
+  );
+}
+
+/** The values that changed since the version compared with, and its number. */
+export interface PanelChanges {
+  changes: ValueChange[];
+  compared: number;
+}
+
 /** The selected node's parameters. */
 export function NodePanel({
   node,
@@ -117,6 +145,8 @@ export function NodePanel({
   retry,
   refusal,
   issues = [],
+  changes = null,
+  readOnly = false,
   onEdit,
   onClose,
 }: {
@@ -129,6 +159,8 @@ export function NodePanel({
   refusal: string | null;
   /** What keeps this node from running, as the live check found it (5.6). */
   issues?: string[];
+  changes?: PanelChanges | null;
+  readOnly?: boolean;
   onEdit: (edit: Edit) => void;
   onClose?: () => void;
 }) {
@@ -161,6 +193,7 @@ export function NodePanel({
         schema={schema}
         ui={(manifest.ui ?? {}) as UiSchema}
         values={values}
+        readOnly={readOnly}
         onChange={(next) => {
           const edit = paramEdit(node.id, values, next, schema);
           if (edit) onEdit(edit);
@@ -199,6 +232,7 @@ export function NodePanel({
             ))}
           </ul>
         ) : null}
+        {changes && changes.changes.length > 0 ? <ChangedSince {...changes} /> : null}
         {body}
       </div>
     </div>
@@ -231,10 +265,14 @@ const DOCUMENT_UI: UiSchema = {
 /** The workflow's own fields: name, description and budget. */
 export function WorkflowPanel({
   spec,
+  changes = null,
+  readOnly = false,
   onEdit,
   onClose,
 }: {
   spec: WorkflowSpec;
+  changes?: PanelChanges | null;
+  readOnly?: boolean;
   onEdit: (edit: Edit) => void;
   onClose?: () => void;
 }) {
@@ -244,15 +282,21 @@ export function WorkflowPanel({
       <PanelHeader
         icon={<SlidersHorizontalIcon aria-hidden="true" className="size-4" />}
         title="Workflow"
-        description="Select a step to edit its parameters."
+        description={
+          readOnly
+            ? "Select a step to see its parameters."
+            : "Select a step to edit its parameters."
+        }
         onClose={onClose}
       />
       <div className="@container flex flex-col gap-4 overflow-y-auto p-4">
+        {changes && changes.changes.length > 0 ? <ChangedSince {...changes} /> : null}
         <ParamForm
           idPrefix="workflow"
           schema={DOCUMENT_SCHEMA}
           ui={DOCUMENT_UI}
           values={values}
+          readOnly={readOnly}
           onChange={(next) => {
             const edit = paramEdit(null, values, next, DOCUMENT_SCHEMA);
             if (edit) onEdit(edit);

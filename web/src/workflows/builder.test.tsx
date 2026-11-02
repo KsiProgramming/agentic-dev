@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { json, renderWithQueries, requested, stubApi, type Routes } from "@/testing/api";
 import { DEFAULT_WORKSPACE_ID } from "@/workspace";
@@ -20,12 +20,30 @@ vi.mock("@/api/client", async (original) => ({
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
+const navigation = vi.hoisted(() => ({
+  search: new URLSearchParams(),
+  replace: vi.fn(),
+  push: vi.fn(),
+}));
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => navigation.search,
+  useRouter: () => ({ replace: navigation.replace, push: navigation.push }),
+}));
+
+beforeEach(() => {
+  navigation.search = new URLSearchParams();
+  navigation.replace.mockReset();
+  navigation.push.mockReset();
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   Object.values(toast).forEach((f) => f.mockReset());
 });
 
 const PATH = `/workflows/flow?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+const VERSIONS = `GET /workflows/flow/versions?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+const versionPath = (n: number) => `GET ${PATH}&version=${n}`;
 // The engine's manifests, as `GET /node-types` answers them (`scripts/export_workflow_schema.py`).
 const NODE_TYPES = JSON.parse(
   readFileSync(resolve(__dirname, "../../../schemas/fixtures/node-types.json"), "utf8"),
@@ -67,8 +85,21 @@ function version(n: number, spec: object = SPEC): WorkflowVersion {
     created_at: "2026-11-02T10:00:00Z",
     spec: spec as WorkflowVersion["spec"],
     ops: null,
+    restored_from: n === 3 ? 1 : null,
     valid: true,
     issues: [],
+  };
+}
+
+/** A row of the history, as `GET /workflows/{id}/versions` answers it. */
+function item(n: number, extra: object = {}) {
+  return {
+    version: n,
+    base_version: n > 1 ? n - 1 : null,
+    created_at: "2026-11-02T10:00:00Z",
+    op_count: n > 1 ? 2 : 0,
+    restored_from: null,
+    ...extra,
   };
 }
 
@@ -76,6 +107,7 @@ function show(routes: Routes) {
   const fetch = stubApi({
     [`GET ${PATH}`]: () => json(200, version(1)),
     "GET /node-types": () => json(200, NODE_TYPES),
+    [VERSIONS]: () => json(200, { items: [item(1)] }),
     ...routes,
   });
   renderWithQueries(<WorkflowBuilder workflowId="flow" />);
@@ -654,4 +686,190 @@ test("quick edits are checked once, after the last", async () => {
     workflow: { root: { steps: { id: string }[] } };
   };
   expect(body.workflow.root.steps.map((s) => s.id)).toEqual(["c", "a", "l"]);
+});
+
+/** The spec at version 2: `a` reworded, `c` gone, `d` added. */
+const SPEC_2 = {
+  ...SPEC,
+  root: {
+    ...SPEC.root,
+    steps: [{ ...agent("a"), instructions: "Plan it." }, SPEC.root.steps[1], agent("d")],
+  },
+};
+
+const HISTORY = {
+  [`GET ${PATH}`]: () => json(200, version(2, SPEC_2)),
+  [versionPath(1)]: () => json(200, version(1)),
+  [VERSIONS]: () => json(200, { items: [item(2), item(1)] }),
+};
+
+test("the history lists every version, and opens one", async () => {
+  show({
+    [`GET ${PATH}`]: () => json(200, version(3)),
+    [VERSIONS]: () =>
+      json(200, { items: [item(3, { restored_from: 1, op_count: 0 }), item(2), item(1)] }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+
+  const list = within(await screen.findByTestId("version-list"));
+  const links = list.getAllByRole("link");
+  expect(links.map((l) => l.getAttribute("href"))).toEqual([
+    "/workflows/flow",
+    "/workflows/flow?version=2",
+    "/workflows/flow?version=1",
+  ]);
+  expect(links[0].textContent).toContain("Latest");
+  expect(links[0].textContent).toContain("Restored from version 1");
+  expect(links[0].getAttribute("aria-current")).toBe("page");
+  expect(links[1].textContent).toContain("2 changes");
+  expect(links[2].textContent).toContain("Created");
+});
+
+test("leaving unsaved edits for another version asks first", async () => {
+  show(HISTORY);
+  await screen.findByRole("heading", { name: "Flow" });
+  menu("d");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "History" }));
+  fireEvent.click(within(await screen.findByTestId("version-list")).getAllByRole("link")[1]);
+
+  const dialog = within(await screen.findByRole("alertdialog"));
+  expect(dialog.getByText("Leave unsaved changes?")).toBeDefined();
+  expect(navigation.push).not.toHaveBeenCalled();
+  fireEvent.click(dialog.getByRole("button", { name: "Leave" }));
+  expect(navigation.push).toHaveBeenCalledWith("/workflows/flow?version=1");
+});
+
+test("an older version is read-only, with Restore, Run and Back to latest", async () => {
+  navigation.search = new URLSearchParams({ version: "1" });
+  show(HISTORY);
+
+  await screen.findByRole("heading", { name: "Flow" });
+  expect(cards()).toEqual(["a", "l", "inner", "c"]);
+  expect(screen.getByTestId("builder-status").textContent).toContain("Version 1 of 2 · read-only");
+  expect(screen.queryByRole("button", { name: "Edit step a" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Back to latest" }).getAttribute("href")).toBe(
+    "/workflows/flow",
+  );
+  expect(screen.getByRole("button", { name: "Run this version" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Show parameters of a" }));
+  const panel = await screen.findByTestId("node-panel");
+  expect(within(panel).getByLabelText("Instructions")).toHaveProperty("readOnly", true);
+});
+
+test("restoring an older version makes it the latest and opens it", async () => {
+  navigation.search = new URLSearchParams({ version: "1" });
+  const fetch = show({
+    ...HISTORY,
+    [`POST /workflows/flow/restore?workspace_id=${DEFAULT_WORKSPACE_ID}`]: () =>
+      json(201, version(3)),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
+  const dialog = within(await screen.findByRole("alertdialog"));
+  expect(dialog.getByText("Restore version 1?")).toBeDefined();
+  expect(dialog.getByText(/It becomes version 3/).textContent).toContain("Version 2 is kept.");
+  fireEvent.click(dialog.getByRole("button", { name: "Restore" }));
+
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/workflows/flow"));
+  expect(toast.success).toHaveBeenCalledWith("Restored version 1 as version 3.");
+  const post = fetch.mock.calls.find(([r]) => r.url.includes("/restore"))![0];
+  expect(await post.clone().json()).toEqual({ base_version: 2, version: 1 });
+});
+
+test("a restore refused for a newer version says so in its dialog", async () => {
+  navigation.search = new URLSearchParams({ version: "1" });
+  show({
+    ...HISTORY,
+    [`POST /workflows/flow/restore?workspace_id=${DEFAULT_WORKSPACE_ID}`]: () =>
+      json(409, {
+        detail: { code: "version_conflict", message: "stale", latest_version: 3 },
+      }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
+  const dialog = within(await screen.findByRole("alertdialog"));
+  fireEvent.click(dialog.getByRole("button", { name: "Restore" }));
+
+  expect((await dialog.findByRole("alert")).textContent).toContain(
+    "Someone saved a newer version meanwhile.",
+  );
+  expect(navigation.push).not.toHaveBeenCalled();
+});
+
+test("comparing marks changed and added cards, and lists what was removed", async () => {
+  navigation.search = new URLSearchParams({ compare: "1" });
+  show(HISTORY);
+  await screen.findByRole("heading", { name: "Flow" });
+
+  const mark = (id: string) =>
+    within(screen.getAllByTestId("builder-node").find((c) => c.dataset.node === id)!).queryByTestId(
+      "diff-badge",
+    )?.textContent;
+  await waitFor(() => expect(mark("a")).toBe("Changed"));
+  expect(mark("d")).toBe("Added");
+  expect(mark("l")).toBeUndefined();
+  expect(screen.getByLabelText("Compare with")).toHaveProperty("value", "1");
+
+  const summary = screen.getByTestId("diff-summary");
+  expect(summary.textContent).toContain("1 added · 1 changed · 1 removed");
+  fireEvent.click(summary);
+  const list = within(await screen.findByTestId("change-list"));
+  expect(list.getByRole("list", { name: "Removed steps" }).textContent).toContain("c");
+  fireEvent.click(list.getByRole("button", { name: "a" }));
+
+  const changes = within(await screen.findByTestId("panel-changes"));
+  expect(changes.getByText("instructions")).toBeDefined();
+  expect(changes.getByText("Do a.")).toBeDefined();
+  expect(changes.getByText("Plan it.")).toBeDefined();
+
+  fireEvent.change(screen.getByLabelText("Compare with"), { target: { value: "" } });
+  expect(navigation.replace).toHaveBeenCalledWith("/workflows/flow");
+});
+
+test("Run waits for unsaved edits to be saved and issues to be fixed", async () => {
+  show({
+    [`GET ${PATH}`]: () =>
+      json(200, {
+        ...version(1),
+        valid: false,
+        issues: [{ code: "policy_limit", path: "root", node_id: null, message: "Too many." }],
+      }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+  const run = screen.getByRole("button", { name: "Run" });
+  expect(run).toHaveProperty("disabled", true);
+  expect(document.getElementById(run.getAttribute("aria-describedby")!)?.textContent).toBe(
+    "Fix the issue first.",
+  );
+});
+
+test("Run opens the run sheet for the version shown, and waits for a save", async () => {
+  show({
+    [`GET /workspaces/${DEFAULT_WORKSPACE_ID}/connections`]: () => json(200, []),
+    [VALIDATE]: () => json(200, { valid: true, issues: [], policy: {} }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  const sheet = within(await screen.findByTestId("workflow-run-sheet"));
+  expect(sheet.getByRole("heading", { name: "New run: Flow" })).toBeDefined();
+  fireEvent.click(sheet.getByRole("button", { name: "Cancel" }));
+
+  menu("c");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+  const run = screen.getByRole("button", { name: "Run" });
+  expect(run).toHaveProperty("disabled", true);
+  expect(document.getElementById(run.getAttribute("aria-describedby")!)?.textContent).toBe(
+    "Save your changes first.",
+  );
 });

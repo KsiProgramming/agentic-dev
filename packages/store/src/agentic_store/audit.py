@@ -30,6 +30,7 @@ AuditAction = Literal[
     "pricing.updated",
     "workflow.created",
     "workflow.updated",
+    "workflow.restored",
 ]
 AUDIT_ACTIONS: Final[tuple[AuditAction, ...]] = get_args(AuditAction)
 

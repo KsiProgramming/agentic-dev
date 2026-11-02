@@ -218,7 +218,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first\nnode, working on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.",
+        "description": "Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored\nworkflow (`stored_workflow`, which the run records), with `input` for its first node,\nworking on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -242,7 +242,7 @@
             }
           },
           "404": {
-            "description": "No workspace with this id"
+            "description": "No workspace with this id, or no such stored workflow or version"
           },
           "409": {
             "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`."
@@ -1461,7 +1461,8 @@
                       "policy.updated",
                       "pricing.updated",
                       "workflow.created",
-                      "workflow.updated"
+                      "workflow.updated",
+                      "workflow.restored"
                     ],
                     "type": "string"
                   }
@@ -2219,6 +2220,91 @@
         }
       }
     },
+    "/workflows/{workflow_id}/restore": {
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Restore",
+        "description": "Store the spec of the older version `version` as the next version, `restored_from` it.\n`base_version` must be the latest, as for `PATCH`; no version changes or goes. Its issues are\nreturned with it.",
+        "operationId": "restoreWorkflow",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowVersionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, workflow or version"
+          },
+          "409": {
+            "description": "`version_conflict`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`already_latest`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflows/{workflow_id}/validate": {
       "post": {
         "tags": [
@@ -2685,7 +2771,8 @@
               "policy.updated",
               "pricing.updated",
               "workflow.created",
-              "workflow.updated"
+              "workflow.updated",
+              "workflow.restored"
             ],
             "title": "Action"
           },
@@ -2989,7 +3076,7 @@
                 "type": "null"
               }
             ],
-            "description": "The workflow to run. Give this or `template`, not both."
+            "description": "The workflow to run. Give this, `template` or `stored_workflow`, only one."
           },
           "template": {
             "anyOf": [
@@ -3000,7 +3087,18 @@
                 "type": "null"
               }
             ],
-            "description": "A template to build the workflow from. Give this or `workflow`, not both."
+            "description": "A template to build the workflow from. Give this, `workflow` or `stored_workflow`, only one."
+          },
+          "stored_workflow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredWorkflowRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A version of a stored workflow of the workspace to run; the run records it. Give this, `workflow` or `template`, only one."
           },
           "input": {
             "type": "string",
@@ -4605,6 +4703,29 @@
         "type": "object",
         "title": "RerunRequest"
       },
+      "RestoreWorkflowRequest": {
+        "properties": {
+          "base_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Base Version",
+            "description": "The latest version, as the client knows it."
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version",
+            "description": "The older version whose spec becomes the latest."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "base_version",
+          "version"
+        ],
+        "title": "RestoreWorkflowRequest"
+      },
       "Route": {
         "properties": {
           "id": {
@@ -5952,6 +6073,35 @@
         "type": "object",
         "title": "StartInstall"
       },
+      "StoredWorkflowRun": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The workflow's id in the run's workspace."
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Default: the latest."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "StoredWorkflowRun",
+        "description": "A stored workflow (`POST /workflows`) to run, at one of its versions (5.7)."
+      },
       "TemplateOut": {
         "properties": {
           "id": {
@@ -6424,7 +6574,8 @@
             "enum": [
               "workflow_exists",
               "version_conflict",
-              "schema"
+              "schema",
+              "already_latest"
             ],
             "title": "Code"
           },
@@ -6469,7 +6620,7 @@
           "message"
         ],
         "title": "WorkflowErrorDetail",
-        "description": "The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`\n(`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does\nnot match the schema, with its `issues`)."
+        "description": "The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`\n(`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does\nnot match the schema, with its `issues`), `already_latest` (a restore of the latest\nversion)."
       },
       "WorkflowRef": {
         "properties": {
@@ -6480,6 +6631,18 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "The version of the stored workflow `id` the run was started from (5.7); `null` for a run of a template or of a spec sent with it."
           }
         },
         "type": "object",
@@ -6614,7 +6777,19 @@
           "op_count": {
             "type": "integer",
             "title": "Op Count",
-            "description": "Graph operations that made it; 0 for version 1."
+            "description": "Graph operations that made it; 0 for version 1 and a restore."
+          },
+          "restored_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From",
+            "description": "The version a restore copied, if one did."
           }
         },
         "type": "object",
@@ -6622,7 +6797,8 @@
           "version",
           "base_version",
           "created_at",
-          "op_count"
+          "op_count",
+          "restored_from"
         ],
         "title": "WorkflowVersionItem"
       },
@@ -6673,7 +6849,19 @@
               }
             ],
             "title": "Ops",
-            "description": "The graph operations that made it from `base_version`; unset for 1."
+            "description": "The graph operations that made it from `base_version`; unset for 1 and for a restore."
+          },
+          "restored_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From",
+            "description": "The version a restore copied; unset unless a restore made it."
           },
           "valid": {
             "type": "boolean",
@@ -6697,6 +6885,7 @@
           "created_at",
           "spec",
           "ops",
+          "restored_from",
           "valid",
           "issues"
         ],

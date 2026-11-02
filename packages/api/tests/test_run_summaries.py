@@ -129,7 +129,11 @@ async def test_done_when_the_api_lists_past_runs_with_status_from_the_log(
     }
     done = by_id[str(completed)]
     assert done["repo"] == {"url": DOCS.url, "ref": None}
-    assert done["workflow"] == {"id": two_step_spec().id, "name": two_step_spec().name}
+    assert done["workflow"] == {
+        "id": two_step_spec().id,
+        "name": two_step_spec().name,
+        "version": None,
+    }
     assert done["started_at"] is not None and done["finished_at"] is not None
     assert done["duration_ms"] >= 0
     assert by_id[str(queued)]["duration_ms"] is None

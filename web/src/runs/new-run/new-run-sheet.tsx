@@ -10,13 +10,20 @@ import { z } from "zod";
 
 import { createApiClient } from "@/api/client";
 import { ApiError, codeOf, detailOf, failure, messageOf, validationIssues } from "@/api/errors";
-import { useNewRepoOptions, usePolicy, useTemplates, type Template } from "@/api/queries";
+import {
+  useNewRepoOptions,
+  usePolicy,
+  useTemplates,
+  type Requirement,
+  type Template,
+} from "@/api/queries";
 import { ErrorState, LoadingState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -61,9 +68,25 @@ interface Values {
   repo: string;
   newRepo: NewRepoValues;
   params: FormValues;
+  /** What the first step of a stored workflow is given; templates take their options instead. */
+  input: string;
   /** "" runs with the workspace's default budget. */
   budget: string;
 }
+
+/** A version of a stored workflow to run (5.7), and the connections it needs. */
+export interface StoredWorkflowSource {
+  id: string;
+  version: number;
+  name: string;
+  requires: Requirement[];
+}
+
+/** What a run is started from: a template with its options, or a stored workflow's version. */
+type RunSource = { template: Template } | { workflow: StoredWorkflowSource };
+
+const requiresOf = (source: RunSource) =>
+  "template" in source ? source.template.requires : source.workflow.requires;
 
 /** The problems of a `policy_limits` refusal, or null for any other body. */
 function policyErrors(error: unknown): string[] | null {
@@ -79,7 +102,7 @@ export function sheetPath(templateId: string) {
 }
 
 function NewRunForm({
-  template,
+  source,
   fields,
   readiness,
   workspaceId,
@@ -89,7 +112,8 @@ function NewRunForm({
   onBlockedChange,
   navigate,
 }: {
-  template: Template;
+  source: RunSource;
+  /** The template's options; none for a stored workflow. */
   fields: FieldSpec[];
   readiness: Readiness;
   workspaceId: string;
@@ -103,10 +127,11 @@ function NewRunForm({
   const router = useRouter();
   const queries = useQueryClient();
   const repoId = useId();
+  const inputId = useId();
   const budgetId = useId();
   const policy = usePolicy({ workspaceId, baseUrl });
   const defaultBudget = policy.data?.effective.budget_usd ?? null;
-  const needsRepo = template.requires.includes("github");
+  const needsRepo = requiresOf(source).includes("github");
   const schema = useMemo(
     () =>
       z
@@ -121,6 +146,7 @@ function NewRunForm({
             license: z.string(),
           }),
           params: toZod(fields),
+          input: z.string().max(20_000, "Keep it under 20,000 characters."),
           budget: budgetSchema(),
         })
         .superRefine((values, ctx) => {
@@ -142,6 +168,7 @@ function NewRunForm({
       repo: "",
       newRepo: EMPTY_NEW_REPO,
       params: defaultValues(fields),
+      input: "",
       budget: "",
     },
   });
@@ -168,8 +195,17 @@ function NewRunForm({
     try {
       result = await createApiClient(baseUrl).POST("/runs", {
         body: {
-          template: { id: template.id, parameters: toParameters(fields, values.params) },
-          input: "",
+          ...("template" in source
+            ? {
+                template: {
+                  id: source.template.id,
+                  parameters: toParameters(fields, values.params),
+                },
+              }
+            : {
+                stored_workflow: { id: source.workflow.id, version: source.workflow.version },
+              }),
+          input: values.input,
           repo: needsRepo && !creating ? { url: values.repo } : null,
           ...(creating ? { new_repo: toNewRepo(values.newRepo) } : {}),
           workspace_id: workspaceId,
@@ -294,6 +330,32 @@ function NewRunForm({
         prefix="params"
         disabled={isSubmitting}
       />
+      {"workflow" in source ? (
+        <Controller
+          name="input"
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <Field data-invalid={fieldState.error ? true : undefined}>
+              <FieldLabel htmlFor={inputId}>Input</FieldLabel>
+              <Textarea
+                id={inputId}
+                rows={4}
+                aria-invalid={fieldState.error ? true : undefined}
+                aria-describedby={fieldState.error ? `${inputId}-error` : `${inputId}-help`}
+                disabled={isSubmitting}
+                {...field}
+              />
+              {fieldState.error?.message ? (
+                <FieldMessage id={`${inputId}-error`}>{fieldState.error.message}</FieldMessage>
+              ) : (
+                <FieldDescription id={`${inputId}-help`}>
+                  Optional. What the first step is given to work on.
+                </FieldDescription>
+              )}
+            </Field>
+          )}
+        />
+      ) : null}
       <Controller
         name="budget"
         control={form.control}
@@ -435,7 +497,7 @@ function SheetBody({
             ) : (
               <NewRunForm
                 key={template.id}
-                template={template}
+                source={{ template }}
                 fields={parsed.fields}
                 readiness={readiness}
                 workspaceId={workspaceId}
@@ -464,23 +526,132 @@ function SheetBody({
         </SheetDescription>
       </SheetHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4">{body}</div>
-      <SheetFooter className="flex-row justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-          Cancel
-        </Button>
-        <Button type="submit" form={formId} disabled={!canStart || pending}>
-          {pending ? (
-            <LoaderCircleIcon
-              aria-hidden="true"
-              data-icon="inline-start"
-              className="motion-safe:animate-spin"
-            />
-          ) : (
-            <PlayIcon aria-hidden="true" data-icon="inline-start" />
-          )}
-          {pending ? "Starting…" : "Start run"}
-        </Button>
-      </SheetFooter>
+      <StartFooter
+        formId={formId}
+        canStart={canStart}
+        pending={pending}
+        onCancel={() => onOpenChange(false)}
+      />
     </>
   );
 }
+
+function StartFooter({
+  formId,
+  canStart,
+  pending,
+  onCancel,
+}: {
+  formId: string;
+  canStart: boolean;
+  pending: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <SheetFooter className="flex-row justify-end gap-2">
+      <Button type="button" variant="ghost" onClick={onCancel}>
+        Cancel
+      </Button>
+      <Button type="submit" form={formId} disabled={!canStart || pending}>
+        {pending ? (
+          <LoaderCircleIcon
+            aria-hidden="true"
+            data-icon="inline-start"
+            className="motion-safe:animate-spin"
+          />
+        ) : (
+          <PlayIcon aria-hidden="true" data-icon="inline-start" />
+        )}
+        {pending ? "Starting…" : "Start run"}
+      </Button>
+    </SheetFooter>
+  );
+}
+
+/**
+ * Starts a run of a version of a stored workflow (5.7): the connections it needs, the repository
+ * when its tools work on one, its input and a budget. Shaped as the New run sheet.
+ */
+export function WorkflowRunSheet({
+  open,
+  onOpenChange,
+  ...props
+}: WorkflowSheetProps & { open: boolean }) {
+  const wide = useMediaQuery(MD_UP);
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side={wide ? "right" : "bottom"}
+        className="data-[side=bottom]:h-svh"
+        size="sm"
+        data-testid="workflow-run-sheet"
+      >
+        <WorkflowSheetBody onOpenChange={onOpenChange} {...props} />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+interface WorkflowSheetProps {
+  onOpenChange: (open: boolean) => void;
+  workflow: StoredWorkflowSource;
+  workspaceId: string;
+  baseUrl?: string;
+  navigate?: (url: string) => void;
+}
+
+function WorkflowSheetBody({
+  onOpenChange,
+  workflow,
+  workspaceId,
+  baseUrl,
+  navigate,
+}: WorkflowSheetProps) {
+  const readiness = useReadiness({ workspaceId, baseUrl });
+  const formId = useId();
+  const [pending, setPending] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const ready = isReady(readiness, workflow.requires);
+  const returnTo = `/workflows/${encodeURIComponent(workflow.id)}?version=${workflow.version}`;
+  return (
+    <>
+      <SheetHeader>
+        <SheetTitle>New run: {workflow.name}</SheetTitle>
+        <SheetDescription>
+          Runs version {workflow.version} of <span className="font-mono">{workflow.id}</span>.
+        </SheetDescription>
+      </SheetHeader>
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4">
+        {workflow.requires.length > 0 ? (
+          <ConnectionChecklist
+            requires={workflow.requires}
+            readiness={readiness}
+            workspaceId={workspaceId}
+            baseUrl={baseUrl}
+            returnTo={returnTo}
+            navigate={navigate}
+          />
+        ) : null}
+        <NewRunForm
+          source={{ workflow }}
+          fields={NO_FIELDS}
+          readiness={readiness}
+          workspaceId={workspaceId}
+          baseUrl={baseUrl}
+          formId={formId}
+          onPendingChange={setPending}
+          onBlockedChange={setBlocked}
+          navigate={navigate}
+        />
+      </div>
+      <StartFooter
+        formId={formId}
+        canStart={ready && !blocked}
+        pending={pending}
+        onCancel={() => onOpenChange(false)}
+      />
+    </>
+  );
+}
+
+const NO_FIELDS: FieldSpec[] = [];

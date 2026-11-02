@@ -34,6 +34,8 @@ class RunSummaryRow:
     workflow_id: str
     workflow_name: str
     template_id: str | None
+    # The stored workflow version the run was started from, if any.
+    workflow_version: int | None
     repo: RepoSource | None
     created_at: datetime
     started_at: datetime | None
@@ -118,6 +120,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.spec["id"].astext.label("workflow_id"),
         Run.spec["name"].astext.label("workflow_name"),
         Run.template_id,
+        Run.workflow_version,
         Run.repo,
         Run.created_at,
         Run.started_at,
@@ -152,6 +155,7 @@ def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
         workflow_id=row.workflow_id,
         workflow_name=row.workflow_name,
         template_id=row.template_id,
+        workflow_version=row.workflow_version,
         repo=RepoSource.model_validate(row.repo) if row.repo is not None else None,
         created_at=row.created_at,
         started_at=row.started_at,

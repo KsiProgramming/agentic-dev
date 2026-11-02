@@ -9,6 +9,7 @@ from agentic_api.runs.routes import existing_workspace
 from agentic_api.workflows.models import (
     CreateWorkflowRequest,
     OpErrorDetail,
+    RestoreWorkflowRequest,
     UpdateWorkflowRequest,
     ValidateWorkflowRequest,
     ValidateWorkflowResponse,
@@ -21,6 +22,7 @@ from agentic_api.workspaces.models import RunLimits, to_usd
 from agentic_engine.spec import OpError, ValidationIssue, schema_issues
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
+    AlreadyLatestError,
     StoredWorkflowVersion,
     VersionConflictError,
     WorkflowExistsError,
@@ -30,6 +32,7 @@ from agentic_store import (
     create_workflow,
     get_workflow_version,
     list_workflow_versions,
+    restore_workflow,
     update_workflow,
 )
 
@@ -115,6 +118,7 @@ async def versions(
                 base_version=row.base_version,
                 created_at=row.created_at,
                 op_count=len(row.ops or []),
+                restored_from=row.restored_from,
             )
             for row in rows
         ]
@@ -145,19 +149,55 @@ async def update(
     except WorkflowNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, None)) from e
     except VersionConflictError as e:
-        detail = WorkflowErrorDetail(
-            code="version_conflict",
-            message=f"version {body.base_version} is not the latest ({e.latest_version}); "
-            "apply the ops to the latest version",
-            latest_version=e.latest_version,
-        )
-        raise HTTPException(status.HTTP_409_CONFLICT, detail.model_dump()) from e
+        raise _conflict(body.base_version, e, "apply the ops to the latest version") from e
     except OpError as e:
         detail = OpErrorDetail(
             code=e.code, message=e.message, op_index=e.op_index, node_id=e.node_id
         )
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
     return await _response(request, workspace_id, stored)
+
+
+@router.post(
+    "/{workflow_id}/restore",
+    operation_id="restoreWorkflow",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "No such workspace, workflow or version"},
+        409: {"model": WorkflowErrorDetail, "description": "`version_conflict`"},
+        422: {"model": WorkflowErrorDetail, "description": "`already_latest`"},
+    },
+)
+async def restore(
+    workflow_id: str, body: RestoreWorkflowRequest, request: Request, workspace_id: Workspace
+) -> WorkflowVersionResponse:
+    """Store the spec of the older version `version` as the next version, `restored_from` it.
+    `base_version` must be the latest, as for `PATCH`; no version changes or goes. Its issues are
+    returned with it."""
+    try:
+        stored = await restore_workflow(
+            _sessions(request), workspace_id, workflow_id, body.base_version, body.version
+        )
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, body.version)) from e
+    except VersionConflictError as e:
+        raise _conflict(body.base_version, e, "restore from the latest version") from e
+    except AlreadyLatestError as e:
+        detail = WorkflowErrorDetail(
+            code="already_latest",
+            message=f"version {body.version} is the latest; there is nothing to restore",
+        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
+    return await _response(request, workspace_id, stored)
+
+
+def _conflict(base_version: int, error: VersionConflictError, then: str) -> HTTPException:
+    detail = WorkflowErrorDetail(
+        code="version_conflict",
+        message=f"version {base_version} is not the latest ({error.latest_version}); {then}",
+        latest_version=error.latest_version,
+    )
+    return HTTPException(status.HTTP_409_CONFLICT, detail.model_dump())
 
 
 def _not_found(workflow_id: str, version: int | None) -> str:
@@ -178,6 +218,7 @@ async def _response(
         created_at=stored.created_at,
         spec=stored.spec,
         ops=ops,
+        restored_from=stored.restored_from,
         valid=not issues,
         issues=issues,
     )

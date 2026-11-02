@@ -54,6 +54,15 @@ class TemplateRun(BaseModel):
             raise ValueError("; ".join(reasons)) from None
 
 
+class StoredWorkflowRun(BaseModel):
+    """A stored workflow (`POST /workflows`) to run, at one of its versions (5.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="The workflow's id in the run's workspace.")
+    version: int | None = Field(default=None, ge=1, description="Default: the latest.")
+
+
 class PolicyErrorDetail(BaseModel):
     """The `detail` of a run refused because its workflow is above the workspace's run limits, or
     has a budget that cannot be enforced (an agent's model has no price): `errors` names each
@@ -70,11 +79,18 @@ class CreateRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow: WorkflowSpec | None = Field(
-        default=None, description="The workflow to run. Give this or `template`, not both."
+        default=None,
+        description="The workflow to run. Give this, `template` or `stored_workflow`, only one.",
     )
     template: TemplateRun | None = Field(
         default=None,
-        description="A template to build the workflow from. Give this or `workflow`, not both.",
+        description="A template to build the workflow from. Give this, `workflow` or "
+        "`stored_workflow`, only one.",
+    )
+    stored_workflow: StoredWorkflowRun | None = Field(
+        default=None,
+        description="A version of a stored workflow of the workspace to run; the run records "
+        "it. Give this, `workflow` or `template`, only one.",
     )
     input: str = ""
     repo: RepoSource | None = Field(
@@ -104,8 +120,9 @@ class CreateRunRequest(BaseModel):
 
     @model_validator(mode="after")
     def _one_workflow(self) -> Self:
-        if (self.workflow is None) == (self.template is None):
-            raise ValueError("give either `workflow` or `template`")
+        sources = [self.workflow, self.template, self.stored_workflow]
+        if sum(source is not None for source in sources) != 1:
+            raise ValueError("give one of `workflow`, `template` and `stored_workflow`")
         if self.template is not None:
             self.workflow = self.template.build_spec()
         return self
@@ -117,13 +134,15 @@ class CreateRunRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _known_tools(self) -> Self:
-        if issues := tool_issues(self.spec().root):
-            raise ValueError("; ".join(messages(issues)))
+    def _spec_fits(self) -> Self:
+        if self.workflow is not None:  # A stored workflow is checked once read (`with_spec`).
+            self._check_spec()
         return self
 
-    @model_validator(mode="after")
-    def _repo_for_repo_tools(self) -> Self:
+    def _check_spec(self) -> None:
+        """Every tool is known, and the repo the tools need is given."""
+        if issues := tool_issues(self.spec().root):
+            raise ValueError("; ".join(messages(issues)))
         for _, node in iter_nodes(self.spec().root):
             tools = node_tools(node)
             repo_tools = [t for t in tools if t.startswith(REPO_TOOL_PREFIXES)]
@@ -137,12 +156,19 @@ class CreateRunRequest(BaseModel):
                     f"node {node.id!r} uses {', '.join(github_tools)}, which need a `repo` on "
                     "GitHub (https://github.com/<owner>/<name>)"
                 )
-        return self
 
     def spec(self) -> WorkflowSpec:
-        """The workflow to run: `workflow`, or the one built from `template`."""
-        assert self.workflow is not None, "validated: built from the template if not given"
+        """The workflow to run: `workflow`, the one built from `template`, or the stored one
+        given to `with_spec`."""
+        assert self.workflow is not None, "validated, or read from the stored workflow"
         return self.workflow
+
+    def with_spec(self, spec: WorkflowSpec) -> Self:
+        """This request with the stored workflow's `spec` to run, checked as a `workflow` is.
+        Raises `ValueError` when it needs a repo the request does not give."""
+        request = self.model_copy(update={"workflow": spec})
+        request._check_spec()
+        return request
 
     def uses_github(self) -> bool:
         return uses_github(self.spec())
@@ -222,6 +248,11 @@ type RunTrigger = Literal["manual", "api", "rerun"]
 class WorkflowRef(BaseModel):
     id: str
     name: str
+    version: int | None = Field(
+        default=None,
+        description="The version of the stored workflow `id` the run was started from (5.7); "
+        "`null` for a run of a template or of a spec sent with it.",
+    )
 
 
 class WaitingGate(BaseModel):

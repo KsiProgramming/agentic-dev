@@ -1,5 +1,5 @@
 """Checking workflow specs before they run, and storing them as versions changed by graph
-operations (5.1)."""
+operations (5.1), restored from an older version (5.7)."""
 
 from datetime import datetime
 from typing import Literal, Self
@@ -77,6 +77,13 @@ class UpdateWorkflowRequest(BaseModel):
     )
 
 
+class RestoreWorkflowRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_version: int = Field(ge=1, description="The latest version, as the client knows it.")
+    version: int = Field(ge=1, description="The older version whose spec becomes the latest.")
+
+
 class WorkflowVersionResponse(BaseModel):
     """One version of a stored workflow, with what keeps it from running now."""
 
@@ -86,7 +93,11 @@ class WorkflowVersionResponse(BaseModel):
     created_at: datetime
     spec: dict[str, JsonValue]
     ops: list[JsonValue] | None = Field(
-        description="The graph operations that made it from `base_version`; unset for 1."
+        description="The graph operations that made it from `base_version`; unset for 1 and "
+        "for a restore."
+    )
+    restored_from: int | None = Field(
+        description="The version a restore copied; unset unless a restore made it."
     )
     valid: bool = Field(description="Whether it could run in the workspace now.")
     issues: list[ValidationIssue] = Field(
@@ -99,7 +110,10 @@ class WorkflowVersionItem(BaseModel):
     version: int
     base_version: int | None
     created_at: datetime
-    op_count: int = Field(description="Graph operations that made it; 0 for version 1.")
+    op_count: int = Field(
+        description="Graph operations that made it; 0 for version 1 and a restore."
+    )
+    restored_from: int | None = Field(description="The version a restore copied, if one did.")
 
 
 class WorkflowVersionsResponse(BaseModel):
@@ -122,9 +136,10 @@ class OpErrorDetail(BaseModel):
 class WorkflowErrorDetail(BaseModel):
     """The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`
     (`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does
-    not match the schema, with its `issues`)."""
+    not match the schema, with its `issues`), `already_latest` (a restore of the latest
+    version)."""
 
-    code: Literal["workflow_exists", "version_conflict", "schema"]
+    code: Literal["workflow_exists", "version_conflict", "schema", "already_latest"]
     message: str
     workflow_id: str | None = Field(
         default=None, description="With `workflow_exists`: the workflow that already exists."

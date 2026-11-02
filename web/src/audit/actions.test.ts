@@ -121,6 +121,14 @@ describe("describe", () => {
       },
       "Changed docs v3 · 4 edits",
     ],
+    [
+      "workflow version restored",
+      {
+        action: "workflow.restored",
+        details: { workflow_id: "docs", version: 4, base_version: 3, restored_from: 1 },
+      },
+      "Restored docs v1 as v4",
+    ],
   ])("%s", (_, overrides, expected) => {
     expect(line(overrides)).toBe(expected);
   });
@@ -161,7 +169,11 @@ test("each category has its actions", () => {
     "repo.created",
   ]);
   expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
-  expect(actionsOf("workflows")).toEqual(["workflow.created", "workflow.updated"]);
+  expect(actionsOf("workflows")).toEqual([
+    "workflow.created",
+    "workflow.updated",
+    "workflow.restored",
+  ]);
   expect(actionsOf("settings")).toEqual([
     "connection.added",
     "connection.removed",

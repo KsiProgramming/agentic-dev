@@ -43,9 +43,11 @@ async def create_run(
     template_parameters: dict[str, JsonValue] | None = None,
     budget_usd: Decimal | None = None,
     trigger: str = "api",
+    workflow_version: tuple[str, int] | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
-    template `spec` was built from (with its options) if any; returns its id. The workspace must
+    template `spec` was built from (with its options) or the stored workflow version it was read
+    from (`(workflow_id, version)`), if any; returns its id. The workspace must
     exist. `trigger` says who started it (`manual` or `api`). The run gets the workspace's policy
     with `budget_usd` in place of its budget, if given (`run_policy`), which raises
     `PolicyViolationError` if the spec is above it."""
@@ -64,6 +66,8 @@ async def create_run(
                 repo_url=repo.url if repo else None,
                 template_id=template_id,
                 template_parameters=template_parameters,
+                workflow_id=workflow_version[0] if workflow_version else None,
+                workflow_version=workflow_version[1] if workflow_version else None,
                 trigger=trigger,
                 branch=repo.ref if repo else None,
             )
@@ -75,6 +79,11 @@ async def create_run(
             run_id=run_id,
             details={
                 "template_id": template_id,
+                **(
+                    {"workflow_id": workflow_version[0], "workflow_version": workflow_version[1]}
+                    if workflow_version
+                    else {}
+                ),
                 "repo_url": repo.url if repo else None,
                 "budget_usd": usd(policy.budget_usd),
             },

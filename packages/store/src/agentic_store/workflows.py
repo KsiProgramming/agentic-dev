@@ -1,6 +1,6 @@
 """Stored workflows (5.1): each change is a batch of graph operations that makes a new, immutable
 version (`workflow_versions`). A change names the version it started from, so two editors never
-overwrite each other."""
+overwrite each other. A restore (5.7) stores a copy of an older version as the next one."""
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -34,6 +34,10 @@ class VersionConflictError(Exception):
         self.latest_version = latest_version
 
 
+class AlreadyLatestError(Exception):
+    """A restore named the latest version, which needs no restoring."""
+
+
 class StoredWorkflowVersion(BaseModel):
     """One version of a workflow, as the API shows it."""
 
@@ -45,6 +49,7 @@ class StoredWorkflowVersion(BaseModel):
     created_at: datetime
     spec: dict[str, JsonValue]
     ops: list[JsonValue] | None
+    restored_from: int | None = None
 
 
 async def create_workflow(
@@ -123,6 +128,56 @@ async def update_workflow(
         return _stored(row)
 
 
+async def restore_workflow(
+    sessions: async_sessionmaker[AsyncSession],
+    workspace_id: UUID,
+    workflow_id: str,
+    base_version: int,
+    version: int,
+) -> StoredWorkflowVersion:
+    """Store version `version`'s spec as the next version, with `restored_from` set to it and no
+    ops. Raises `WorkflowNotFoundError` for an unknown workflow or version,
+    `VersionConflictError` when `base_version` is not the latest, and `AlreadyLatestError` when
+    `version` is the latest."""
+    async with sessions.begin() as session:
+        workflow = await session.get(Workflow, (workspace_id, workflow_id), with_for_update=True)
+        if workflow is None:
+            raise WorkflowNotFoundError(workflow_id)
+        if base_version != workflow.latest_version:
+            raise VersionConflictError(workflow.latest_version)
+        if version == workflow.latest_version:
+            raise AlreadyLatestError(version)
+        source = await session.get(WorkflowVersion, (workspace_id, workflow_id, version))
+        if source is None:
+            raise WorkflowNotFoundError(workflow_id)
+        latest = base_version + 1
+        row = WorkflowVersion(
+            workspace_id=workspace_id,
+            workflow_id=workflow_id,
+            version=latest,
+            spec=source.spec,
+            base_version=base_version,
+            restored_from=version,
+        )
+        session.add(row)
+        workflow.latest_version = latest
+        workflow.updated_at = datetime.now(UTC)
+        audit(
+            session,
+            workspace_id,
+            "workflow.restored",
+            details={
+                "workflow_id": workflow_id,
+                "version": latest,
+                "base_version": base_version,
+                "restored_from": version,
+            },
+        )
+        await session.flush()
+        await session.refresh(row)
+        return _stored(row)
+
+
 async def get_workflow_version(
     sessions: async_sessionmaker[AsyncSession],
     workspace_id: UUID,
@@ -171,4 +226,5 @@ def _stored(row: WorkflowVersion) -> StoredWorkflowVersion:
         created_at=row.created_at,
         spec=row.spec,
         ops=row.ops,
+        restored_from=row.restored_from,
     )

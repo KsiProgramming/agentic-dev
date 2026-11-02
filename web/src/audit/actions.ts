@@ -6,6 +6,7 @@ import {
   FlagIcon,
   FilePenIcon,
   FilePlusIcon,
+  HistoryIcon,
   FolderPlusIcon,
   GaugeIcon,
   PlayIcon,
@@ -47,6 +48,7 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
   "workflow.created": { label: "Workflow created", icon: FilePlusIcon, category: "workflows" },
   "workflow.updated": { label: "Workflow changed", icon: FilePenIcon, category: "workflows" },
+  "workflow.restored": { label: "Version restored", icon: HistoryIcon, category: "workflows" },
   "connection.added": { label: "Connection added", icon: PlugIcon, category: "settings" },
   "connection.removed": { label: "Connection removed", icon: UnplugIcon, category: "settings" },
   "policy.updated": { label: "Run limits changed", icon: GaugeIcon, category: "settings" },
@@ -193,11 +195,16 @@ export function describe(event: AuditEvent): string {
       );
     }
     case "workflow.created":
-    case "workflow.updated": {
+    case "workflow.updated":
+    case "workflow.restored": {
       const workflow = text(d, "workflow_id") ?? "A workflow";
       const version = count(d, "version");
       const at = version > 0 ? ` v${version}` : "";
       if (event.action === "workflow.created") return `Created ${workflow}${at}`;
+      if (event.action === "workflow.restored") {
+        const from = count(d, "restored_from");
+        return `Restored ${workflow}${from > 0 ? ` v${from}` : ""} as${at || " the latest"}`;
+      }
       const ops = count(d, "op_count");
       const edits = ops > 0 ? ` · ${ops} ${ops === 1 ? "edit" : "edits"}` : "";
       return `Changed ${workflow}${at}${edits}`;

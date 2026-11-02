@@ -6,7 +6,9 @@ import {
   GitBranchIcon,
   GitPullRequestIcon,
   LinkIcon,
+  WorkflowIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { createElement, type ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -156,6 +158,19 @@ export function RunHeader({
                   <span className="truncate">{branch}</span>
                 </span>
               ) : null}
+            </li>
+          ) : null}
+          {run?.workflow.version != null ? (
+            <li className="flex min-w-0 items-center gap-1.5">
+              <WorkflowIcon aria-hidden="true" className="size-3.5 shrink-0" />
+              <Link
+                data-testid="workflow-version"
+                href={`/workflows/${encodeURIComponent(run.workflow.id)}?version=${run.workflow.version}`}
+                className="min-w-0 truncate rounded-sm underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="font-mono">{run.workflow.id}</span> · version{" "}
+                {run.workflow.version}
+              </Link>
             </li>
           ) : null}
           {run ? (
