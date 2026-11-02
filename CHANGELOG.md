@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 5.3 node manifests and a palette generated from them:
+- Phase 5.3 node manifests and a palette generated from them ([#148](https://github.com/KsiProgramming/agentic-dev/pull/148)):
   - **Manifests.** `agentic_engine.nodes`: one manifest per primitive (label, description, category, icon, parameters as JSON Schema from the node's model, child slots, a default node, fill hints); a test fails when a primitive has none. `GET /node-types` serves them; `schemas/fixtures/node-types.json` holds the same list for the web's tests.
   - **Palette.** The builder's "Add a step after" is a submenu drawn from `GET /node-types`, grouped as Steps, Flow and Combine; it adds any of the nine primitives, containers with their children under fresh ids, and a reduce whose `from` is the step before it. A kind the engine adds appears with no web change; a card of a kind the web does not know is drawn from its manifest, or as a box.
 - Phase 5.2 builder canvas, edits as graph operations ([#147](https://github.com/KsiProgramming/agentic-dev/pull/147)):
