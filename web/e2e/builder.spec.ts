@@ -43,8 +43,9 @@ test("edits on the canvas are saved as a new version and read back", async ({ pa
   await stepMenu(page, "ship", "Remove");
   await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click();
   await page.getByRole("button", { name: "Edit details" }).click();
+  // The workflow's own fields are in the side panel (5.4): a pane, or a sheet below 1024 px.
   await page.getByLabel("Name").fill("E2E builder, edited");
-  await page.getByRole("button", { name: "Apply" }).click();
+  await page.keyboard.press("Escape");
 
   const order = ["draft", "review", "agent_1"];
   expect(

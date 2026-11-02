@@ -105,7 +105,7 @@ A review of the screens shipped in Milestones 2 and 3 found that they work but r
 | 5.2 | Canvas renders a spec; edits emit graph operations | Editing on canvas round-trips to the stored spec | ✅ Done ([#147](https://github.com/KsiProgramming/agentic-dev/pull/147)) |
 | 5.3 | Node manifests + palette generated from them | A new primitive appears in the palette with no frontend change | ✅ Done ([#148](https://github.com/KsiProgramming/agentic-dev/pull/148)) |
 | 5.4 | Side panel from parameter JSON Schema | Role, instructions, provider, tools, budget (optional) are editable | ✅ Done ([#149](https://github.com/KsiProgramming/agentic-dev/pull/149)) |
-| 5.5 | Container nodes (map, parallel, loop) drawn with children inside | Nested flow is editable visually | — |
+| 5.5 | Container nodes (map, parallel, loop) drawn with children inside | Nested flow is editable visually | ✅ Done ([#150](https://github.com/KsiProgramming/agentic-dev/pull/150)) |
 | 5.6 | Live validation on canvas (incompatible ports blocked, errors on nodes) | Invalid connections cannot be made | — |
 | 5.7 | Versions: history, visual diff, restore, run any version | User restores and runs an older version | — |
 | 5.8 | Start screen v2: provider picker and "Blank canvas" added to the 2.6 start screen | A user starts a canvas workflow without touching JSON | — |

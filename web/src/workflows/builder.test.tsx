@@ -114,12 +114,12 @@ async function patched(fetch: ReturnType<typeof stubApi>) {
   return (await call![0].clone().json()) as { base_version: number; ops: GraphOp[] };
 }
 
-test("draws the stored workflow, and only root steps get an edit menu", async () => {
+test("draws the stored workflow, with an edit menu on every node, nested ones too", async () => {
   show({});
 
   await screen.findByRole("heading", { name: "Flow" });
   expect(cards()).toEqual(["a", "l", "inner", "c"]);
-  expect(screen.queryByRole("button", { name: "Edit step inner" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Edit step inner" })).toBeDefined();
   expect(screen.getByTestId("builder-status").textContent).toContain("Version 1");
   expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
 });
@@ -400,4 +400,112 @@ test("Escape and Close close the panel; with nothing selected it shows the workf
   expect(cards()).toEqual(["a", "l", "inner"]);
   fireEvent.click(screen.getByRole("button", { name: "Edit details" }));
   expect(await screen.findByTestId("workflow-panel")).toBeTruthy();
+});
+
+/** Opens `nodeId`'s submenu `name` and waits for it. */
+async function openSub(nodeId: string, name: string) {
+  menu(nodeId);
+  fireEvent.keyDown(screen.getByRole("menuitem", { name }), { key: "ArrowRight" });
+  return waitFor(() => {
+    const menus = screen.getAllByRole("menu");
+    expect(menus).toHaveLength(2);
+    return within(menus[1]);
+  });
+}
+
+/** Picks the item of an open submenu that `match`es, and waits for the menus to close. */
+async function pick(sub: ReturnType<typeof within>, match: (item: HTMLElement) => boolean) {
+  const item = sub.getAllByRole("menuitem").find(match);
+  expect(item).toBeDefined();
+  fireEvent.click(item!);
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
+}
+
+async function closeMenu() {
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
+}
+
+test("a step added after a loop's body joins it in a new sequence, saved as one batch", async () => {
+  const fetch = show({
+    [`PATCH ${PATH}`]: async (request) => {
+      const body = (await request.clone().json()) as { ops: GraphOp[] };
+      return json(201, version(2, applyOps(SPEC, body.ops)));
+    },
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  await add("inner", "gate");
+  expect(cards()).toEqual(["a", "l", "inner", "gate_1", "c"]);
+  expect(screen.getByTestId("builder-status").textContent).toContain("1 unsaved change");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  const { ops } = await waitFor(() => patched(fetch));
+  expect(ops).toEqual([
+    { op: "addNode", node: { type: "gate", id: "gate_1", title: "Approve" } },
+    { op: "connect", from: "inner", to: "gate_1", sequence_id: "sequence_1" },
+  ]);
+});
+
+test("a lone body cannot be removed or moved away, and says why; it can be replaced", async () => {
+  show({});
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("inner");
+  const remove = screen.getByRole("menuitem", { name: /^Remove/ });
+  expect(remove.getAttribute("aria-disabled")).toBe("true");
+  expect(remove.textContent).toContain("A loop needs a body; replace it instead.");
+  await closeMenu();
+
+  await pick(await openSub("inner", "Replace with…"), (i) => i.dataset.kind === "tool");
+  const dialog = within(screen.getByRole("alertdialog"));
+  expect(dialog.getByText(/A new tool takes its place/)).toBeDefined();
+  fireEvent.click(dialog.getByRole("button", { name: "Replace" }));
+
+  expect(cards()).toEqual(["a", "l", "tool_1", "c"]);
+  fireEvent.click(screen.getByRole("button", { name: "Undo: Replace inner with tool_1" }));
+  expect(cards()).toEqual(["a", "l", "inner", "c"]);
+});
+
+test("a step moves into a container and back out, from Move to…", async () => {
+  show({});
+  await screen.findByRole("heading", { name: "Flow" });
+
+  await pick(await openSub("a", "Move to…"), (i) => i.textContent === "After inner");
+  expect(cards()).toEqual(["l", "inner", "a", "c"]);
+
+  await pick(await openSub("a", "Move to…"), (i) => i.textContent === "After c");
+  expect(cards()).toEqual(["l", "inner", "c", "a"]);
+  expect(screen.getByTestId("builder-status").textContent).toContain("2 unsaved changes");
+});
+
+test("a parallel gets a branch, and loses one only while two are left", async () => {
+  const parallel = {
+    ...SPEC,
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [{ type: "parallel", id: "p", join: "all", branches: [agent("b1"), agent("b2")] }],
+    },
+  };
+  stubApi({
+    [`GET ${PATH}`]: () => json(200, version(1, parallel)),
+    "GET /node-types": () => json(200, NODE_TYPES),
+  });
+  renderWithQueries(<WorkflowBuilder workflowId="flow" />);
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("b1");
+  expect(screen.getByRole("menuitem", { name: /^Remove/ }).textContent).toContain(
+    "A parallel needs at least two branches.",
+  );
+  await closeMenu();
+
+  await pick(await openSub("p", "Add a branch"), (i) => i.dataset.kind === "agent");
+  expect(cards()).toEqual(["p", "b1", "b2", "agent_1"]);
+
+  menu("b1");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+  fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remove" }));
+  expect(cards()).toEqual(["p", "b2", "agent_1"]);
 });
