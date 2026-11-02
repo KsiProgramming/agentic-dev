@@ -678,6 +678,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/node-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Node Types
+         * @description Every primitive's manifest, in palette order: the builder draws its palette and cards
+         *     from them, so a primitive the engine knows needs no web change.
+         */
+        get: operations["listNodeTypes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -892,6 +913,8 @@ export interface components {
             status: "cancelling";
         };
         /** @enum {string} */
+        Category: "step" | "flow" | "combine";
+        /** @enum {string} */
         ChangeStatus: "added" | "modified" | "deleted" | "renamed";
         /**
          * Connect
@@ -1088,6 +1111,8 @@ export interface components {
             /** Content */
             content: string;
         };
+        /** @constant */
+        Fill: "previous_step";
         /**
          * GateArtifact
          * @description A run artifact as a gate shows it to the approver (`gate_waiting`'s `run_artifacts`).
@@ -1345,6 +1370,56 @@ export interface components {
         NewWorkspace: {
             /** Name */
             name: string;
+        };
+        /** NodeManifest */
+        NodeManifest: {
+            /**
+             * Kind
+             * @description The node's `type`.
+             */
+            kind: string;
+            /**
+             * Label
+             * @description Its name in the palette and on its card: `Agent`.
+             */
+            label: string;
+            /**
+             * Description
+             * @description One sentence on what it does.
+             */
+            description: string;
+            category: components["schemas"]["Category"];
+            /**
+             * Icon
+             * @description A lucide icon name in kebab case, e.g. `bot`.
+             */
+            icon: string;
+            /**
+             * Parameters
+             * @description JSON Schema of its editable fields: the node's schema without `type`, `id` and the slots that hold nodes.
+             */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /**
+             * Slots
+             * @description The fields that hold child nodes, a node or a list of them: `steps`, `body`, `routes[].then` (each route's `then`). Empty for a leaf.
+             */
+            slots: string[];
+            /**
+             * Default
+             * @description A whole node the palette adds, children included; the palette gives each node in it a fresh id.
+             */
+            default: {
+                [key: string]: unknown;
+            };
+            /**
+             * Fill
+             * @description Parameters the palette sets when it adds the node, e.g. `from` to the previous step's id.
+             */
+            fill?: {
+                [key: string]: components["schemas"]["Fill"];
+            };
         };
         /** @enum {string} */
         NotEditable: "binary" | "too_large" | "deleted" | "renamed" | "over_limit";
@@ -4073,6 +4148,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    listNodeTypes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeManifest"][];
+                };
             };
         };
     };

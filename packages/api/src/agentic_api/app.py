@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from agentic_api.github.routes import router as github_router
 from agentic_api.health import router as health_router
+from agentic_api.node_types.routes import router as node_types_router
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.routes import router as runs_router
 from agentic_api.settings import Settings
@@ -102,6 +103,7 @@ def create_app(
     app.include_router(github_router)
     app.include_router(templates_router)
     app.include_router(workflows_router)
+    app.include_router(node_types_router)
     app.add_exception_handler(RequestValidationError, _validation_error)
     _add_schema_components(app, RunEvent)
     return app

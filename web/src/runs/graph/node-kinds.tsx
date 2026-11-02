@@ -1,5 +1,6 @@
 import {
   BotIcon,
+  BoxIcon,
   LayersIcon,
   MergeIcon,
   RepeatIcon,
@@ -26,14 +27,20 @@ const KIND: Record<NodeKind, { icon: LucideIcon; label: string }> = {
   sequence: { icon: LayersIcon, label: "sequence" },
 };
 
-/** A node kind in a word: "agent", "map". */
-export function kindLabel(kind: NodeKind): string {
-  return KIND[kind].label;
+/** Whether this app has its own icon and name for `kind`. A kind the engine added later (5.3)
+ * has not: it is drawn as a box under its own name, or from its manifest in the builder. */
+export function isKnownKind(kind: string): kind is NodeKind {
+  return Object.hasOwn(KIND, kind);
 }
 
-/** A node kind's icon, beside its name. */
+/** A node kind in a word: "agent", "map"; the kind itself for one this app does not know. */
+export function kindLabel(kind: NodeKind): string {
+  return isKnownKind(kind) ? KIND[kind].label : kind;
+}
+
+/** A node kind's icon, beside its name; a box for one this app does not know. */
 export function KindIcon({ kind, className }: { kind: NodeKind; className?: string }) {
-  const Icon = KIND[kind].icon;
+  const Icon = isKnownKind(kind) ? KIND[kind].icon : BoxIcon;
   return <Icon aria-hidden="true" className={className} />;
 }
 

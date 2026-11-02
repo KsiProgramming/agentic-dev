@@ -1,6 +1,7 @@
 import type { components } from "@/api/schema";
 import { allSpecNodes, type SpecNode, type WorkflowSpec } from "@/runs/graph/spec-graph";
 
+import type { NodeManifest } from "./node-types";
 import type { GraphOp } from "./ops";
 
 /**
@@ -15,27 +16,52 @@ export interface Edit {
   ops: GraphOp[];
 }
 
-/** The kinds the "Add step" menu offers until the manifest palette (5.3) replaces it. */
-export const NEW_KINDS = ["agent", "tool", "gate"] as const;
-export type NewKind = (typeof NEW_KINDS)[number];
-
 type AddNode = components["schemas"]["AddNode"];
+type Json = Record<string, unknown>;
 
-/** A new node of `kind` with defaults that match the schema, under an id not used in `spec`:
- * `agent_1`, `agent_2`, … */
-export function newNode(spec: WorkflowSpec, kind: NewKind): AddNode["node"] {
-  const ids = new Set(allSpecNodes(spec).map((n) => n.id));
-  let n = 1;
-  while (ids.has(`${kind}_${n}`)) n++;
-  const id = `${kind}_${n}`;
-  switch (kind) {
-    case "agent":
-      return { type: "agent", id, role: "Agent", instructions: "Describe what this agent does." };
-    case "tool":
-      return { type: "tool", id, tool: "repo.list_files" };
-    case "gate":
-      return { type: "gate", id, title: "Approve" };
+/** The nodes under `node`, itself first, found through each manifest's `slots` (`steps`,
+ * `body`, `routes[].then`); a kind with no manifest is a leaf. */
+function* nodesUnder(node: Json, manifests: Map<string, NodeManifest>): Generator<Json> {
+  yield node;
+  for (const slot of manifests.get(String(node.type))?.slots ?? []) {
+    const [head, field] = slot.split("[].");
+    const held = field
+      ? ((node[head] as Json[] | undefined) ?? []).map((item) => item[field])
+      : [node[head]];
+    for (const value of held.flat()) {
+      if (value && typeof value === "object") yield* nodesUnder(value as Json, manifests);
+    }
   }
+}
+
+/**
+ * A new node from `kind`'s manifest: its `default` with a fresh id for every node in it (the
+ * first free `<kind>_<n>` in `spec`: `agent_1`, `agent_2`, �) and its `fill` applied, added
+ * after the step `afterId` (`null`: first).
+ */
+export function newNode(
+  spec: WorkflowSpec,
+  kind: string,
+  manifests: NodeManifest[],
+  afterId: string | null = null,
+): AddNode["node"] {
+  const byKind = new Map(manifests.map((m) => [m.kind, m]));
+  const manifest = byKind.get(kind);
+  if (!manifest) throw new Error(`There is no node type ${kind}.`);
+  const taken = new Set(
+    [...nodesUnder(spec.root as unknown as Json, byKind)].map((n) => String(n.id)),
+  );
+  const node = structuredClone(manifest.default) as Json;
+  for (const n of nodesUnder(node, byKind)) {
+    let i = 1;
+    while (taken.has(`${n.type}_${i}`)) i++;
+    n.id = `${n.type}_${i}`;
+    taken.add(n.id as string);
+  }
+  for (const [param, fill] of Object.entries(manifest.fill ?? {})) {
+    if (fill === "previous_step" && afterId !== null) node[param] = afterId;
+  }
+  return node as AddNode["node"];
 }
 
 /** The steps the builder edits: those of the root sequence (none when the root is not one). */
@@ -43,9 +69,14 @@ export function rootSteps(spec: WorkflowSpec): SpecNode[] {
   return spec.root.type === "sequence" ? spec.root.steps : [];
 }
 
-/** Add a new `kind` node after the step `afterId`, or first when it is `null`. */
-export function addStep(spec: WorkflowSpec, afterId: string | null, kind: NewKind): Edit {
-  const node = newNode(spec, kind);
+/** Add a new `kind` node, from its manifest, after the step `afterId`, or first when `null`. */
+export function addStep(
+  spec: WorkflowSpec,
+  afterId: string | null,
+  kind: string,
+  manifests: NodeManifest[],
+): Edit {
+  const node = newNode(spec, kind, manifests, afterId);
   const at = afterId === null ? { parent: spec.root.id, index: 0 } : { after: afterId };
   return { label: `Add ${node.id}`, ops: [{ op: "addNode", node, at }] };
 }

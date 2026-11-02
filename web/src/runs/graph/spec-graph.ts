@@ -55,6 +55,9 @@ export function nodeDetail(node: SpecNode): string {
     }
     case "sequence":
       return "";
+    default:
+      // A kind the engine added after this app was built (5.3): its card shows its kind.
+      return "";
   }
 }
 
