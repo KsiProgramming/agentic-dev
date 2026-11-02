@@ -1,10 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiBaseUrl, createApiClient } from "@/api/client";
 import { ApiError, detailOf } from "@/api/errors";
 import type { components } from "@/api/schema";
+import { useDebounced } from "@/lib/use-debounced";
 
 import type { GraphOp } from "./ops";
 
@@ -49,6 +50,54 @@ export function useWorkflow(workspaceId: string, workflowId: string, baseUrl = a
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
+}
+
+/** Why a workflow cannot run, on the node to fix (3.4). */
+export type ValidationIssue = components["schemas"]["ValidationIssue"];
+
+/** How long the builder waits after the last edit before it checks the edited spec. */
+export const VALIDATE_DEBOUNCE_MS = 400;
+
+/** The issues of the workflow as edited (5.6): the version's own while there are no unsaved
+ * edits; otherwise `POST /workflows/{id}/validate` on `spec`, once it has not changed for
+ * `VALIDATE_DEBOUNCE_MS`, keeping the last answer meanwhile. A failed check blocks nothing. */
+export function useValidation(
+  workspaceId: string,
+  version: WorkflowVersion,
+  spec: unknown,
+  dirty: boolean,
+  baseUrl = apiBaseUrl(),
+) {
+  const checked = useDebounced(dirty ? spec : null, VALIDATE_DEBOUNCE_MS);
+  const query = useQuery({
+    queryKey: [...workflowKey(workspaceId, version.workflow_id), "validate", checked],
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).POST("/workflows/{workflow_id}/validate", {
+          params: { path: { workflow_id: version.workflow_id } },
+          body: {
+            workflow: checked as components["schemas"]["ValidateWorkflowRequest"]["workflow"],
+            workspace_id: workspaceId,
+          },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not check the workflow");
+      return data;
+    },
+    enabled: dirty && checked !== null,
+    placeholderData: keepPreviousData,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+  if (!dirty) {
+    return { issues: version.issues, checking: false, error: null, retry: () => {} };
+  }
+  return {
+    issues: query.data?.issues ?? version.issues,
+    checking: checked !== spec || query.isFetching,
+    error: query.isError ? "Could not check the workflow." : null,
+    retry: () => void query.refetch(),
+  };
 }
 
 /** `PATCH /workflows/{id}`: the ops applied to `base_version`, stored as the next version. A

@@ -9,6 +9,9 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 5.6 live validation on canvas:
+  - **Blocked connections.** In the builder, an edit that would make a connection whose typed ports do not fit (a move, a remove, a replace or an add that puts a consumer after a producer whose `output_schema` lacks what its `input_schema` requires) is disabled in its menu, with the reason under it. Edits that keep or remove existing mismatches stay allowed. The browser's check (`@/workflows/ports`) mirrors the engine's `port_mismatch`; `schemas/fixtures/port-checks.json` is run by both so they cannot drift.
+  - **Live issues.** Unsaved edits are checked with `POST /workflows/{id}/validate` 400 ms after the last one. Each issue shows on its node's card and at the top of its side panel; the status line counts them and opens a list whose node ids select their card. A failed check says so, with Retry, and blocks nothing.
 - Phase 5.5 container nodes drawn with children inside ([#150](https://github.com/KsiProgramming/agentic-dev/pull/150)):
   - **Nested editing.** In the builder every node card has its menu, inside maps, loops, parallels and router routes too: add a step after it (a lone body or branch grows into a new sequence), add a branch to a parallel, move up or down in its own sequence, "Move to…" after any other node or into a new branch, "Replace with…" another kind (so a body or route is never empty), and remove. What would leave a container empty, or a parallel with one branch, is disabled with the reason. Each is one undo step made of the existing graph operations; no engine or API change.
 - Phase 5.4 side panel from parameter JSON Schema ([#149](https://github.com/KsiProgramming/agentic-dev/pull/149)):

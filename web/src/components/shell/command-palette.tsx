@@ -29,6 +29,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { inboxRuns, useWaitingRuns } from "@/inbox/waiting";
+import { useDebounced } from "@/lib/use-debounced";
 import { SETTINGS_PAGES } from "@/settings/pages";
 import { badgeStatus, expiredLabel, repoLabel, type RunSummary } from "@/runs/summaries";
 import { useRunSearch } from "@/runs/use-run-search";
@@ -42,15 +43,6 @@ const PR_NUMBER = /\/pull\/(\d+)$/;
 
 /** How long the palette waits after a keystroke before it searches. */
 const DEBOUNCE_MS = 200;
-
-function useDebounced(value: string, ms: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(id);
-  }, [value, ms]);
-  return debounced;
-}
 
 /** `⌘K` / `Ctrl+K` opens or closes the palette from anywhere, except inside the diff editor,
  * whose own shortcuts start with `Ctrl+K`. */

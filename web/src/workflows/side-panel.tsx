@@ -116,6 +116,7 @@ export function NodePanel({
   error,
   retry,
   refusal,
+  issues = [],
   onEdit,
   onClose,
 }: {
@@ -126,6 +127,8 @@ export function NodePanel({
   retry: () => void;
   /** A refusal (a `422`, an op error) that names this node. */
   refusal: string | null;
+  /** What keeps this node from running, as the live check found it (5.6). */
+  issues?: string[];
   onEdit: (edit: Edit) => void;
   onClose?: () => void;
 }) {
@@ -185,6 +188,16 @@ export function NodePanel({
             <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>{refusal}</span>
           </p>
+        ) : null}
+        {issues.length > 0 ? (
+          <ul aria-label="Issues" className="flex flex-col gap-1">
+            {issues.map((issue) => (
+              <li key={issue} className="flex items-start gap-1 text-meta text-status-failed">
+                <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                <span>{issue}</span>
+              </li>
+            ))}
+          </ul>
         ) : null}
         {body}
       </div>

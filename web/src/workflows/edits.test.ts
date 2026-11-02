@@ -8,9 +8,11 @@ import type { WorkflowSpec } from "@/runs/graph/spec-graph";
 import {
   addBranch,
   addStep,
+  blockReason,
   moveStep,
   moveTargets,
   moveTo,
+  newMismatches,
   newNode,
   placeOf,
   removeStep,
@@ -287,5 +289,55 @@ describe("nested edits (5.5)", () => {
     const reduce = replaceNode(NESTED, "y", "reduce", NODE_TYPES)!;
     expect(reduce.ops[1]).toMatchObject({ node: { from: "x" }, at: { parent: "ls", index: 1 } });
     expect(replaceNode(NESTED, "main", "agent", NODE_TYPES)).toBeNull();
+  });
+});
+
+describe("blocked connections (5.6)", () => {
+  // `a` gives `a`, `b` gives `b`, `c` needs `b` and gives `c`, and `d` needs `a`, which `c` does
+  // not give: the spec already has one mismatch, on `d`.
+  const obj = (props: string[], required: string[] = []) => ({
+    type: "object",
+    properties: Object.fromEntries(props.map((p) => [p, { type: "string" }])),
+    required,
+  });
+  const TYPED = {
+    spec_version: "0",
+    id: "flow",
+    name: "Flow",
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [
+        { ...agent("a"), output_schema: obj(["a"]) },
+        { ...agent("b"), output_schema: obj(["b"]) },
+        { ...agent("c"), input_schema: obj(["b"], ["b"]), output_schema: obj(["c"]) },
+        { ...agent("d"), input_schema: obj(["a"], ["a"]) },
+      ],
+    },
+  } as unknown as WorkflowSpec;
+  const C_NEEDS_B =
+    "The input_schema of 'c' requires 'b', which the output_schema of 'a' does not declare.";
+
+  it("blocks each structural edit that connects ports that do not fit", () => {
+    expect(blockReason(TYPED, removeStep("b"))).toBe(C_NEEDS_B);
+    expect(blockReason(TYPED, moveStep(TYPED, "c", "up"))).toBe(C_NEEDS_B);
+    expect(blockReason(TYPED, moveStep(TYPED, "a", "down"))).toBe(C_NEEDS_B);
+    expect(blockReason(TYPED, moveTo(TYPED, "c", { after: "a" }))).toBe(C_NEEDS_B);
+    expect(newMismatches(TYPED, removeStep("b"))).toEqual([
+      expect.objectContaining({ producer: "a", consumer: "c" }),
+    ]);
+  });
+
+  it("allows an edit that breaks an edge, keeps a mismatch or removes one", () => {
+    expect(blockReason(TYPED, replaceNode(TYPED, "b", "agent", NODE_TYPES))).toBeNull();
+    expect(blockReason(TYPED, addStep(TYPED, "a", "agent", NODE_TYPES))).toBeNull();
+    // `d`'s mismatch is there already: an edit elsewhere keeps it, and removing `d` drops it.
+    expect(newMismatches(TYPED, replaceNode(TYPED, "b", "agent", NODE_TYPES)!)).toEqual([]);
+    expect(blockReason(TYPED, removeStep("d"))).toBeNull();
+    expect(blockReason(TYPED, null)).toBeNull();
+  });
+
+  it("finds nothing new for an edit that does not apply", () => {
+    expect(newMismatches(TYPED, removeStep("nope"))).toEqual([]);
   });
 });
