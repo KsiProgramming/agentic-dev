@@ -16,6 +16,18 @@ export function workflowKey(workspaceId: string, workflowId: string) {
   return ["workspace", workspaceId, "workflow", workflowId] as const;
 }
 
+/** One version of a workflow; a version never changes, so it is never refetched. */
+function versionKey(workspaceId: string, workflowId: string, version: number) {
+  return [...workflowKey(workspaceId, workflowId), "version", version] as const;
+}
+
+function versionsKey(workspaceId: string, workflowId: string) {
+  return [...workflowKey(workspaceId, workflowId), "versions"] as const;
+}
+
+/** A row of a workflow's history (5.7). */
+export type WorkflowVersionItem = components["schemas"]["WorkflowVersionItem"];
+
 /** Fetch errors become "Could not reach the API." instead of the browser's TypeError. */
 async function call<T>(request: () => Promise<T>): Promise<T> {
   try {
@@ -25,15 +37,20 @@ async function call<T>(request: () => Promise<T>): Promise<T> {
   }
 }
 
-/** `GET /workflows/{id}`: the latest version; `null` when there is no such workflow. */
+/** `GET /workflows/{id}`: the latest version, or `version`; `null` when there is no such
+ * workflow or version. */
 export async function fetchWorkflow(
   baseUrl: string,
   workspaceId: string,
   workflowId: string,
+  version?: number,
 ): Promise<WorkflowVersion | null> {
   const { data, error, response } = await call(() =>
     createApiClient(baseUrl).GET("/workflows/{workflow_id}", {
-      params: { path: { workflow_id: workflowId }, query: { workspace_id: workspaceId } },
+      params: {
+        path: { workflow_id: workflowId },
+        query: { workspace_id: workspaceId, version },
+      },
     }),
   );
   if (response.status === 404) return null;
@@ -49,6 +66,44 @@ export function useWorkflow(workspaceId: string, workflowId: string, baseUrl = a
     queryFn: () => fetchWorkflow(baseUrl, workspaceId, workflowId),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+  });
+}
+
+/** Version `version` of the workflow (5.7); nothing is asked while it is `null`. */
+export function useWorkflowVersion(
+  workspaceId: string,
+  workflowId: string,
+  version: number | null,
+  baseUrl = apiBaseUrl(),
+) {
+  return useQuery({
+    queryKey: versionKey(workspaceId, workflowId, version ?? 0),
+    queryFn: () => fetchWorkflow(baseUrl, workspaceId, workflowId, version ?? undefined),
+    enabled: version !== null,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** `GET /workflows/{id}/versions`: the workflow's history, newest first. */
+export function useWorkflowVersions(
+  workspaceId: string,
+  workflowId: string,
+  enabled = true,
+  baseUrl = apiBaseUrl(),
+) {
+  return useQuery({
+    queryKey: versionsKey(workspaceId, workflowId),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workflows/{workflow_id}/versions", {
+          params: { path: { workflow_id: workflowId }, query: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the history");
+      return data.items;
+    },
+    enabled,
   });
 }
 
@@ -117,6 +172,40 @@ export function useSaveWorkflow(workspaceId: string, workflowId: string, baseUrl
     },
     onSuccess: (version) => {
       queryClient.setQueryData(workflowKey(workspaceId, workflowId), version);
+      void queryClient.invalidateQueries({ queryKey: versionsKey(workspaceId, workflowId) });
+    },
+  });
+}
+
+/** `POST /workflows/{id}/restore` (5.7): version `version`'s spec stored as the next version,
+ * from `baseVersion`, the latest. A refusal is an `ApiError` whose body is `version_conflict`
+ * (409) or `already_latest` (422). */
+export function useRestoreWorkflow(
+  workspaceId: string,
+  workflowId: string,
+  baseUrl = apiBaseUrl(),
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ baseVersion, version }: { baseVersion: number; version: number }) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).POST("/workflows/{workflow_id}/restore", {
+          params: { path: { workflow_id: workflowId }, query: { workspace_id: workspaceId } },
+          body: { base_version: baseVersion, version },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not restore the version");
+      return data;
+    },
+    onSuccess: (version) => {
+      queryClient.setQueryData(workflowKey(workspaceId, workflowId), version);
+      void queryClient.invalidateQueries({ queryKey: versionsKey(workspaceId, workflowId) });
+    },
+    onError: (err) => {
+      // Someone saved meanwhile: the history and the latest version are out of date.
+      if (err instanceof ApiError && err.code === "version_conflict") {
+        void queryClient.invalidateQueries({ queryKey: workflowKey(workspaceId, workflowId) });
+      }
     },
   });
 }

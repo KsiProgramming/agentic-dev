@@ -1,18 +1,23 @@
 "use client";
 
 import {
+  ArrowLeftIcon,
   CircleAlertIcon,
   EllipsisIcon,
+  HistoryIcon,
   PencilIcon,
+  PlayIcon,
   PlusIcon,
   ReplaceIcon,
+  RotateCcwIcon,
   RotateCwIcon,
   SlidersHorizontalIcon,
   Undo2Icon,
   WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { ApiError, detailOf } from "@/api/errors";
@@ -29,6 +34,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,15 +65,21 @@ import {
   type WorkflowSpec,
 } from "@/runs/graph/spec-graph";
 import { CARD, SpecTree, type MapNode } from "@/runs/graph/spec-tree";
+import { WorkflowRunSheet } from "@/runs/new-run/new-run-sheet";
+import { workflowRequires } from "@/runs/new-run/readiness";
 import { useWorkspaceId } from "@/workspace";
 
 import {
+  useRestoreWorkflow,
   useSaveWorkflow,
   useValidation,
   useWorkflow,
+  useWorkflowVersion,
+  useWorkflowVersions,
   type ValidationIssue,
   type WorkflowVersion,
 } from "./api";
+import { diffSpecs } from "./diff";
 import {
   addBranch,
   addStep,
@@ -84,6 +96,7 @@ import {
   type Edit,
   type MoveTarget,
 } from "./edits";
+import { ChangesStatus, DiffBadge, HistorySheet, versionHref } from "./history";
 import { ManifestIcon, paletteGroups, useNodeTypes, type NodeManifest } from "./node-types";
 import { applyOps, OpError } from "./ops";
 import { NodePanel, WorkflowPanel } from "./side-panel";
@@ -94,19 +107,55 @@ interface Refusal {
   message: string;
 }
 
+/** A version number from the URL, or `null`. */
+function versionParam(value: string | null): number | null {
+  const n = Number(value);
+  return value !== null && Number.isInteger(n) && n >= 1 ? n : null;
+}
+
 /**
  * The builder (5.2): a stored workflow drawn as the run map's cards, edited through each node's
  * menu, at any depth (5.5), and the side panel (5.4), where the selected node's parameters, or the workflow's
  * own fields, are edited. Edits are graph operations kept here until Save sends them as one
  * `PATCH /workflows/{id}`; what is drawn is the stored version with them applied.
+ *
+ * `?version=n` shows an older version read-only, to restore or run (5.7); `?compare=m` marks
+ * what differs from version m on the cards.
  */
 export function WorkflowBuilder({ workflowId }: { workflowId: string }) {
   const workspaceId = useWorkspaceId();
+  const searchParams = useSearchParams();
+  const requested = versionParam(searchParams.get("version"));
+  const compare = versionParam(searchParams.get("compare"));
   const query = useWorkflow(workspaceId, workflowId);
+  const latest = query.data;
+  const older = latest && requested !== null && requested !== latest.version ? requested : null;
+  const olderQuery = useWorkflowVersion(workspaceId, workflowId, older);
 
   if (query.isPending) return <LoadingState label="Loading workflow…" />;
   if (query.isError) {
     return <ErrorState message={query.error.message} onRetry={() => void query.refetch()} />;
+  }
+  if (older !== null) {
+    if (olderQuery.isPending) return <LoadingState label="Loading workflow…" />;
+    if (olderQuery.isError) {
+      return (
+        <ErrorState message={olderQuery.error.message} onRetry={() => void olderQuery.refetch()} />
+      );
+    }
+    if (!olderQuery.data) {
+      return (
+        <EmptyState
+          icon={HistoryIcon}
+          message={`This workflow has no version ${older}.`}
+          action={
+            <Button asChild variant="outline">
+              <Link href={versionHref(workflowId, null)}>Back to latest</Link>
+            </Button>
+          }
+        />
+      );
+    }
   }
   if (!query.data) {
     return (
@@ -122,10 +171,15 @@ export function WorkflowBuilder({ workflowId }: { workflowId: string }) {
       />
     );
   }
+  const shown = older !== null && olderQuery.data ? olderQuery.data : query.data;
   return (
     <Editor
-      key={query.data.workflow_id}
-      version={query.data}
+      // The latest keeps its edits across a save (a new version); an older one is its own view.
+      key={older === null ? query.data.workflow_id : `${query.data.workflow_id}@${older}`}
+      version={shown}
+      latestVersion={query.data.version}
+      readOnly={older !== null}
+      compare={compare}
       workspaceId={workspaceId}
       refetch={async () => (await query.refetch()).data ?? null}
     />
@@ -134,25 +188,45 @@ export function WorkflowBuilder({ workflowId }: { workflowId: string }) {
 
 function Editor({
   version,
+  latestVersion,
+  readOnly,
+  compare,
   workspaceId,
   refetch,
 }: {
   version: WorkflowVersion;
+  /** The latest version's number: edits and restores start from it. */
+  latestVersion: number;
+  /** An older version: shown to restore or run, never edited. */
+  readOnly: boolean;
+  /** The version whose differences are marked, if any. */
+  compare: number | null;
   workspaceId: string;
   refetch: () => Promise<WorkflowVersion | null>;
 }) {
+  const router = useRouter();
+  const runReasonId = useId();
   const [edits, setEdits] = useState<Edit[]>([]);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [removing, setRemoving] = useState<Removal | null>(null);
   // The card to focus once an edit drew it: menus close, and a replaced node's card is gone.
   const focusNext = useRef<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
+  // Another version to open, once leaving the unsaved edits is confirmed.
+  const [leaving, setLeaving] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [runOpen, setRunOpen] = useState(false);
   // The node whose parameters the panel shows; none: the workflow's own fields. A node that is
   // gone (removed, undone) is no longer selected. Below 1024 px the panel is a sheet.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const wide = useMediaQuery(LG_UP);
   const save = useSaveWorkflow(workspaceId, version.workflow_id);
+  const restore = useRestoreWorkflow(workspaceId, version.workflow_id);
+  const versions = useWorkflowVersions(workspaceId, version.workflow_id);
+  const compared = useWorkflowVersion(workspaceId, version.workflow_id, compare);
   const nodeTypes = useNodeTypes();
   const manifests = useMemo(() => nodeTypes.data ?? [], [nodeTypes.data]);
   const palette: Palette = {
@@ -188,6 +262,16 @@ function Editor({
   const selected = selectedId
     ? (allSpecNodes(spec).find((n) => n.id === selectedId) ?? null)
     : null;
+  // What differs from the version compared with, unsaved edits included (5.7).
+  const diff = useMemo(
+    () => (compared.data ? diffSpecs(compared.data.spec as unknown as WorkflowSpec, spec) : null),
+    [compared.data, spec],
+  );
+  const runReason = dirty
+    ? "Save your changes first."
+    : version.issues.length > 0
+      ? `Fix the ${version.issues.length === 1 ? "issue" : `${version.issues.length} issues`} first.`
+      : null;
 
   useEffect(() => {
     if (!dirty) return;
@@ -208,7 +292,7 @@ function Editor({
   }, [spec]);
 
   function apply(edit: Edit | null) {
-    if (!edit) return;
+    if (!edit || readOnly) return;
     try {
       applyOps(base, [...ops, ...edit.ops]);
     } catch (err) {
@@ -262,6 +346,27 @@ function Editor({
     }
   }
 
+  async function onRestore() {
+    setRestoreError(null);
+    try {
+      const restored = await restore.mutateAsync({
+        baseVersion: latestVersion,
+        version: version.version,
+      });
+      setRestoreOpen(false);
+      toast.success(`Restored version ${version.version} as version ${restored.version}.`);
+      router.push(versionHref(version.workflow_id, null));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "version_conflict") {
+        setRestoreError(
+          "Someone saved a newer version meanwhile. Restore again to make this one the latest.",
+        );
+        return;
+      }
+      setRestoreError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   function undo() {
     setRefusal(null);
     setEdits((current) => current.slice(0, -1));
@@ -303,7 +408,8 @@ function Editor({
 
   function renderCard(node: MapNode): ReactNode {
     // Every node is edited where it is; a route's card is not a node.
-    const place = node.kind === "route" ? null : placeOf(spec, node.id);
+    const place = node.kind === "route" || readOnly ? null : placeOf(spec, node.id);
+    const change = node.kind === "route" ? undefined : diff?.nodes.get(node.id);
     const failed = refusal?.nodeId === node.id ? refusal.message : null;
     const nodeIssues = node.kind === "route" ? [] : (issuesOf.get(node.id) ?? []);
     const isSelected = selected?.id === node.id;
@@ -328,7 +434,7 @@ function Editor({
               type="button"
               data-select={node.id}
               aria-pressed={isSelected}
-              aria-label={`Edit parameters of ${node.name}`}
+              aria-label={`${readOnly ? "Show" : "Edit"} parameters of ${node.name}`}
               onClick={() => select(node.id)}
               className="min-w-0 truncate rounded-sm text-left font-mono text-meta font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
             >
@@ -337,6 +443,7 @@ function Editor({
           ) : (
             <span className="truncate font-mono text-meta font-medium">{node.name}</span>
           )}
+          {change ? <DiffBadge change={change} /> : null}
           {kind && known ? (
             <KindIcon kind={kind} className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
           ) : kind ? (
@@ -399,7 +506,18 @@ function Editor({
   }
 
   function panel(onClose: (() => void) | undefined): ReactNode {
-    if (!selected) return <WorkflowPanel spec={spec} onEdit={apply} onClose={onClose} />;
+    if (!selected) {
+      return (
+        <WorkflowPanel
+          spec={spec}
+          changes={diff && compare !== null ? { changes: diff.document, compared: compare } : null}
+          readOnly={readOnly}
+          onEdit={apply}
+          onClose={onClose}
+        />
+      );
+    }
+    const change = diff?.nodes.get(selected.id);
     return (
       <NodePanel
         node={selected}
@@ -409,6 +527,12 @@ function Editor({
         retry={() => void nodeTypes.refetch()}
         refusal={refusal?.nodeId === selected.id ? refusal.message : null}
         issues={issuesOf.get(selected.id)}
+        changes={
+          change?.kind === "changed" && compare !== null
+            ? { changes: change.changes, compared: compare }
+            : null
+        }
+        readOnly={readOnly}
         onEdit={apply}
         onClose={onClose}
       />
@@ -426,40 +550,92 @@ function Editor({
         }
         description={spec.description ?? "No description."}
         actions={
-          <>
-            <Button type="button" variant="ghost" onClick={() => select(null)}>
-              <PencilIcon aria-hidden="true" data-icon="inline-start" />
-              Edit details
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!dirty || save.isPending}
-              onClick={undo}
-              aria-label={dirty ? `Undo: ${edits[edits.length - 1].label}` : "Undo"}
-            >
-              <Undo2Icon aria-hidden="true" data-icon="inline-start" />
-              Undo
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!dirty || save.isPending}
-              onClick={() => setDiscarding(true)}
-            >
-              Discard
-            </Button>
-            <Button type="button" disabled={!dirty || save.isPending} onClick={() => void onSave()}>
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-          </>
+          readOnly ? (
+            <>
+              <Button type="button" variant="ghost" onClick={() => setHistoryOpen(true)}>
+                <HistoryIcon aria-hidden="true" data-icon="inline-start" />
+                History
+              </Button>
+              <Button asChild variant="outline">
+                <Link href={versionHref(version.workflow_id, null)}>
+                  <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+                  Back to latest
+                </Link>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setRestoreError(null);
+                  setRestoreOpen(true);
+                }}
+              >
+                <RotateCcwIcon aria-hidden="true" data-icon="inline-start" />
+                Restore this version
+              </Button>
+              <RunButton
+                label="Run this version"
+                reason={runReason}
+                reasonId={runReasonId}
+                onRun={() => setRunOpen(true)}
+              />
+            </>
+          ) : (
+            <>
+              <Button type="button" variant="ghost" onClick={() => select(null)}>
+                <PencilIcon aria-hidden="true" data-icon="inline-start" />
+                Edit details
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setHistoryOpen(true)}>
+                <HistoryIcon aria-hidden="true" data-icon="inline-start" />
+                History
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!dirty || save.isPending}
+                onClick={undo}
+                aria-label={dirty ? `Undo: ${edits[edits.length - 1].label}` : "Undo"}
+              >
+                <Undo2Icon aria-hidden="true" data-icon="inline-start" />
+                Undo
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!dirty || save.isPending}
+                onClick={() => setDiscarding(true)}
+              >
+                Discard
+              </Button>
+              <Button
+                type="button"
+                variant={dirty ? "default" : "outline"}
+                disabled={!dirty || save.isPending}
+                onClick={() => void onSave()}
+              >
+                {save.isPending ? "Saving…" : "Save"}
+              </Button>
+              <RunButton
+                label="Run"
+                reason={runReason}
+                reasonId={runReasonId}
+                primary={!dirty}
+                onRun={() => setRunOpen(true)}
+              />
+            </>
+          )
         }
       />
-      <p
+      <div
         data-testid="builder-status"
-        className="flex flex-wrap gap-x-3 gap-y-1 text-meta text-foreground-secondary"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-foreground-secondary"
       >
-        <span>Version {version.version}</span>
+        <span>
+          {readOnly
+            ? `Version ${version.version} of ${latestVersion} · read-only`
+            : `Version ${version.version}`}
+        </span>
         <IssuesStatus
           issues={validation.issues}
           checking={validation.checking}
@@ -472,7 +648,21 @@ function Editor({
             {edits.length} unsaved {edits.length === 1 ? "change" : "changes"}
           </span>
         ) : null}
-      </p>
+        <CompareSelect
+          versions={versions.data?.map((v) => v.version).filter((n) => n !== version.version)}
+          value={compare}
+          onChange={(m) =>
+            router.replace(versionHref(version.workflow_id, readOnly ? version.version : null, m))
+          }
+        />
+        {compare !== null && compared.isError ? (
+          <span className="text-status-failed">Could not load version {compare}.</span>
+        ) : compare !== null && compared.data === null ? (
+          <span>There is no version {compare}.</span>
+        ) : diff && compare !== null ? (
+          <ChangesStatus diff={diff} compared={compare} onShow={showIssue} />
+        ) : null}
+      </div>
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
         <section
           aria-label="Workflow canvas"
@@ -480,7 +670,7 @@ function Editor({
         >
           <div className="flex items-center justify-between gap-2 border-b bg-surface-subtle px-4 py-2">
             <h2 className="text-caption font-medium text-muted-foreground">Steps</h2>
-            {spec.root.type === "sequence" ? (
+            {spec.root.type === "sequence" && !readOnly ? (
               <AddMenu
                 label="Add first step"
                 palette={palette}
@@ -522,6 +712,96 @@ function Editor({
         </Sheet>
       )}
 
+      <HistorySheet
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        workflowId={version.workflow_id}
+        shown={version.version}
+        versions={{
+          data: versions.data,
+          error: versions.isError ? versions.error.message : null,
+          retry: () => void versions.refetch(),
+        }}
+        onOpen={(href, event) => {
+          if (!dirty) {
+            setHistoryOpen(false);
+            return;
+          }
+          event.preventDefault();
+          setHistoryOpen(false);
+          setLeaving(href);
+        }}
+      />
+      <WorkflowRunSheet
+        open={runOpen}
+        onOpenChange={setRunOpen}
+        workflow={{
+          id: version.workflow_id,
+          version: version.version,
+          name: spec.name,
+          requires: workflowRequires(version.spec as unknown as WorkflowSpec),
+        }}
+        workspaceId={workspaceId}
+      />
+      <AlertDialog open={restoreOpen} onOpenChange={setRestoreOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore version {version.version}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              It becomes version {latestVersion + 1}, the latest.{" "}
+              {latestVersion > version.version + 1
+                ? `Versions ${version.version + 1} to ${latestVersion} are kept.`
+                : `Version ${latestVersion} is kept.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {restoreError ? (
+            <p role="alert" className="flex items-start gap-1 text-meta text-status-failed">
+              <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <span>{restoreError}</span>
+            </p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restore.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                void onRestore();
+              }}
+            >
+              {restore.isPending ? "Restoring…" : "Restore"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={leaving !== null}
+        onOpenChange={(open) => (open ? null : setLeaving(null))}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your {edits.length} unsaved {edits.length === 1 ? "change is" : "changes are"} lost
+              when you open another version.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                const href = leaving;
+                setEdits([]);
+                setLeaving(null);
+                if (href) router.push(href);
+              }}
+            >
+              Leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <RemoveDialog
         removal={removing}
         onCancel={() => setRemoving(null)}
@@ -555,6 +835,78 @@ function Editor({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+/** Run, or why not: the reason is its tooltip and its accessible description. */
+function RunButton({
+  label,
+  reason,
+  reasonId,
+  primary = true,
+  onRun,
+}: {
+  label: string;
+  reason: string | null;
+  reasonId: string;
+  primary?: boolean;
+  onRun: () => void;
+}) {
+  return (
+    <>
+      <span title={reason ?? undefined}>
+        <Button
+          type="button"
+          variant={primary ? "default" : "outline"}
+          disabled={reason !== null}
+          aria-describedby={reason ? reasonId : undefined}
+          onClick={onRun}
+        >
+          <PlayIcon aria-hidden="true" data-icon="inline-start" />
+          {label}
+        </Button>
+      </span>
+      {reason ? (
+        <span id={reasonId} className="sr-only">
+          {reason}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** Which version's differences the cards mark (5.7). */
+function CompareSelect({
+  versions,
+  value,
+  onChange,
+}: {
+  versions: number[] | undefined;
+  value: number | null;
+  onChange: (version: number | null) => void;
+}) {
+  const id = useId();
+  if (!versions || versions.length === 0) return null;
+  // A compared version the list does not have yet stays shown.
+  const options = value !== null && !versions.includes(value) ? [value, ...versions] : versions;
+  return (
+    <span className="flex items-center gap-2">
+      <label htmlFor={id} className="text-meta text-foreground-secondary">
+        Compare with
+      </label>
+      <NativeSelect
+        id={id}
+        value={value === null ? "" : String(value)}
+        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+      >
+        <NativeSelectOption value="">Nothing</NativeSelectOption>
+        {options.map((n) => (
+          <NativeSelectOption key={n} value={String(n)}>
+            Version {n}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+    </span>
   );
 }
 

@@ -176,6 +176,9 @@ class Run(Base):
     template_id: Mapped[str | None] = mapped_column(String(128))
     # The template's options the run was started with (for "Edit and rerun" later).
     template_parameters: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    # The stored workflow version the spec was read from, if any (5.7).
+    workflow_id: Mapped[str | None] = mapped_column(String(64))
+    workflow_version: Mapped[int | None] = mapped_column(Integer)
     repo_url: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -263,7 +266,8 @@ class Workflow(Base):
 
 class WorkflowVersion(Base):
     """One version of a workflow, append only (a trigger refuses `UPDATE` and `DELETE`): the spec,
-    and the graph operations that made it from `base_version` (both unset for version 1)."""
+    and the graph operations that made it from `base_version` (both unset for version 1). A
+    restore (5.7) copies the spec of version `restored_from` and has no ops."""
 
     __tablename__ = "workflow_versions"
     __table_args__ = (
@@ -281,6 +285,7 @@ class WorkflowVersion(Base):
     spec: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     base_version: Mapped[int | None] = mapped_column(Integer)
     ops: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
+    restored_from: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

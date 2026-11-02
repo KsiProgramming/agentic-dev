@@ -23,11 +23,11 @@ async def create_rerun(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID, budget_usd: Decimal | None = None
 ) -> UUID:
     """Insert a `queued` copy of the ended run `run_id` (its spec, input, repo, workspace,
-    template and template options) with `rerun_of` set to it, and return the new run's id.
-    Raises `RunNotFoundError`, or `RunNotEndedError` if the run is still queued, running or
-    waiting. The new run gets the workspace's policy as it is now, not the original's, with
-    `budget_usd` as its budget if given, and `PolicyViolationError` is raised if the spec is above
-    it. The original's spend does not count toward it."""
+    template and template options, and the workflow version it ran) with `rerun_of` set to it,
+    and return the new run's id. Raises `RunNotFoundError`, or `RunNotEndedError` if the run is
+    still queued, running or waiting. The new run gets the workspace's policy as it is now, not
+    the original's, with `budget_usd` as its budget if given, and `PolicyViolationError` is
+    raised if the spec is above it. The original's spend does not count toward it."""
     new_id = uuid4()
     async with sessions.begin() as session:
         # An ended run never changes again, so it needs no lock while it is copied.
@@ -51,6 +51,8 @@ async def create_rerun(
                 repo_url=original.repo_url,
                 template_id=original.template_id,
                 template_parameters=original.template_parameters,
+                workflow_id=original.workflow_id,
+                workflow_version=original.workflow_version,
                 rerun_of=original.id,
                 trigger="rerun",
                 branch=original.repo.get("ref") if original.repo else None,

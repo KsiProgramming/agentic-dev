@@ -1,4 +1,5 @@
-"""Stored workflows (5.1): each batch of graph operations makes a new, immutable version."""
+"""Stored workflows (5.1): each batch of graph operations makes a new, immutable version; a
+restore (5.7) copies an older one as the next."""
 
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.spec import GraphOp, OpError
 from agentic_store import (
+    AlreadyLatestError,
     AuditEvent,
     VersionConflictError,
     WorkflowExistsError,
@@ -20,6 +22,7 @@ from agentic_store import (
     create_workspace,
     get_workflow_version,
     list_workflow_versions,
+    restore_workflow,
     update_workflow,
 )
 
@@ -170,3 +173,50 @@ async def test_changes_are_audited_without_the_spec(
             },
         ),
     ]
+
+
+async def test_a_restore_copies_an_older_version_as_the_next(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    await create_workflow(sessions, workspace_id, spec("docs"))
+    second = await update_workflow(sessions, workspace_id, "docs", 1, ADD_REVIEW)
+    await update_workflow(
+        sessions, workspace_id, "docs", 2, ops({"op": "removeNode", "node_id": "plan"})
+    )
+
+    restored = await restore_workflow(sessions, workspace_id, "docs", 3, 1)
+
+    assert (restored.version, restored.base_version, restored.ops) == (4, 3, None)
+    assert (restored.restored_from, restored.spec) == (1, spec("docs"))
+    assert await get_workflow_version(sessions, workspace_id, "docs", 2) == second
+    assert (await get_workflow_version(sessions, workspace_id, "docs")).version == 4
+    async with sessions() as session:
+        row = await session.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.workspace_id == workspace_id)
+            .order_by(AuditEvent.id.desc())
+        )
+    assert row is not None
+    assert (row.action, row.details) == (
+        "workflow.restored",
+        {"workflow_id": "docs", "version": 4, "base_version": 3, "restored_from": 1},
+    )
+
+
+async def test_a_restore_is_refused_when_stale_latest_or_unknown(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    workspace_id = await new_workspace(sessions)
+    await create_workflow(sessions, workspace_id, spec("docs"))
+    await update_workflow(sessions, workspace_id, "docs", 1, ADD_REVIEW)
+
+    with pytest.raises(VersionConflictError):
+        await restore_workflow(sessions, workspace_id, "docs", 1, 1)
+    with pytest.raises(AlreadyLatestError):
+        await restore_workflow(sessions, workspace_id, "docs", 2, 2)
+    with pytest.raises(WorkflowNotFoundError):
+        await restore_workflow(sessions, workspace_id, "docs", 2, 7)
+    with pytest.raises(WorkflowNotFoundError):
+        await restore_workflow(sessions, workspace_id, "nope", 1, 1)
+    assert len(await list_workflow_versions(sessions, workspace_id, "docs")) == 2

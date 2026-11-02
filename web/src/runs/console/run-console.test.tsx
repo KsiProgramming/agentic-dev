@@ -843,6 +843,15 @@ test("a rerun links back to the run it repeats", async () => {
   expect(link.parentElement?.textContent).toBe(`Rerun of ${ORIGINAL.slice(0, 8)}`);
 });
 
+test("a run of a stored workflow version links back to that version", async () => {
+  api(detail({ workflow: { id: "docs", name: "Generate docs", version: 3 } }));
+  show();
+
+  const link = await screen.findByTestId("workflow-version");
+  expect(link.getAttribute("href")).toBe("/workflows/docs?version=3");
+  expect(link.textContent).toBe("docs · version 3");
+});
+
 test("?tab=graph opens the graph of the run's workflow", async () => {
   nav.search = "tab=graph";
   api(detail({ status: "completed" }));

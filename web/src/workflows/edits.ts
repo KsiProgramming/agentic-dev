@@ -136,8 +136,8 @@ function* places(place: Place): Generator<Place> {
   for (const child of children) yield* places(child);
 }
 
-/** Where `nodeId` is, or `null` when the spec has no such node. */
-export function placeOf(spec: WorkflowSpec, nodeId: string): Place | null {
+/** Where every node of the spec is, depth first in run order. */
+export function allPlaces(spec: WorkflowSpec): Place[] {
   const root: Place = {
     node: spec.root,
     parent: null,
@@ -145,8 +145,12 @@ export function placeOf(spec: WorkflowSpec, nodeId: string): Place | null {
     siblings: [spec.root.id],
     index: 0,
   };
-  for (const place of places(root)) if (place.node.id === nodeId) return place;
-  return null;
+  return [...places(root)];
+}
+
+/** Where `nodeId` is, or `null` when the spec has no such node. */
+export function placeOf(spec: WorkflowSpec, nodeId: string): Place | null {
+  return allPlaces(spec).find((place) => place.node.id === nodeId) ?? null;
 }
 
 /** Why the node at `place` cannot leave it (be removed or moved away), as a sentence for its

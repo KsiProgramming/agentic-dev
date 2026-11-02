@@ -1,6 +1,7 @@
 """`POST /workflows/{id}/validate`: every reason a workflow cannot run in a workspace, without
 running it (3.4). Stored workflows (5.1): `POST /workflows`, `GET /workflows/{id}` and its
-versions, and `PATCH /workflows/{id}`, where graph operations make a new, immutable version."""
+versions, and `PATCH /workflows/{id}`, where graph operations make a new, immutable version.
+Restoring an older version as the latest (5.7)."""
 
 import json
 from collections.abc import AsyncIterator
@@ -302,8 +303,20 @@ async def test_applying_ops_produces_a_new_immutable_version(
     assert latest.json()["version"] == 2
     versions = await client.get("/workflows/review-loop/versions", params=params)
     assert versions.json()["items"] == [
-        {"version": 2, "base_version": 1, "created_at": second["created_at"], "op_count": 2},
-        {"version": 1, "base_version": None, "created_at": first["created_at"], "op_count": 0},
+        {
+            "version": 2,
+            "base_version": 1,
+            "created_at": second["created_at"],
+            "op_count": 2,
+            "restored_from": None,
+        },
+        {
+            "version": 1,
+            "base_version": None,
+            "created_at": first["created_at"],
+            "op_count": 0,
+            "restored_from": None,
+        },
     ]
 
 
@@ -454,3 +467,65 @@ async def test_unknown_workflows_versions_and_workspaces_are_not_found(
     ]
 
     assert [r.status_code for r in responses] == [404] * 6
+
+
+async def restore(
+    client: AsyncClient, workspace: UUID, workflow_id: str, base_version: int, version: int
+) -> Any:
+    return await client.post(
+        f"/workflows/{workflow_id}/restore",
+        params={"workspace_id": str(workspace)},
+        json={"base_version": base_version, "version": version},
+    )
+
+
+async def test_restoring_stores_an_older_spec_as_the_next_version(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    original = spec_json("valid/review-loop.json")
+    await create(client, workspace, original)
+    assert (await patch(client, workspace, "review-loop", 1, SET_PUBLISH)).status_code == 201
+
+    response = await restore(client, workspace, "review-loop", 2, 1)
+
+    assert response.status_code == 201, response.text
+    third = response.json()
+    assert (third["version"], third["base_version"], third["ops"]) == (3, 2, None)
+    assert (third["restored_from"], third["spec"], third["valid"]) == (1, original, True)
+    params = {"workspace_id": str(workspace)}
+    second = await client.get("/workflows/review-loop", params={**params, "version": 2})
+    assert second.json()["restored_from"] is None
+    assert second.json()["spec"] != original
+    versions = await client.get("/workflows/review-loop/versions", params=params)
+    items = versions.json()["items"]
+    assert [(v["version"], v["op_count"], v["restored_from"]) for v in items] == [
+        (3, 0, 1),
+        (2, 1, None),
+        (1, 0, None),
+    ]
+
+
+async def test_a_restore_is_refused_when_stale_latest_or_unknown(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    await create(client, workspace, spec_json("valid/review-loop.json"))
+    assert (await patch(client, workspace, "review-loop", 1, SET_PUBLISH)).status_code == 201
+
+    stale = await restore(client, workspace, "review-loop", 1, 1)
+    latest = await restore(client, workspace, "review-loop", 2, 2)
+    missing = [
+        await restore(client, workspace, "review-loop", 2, 9),
+        await restore(client, workspace, "nope", 1, 1),
+        await restore(client, uuid4(), "review-loop", 2, 1),
+    ]
+
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "version_conflict"
+    assert stale.json()["detail"]["latest_version"] == 2
+    assert latest.status_code == 422
+    assert latest.json()["detail"]["code"] == "already_latest"
+    assert [r.status_code for r in missing] == [404] * 3
+    versions = await client.get(
+        "/workflows/review-loop/versions", params={"workspace_id": str(workspace)}
+    )
+    assert len(versions.json()["items"]) == 2

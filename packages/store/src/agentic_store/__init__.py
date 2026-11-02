@@ -106,6 +106,7 @@ from agentic_store.summaries import (
     list_run_summaries,
 )
 from agentic_store.workflows import (
+    AlreadyLatestError,
     StoredWorkflowVersion,
     VersionConflictError,
     WorkflowExistsError,
@@ -113,6 +114,7 @@ from agentic_store.workflows import (
     create_workflow,
     get_workflow_version,
     list_workflow_versions,
+    restore_workflow,
     update_workflow,
 )
 
@@ -126,6 +128,7 @@ __all__ = [
     "RUN_QUEUE",
     "USER_CANCEL_REASON",
     "AlreadyDecidedError",
+    "AlreadyLatestError",
     "Approval",
     "ApprovalError",
     "AuditAction",
@@ -215,6 +218,7 @@ __all__ = [
     "replace_price_overrides",
     "repo_created",
     "request_cancel",
+    "restore_workflow",
     "run_ended",
     "update_workflow",
     "waiting_run_ids",

@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from pydantic import ValidationError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -56,6 +57,7 @@ from agentic_store import (
     RunNotFoundError,
     RunSummaryRow,
     StoredArtifact,
+    WorkflowNotFoundError,
     WorkspaceNotFoundError,
     count_runs,
     create_rerun,
@@ -65,6 +67,7 @@ from agentic_store import (
     get_run,
     get_run_artifact,
     get_run_summary,
+    get_workflow_version,
     get_workspace,
     list_changed_run_summaries,
     list_run_artifacts,
@@ -146,7 +149,9 @@ def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
         "id": row.id,
         "workspace_id": row.workspace_id,
         "status": row.status,
-        "workflow": WorkflowRef(id=row.workflow_id, name=row.workflow_name),
+        "workflow": WorkflowRef(
+            id=row.workflow_id, name=row.workflow_name, version=row.workflow_version
+        ),
         "template_id": row.template_id,
         "repo": row.repo,
         "created_at": row.created_at,
@@ -312,7 +317,7 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="createRun",
     responses={
-        404: {"description": "No workspace with this id"},
+        404: {"description": "No workspace with this id, or no such stored workflow or version"},
         409: {
             "description": "The workflow uses `github.*` tools, but the workspace has no "
             "GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, "
@@ -325,8 +330,9 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
     },
 )
 async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
-    """Queue a run of `workflow`, or of the workflow `template` builds, with `input` for its first
-    node, working on `repo` if given. Stream it from `events_url`. A workflow that publishes
+    """Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored
+    workflow (`stored_workflow`, which the run records), with `input` for its first node,
+    working on `repo` if given. Stream it from `events_url`. A workflow that publishes
     (`github.openPR`) must have a gate between the writer and the publishing node, or it is
     refused with `422`. So is one above the workspace's run limits (`GET
     /workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was
@@ -343,6 +349,9 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
     if await get_workspace(sessions, workspace_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
+    stored: tuple[str, int] | None = None
+    if body.stored_workflow is not None:
+        body, stored = await _with_stored_spec(sessions, workspace_id, body)
     spec, repo = body.spec(), body.repo
     if body.new_repo is not None:
         spec, repo = await _on_new_repo(request, workspace_id, body)
@@ -359,12 +368,41 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
             template_parameters=dict(body.template.parameters) if body.template else None,
             budget_usd=to_usd(body.budget_usd),
             trigger=body.trigger,
+            workflow_version=stored,
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
+    )
+
+
+async def _with_stored_spec(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, body: CreateRunRequest
+) -> tuple[CreateRunRequest, tuple[str, int]]:
+    """`body` with the spec of the stored workflow version it names, and that version. A version
+    with issues is refused as a `workflow` with them would be."""
+    ref = body.stored_workflow
+    assert ref is not None
+    try:
+        stored = await get_workflow_version(sessions, workspace_id, ref.id, ref.version)
+    except WorkflowNotFoundError:
+        missing = f"workflow {ref.id} not found"
+        if ref.version is not None:
+            missing = f"workflow {ref.id} has no version {ref.version}"
+        raise HTTPException(status.HTTP_404_NOT_FOUND, missing) from None
+    try:
+        body = body.with_spec(WorkflowSpec.model_validate(stored.spec))
+    except ValidationError as e:
+        reasons = "; ".join(str(err["msg"]).removeprefix("Value error, ") for err in e.errors())
+    except ValueError as e:
+        reasons = str(e)
+    else:
+        return body, (stored.workflow_id, stored.version)
+    raise HTTPException(
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        f"version {stored.version} of workflow {ref.id} cannot run: {reasons}",
     )
 
 
