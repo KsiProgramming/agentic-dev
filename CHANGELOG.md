@@ -9,6 +9,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Open-source release: Apache-2.0 `LICENSE` and `NOTICE`, `SECURITY.md` (private vulnerability reporting), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), and a new `README.md` for readers outside the project ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- `docs/`: architecture overview (C4 context, containers, components, quality attributes), business flows, technical flows, data model, architecture decision records, security model (trust boundaries, STRIDE, controls, known gaps), deployment guide (local, single host, production reference, operations), configuration reference, and a guide to connecting your own GitHub App and model keys and extending providers, tools, sandboxes, Git hosts and KMS ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - `specs/ideas.md`: four ideas from testing 5.8 — workflows that work on several repos, publishing a stored workflow as a template, letting later agents read what earlier writers changed, and recovering runs lost between the queue and the worker ([#154](https://github.com/KsiProgramming/agentic-dev/pull/154)).
 - Phase 5.8 start screen v2: provider picker and "Blank canvas" ([#153](https://github.com/KsiProgramming/agentic-dev/pull/153)):
   - **Blank canvas.** The start screen (`/templates`, now titled "Start") opens with a Blank canvas card. Its sheet takes a name, an id (a slug of the name until edited), an optional description and the provider the first agent runs on. GitHub Copilot is listed but not available until the Copilot adapter ships. Create workflow opens the builder with the starter agent selected. `POST /workflows` takes `{blank: {name, id?, description?, provider?}}`.
@@ -311,6 +313,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- On a phone, a run console opened with `?step=` opens that step's sheet at once, so a link to a step shows the step ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- CI's e2e job runs three workers (`--scale worker=3`): with one, runs started by parallel browsers queued behind each other and gates timed out ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- The old `README.MD` is split into `docs/product/product-spec.md` (the original product specification, reformatted as Markdown, author byline removed) and `docs/development/developer-reference.md` (the phase-by-phase developer reference); `.env.example` and `docker-compose.yml` point to the latter ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- `specs/mission.md` and `specs/tech-stack.md`: distribution is now open source and self-hosted first (Apache-2.0), replacing "SaaS only"; a packaged installer is the new non-goal ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- `web/Dockerfile` takes `NEXT_PUBLIC_API_URL` as a build argument (default unchanged), so the web app can be built for an API on another host ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- The `open-pr` skill and a repo-rules test no longer hard-code the repository owner ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Roadmap: phase 11.9 (Design language v2) marked done, linking [#144](https://github.com/KsiProgramming/agentic-dev/pull/144); its Status cell had been left at "—" after the merge.
 - Phase 11.9 Design language v2 ([#144](https://github.com/KsiProgramming/agentic-dev/pull/144)): every screen follows the new [`specs/design-language.md`](specs/design-language.md), now part of the constitution:
   - **Tokens.** An ink (near-black) primary replaces indigo; three text levels (`foreground`, `foreground-secondary`, `muted-foreground`) plus `placeholder`; tinted surfaces (`surface-sunken`, `surface-subtle`), `border-strong`, `divider`, an edge per status (`--status-*-border`) and colours per finding severity (`--severity-*`); UI text 13 px, Inter `cv11`/`ss01`, `text-kbd`. A test checks every text level is ≥ 4.5:1 on every surface, light and dark.
@@ -348,6 +356,10 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
+- Run map cards' accessible name now holds their visible line ("each, Done, 2 of 2 items, map"): an `aria-label` left it out, which axe reports as a WCAG 2.5.3 failure ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- About 40 end-to-end tests that went stale when phases 11.6 and 11.9 merged without CI now pass: the run map's `map-node` cards, the "Step" filter, the console's time tiles and pull request link, the artifact sheet's JSON groups, the pricing table's container query, and page checks made while a modal sheet is open ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- Flaky a11y e2e check of the new workflow sheet: axe now runs once the sheet has finished sliding in, not while its fading text reads as low contrast ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- Flaky worker test `test_a_run_with_a_repo_lists_its_files_in_a_sandbox`: a completed run's sandbox is removed just after `run_completed`, so the test now waits for the removal before stopping the worker instead of asserting at once ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Accessibility of the 11.7 shell ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)), found by the axe checks while building 4.2. CI never ran them on `main`, because the jobs were not started:
   - **Search button.** Its accessible name ("Search runs and commands") now starts with its visible text (WCAG 2.5.3). The ellipsis and the `⌘K` hint are drawn by CSS and hidden from the name, and the shortcut stays in `aria-keyshortcuts`.
   - **Preferences menu.** It is no longer modal, so it does not hide the page with `aria-hidden` while scroll areas behind it stay focusable. Escape and a click outside still close it.

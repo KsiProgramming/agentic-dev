@@ -1,0 +1,9 @@
+Agentic Dev Platform
+Copyright 2026 The Agentic Dev Platform contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The sandbox image built from packages/sandbox/Dockerfile downloads and bundles third-party
+tools under their own licenses: ruff (MIT), Biome (MIT or Apache-2.0), ShellCheck (GPL-3.0),
+gitleaks (MIT) and osv-scanner (Apache-2.0), and vulnerability data from the OSV database
+(CC-BY 4.0). They are executed as separate programs and are not part of this product's source.

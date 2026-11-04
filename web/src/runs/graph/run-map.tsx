@@ -121,7 +121,6 @@ export function RunMap({
         data-node={node.id}
         data-status={status}
         aria-pressed={isSelected}
-        aria-label={`${node.name}, ${statusLabel(status)}, ${kindLabel(node.kind as NodeKind)}`}
         onClick={() => onOpen(node.id)}
         className={cn(
           CARD,
@@ -132,7 +131,12 @@ export function RunMap({
       >
         <span className="flex min-w-0 items-center gap-2">
           <Dot status={status} />
-          <span className="truncate font-mono text-meta font-medium">{node.name}</span>
+          {/* The name comes from the card's own text, so it holds what is visible (WCAG 2.5.3):
+              "each, Done, 2 of 2 items, map". Status and kind are words for screen readers. */}
+          <span className="truncate font-mono text-meta font-medium">
+            {node.name}
+            <span className="sr-only">, {statusLabel(status)},</span>
+          </span>
           <KindIcon
             kind={node.kind as NodeKind}
             className="ml-auto size-3.5 shrink-0 text-muted-foreground"
@@ -140,6 +144,7 @@ export function RunMap({
         </span>
         <span className="truncate pl-4 text-caption text-foreground-secondary">
           {status === "skipped" ? "Skipped" : nodeLine(node, state, runs.get(node.id) ?? [], now)}
+          <span className="sr-only">, {kindLabel(node.kind as NodeKind)}</span>
         </span>
       </button>
     );

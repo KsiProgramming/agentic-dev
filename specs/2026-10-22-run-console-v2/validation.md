@@ -25,7 +25,7 @@ The user chose Vitest reducer + component tests as the merge gate. Backend code 
 - [x] Lint and types: `ruff`, `pyright` strict, ESLint, Prettier, `tsc` clean; OpenAPI and `schema.d.ts` regenerated.
 
 ## Manual / demo checks
-- [x] On the local stack (Claude runtime), a real "Generate docs" run on `KsiProgramming/GildedRoseKata`: each agent turn is one message; a module's 16 tool calls are one summary line; the writer's file writes and commit show their first lines; map items read `src/Core dotnet`; steps hang off the rail with status icons; the waiting gate says "Needs approval" with its panel.
+- [x] On the local stack (Claude runtime), a real "Generate docs" run on a public GildedRose kata repo: each agent turn is one message; a module's 16 tool calls are one summary line; the writer's file writes and commit show their first lines; map items read `src/Core dotnet`; steps hang off the rail with status icons; the waiting gate says "Needs approval" with its panel.
 - [x] Raw events on a two-node run: each streamed message is one folded row ("text_delta × 6", "× 27") with readable text; 45 events in all.
 - [x] A fresh live run shows the activity line ("writer · Thinking…") with a spinner.
 - [x] Opening a finished or waiting run lands at the top with no "Jump to latest" pill.

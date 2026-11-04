@@ -40,8 +40,13 @@ describe("RunMap", () => {
     const cards = screen.getAllByTestId("map-node");
     expect(cards.map((c) => c.dataset.node)).toContain("list_modules");
     expect(cards.every((c) => c.dataset.status === "not_started")).toBe(true);
-    // A card names itself with its status and kind (WCAG 2.5.3: visible text first).
-    expect(cards[0]!.getAttribute("aria-label")).toMatch(/^list_modules, Not started, tool$/);
+    // A card's name is its visible text with its status and kind for screen readers, so it
+    // holds what is visible (WCAG 2.5.3): name, status, what it does, kind.
+    // jsdom joins the card's two lines without the space a browser puts between them.
+    expect(screen.getByRole("button", { name: /^list_modules, Not started, ?.+, tool$/ })).toBe(
+      cards[0],
+    );
+    expect(cards[0]!.hasAttribute("aria-label")).toBe(false);
     expect(screen.getByTestId("run-map").textContent).toContain("0 of");
   });
 

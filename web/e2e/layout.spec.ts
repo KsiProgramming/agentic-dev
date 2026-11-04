@@ -64,6 +64,16 @@ async function screenshot(page: Page, name: string) {
   await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
 }
 
+/** A sheet open over the page (a modal dialog): the page behind it, its heading included, is
+ * hidden from assistive tech, so only the sheet is checked, once it has finished sliding in. */
+async function checkSheetOpen(page: Page, name: string) {
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toBeVisible();
+  await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+  await expectNoHorizontalScroll(page);
+  await screenshot(page, name);
+}
+
 async function checkPage(page: Page, name: string) {
   await expect(page.getByTestId("app-shell")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
@@ -109,7 +119,7 @@ test("workflows", async ({ page, request }) => {
   await checkPage(page, "workflows");
   await page.goto("/workflows?blank=1");
   await expect(page.getByTestId("new-workflow-sheet").getByRole("radio").first()).toBeVisible();
-  await checkPage(page, "new-workflow-sheet");
+  await checkSheetOpen(page, "new-workflow-sheet");
 });
 
 test("workflow builder", async ({ page, request }) => {
@@ -175,16 +185,17 @@ test("settings: integrations", async ({ page }) => {
 test("settings: models and pricing", async ({ page }) => {
   await page.goto("/settings/models");
   const table = page.getByRole("table", { name: /Model prices/ });
-  if (page.viewportSize()!.width >= 768) {
-    await expect(table).toBeVisible();
+  const list = page.getByRole("list", { name: /Model prices/ });
+  // The card shows a table from 720 px of its own width, a list below that (a container
+  // query): one of them, never both.
+  await expect(table.or(list).filter({ visible: true })).toHaveCount(1);
+  if (page.viewportSize()!.width >= 1440) await expect(table).toBeVisible();
+  if (await table.isVisible()) {
     // Done when (11.7): the pricing table fits its card, with no scroll of its own.
     const overflow = await table.evaluate(
       (t) => t.parentElement!.scrollWidth - t.parentElement!.clientWidth,
     );
     expect(overflow, "pricing table scrolls sideways").toBeLessThanOrEqual(0);
-  } else {
-    await expect(table).toBeHidden();
-    await expect(page.getByRole("list", { name: /Model prices/ })).toBeVisible();
   }
   await expectSettingsLayout(page);
   await checkPage(page, "settings-models");
@@ -245,7 +256,9 @@ test("an agent's activity, its work open", async ({ page, request }) => {
   );
   await page.getByTestId("work-block").getByRole("button").first().click();
   await expect(page.getByTestId("tool-intent").first()).toBeVisible();
-  await checkPage(page, "run-activity");
+  // On a phone the linked step opens in its sheet over the console.
+  if (page.viewportSize()!.width < 768) await checkSheetOpen(page, "run-activity");
+  else await checkPage(page, "run-activity");
 });
 
 test("a failed run", async ({ page, request }) => {
@@ -264,8 +277,12 @@ test("a run failed at a typed port", async ({ page, request }) => {
   await page.goto(`/runs/${runId}`);
   const banner = page.getByTestId("run-banner");
   await expect(banner).toHaveAttribute("data-kind", "failed", { timeout: 30_000 });
-  await expect(page.getByTestId("step-panel").getByTestId("port-errors")).toBeVisible();
   await checkPage(page, "run-port-failed");
+  // A link to the failing step shows its port errors, in the step sheet on a phone.
+  await page.goto(`/runs/${runId}?step=writer`);
+  await expect(page.getByTestId("step-panel").getByTestId("port-errors")).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await screenshot(page, "run-port-failed-step");
 });
 
 test("a run's artifacts, and one open in its sheet", async ({ page, request }) => {
@@ -283,7 +300,7 @@ test("a run's artifacts, and one open in its sheet", async ({ page, request }) =
     .getByTestId("run-artifact")
     .getByRole("button", { name: /findings\.json/ })
     .click();
-  await expect(page.getByTestId("artifact-sheet").getByRole("group")).toBeVisible();
+  await expect(page.getByTestId("artifact-sheet").getByRole("group").first()).toBeVisible();
   await screenshot(page, "run-artifact-sheet");
 });
 
@@ -346,18 +363,18 @@ test("a run's graph, waiting at a gate", async ({ page, request }) => {
   await page.goto(`/runs/${runId}?view=graph`);
   const dock = page.getByTestId("approval-dock").filter({ visible: true });
   await expect(dock).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("graph-node")).toHaveCount(4);
+  await expect(page.getByTestId("map-node")).toHaveCount(4);
   await checkPage(page, "run-graph");
 
-  // The graph pans and zooms in its own box, which ends above the dock once scrolled down.
-  const graph = page.getByTestId("run-graph");
+  // The map scrolls in its own box, which ends above the dock once the page is scrolled down.
+  const graph = page.getByTestId("run-map");
   const box = (await graph.boundingBox())!;
   expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const scrolled = (await graph.boundingBox())!;
   expect(scrolled.y + scrolled.height).toBeLessThanOrEqual((await dock.boundingBox())!.y + 1);
 
-  await page.locator('[data-testid="graph-node"][data-node-id="worker"]').click();
+  await page.locator('[data-testid="map-node"][data-node="worker"]').click();
   await expect(page.getByTestId("step-panel")).toHaveAttribute("data-key", "each[1]/worker");
   await expectNoHorizontalScroll(page);
   await screenshot(page, "run-graph-step");

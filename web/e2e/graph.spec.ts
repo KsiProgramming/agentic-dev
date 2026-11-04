@@ -6,7 +6,7 @@ import { apiURL, COMBINE, GATE, MAP, startRun } from "./runs";
  * panel beside it. */
 
 function graphNode(page: Page, nodeId: string) {
-  return page.locator(`[data-testid="graph-node"][data-node-id="${nodeId}"]`);
+  return page.locator(`[data-testid="map-node"][data-node="${nodeId}"]`);
 }
 
 /** A run of a map, a reduce and a gate, opened on its Graph tab once it waits at the gate. */
@@ -23,11 +23,12 @@ async function openWaitingGraph(page: Page, request: Parameters<typeof startRun>
 test("clicking a node in the graph shows what the agent did", async ({ page, request }) => {
   const runId = await openWaitingGraph(page, request);
 
-  // Every node of the spec is drawn, with its status in words.
-  await expect(page.getByTestId("graph-node")).toHaveCount(4);
-  await expect(graphNode(page, "each")).toHaveAccessibleName("each, Done, 2 of 2 items, map");
+  // Every node of the spec is drawn, named by its visible text with its status and kind in words
+  // (the browser may put a space where hidden and visible text meet; speech ignores it).
+  await expect(page.getByTestId("map-node")).toHaveCount(4);
+  await expect(graphNode(page, "each")).toHaveAccessibleName(/^each ?, Done, 2 of 2 items ?, map$/);
   await expect(graphNode(page, "approve")).toHaveAccessibleName(
-    "approve, Needs approval, Approve the greeting, gate",
+    /^approve ?, Needs approval, .+ ?, gate$/,
   );
 
   await graphNode(page, "worker").click();

@@ -67,7 +67,10 @@ for (const colorScheme of ["light", "dark"] as const) {
       ).toBeVisible();
       await expectNoSeriousIssues(page);
       await open(page, "/workflows?blank=1");
-      await expect(page.getByTestId("new-workflow-sheet").getByRole("radio").first()).toBeVisible();
+      const sheet = page.getByTestId("new-workflow-sheet");
+      await expect(sheet.getByRole("radio").first()).toBeVisible();
+      // Check it where it rests: mid-slide, its fading text reads as low contrast.
+      await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       await expectNoSeriousIssues(page);
     });
 
@@ -194,7 +197,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         .getByTestId("run-artifact")
         .getByRole("button", { name: /findings\.json/ })
         .click();
-      await expect(page.getByTestId("artifact-sheet").getByRole("group")).toBeVisible();
+      await expect(page.getByTestId("artifact-sheet").getByRole("group").first()).toBeVisible();
       await expectNoSeriousIssues(page);
     });
 
@@ -209,7 +212,7 @@ for (const colorScheme of ["light", "dark"] as const) {
 
     test("a run failed at a typed port has no serious a11y issues", async ({ page, request }) => {
       const runId = await startRun(request, [TYPED_WRITER], "E2E typed port a11y");
-      await open(page, `/runs/${runId}`);
+      await open(page, `/runs/${runId}?step=writer`);
       await expect(page.getByTestId("step-panel").getByTestId("port-errors")).toBeVisible({
         timeout: 30_000,
       });
@@ -294,10 +297,10 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByTestId("approval-dock").filter({ visible: true })).toBeVisible({
         timeout: 30_000,
       });
-      await expect(page.getByTestId("graph-node")).toHaveCount(4);
+      await expect(page.getByTestId("map-node")).toHaveCount(4);
       await expectNoSeriousIssues(page);
 
-      await page.locator('[data-testid="graph-node"][data-node-id="worker"]').click();
+      await page.locator('[data-testid="map-node"][data-node="worker"]').click();
       await expect(page.getByTestId("step-panel")).toHaveAttribute("data-key", "each[1]/worker");
       await expectNoSeriousIssues(page);
 

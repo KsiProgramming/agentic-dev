@@ -25,7 +25,10 @@ interface Row {
 async function rows(page: Page): Promise<Row[]> {
   // The selected step's Events, then every step's.
   await page.getByRole("tab", { name: "Events" }).click();
-  await page.getByLabel("Step").selectOption("");
+  await page
+    .getByRole("combobox", { name: "Step", exact: true })
+    .filter({ visible: true })
+    .selectOption("");
   // The panel renders after the click: read the rows once they are there.
   await expect(page.getByTestId("event-row").first()).toBeVisible();
   return page.getByTestId("event-row").evaluateAll((els) =>
@@ -121,9 +124,10 @@ test("a docs run waits at its gate, is approved from the dock and opens a pull r
       timeout: 60_000,
     },
   );
-  await expect(
-    page.getByRole("link", { name: new RegExp(`${DOCS_DEMO}/pull/\\d+`) }).first(),
-  ).toBeVisible();
+  // The header links to the pull request ("Pull request #N", 11.6).
+  const pr = page.getByTestId("pull-request").filter({ visible: true });
+  await expect(pr).toHaveText(/Pull request #\d+/);
+  await expect(pr).toHaveAttribute("href", new RegExp(`${DOCS_DEMO}/pull/\\d+$`));
 });
 
 test("a run started with POST /runs shows its events within 1 s", async ({ page, request }) => {

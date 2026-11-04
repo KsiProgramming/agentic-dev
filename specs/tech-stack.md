@@ -219,7 +219,7 @@ Each kind of value has one component (`@/components/display`), used everywhere a
   - Sequences are not drawn as boxes: their steps run top to bottom as a chain of cards, joined by a line. A container's body (map, loop), branches (parallel) or routes (router, `default` last) hang off it to the right as chains of their own, joined by elbow lines; below 560 px of map width they hang under it, indented, so a phone scrolls down, not sideways.
   - Each card (56 px, 208 px wide) shows a status dot (hollow before the run reaches it, dashed on a route not taken), its id (mono), its kind icon, and one line: what it did ("28s · $0.245", "3 runs · …"), how far a container got ("3 of 3 branches · settled", "Routed to fix_first"), else what it does (role, tool, gate title). A route its router did not take is "Skipped". A footer reads "22 steps · All completed · 2 skipped".
   - Status comes from the same timeline as the step list; no layout engine, nothing moves; the map scrolls inside its box (`min(75svh, 800px)`).
-  - Each card is a button whose accessible name starts with its visible text ("worker, Done, agent": WCAG 2.5.3), `aria-pressed` when its step is shown (a 2 px ring). Selecting a card shows its step in the step panel: the run of it that needs attention first (failed, waiting, running, cancelled), else its last. The dock's `A` / `R` shortcuts work while a card has focus.
+  - Each card is a button whose accessible name is its visible text, with its status and kind added as screen-reader words ("each, Done, 2 of 2 items, map"), never an `aria-label` that leaves the visible line out (WCAG 2.5.3, checked by axe), `aria-pressed` when its step is shown (a 2 px ring). Selecting a card shows its step in the step panel: the run of it that needs attention first (failed, waiting, running, cancelled), else its last. The dock's `A` / `R` shortcuts work while a card has focus.
 - **Approval dock:** while a gate is waiting, a bar is fixed to the bottom of the viewport (its decision and dialogs are the Inbox's, see Inbox) with:
   - the gate title, and when it expires (`ExpiresIn`, when the gate has an expiry);
   - a one-line summary: the gate's prompt, else the first line of its artifact;
@@ -490,7 +490,8 @@ A rule an agent can break without noticing will be broken. So each one is either
 
 - Local dev: `docker compose` (Postgres, Redis, API, worker, frontend).
 - CI: GitHub Actions.
-- Hosting: SaaS only (v1). Containerised services on a managed Kubernetes or container platform. The cloud provider is still to be decided.
+- Hosting: open source (Apache-2.0), self-hosted by each team; a hosted multi-tenant service later (10.5). Containerised services; the reference topologies (single host, Kubernetes application tier with dedicated worker hosts) are in `docs/operations/deployment.md`. The web image takes the API's URL at build time (`NEXT_PUBLIC_API_URL` build argument).
+- Documentation: `docs/` explains the system to readers outside the project (architecture, flows, security model, deployment, integrations); `specs/` stays binding and wins when they disagree.
 
 ## Decisions log
 
@@ -499,7 +500,8 @@ A rule an agent can break without noticing will be broken. So each one is either
 | Engine | LangGraph (not Temporal) | Python-native and agent-oriented, with built-in interrupts for gates and `Send` for dynamic fan-out. Durability comes from the Postgres checkpointer. |
 | Backend language | Python | Matches LangGraph and has a strong agent/MCP SDK ecosystem. |
 | Frontend | Next.js/TS | As specified by stakeholders. Contracts are shared through JSON Schema. |
-| Hosting | SaaS only | v1 scope (see mission). |
+| Hosting | SaaS only. Superseded by "Distribution (open source)" | v1 scope (see mission). |
+| Distribution (open source) | Apache-2.0, self-hosted first; each deployment registers its own GitHub App and stores its own model keys | Teams can adopt and modify it with an explicit patent grant (MIT has none; AGPL keeps many companies away). No deployment depends on another's credentials. The hosted service (10.5) remains a goal. |
 | UI kit | shadcn/ui + Tailwind tokens (not MUI, Chakra or Ant) | We own the component code, it is accessible through Radix, it gives a modern, neutral enterprise look, and it themes through CSS variables. |
 | Event display | Merge deltas on the client, buffer writes on the server (250 ms) | The append-only log and SSE replay stay unchanged. The UI shows messages, not chunks. |
 | Rerun | A new run linked by `rerun_of` | The log stays immutable and the history stays truthful. Resuming from a checkpoint is a separate, later feature. |
@@ -586,4 +588,5 @@ A rule an agent can break without noticing will be broken. So each one is either
 | Palette icons (5.3) | A lucide name in the manifest, drawn through a small lookup with a box fallback | Importing every lucide icon would weigh on the bundle; an unknown name still draws, so a new primitive needs no web change. |
 | Size lint (11.9) | `no-raw-colors` also rejects arbitrary text sizes | Keeps the type scale mechanical; `em` sizes and `text-[0px]` stay allowed. |
 | Step detail on phones (11.9) | A full-height bottom sheet below 768 px; stacked from 768 to 1279 px | The stacked panel pushed the step's content far below the list on a phone. |
+| Step links on phones | A console opened with `?step=` on a phone opens that step's sheet at once | A shared link to a step shows the step, not the list it is in; a console opened without one still shows the list first. |
 | Output tile (11.9) | The artifact the run wrote last, from `GET /runs/{id}/artifacts` | A report-only run (an audit) shows its result with no API change; the runs list would need `RunSummary.output_artifact` (a follow-up). |
