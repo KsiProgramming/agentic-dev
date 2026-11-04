@@ -177,7 +177,7 @@ Weight 500 on names, labels, buttons and tabs is what makes a screen look solid.
 The sidebar is a drawer below 1024 px and an icon rail from 1024 to 1279 px (tech-stack → Layout); the rules below are for phones.
 
 - Stat tiles collapse to a two-column list of label and value, not a stack of cards; an odd last tile spans both columns.
-- Selecting a step opens its detail as a full-height sheet instead of stacking it under the step list.
+- Selecting a step opens its detail as a full-height sheet instead of stacking it under the step list. A link to a step (`?step=`) opens on its sheet.
 - Tabs that do not fit scroll sideways with a fade at the edge, or move the last ones into a "More" menu. Never cut a label off without a hint.
 - Side padding 16 px; cards keep their 1 px border.
 

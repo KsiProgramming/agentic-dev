@@ -313,6 +313,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
   - `Status` column in `specs/roadmap.md` (phase 0.1 marked done), and a CI check (`scripts/check_roadmap.py`) that requires a PR implementing a phase to mark it done.
 
 ### Changed
+- On a phone, a run console opened with `?step=` opens that step's sheet at once, so a link to a step shows the step ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- CI's e2e job runs three workers (`--scale worker=3`): with one, runs started by parallel browsers queued behind each other and gates timed out ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - The old `README.MD` is split into `docs/product/product-spec.md` (the original product specification, reformatted as Markdown, author byline removed) and `docs/development/developer-reference.md` (the phase-by-phase developer reference); `.env.example` and `docker-compose.yml` point to the latter ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - `specs/mission.md` and `specs/tech-stack.md`: distribution is now open source and self-hosted first (Apache-2.0), replacing "SaaS only"; a packaged installer is the new non-goal ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - `web/Dockerfile` takes `NEXT_PUBLIC_API_URL` as a build argument (default unchanged), so the web app can be built for an API on another host ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
@@ -354,6 +356,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
+- Run map cards' accessible name now holds their visible line ("each, Done, 2 of 2 items, map"): an `aria-label` left it out, which axe reports as a WCAG 2.5.3 failure ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
+- About 40 end-to-end tests that went stale when phases 11.6 and 11.9 merged without CI now pass: the run map's `map-node` cards, the "Step" filter, the console's time tiles and pull request link, the artifact sheet's JSON groups, the pricing table's container query, and page checks made while a modal sheet is open ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Flaky a11y e2e check of the new workflow sheet: axe now runs once the sheet has finished sliding in, not while its fading text reads as low contrast ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Flaky worker test `test_a_run_with_a_repo_lists_its_files_in_a_sandbox`: a completed run's sandbox is removed just after `run_completed`, so the test now waits for the removal before stopping the worker instead of asserting at once ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Accessibility of the 11.7 shell ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)), found by the axe checks while building 4.2. CI never ran them on `main`, because the jobs were not started:

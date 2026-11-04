@@ -262,7 +262,11 @@ function Console({
   // On a phone the selected step opens as a full-height sheet over the list
   // (design-language.md → Mobile); from 768 px it is beside or below the list.
   const phone = useMediaQuery(PHONE);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  // A link to a step (`?step=`) opens on that step on a phone too, not on the list. The sheet
+  // only renders once the run's steps are loaded, on the client, so this never hydrates.
+  const [sheetOpen, setSheetOpen] = useState(
+    () => asked !== null && typeof window !== "undefined" && !!window.matchMedia?.(PHONE).matches,
+  );
   const showStep = useCallback(
     (focus: boolean) => {
       if (window.matchMedia?.(PHONE).matches) setSheetOpen(true);

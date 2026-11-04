@@ -92,7 +92,8 @@ test("a scanner's findings.json reaches the reporter past a step and a gate", as
   const shown = review.getByRole("region", { name: "Run artifacts" });
   await expect(shown.getByText("findings.json")).toBeVisible({ timeout: 30_000 });
   await review.getByRole("button", { name: /^Approve/ }).click();
-  await expect(review.getByRole("status")).toContainText("Approved");
+  // The Inbox moves on once the gate is decided; its toast confirms it.
+  await expect(page.getByText("Approved: Approve the findings")).toBeVisible();
 
   await page.goto(`/runs/${runId}?step=scan`);
   await expect(page.getByTestId("run-status").filter({ visible: true })).toHaveAttribute(
@@ -105,6 +106,8 @@ test("a scanner's findings.json reaches the reporter past a step and a gate", as
   await written.getByTestId("artifact-card").click();
   const sheet = page.getByTestId("artifact-sheet");
   await expect(sheet.getByRole("group", { name: "findings.json" })).toBeVisible();
+  // Deep levels start collapsed: open the finding to read it.
+  await sheet.locator("details:not([open]) > summary").first().click();
   await expect(sheet.getByText('"F1"')).toBeVisible();
   await page.keyboard.press("Escape");
 
@@ -133,7 +136,10 @@ test("no table cell holds JSON; an event's payload opens in the drawer", async (
   await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "succeeded", {
     timeout: 30_000,
   });
-  await page.getByLabel("Step").selectOption("");
+  await page
+    .getByRole("combobox", { name: "Step", exact: true })
+    .filter({ visible: true })
+    .selectOption("");
   await expect(page.getByTestId("event-row").first()).toBeVisible();
 
   const cells = await page.getByRole("cell").allTextContents();

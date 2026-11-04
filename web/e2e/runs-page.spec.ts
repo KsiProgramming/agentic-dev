@@ -106,16 +106,21 @@ test("a run's wait at a gate is shown apart from its duration", async ({ page, r
   const tag = Date.now().toString(36);
   const gated = await startRun(request, [WRITER, GATE], `Waits then works ${tag}`);
 
+  // The console's Active time tile (11.6): the time worked, the wait at the gate beneath it.
   await page.goto(`/runs/${gated}`);
-  const time = page.getByTestId("run-time");
-  await expect(time).toContainText("waiting", { timeout: 30_000 });
+  const figures = page.getByRole("region", { name: "Run figures" }).filter({ visible: true });
+  await expect(figures).toContainText(/waiting \S+/, { timeout: 30_000 });
   await page.waitForTimeout(2_000);
   const approval = await request.post(`${apiURL}/runs/${gated}/approvals`, {
     data: { node_id: GATE.id, decision: "approve" },
   });
   expect(approval.status()).toBe(202);
-  await expect(page.getByTestId("run-status")).toContainText("Succeeded", { timeout: 30_000 });
-  await expect(time).toHaveText(/^(<1s|\d+s) · waited \d+s$/);
+  await expect(page.getByTestId("run-status").filter({ visible: true })).toContainText(
+    "Succeeded",
+    { timeout: 30_000 },
+  );
+  await expect(figures.getByTestId("run-duration")).toHaveText(/^(<1s|\d+s)$/);
+  await expect(figures).toContainText(/waited \d+s/);
 
   await page.goto("/runs");
   const all = page.getByRole("table", { name: "All runs" });
