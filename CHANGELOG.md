@@ -354,6 +354,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
+- Flaky worker test `test_a_run_with_a_repo_lists_its_files_in_a_sandbox`: a completed run's sandbox is removed just after `run_completed`, so the test now waits for the removal before stopping the worker instead of asserting at once ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Accessibility of the 11.7 shell ([#138](https://github.com/KsiProgramming/agentic-dev/pull/138)), found by the axe checks while building 4.2. CI never ran them on `main`, because the jobs were not started:
   - **Search button.** Its accessible name ("Search runs and commands") now starts with its visible text (WCAG 2.5.3). The ellipsis and the `⌘K` hint are drawn by CSS and hidden from the name, and the shortcut stays in `aria-keyshortcuts`.
   - **Preferences menu.** It is no longer modal, so it does not hide the page with `aria-hidden` while scroll areas behind it stay focusable. Escape and a click outside still close it.

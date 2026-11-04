@@ -162,6 +162,16 @@ async def wait_for_status(
             await asyncio.sleep(0.05)
 
 
+async def wait_until_empty(directory: Path) -> None:
+    """Return once `directory` is empty. A completed run's sandbox is removed after
+    `run_completed` is written, so its status can read `completed` a moment before."""
+    async with asyncio.timeout(10):
+        while True:
+            if not await asyncio.to_thread(lambda: any(directory.iterdir())):
+                return
+            await asyncio.sleep(0.05)
+
+
 async def wait_for_event(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID, type: str, node_id: str
 ) -> None:
@@ -320,6 +330,8 @@ async def test_a_run_with_a_repo_lists_its_files_in_a_sandbox(
     async with worker(postgres_url, redis_url, make_runtime=fake_with_tools, sandboxes=sandboxes):
         run_id = await submit(sessions, redis_url, load_spec("list-repo-files.json"), repo)
         await wait_for_status(sessions, run_id, "completed")
+        # Before the worker stops: stopping it would cancel the removal under way.
+        await wait_until_empty(boxes)  # the sandbox is gone
 
     events = await list_run_events(sessions, run_id)
     call = next(e for e in events if e.type == "tool_call")
@@ -327,7 +339,6 @@ async def test_a_run_with_a_repo_lists_its_files_in_a_sandbox(
     assert (call.node_id, call.payload["name"]) == ("explorer", "repo.list_files")
     assert result.payload["is_error"] is False
     assert {"README.md", "src/", "src/app.py"} <= set(str(result.payload["output"]).splitlines())
-    assert list(boxes.iterdir()) == []  # the sandbox is gone
 
 
 class RecordingSandboxes:
