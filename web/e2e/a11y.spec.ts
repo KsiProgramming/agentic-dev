@@ -67,7 +67,10 @@ for (const colorScheme of ["light", "dark"] as const) {
       ).toBeVisible();
       await expectNoSeriousIssues(page);
       await open(page, "/workflows?blank=1");
-      await expect(page.getByTestId("new-workflow-sheet").getByRole("radio").first()).toBeVisible();
+      const sheet = page.getByTestId("new-workflow-sheet");
+      await expect(sheet.getByRole("radio").first()).toBeVisible();
+      // Check it where it rests: mid-slide, its fading text reads as low contrast.
+      await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       await expectNoSeriousIssues(page);
     });
 
