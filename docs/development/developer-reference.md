@@ -76,9 +76,16 @@ CI fails if `schemas/workflow-spec.v0.json` is out of date.
 Tests use `FakeRuntime` (`agentic_runtime.fake`), which replays a script per node id and echoes the input for unscripted nodes. `Delay` steps let tests cancel mid-run:
 
 ```python
-runtime = FakeRuntime({"reviewer": [ToolCall(call_id="c1", name="repo.read_file"),
-                                    ToolResult(call_id="c1", output="..."),
-                                    Message(text="LGTM"), Usage(input_tokens=5, output_tokens=1)]})
+runtime = FakeRuntime(
+    {
+        "reviewer": [
+            ToolCall(call_id="c1", name="repo.read_file"),
+            ToolResult(call_id="c1", output="..."),
+            Message(text="LGTM"),
+            Usage(input_tokens=5, output_tokens=1),
+        ]
+    }
+)
 result = await run_agent_node(node, runtime, input="draft")  # agentic_engine.agent
 ```
 
