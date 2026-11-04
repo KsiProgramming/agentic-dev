@@ -80,7 +80,7 @@ services:
       API_BASE_URL: http://localhost:${API_PORT:-8000}
       # The browser calls the API directly, so the web app's origin must be allowed.
       CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}"]'
-      # The platform's GitHub App (README, "GitHub App"). Left blank, the GitHub endpoints
+      # The platform's GitHub App (docs/development/developer-reference.md, "GitHub App"). Left blank, the GitHub endpoints
       # answer 503 and the rest works. Its private key is read from ./.secrets/github-app.pem.
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}

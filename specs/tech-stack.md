@@ -490,7 +490,8 @@ A rule an agent can break without noticing will be broken. So each one is either
 
 - Local dev: `docker compose` (Postgres, Redis, API, worker, frontend).
 - CI: GitHub Actions.
-- Hosting: SaaS only (v1). Containerised services on a managed Kubernetes or container platform. The cloud provider is still to be decided.
+- Hosting: open source (Apache-2.0), self-hosted by each team; a hosted multi-tenant service later (10.5). Containerised services; the reference topologies (single host, Kubernetes application tier with dedicated worker hosts) are in `docs/operations/deployment.md`. The web image takes the API's URL at build time (`NEXT_PUBLIC_API_URL` build argument).
+- Documentation: `docs/` explains the system to readers outside the project (architecture, flows, security model, deployment, integrations); `specs/` stays binding and wins when they disagree.
 
 ## Decisions log
 
@@ -499,7 +500,8 @@ A rule an agent can break without noticing will be broken. So each one is either
 | Engine | LangGraph (not Temporal) | Python-native and agent-oriented, with built-in interrupts for gates and `Send` for dynamic fan-out. Durability comes from the Postgres checkpointer. |
 | Backend language | Python | Matches LangGraph and has a strong agent/MCP SDK ecosystem. |
 | Frontend | Next.js/TS | As specified by stakeholders. Contracts are shared through JSON Schema. |
-| Hosting | SaaS only | v1 scope (see mission). |
+| Hosting | SaaS only. Superseded by "Distribution (open source)" | v1 scope (see mission). |
+| Distribution (open source) | Apache-2.0, self-hosted first; each deployment registers its own GitHub App and stores its own model keys | Teams can adopt and modify it with an explicit patent grant (MIT has none; AGPL keeps many companies away). No deployment depends on another's credentials. The hosted service (10.5) remains a goal. |
 | UI kit | shadcn/ui + Tailwind tokens (not MUI, Chakra or Ant) | We own the component code, it is accessible through Radix, it gives a modern, neutral enterprise look, and it themes through CSS variables. |
 | Event display | Merge deltas on the client, buffer writes on the server (250 ms) | The append-only log and SSE replay stay unchanged. The UI shows messages, not chunks. |
 | Rerun | A new run linked by `rerun_of` | The log stays immutable and the history stays truthful. Resuming from a checkpoint is a separate, later feature. |

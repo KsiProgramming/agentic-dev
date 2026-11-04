@@ -39,7 +39,7 @@ Teams need AI agents that work on their real codebases: writing docs, auditing c
 
 ## v1 decisions
 
-- **Hosting: SaaS only.** A multi-tenant hosted service. Self-hosting for enterprises is a later goal, not a v1 commitment.
+- **Distribution: open source, self-hosted first.** The code is published under the Apache License 2.0. Teams run it on their own infrastructure with their own GitHub App and model keys; no deployment depends on another's credentials. A multi-tenant hosted service stays a later goal (roadmap 10.5). This replaces the earlier "SaaS only" decision. Until users and roles exist, a deployment must sit behind an authenticating proxy (`docs/security/security-model.md`).
 - **Autonomous mode is allowed for code-writing workflows.** Gates are still enforced before every write action (push, PR, repo creation, Jira change). Autonomous mode skips draft approval, never write gates.
 - **Budget is optional.** A workspace, workflow or run *may* set a USD budget. If set, it is a hard stop at 100%. If no budget is set, the run continues without a cost cap. The other policy limits still apply (agents alive, agents spawned, nesting depth, loop iterations, wall time). Cost is always tracked and shown, whether or not a budget is set.
 
@@ -49,7 +49,7 @@ Teams need AI agents that work on their real codebases: writing docs, auditing c
 - Merging to protected branches without human approval.
 - GitLab, Bitbucket, Linear and Azure DevOps (adapters come later as MCP servers).
 - Self-hosted local models.
-- Self-hosted deployment of the platform.
+- A supported, packaged installer (Helm chart, marketplace image). Self-hosting is documented (`docs/operations/deployment.md`), not packaged.
 
 ## How we measure success
 

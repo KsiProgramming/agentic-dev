@@ -24,10 +24,10 @@ def test_ruleset_allows_only_squash_and_has_no_bypass() -> None:
 
 def test_github_remote_parses_https_and_ssh() -> None:
     for url in (
-        "https://github.com/KsiProgramming/agentic-dev.git",
-        "https://github.com/KsiProgramming/agentic-dev",
-        "git@github.com:KsiProgramming/agentic-dev.git",
+        "https://github.com/acme/agentic-dev.git",
+        "https://github.com/acme/agentic-dev",
+        "git@github.com:acme/agentic-dev.git",
     ):
         match = GITHUB_REMOTE.search(url)
         assert match is not None
-        assert match.group(1) == "KsiProgramming/agentic-dev"
+        assert match.group(1) == "acme/agentic-dev"

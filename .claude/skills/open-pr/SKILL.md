@@ -64,7 +64,7 @@ gh pr create --base main \
 The bot's roadmap commit is pushed with the default token, so it does not rerun CI: the PR's head would have no CI run and could not merge. One more push of yours fixes that, and it must come **after** the bot's commit, never next to it:
 
 1. If step 3 applies, wait for the `Roadmap phase marked done` check to finish (`gh pr checks <n> --watch`, or poll until it is not pending), then take its commit: `git pull --ff-only`. Never rebase or amend over it, and never force-push.
-2. Add the PR link to the changelog entry (`([#<n>](https://github.com/KsiProgramming/agentic-dev/pull/<n>))`), commit, and push. This push reruns every check on the final head.
+2. Add the PR link to the changelog entry (`([#<n>](<pr-url>))`, where `<pr-url>` is the PR's own URL from `gh pr view --json url -q .url`), commit, and push. This push reruns every check on the final head.
 
 If a push is still rejected, `git pull --ff-only` and push again; do not amend a pushed commit.
 
