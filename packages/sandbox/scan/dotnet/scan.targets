@@ -1,0 +1,18 @@
+<!-- Imported after every project of a `scan.lint` .NET build (4.8), through
+     `-p:CustomAfterMicrosoftCommonTargets`. It gives each project and target framework its own
+     SARIF log, so a solution or a multi-targeted project never overwrites another's, records
+     which project wrote it (`<log>.project`), and keeps warnings as warnings: the scan reports
+     them, it does not fail on them. -->
+<Project>
+  <PropertyGroup>
+    <_AgenticScanLog>$(AgenticScanOut)/log-$([MSBuild]::StableStringHash($(MSBuildProjectFullPath)))-$(MSBuildProjectName)-$(TargetFramework)</_AgenticScanLog>
+    <ErrorLog>$(_AgenticScanLog).sarif,version=2.1</ErrorLog>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseSharedCompilation>false</UseSharedCompilation>
+  </PropertyGroup>
+  <Target Name="AgenticScanRecordProject" BeforeTargets="CoreCompile" Condition="'$(AgenticScanOut)' != ''">
+    <WriteLinesToFile File="$(_AgenticScanLog).project" Lines="$(MSBuildProjectFullPath)" Overwrite="true" />
+  </Target>
+</Project>

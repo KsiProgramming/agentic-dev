@@ -76,10 +76,12 @@ flowchart TB
         redis[("<b>Redis 7</b><br/>run queue,<br/>install state")]
         sandbox["<b>Sandbox</b> (one per run)<br/>Docker container, no network,<br/>read-only root, repo clone"]
         kms["<b>Master key</b><br/>key file (dev) / cloud KMS"]
+        proxy["<b>Egress proxy</b><br/>tinyproxy, api.nuget.org only"]
     end
 
     gh[("GitHub")]
     llm[("Anthropic API")]
+    nuget[("NuGet")]
 
     browser -- "HTTPS" --> web
     browser -- "HTTPS, JSON + SSE" --> api
@@ -94,6 +96,8 @@ flowchart TB
     api -- "App JWT" --> gh
     worker -- "clone / push (installation token)" --> gh
     worker -- "Messages API" --> llm
+    sandbox -. ".NET restore job only" .-> proxy
+    proxy -- "HTTPS" --> nuget
 ```
 
 | Container | Technology | Responsibility | Scales by |
@@ -101,7 +105,8 @@ flowchart TB
 | **Web** | Next.js, React, Tailwind v4, shadcn/ui | All user screens. Talks to the API from the browser; holds no secrets and no server-side state. | Stateless replicas |
 | **API** | FastAPI, Pydantic v2, SQLAlchemy 2 (async), Alembic | REST endpoints, Server-Sent Events for live runs, workflow validation, graph operations, connections and secrets, GitHub install flow. Never runs agents. | Stateless replicas |
 | **Worker** | Python, LangGraph, Anthropic SDK, MCP SDK, docker-py | Claims queued runs, compiles specs, runs agents and tools, writes events and checkpoints, enforces policy, pushes branches and opens PRs. | Add processes; runs are distributed by lease |
-| **Sandbox** | Alpine + git + pinned scanners (ruff, Biome, ShellCheck, gitleaks, osv-scanner) | Holds the repo clone and writer worktrees; executes `repo.*` and `scan.*` tool commands. Has **no network and no credentials**. | One per run |
+| **Sandbox** | Alpine + git + pinned scanners (ruff, Biome, ShellCheck, gitleaks, osv-scanner) + the .NET SDK | Holds the repo clone and writer worktrees; executes `repo.*` and `scan.*` tool commands. Has **no network and no credentials**. A .NET lint restores and builds in short-lived job containers on the same files; only the restore job reaches the network, and only `api.nuget.org`, through the egress proxy. | One per run |
+| **Egress proxy** | tinyproxy (`packages/egress-proxy`) | The only route out for a .NET restore job: HTTPS to `api.nuget.org`, every other host refused and logged. | One per deployment |
 | **PostgreSQL** | PostgreSQL 16 | System of record: runs, append-only events, LangGraph checkpoints, artifacts, workflows and versions, approvals, audit, encrypted connections. `LISTEN/NOTIFY` fans out live events. | Managed service, vertical + read replicas |
 | **Redis** | Redis 7 | Announces new runs (a list of run ids) and keeps single-use GitHub install `state` tokens (10 min TTL). Not a system of record: ownership and state are in Postgres. | Managed service |
 | **Master key** | 32-byte key file (dev); cloud KMS (planned, phase 10.5) | Wraps each workspace's data key (envelope encryption). | — |
@@ -197,9 +202,10 @@ flowchart LR
     w1 --> pg & rd & dk
     api1 & w1 -.-> kms
     w1 -- "egress: GitHub,<br/>model provider" --> internet((Internet))
+    dk -. ".NET restore jobs,<br/>through the egress proxy" .-> nuget["api.nuget.org"]
 ```
 
-The execution tier is the high-risk zone: it runs untrusted repository content next to model output. Keep workers on dedicated nodes, give them the only route to the container runtime, and allow them egress to GitHub and the model provider only. The [deployment guide](../operations/deployment.md) gives the full reference topology, sizing and a production checklist.
+The execution tier is the high-risk zone: it runs untrusted repository content next to model output. Keep workers on dedicated nodes, give them the only route to the container runtime, and allow them egress to GitHub and the model provider only. Sandboxes have no network; the one exception is a .NET restore job, which reaches `api.nuget.org` through the egress proxy and nothing else. The [deployment guide](../operations/deployment.md) gives the full reference topology, sizing and a production checklist.
 
 ---
 
@@ -210,7 +216,7 @@ The execution tier is the high-risk zone: it runs untrusted repository content n
 | **Durability** | A worker restart mid-run loses no completed node (AC-8) | LangGraph Postgres checkpointer per node; run leases with a heartbeat; an expired lease lets another worker resume from the last checkpoint; `MAX_ATTEMPTS` stops crash loops |
 | **Auditability** | Every agent action, tool call, artifact, approval and cost is recorded | Append-only `run_events`, `run_artifacts`, `workflow_versions` and `audit_events` (the last two guarded by database triggers that refuse `UPDATE`/`DELETE`) |
 | **Safety** | No irreversible action without a human; limits enforced by the engine, not the graph | `gate` before push, PR, repo creation; policy ceilings checked at validation and at runtime; optional hard budget |
-| **Isolation** | Repo content and agent output cannot reach the host, the network or credentials | Sandbox with no network, read-only root, `cap_drop: ALL`, `no-new-privileges`, non-root user, CPU/memory/PID limits; credentials only on the worker |
+| **Isolation** | Repo content and agent output cannot reach the host, the network or credentials | Sandbox with no network, read-only root, `cap_drop: ALL`, `no-new-privileges`, non-root user, CPU/memory/PID limits; credentials only on the worker. A .NET restore job reaches `api.nuget.org` only, through an allowlisting proxy |
 | **Confidentiality** | Model keys never appear in logs, events or agent context | Envelope encryption (AES-256-GCM, per-workspace data key, row-bound AAD); redaction filter on every log handler; keys used only by the run's own client |
 | **Live feedback** | Events visible in the console within 1 s | Postgres `NOTIFY` → API listener → SSE; deltas buffered 250 ms server-side and merged client-side |
 | **Truthful numbers** | Durations are active time; costs never rewritten | Active and waiting time kept apart on the run row; cost priced once when the usage event is logged |

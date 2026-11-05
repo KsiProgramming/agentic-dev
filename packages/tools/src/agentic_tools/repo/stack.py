@@ -20,6 +20,8 @@ MANIFESTS: tuple[tuple[str, ModuleKind], ...] = (
     ("Cargo.toml", "rust"),
     ("pom.xml", "java"),
     ("*.csproj", "dotnet"),
+    ("*.fsproj", "dotnet"),
+    ("*.vbproj", "dotnet"),
 )
 # Directories that never hold a module: dependencies, build output and existing docs. Hidden
 # directories are skipped too.

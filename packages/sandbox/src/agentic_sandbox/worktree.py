@@ -12,11 +12,11 @@ host can make git run code.
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from uuid import UUID
 
 from agentic_sandbox.errors import SandboxError
-from agentic_sandbox.protocol import DEFAULT_EXEC_TIMEOUT_S, ExecResult, Sandbox
+from agentic_sandbox.protocol import DEFAULT_EXEC_TIMEOUT_S, ExecResult, JobNetwork, Sandbox
 
 log = logging.getLogger("agentic_sandbox")
 
@@ -132,6 +132,23 @@ class Worktree:
 
     async def put_artifact(self, name: str, data: bytes) -> str:
         return await self._sandbox.put_artifact(name, data)
+
+    @property
+    def job_networks(self) -> frozenset[JobNetwork]:
+        return self._sandbox.job_networks
+
+    async def run_job(
+        self,
+        argv: Sequence[str],
+        *,
+        network: JobNetwork,
+        cwd: str,
+        timeout_s: float,
+        env: Mapping[str, str] | None = None,
+    ) -> ExecResult:
+        return await self._sandbox.run_job(
+            argv, network=network, cwd=cwd, timeout_s=timeout_s, env=env
+        )
 
 
 async def add_worktree(sandbox: Sandbox, run_id: UUID, node_id: str) -> Worktree:

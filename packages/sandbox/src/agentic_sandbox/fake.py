@@ -24,6 +24,7 @@ from agentic_sandbox.protocol import (
     MAX_PUT_FILE_BYTES,
     MAX_TAKE_FILE_BYTES,
     ExecResult,
+    JobNetwork,
     check_artifact_name,
     decode_capped,
 )
@@ -35,9 +36,12 @@ _GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
 class FakeSandbox:
     """Implements `Sandbox` with local processes. `root` holds the clone at `root/repo`."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self, root: Path, *, job_networks: frozenset[JobNetwork] = frozenset({"none"})
+    ) -> None:
         self._root = root
         self._workdir = root / "repo"
+        self._job_networks = job_networks
 
     @property
     def workdir(self) -> str:
@@ -54,7 +58,11 @@ class FakeSandbox:
         timeout_s: float = DEFAULT_EXEC_TIMEOUT_S,
         cwd: str | None = None,
     ) -> ExecResult:
-        workdir = self._checked_cwd(cwd)
+        return await self._run(argv, self._checked_cwd(cwd), timeout_s, {})
+
+    async def _run(
+        self, argv: Sequence[str], workdir: Path, timeout_s: float, env: Mapping[str, str]
+    ) -> ExecResult:
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
@@ -62,7 +70,7 @@ class FakeSandbox:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, **_GIT_ENV},
+                env={**os.environ, **_GIT_ENV, **env},
             )
         except OSError as e:
             return ExecResult(exit_code=127, stdout="", stderr=f"{argv[0]}: {e.strerror}")
@@ -119,6 +127,34 @@ class FakeSandbox:
         path = self._root / "artifacts" / name
         await asyncio.to_thread(_write_read_only, path, data)
         return path.as_posix()
+
+    @property
+    def job_networks(self) -> frozenset[JobNetwork]:
+        return self._job_networks
+
+    async def run_job(
+        self,
+        argv: Sequence[str],
+        *,
+        network: JobNetwork,
+        cwd: str,
+        timeout_s: float,
+        env: Mapping[str, str] | None = None,
+    ) -> ExecResult:
+        """Runs `argv` as a local process, like `exec`: the fake isolates nothing, so `network`
+        is only checked against `job_networks`."""
+        path = self._checked_job_cwd(cwd)
+        if network not in self._job_networks:
+            raise SandboxError(f"sandbox jobs have no {network!r} network")
+        return await self._run(argv, path, timeout_s, env or {})
+
+    def _checked_job_cwd(self, cwd: str) -> Path:
+        """`cwd` if it is a directory under the staging directory."""
+        staging = (self._root / ".incoming").resolve()
+        path = Path(cwd).resolve()
+        if path == staging or not path.is_relative_to(staging):
+            raise ValueError("a job works in a directory under the staging directory")
+        return path
 
     def _checked_cwd(self, cwd: str | None) -> Path:
         """`cwd` (default the clone) if it is the clone or a directory under the worktrees."""

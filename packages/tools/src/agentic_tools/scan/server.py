@@ -3,14 +3,16 @@
 `build_scan_server(sandbox)` is called per run. Its tools are read-only and each returns a
 `FindingsReport` as structured content:
 
-- `lint`: ruff, Biome and ShellCheck, chosen per module from the repo's own stack and config
-  (`agentic_tools.scan.stack`), or the linters the caller names;
+- `lint`: ruff, Biome, ShellCheck and the .NET analyzers (`dotnet`, 4.8), chosen per module from
+  the repo's own stack and config (`agentic_tools.scan.stack`), or the linters the caller names;
 - `secrets`: gitleaks on the working tree, redacted;
 - `dependencies`: osv-scanner on the repo's lockfiles, offline, against the vulnerability
   database baked into the sandbox image.
 
 Every engine runs inside the sandbox (no network, read-only root) with a timeout and writes its
-report to the staging directory, read back with `take_file`, so a large report is not cut. One
+report to the staging directory, read back with `take_file`, so a large report is not cut. The
+.NET build runs in job containers on the sandbox's files: its restore alone reaches NuGet,
+through the egress proxy (`agentic_tools.scan.dotnet`). One
 engine failing is a failed check in the report; only when every engine fails is the call an
 error. Output is data, never instructions. Errors raise `ToolError`.
 """
@@ -18,7 +20,7 @@ error. Output is data, never instructions. Errors raise `ToolError`.
 import posixpath
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Annotated, Any, Literal
 from uuid import uuid4
@@ -29,6 +31,7 @@ from pydantic import Field
 
 from agentic_sandbox import Sandbox, SandboxError
 from agentic_tools.repo.paths import CONFINE, NOT_FOUND, OUTSIDE, repo_relative
+from agentic_tools.scan.dotnet import DotnetLimits, lint_dotnet
 from agentic_tools.scan.normalise import (
     ScanOutputError,
     biome_findings,
@@ -68,7 +71,7 @@ case "$(pwd -P)/" in "$root"/*) ;; *) exit {_CONFINE_FAILED} ;; esac
 
 # Prints each engine's version line and the database date; a missing engine prints nothing.
 _VERSIONS_SCRIPT = f"""
-for t in ruff biome shellcheck gitleaks osv-scanner; do
+for t in ruff biome shellcheck gitleaks osv-scanner dotnet; do
   v=$("$t" --version 2>/dev/null | tr '\\n' ' ')
   [ -n "$v" ] && echo "$t $v"
 done
@@ -97,6 +100,7 @@ class ScanLimits:
 
     timeout_s: float = 120.0
     max_findings: int = MAX_FINDINGS
+    dotnet: DotnetLimits = field(default_factory=DotnetLimits)
 
 
 ScanPath = Annotated[
@@ -200,6 +204,8 @@ class _ScanTools:
                 files = [f"./{f}" for f in target.files]
                 _, raw = await self._run("shellcheck", ".", [*argv, *files], ok=(0, 1))
                 parse = partial(shellcheck_findings)
+            case "dotnet":  # built together, in `lint`
+                raise AssertionError("dotnet targets are linted by `lint_dotnet`")
         try:
             found = parse(raw, config=target.config)
         except ScanOutputError as e:
@@ -213,15 +219,16 @@ class _ScanTools:
             Field(
                 description="`auto` (default): the linter each module's own stack and config "
                 "call for; a linter we cannot run is reported as skipped, never replaced. Or "
-                "a list naming exactly which to run: `ruff`, `biome`, `shellcheck`."
+                "a list naming exactly which to run: `ruff`, `biome`, `shellcheck`, `dotnet`."
             ),
         ] = "auto",
         path: ScanPath = ".",
     ) -> FindingsReport:
         """Lint the repository with the linters its own stack uses: ruff for Python, Biome for
-        JS/TS, ShellCheck for shell scripts. Each module uses its own config; a module with
-        none gets a conservative platform rule set (findings marked `platform-default`). The
-        report lists what was checked where, and why anything was skipped."""
+        JS/TS, ShellCheck for shell scripts, the .NET analyzers (a build) for C# projects. Each
+        module uses its own config; a module with none gets a conservative platform rule set
+        (findings marked `platform-default`). The report lists what was checked where, and why
+        anything was skipped."""
         target = await self._checked_path(path)
         probe = await self._sandbox.exec(["sh", "-c", PROBE_SCRIPT, "probe"])
         if probe.exit_code != 0 or "::sources::" not in probe.stdout:
@@ -231,7 +238,10 @@ class _ScanTools:
         versions = await self._versions_of()
         checks: list[Check] = list(skipped)
         findings: list[Finding] = []
+        dotnet = [run for run in runs if run.tool == "dotnet"]
         for run in runs:
+            if run.tool == "dotnet":
+                continue
             check = Check(
                 path=run.target,
                 kind=run.kind,
@@ -247,6 +257,13 @@ class _ScanTools:
                 continue
             checks.append(check.model_copy(update={"findings": len(found)}))
             findings.extend(found)
+        if dotnet:
+            dotnet_checks, found = await lint_dotnet(
+                self._sandbox, dotnet, version=versions.get("dotnet"), limits=self._limits.dotnet
+            )
+            checks.extend(dotnet_checks)
+            texts = await self._line_texts([(f.path, f.line) for f in found])
+            findings.extend(with_line_texts(found, texts))
         _all_failed(checks)
         return build_report("lint", checks, findings, max_findings=self._limits.max_findings)
 

@@ -37,7 +37,7 @@ docker compose up --build
 - For GitHub, create a development App (Setup URL `http://localhost:8000/github/setup`), save its key as `.secrets/github-app.pem`, and set `GITHUB_APP_ID` and `GITHUB_APP_SLUG`.
 - To try everything without GitHub, set `AGENTIC_GITHUB=fake`: two local demo repos (`e2e-org/docs-demo`, `e2e-org/private-lib`) stand in.
 
-Compose starts: `postgres`, `redis`, `keygen` (creates the master key once in the `secrets` volume), `fixtures` (seeds the fake repos), `api` (runs migrations, then serves), `sandbox-image` (builds the sandbox image), `worker` and `web`. Only the API and web are published to the host.
+Compose starts: `postgres`, `redis`, `keygen` (creates the master key once in the `secrets` volume), `fixtures` (seeds the fake repos), `api` (runs migrations, then serves), `sandbox-image` (builds the sandbox image), `egress-proxy` (the NuGet egress proxy a .NET restore job reaches, on the internal `agentic-nuget` network), `worker` and `web`. Only the API and web are published to the host.
 
 > Deleting the `secrets` volume deletes the master key: stored model keys become unreadable and must be entered again.
 
@@ -78,6 +78,7 @@ Steps:
    docker compose build --build-arg NEXT_PUBLIC_API_URL=https://api.example.com web
    ```
 4. **Remove development-only mounts** from the worker in an override file: the `./.git:/samples/agentic-dev.git` demo mount and the `fixtures` volume, and leave `SANDBOX_LOCAL_ROOT` unset, so only https repositories can be cloned.
+5. **Decide on .NET lint.** `scan.lint` restores and builds C# projects in job containers; the restore reaches `api.nuget.org` through the `egress-proxy` service, whose network (`agentic-nuget`) is internal. Keep the service and the worker's `SANDBOX_NUGET_NETWORK`/`SANDBOX_NUGET_PROXY` to lint .NET repos; remove them, and .NET modules are reported as skipped ("NuGet restore is not configured"), with no sandbox network at all. Allow the proxy's host outbound HTTPS to `api.nuget.org`.
 5. **Put both hostnames behind SSO.** Every request to `app.` and `api.` must carry an authenticated session. Example with oauth2-proxy: run it in front of both upstreams with your IdP, cookie domain `.example.com`, and allow only your organisation's group. The GitHub App's Setup URL (`/github/setup`) is opened by the installer's browser, so it is covered by the same session.
 6. **Register the GitHub App** with Setup URL `https://api.example.com/github/setup` and Homepage URL `https://app.example.com`.
 7. **Optional, recommended:** install gVisor and make `runsc` the Docker daemon's default runtime, so every sandbox gets a user-space kernel. Run the test suite's Docker tests once to confirm the sandbox still works.
@@ -116,6 +117,7 @@ flowchart TB
     w1 & w2 --> pg & rd
     api & w1 & w2 -.-> sm
     w1 & w2 -- "egress allowlist:<br/>GitHub, model provider" --> net((Internet))
+    w1 & w2 -. ".NET restore jobs, via the<br/>egress proxy: api.nuget.org" .-> net
 ```
 
 ### Tiers
@@ -127,6 +129,8 @@ flowchart TB
 - Point `DOCKER_HOST` at a dedicated, TLS-protected remote Docker host per worker.
 - Do **not** run Docker-in-Docker as a privileged pod in a shared cluster: it gives the pod host-level control.
 
+**NuGet egress (optional).** To lint .NET repos, each worker host runs the egress proxy (`packages/egress-proxy`) on an internal Docker network, as compose does: `docker network create --internal agentic-nuget`, the proxy container on it and on a network with outbound HTTPS to `api.nuget.org`, and the worker started with `SANDBOX_NUGET_NETWORK=agentic-nuget` and `SANDBOX_NUGET_PROXY=http://<proxy container name>:3128`. Restore and build jobs run with 2 GB, 2 CPUs and 512 PIDs by default (`SANDBOX_JOB_MEMORY`, `SANDBOX_JOB_CPUS`). The proxy logs every host it refuses.
+
 Native Kubernetes sandboxes (a `Sandbox` backend that creates pods with a `RuntimeClass` such as gVisor or Kata) are a natural extension of the `Sandbox` protocol; see [Connecting your platforms](../integrations/connecting-platforms.md#6-adding-a-sandbox-backend). Production isolation is roadmap phase 10.2.
 
 **Data tier.** Managed PostgreSQL 16 with high availability and point-in-time recovery; managed Redis with TLS and authentication. Redis holds no system of record, but it is not entirely disposable: it carries the announcements of runs that are queued and not yet claimed, and pending GitHub install states. A run whose announcement is lost stays `queued` until it is rerun (automatic recovery is tracked in [`specs/ideas.md`](../../specs/ideas.md)). Use a managed Redis with persistence, or check for stale `queued` runs after a Redis restart.
@@ -136,8 +140,10 @@ Native Kubernetes sandboxes (a `Sandbox` backend that creates pods with a `Runti
 ```bash
 # Python services (API + worker share one image)
 docker build -f packages/api/Dockerfile -t registry.example.com/agentic/python:1.0.0 .
-# Sandbox image (scanners and offline vulnerability DB baked in, ~510 MB)
+# Sandbox image (scanners, offline vulnerability DB and the .NET SDK baked in, ~1.2 GB)
 docker build -t registry.example.com/agentic/sandbox:1.0.0 packages/sandbox
+# NuGet egress proxy, if .NET repos are linted
+docker build -t registry.example.com/agentic/egress-proxy:1.0.0 packages/egress-proxy
 # Web, one build per environment
 docker build --build-arg NEXT_PUBLIC_API_URL=https://api.example.com \
   -t registry.example.com/agentic/web:1.0.0 web
@@ -153,6 +159,7 @@ Run the worker with `python -m agentic_worker` on the Python image, and set `SAN
 | api | 2 × (0.5 vCPU, 512 MB) | CPU, open SSE connections |
 | worker | 1 process per 1–2 concurrent runs; VMs of 4–8 vCPU, 16–32 GB | Queue depth (`runs` with status `queued`), waiting time to claim |
 | sandbox | 1 per active run, 1 CPU / 512 MB / 256 PIDs each | — |
+| job container | During a .NET lint only: 2 CPU / 2 GB / 512 PIDs, one at a time per lint | `SANDBOX_JOB_MEMORY`, `SANDBOX_JOB_CPUS` |
 | PostgreSQL | 2 vCPU, 8 GB, 100 GB SSD | Event and artifact volume; connections (each API process holds one `LISTEN` connection) |
 | Redis | Smallest managed tier | — |
 
@@ -168,7 +175,7 @@ Security (see the [security model](../security/security-model.md#6-operator-resp
 - [ ] `AGENTIC_ENV=production`; `AGENTIC_GITHUB=app`; `CLAUDE_KEY_CHECK=anthropic`; `SANDBOX_BACKEND=docker`; `SANDBOX_LOCAL_ROOT` unset.
 - [ ] Unique master key per environment, in a secret manager, mounted read-only, **backed up apart from the database**.
 - [ ] Your own GitHub App with minimal permissions, installed on selected repositories; branch protection on default branches.
-- [ ] Workers on dedicated hosts; sandboxed container runtime; egress restricted to GitHub and the model provider.
+- [ ] Workers on dedicated hosts; sandboxed container runtime; egress restricted to GitHub and the model provider (and, if .NET repos are linted, the egress proxy's to `api.nuget.org`).
 - [ ] Postgres and Redis private, with TLS and strong credentials; no default passwords.
 - [ ] `CORS_ORIGINS`, `WEB_BASE_URL`, `API_BASE_URL` and `NEXT_PUBLIC_API_URL` set to your HTTPS URLs.
 - [ ] Images built from a tagged release, scanned, and pinned by digest.
@@ -222,6 +229,8 @@ Target: RPO = your Postgres PITR window; RTO = time to restore Postgres and star
 | Install returns to `?github=error&reason=state` | Install took more than 10 minutes, or Redis was flushed | Start the install again |
 | Runs stay `queued` | No worker running, workers cannot reach Redis/Postgres, or Redis lost the run's announcement | Check worker health and logs; a run whose announcement was lost is not picked up automatically yet: rerun it (see `specs/ideas.md`) |
 | Runs fail with a sandbox error | Worker cannot reach Docker, or `SANDBOX_IMAGE` missing | Check `DOCKER_GID`/socket permissions; build or pull the sandbox image |
+| .NET modules "skipped: NuGet restore is not configured" | `SANDBOX_NUGET_NETWORK`/`SANDBOX_NUGET_PROXY` unset on the worker | Run the egress proxy and set both (see Execution tier) |
+| .NET modules "restore failed: a package source is not reachable" | The proxy cannot reach `api.nuget.org`, or a package is only on a private feed | Check the proxy host's outbound HTTPS and its log; private feeds are not supported yet |
 | Runs on Claude fail because the stored key cannot be decrypted | Master key changed or differs between API and worker | Use the same key file on both; restore it, or enter keys again |
 | Browser errors calling the API | `NEXT_PUBLIC_API_URL` or `CORS_ORIGINS` wrong | Rebuild web with the right URL; set the origin list |
 | PR step fails with permission error | App lacks Contents/Pull requests write, or is not installed on the repo | Fix the App permissions and accept them on the installation |

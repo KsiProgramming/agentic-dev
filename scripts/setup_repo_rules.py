@@ -27,6 +27,7 @@ GITHUB_ACTIONS_APP_ID = 15368
 # Every job of ci.yml and pr-checks.yml; test_setup_repo_rules keeps the list in sync.
 REQUIRED_CHECKS = [
     "Python (lint, types, tests)",
+    "Sandbox image (arm64 build)",
     "Web (lint, types, unit tests)",
     "API contract (generated client is up to date)",
     "Compose smoke test + e2e",

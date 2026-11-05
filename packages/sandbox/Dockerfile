@@ -1,6 +1,8 @@
 # The sandbox image runs' repo tools execute in: alpine with git, so writer nodes can commit on
-# their own worktree, and the scanners of the `scan` tools (4.4). Containers from it run as uid
-# 1000 with no network, a read-only root and no capabilities (`agentic_sandbox.docker_backend`).
+# their own worktree, the scanners of the `scan` tools (4.4) and the .NET SDK `scan.lint` builds
+# C# projects with (4.8). Containers from it run as uid 1000 with no network, a read-only root and
+# no capabilities (`agentic_sandbox.docker_backend`); only a .NET restore job reaches NuGet,
+# through the egress proxy (`packages/egress-proxy`).
 # Build: docker build -t agentic-dev/sandbox:dev packages/sandbox
 
 # Scanners: pinned releases, each checked against its sha256 (from the release's asset digest).
@@ -56,11 +58,20 @@ RUN set -eu; \
     done; \
     date -u +%Y-%m-%d > /osv/as-of
 
+# The .NET SDK (4.8): the current LTS for linux-musl, from Microsoft's image pinned by its index
+# digest (amd64 and arm64). `scan.lint` builds C# projects with it to run their analyzers;
+# reference packs for older target frameworks and the repo's analyzer packages come from NuGet
+# when a restore job runs.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403-alpine3.24@sha256:cc02b814237a76c4735fb6eeee87181597b5e56f2ce458a435e527674d91f4d7 AS dotnet
+
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
-RUN apk add --no-cache git \
+# git for the repo tools; the rest is what the .NET SDK needs on alpine.
+RUN apk add --no-cache git ca-certificates icu-libs krb5-libs libgcc libintl libssl3 libstdc++ zlib \
     && adduser -D -u 1000 -h /tmp sandbox
 
+COPY --from=dotnet /usr/share/dotnet/ /usr/share/dotnet/
+RUN ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
 COPY --from=scanners /dl/bin/ /usr/local/bin/
 COPY --from=osv-db /osv/ /opt/osv/
 COPY scan/ /opt/scan/
@@ -71,6 +82,13 @@ ENV GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL=/dev/null \
     HOME=/tmp \
     RUFF_NO_CACHE=true \
-    OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY=/opt/osv
+    OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY=/opt/osv \
+    DOTNET_ROOT=/usr/share/dotnet \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1 \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=1 \
+    DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
+    NUGET_CERT_REVOCATION_MODE=offline
 
 USER 1000:1000

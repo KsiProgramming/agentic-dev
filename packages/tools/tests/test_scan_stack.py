@@ -1,4 +1,5 @@
-"""`plan_lint`: which linter runs on which module, from the repo's own stack and config (4.4)."""
+"""`plan_lint`: which linter runs on which module, from the repo's own stack and config (4.4,
+.NET 4.8)."""
 
 from collections.abc import Sequence
 
@@ -65,14 +66,63 @@ def test_our_own_linter_wins_when_both_are_configured() -> None:
 
 
 def test_stacks_with_no_supported_linter_are_skipped_with_the_reason() -> None:
-    probe = _probe({"svc": "go", "core": "rust", "app": "java", "win": "dotnet"})
+    probe = _probe(
+        {"svc": "go", "core": "rust", "app": "java", "fs": "dotnet", "vb": "dotnet"},
+        {"fsproj": {"fs"}, "vbproj": {"vb"}},
+    )
 
     assert plan_lint(probe)[0] == []
     assert [reason for _, _, reason in _skips(probe)] == [
         "no supported linter for go",
         "no supported linter for rust",
         "no supported linter for java",
-        "no supported linter for dotnet",
+        "no supported linter for fsharp",
+        "no supported linter for vb",
+    ]
+
+
+def test_a_csharp_project_gets_the_dotnet_analyzers() -> None:
+    probe = _probe({"src/Api": "dotnet", "src/Core": "dotnet"}, {"csproj": {"src/Api", "src/Core"}})
+
+    targets, skipped = plan_lint(probe)
+
+    assert _runs(targets) == [
+        ("dotnet", "src/Api", "platform-default"),
+        ("dotnet", "src/Core", "platform-default"),
+    ]
+    assert [t.kind for t in targets] == ["dotnet", "dotnet"]
+    assert skipped == []
+
+
+def test_analysis_set_up_by_the_repo_makes_the_dotnet_config_the_repos() -> None:
+    # An `.editorconfig` with analyzer settings at the root, or a project's own analysis settings.
+    probe = _probe(
+        {"src/Api": "dotnet", "tools/Gen": "dotnet"},
+        {"csproj": {"src/Api", "tools/Gen"}, "dotnet": {"src"}},
+    )
+
+    targets, _ = plan_lint(probe)
+
+    assert _runs(targets) == [
+        ("dotnet", "src/Api", "repo"),
+        ("dotnet", "tools/Gen", "platform-default"),
+    ]
+
+
+def test_a_csharp_project_beside_an_fsharp_one_is_linted() -> None:
+    probe = _probe({"mixed": "dotnet"}, {"csproj": {"mixed"}, "fsproj": {"mixed"}})
+
+    assert _runs(plan_lint(probe)[0]) == [("dotnet", "mixed", "platform-default")]
+
+
+def test_dotnet_is_named_like_the_other_linters() -> None:
+    probe = _probe({"src/Api": "dotnet", "web": "node"}, {"csproj": {"src/Api"}})
+
+    targets, _ = plan_lint(probe, linters=["dotnet"])
+
+    assert _runs(targets) == [("dotnet", "src/Api", "platform-default")]
+    assert _skips(_probe({"web": "node"}), linters=["dotnet"]) == [
+        (".", "dotnet", "no csharp files to lint")
     ]
 
 
@@ -155,3 +205,23 @@ def test_read_probe_reads_modules_configs_and_sources() -> None:
         "biome": frozenset({"."}),
     }
     assert probe.sources == ["api/main.py", "web/a.ts"]
+
+
+def test_read_probe_reads_dotnet_projects_and_analysis_configs() -> None:
+    stdout = (
+        "./src/Api/Api.csproj\n./src/Fs/Fs.fsproj\n::dirs::\n./src\n"
+        "::configs::\ncsproj ./src/Api/Api.csproj\ndotnet ./src/Api/Api.csproj\n"
+        "fsproj ./src/Fs/Fs.fsproj\ndotnet ./.editorconfig\n::sources::\n"
+    )
+
+    probe = read_probe(stdout)
+
+    assert [(m.path, m.kind) for m in probe.modules] == [
+        ("src/Api", "dotnet"),
+        ("src/Fs", "dotnet"),
+    ]
+    assert probe.configs == {
+        "csproj": frozenset({"src/Api"}),
+        "dotnet": frozenset({"src/Api", "."}),
+        "fsproj": frozenset({"src/Fs"}),
+    }

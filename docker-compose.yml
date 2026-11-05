@@ -113,6 +113,19 @@ services:
     command: ["true"]
     network_mode: none
 
+  # The NuGet egress proxy (4.8): the only route out for a sandbox's .NET restore job. Jobs reach
+  # it on `agentic-nuget`, an internal network with no other way out; it alone also sits on the
+  # default network, which has internet access. It forwards HTTPS to api.nuget.org and logs every
+  # host it refuses.
+  egress-proxy:
+    build:
+      context: packages/egress-proxy
+    image: agentic-dev/egress-proxy:dev
+    networks:
+      default:
+      nuget:
+        aliases: [egress-proxy]
+
   worker:
     build:
       context: .
@@ -141,6 +154,9 @@ services:
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-agentic-dev/sandbox:dev}
       SANDBOX_LOCAL_ROOT: /samples
+      # A .NET restore job runs on this network and reaches NuGet through the proxy (4.8).
+      SANDBOX_NUGET_NETWORK: agentic-nuget
+      SANDBOX_NUGET_PROXY: http://egress-proxy:3128
       # The same GitHub App as the API: runs on GitHub repos clone with an installation token,
       # and `github.openPR` pushes a writer's branch and opens a pull request (after a gate).
       # Left blank, GitHub repos are cloned anonymously and runs that use github.* tools fail.
@@ -169,6 +185,8 @@ services:
         condition: service_healthy
       sandbox-image:
         condition: service_completed_successfully
+      egress-proxy:
+        condition: service_started
       fixtures:
         condition: service_completed_successfully
 
@@ -185,3 +203,10 @@ volumes:
   pgdata:
   secrets:
   fixtures:
+
+networks:
+  # Sandbox restore jobs and the egress proxy only; `internal` gives it no route out (4.8). Named
+  # outright, as the worker attaches job containers to it by name.
+  nuget:
+    name: agentic-nuget
+    internal: true

@@ -5,7 +5,10 @@ change. Writer nodes get their own git worktree under `worktrees_dir` (`agentic_
 and file contents reach the sandbox through `put_file` (and leave it through `take_file`, e.g. a
 writer's branch as a git bundle). The run's artifacts are copied to `artifacts_dir`
 (`put_artifact`), where the sandbox user can read them but not change them. Commands run with
-`workdir`, or a worktree, as their current directory. The manager owns the lifecycle: `open()`
+`workdir`, or a worktree, as their current directory. Heavier work (a .NET restore and build,
+4.8) runs as a job (`run_job`): a short-lived container on the sandbox's files with its own
+limits, working in a directory under `staging_dir`, never in the checkout. The manager owns the
+lifecycle: `open()`
 creates the sandbox and clones the repo, and leaving the context destroys it, whether the run
 succeeded, failed or was cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and
 the attempt that continues it opens it again (`open(..., reuse=True)`).
@@ -15,7 +18,7 @@ import re
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import Final, Literal, Protocol
 from uuid import UUID
 
 from agentic_sandbox.source import RepoSource
@@ -37,6 +40,10 @@ def check_artifact_name(name: str) -> None:
     """Raises `ValueError` unless `name` is a run artifact's name, so it is one file name."""
     if not ARTIFACT_NAME.match(name):
         raise ValueError(f"not an artifact name: {name!r}")
+
+
+type JobNetwork = Literal["none", "nuget"]
+"""Where a job container may connect: nowhere, or NuGet only through the egress proxy (4.8)."""
 
 
 @dataclass(frozen=True)
@@ -97,6 +104,30 @@ class Sandbox(Protocol):
         """Copy the run artifact `name` to `artifacts_dir`, replacing an older version, and
         return its path. Raises `ValueError` if `name` is not an artifact's name, and
         `SandboxError` if `data` is over `MAX_PUT_FILE_BYTES` or cannot be copied."""
+        ...
+
+    @property
+    def job_networks(self) -> frozenset[JobNetwork]:
+        """The networks `run_job` can give a job: `none`, and `nuget` when the deployment has a
+        NuGet egress proxy. Empty when the sandbox runs no jobs."""
+        ...
+
+    async def run_job(
+        self,
+        argv: Sequence[str],
+        *,
+        network: JobNetwork,
+        cwd: str,
+        timeout_s: float,
+        env: Mapping[str, str] | None = None,
+    ) -> ExecResult:
+        """Run `argv` (no shell) in a short-lived job container (4.8): the sandbox's image and
+        files, with its own, larger limits, on `network`, as the sandbox user. `cwd` is a
+        directory under `staging_dir`, where the job works (a job never changes the checkout).
+        The container is removed when the job ends, whatever its outcome; a job still running
+        after `timeout_s` is stopped and reported with exit code 124. Raises `ValueError` for any
+        other `cwd`, and `SandboxError` if `network` is not in `job_networks` or the container
+        cannot be run."""
         ...
 
 

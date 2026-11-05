@@ -37,6 +37,7 @@ flowchart LR
     end
     subgraph T3["Contained: sandbox"]
         sb["Sandbox container<br/>no network, no credentials"]
+        job[".NET restore job<br/>no credentials"]
     end
     subgraph D["Data tier"]
         pg[("Postgres")]
@@ -52,6 +53,7 @@ flowchart LR
     worker -- "B4: prompts, code" --> model
     model -- "tool calls (validated)" --> worker
     worker -- "B5: push bundle, open PR" --> gh["GitHub"]
+    job -- "B6: HTTPS via egress proxy" --> nuget["api.nuget.org"]
 ```
 
 | Boundary | What crosses it | Main controls |
@@ -61,6 +63,7 @@ flowchart LR
 | **B3** repository → sandbox | Untrusted files | Shallow clone by the worker over https only (other transports refused), no prompts, system and user git config ignored; git in the sandbox runs with hooks and fsmonitor disabled; checkout read-only to agents |
 | **B4** worker ↔ model | Instructions, code as input, tool calls | Instructions/data separation; per-node tool grants; output schema validation; policy limits |
 | **B5** worker → GitHub | Branches, PRs | Human gate before every push/PR; create-only push; short-lived installation token |
+| **B6** restore job → NuGet | Package downloads for a .NET lint (4.8) | An internal Docker network whose only exit is an allowlisting proxy (`CONNECT` to `api.nuget.org:443`, every other host refused and logged); the platform's `nuget.config` only (the repo's sources are never read); no credentials in the job; the build that follows has no network |
 
 ## 3. Threat model (STRIDE)
 
@@ -75,6 +78,7 @@ flowchart LR
 | **Information disclosure** | Model key in logs or events | Encryption at rest, redaction filter, key used only by the run's client, only last 4 chars shown | Process memory on the worker |
 | | Secret found by the scanner reaches the report | gitleaks `--redact`; report model has no field for the match | — |
 | | Prompt injection exfiltrates code | Sandbox has no network; agents have no network tools | Code is sent to the model provider by design: choose a provider and region per your policy |
+| | A repo's MSBuild code exfiltrates during a .NET restore (4.8): restore and build run the repo's targets and analyzer DLLs | Restore jobs reach `api.nuget.org` only, through the proxy; no credentials in the job; the build has no network; refused hosts are logged | Data could be encoded in requests to the NuGet API itself; the job holds only the repo, which the sandbox already has. Leave .NET lint out of workflows (or the egress proxy out of the deployment) where that matters |
 | **Denial of service** | Runaway agents or loops spend money | Policy ceilings, optional hard budget, approval TTL, `MAX_ATTEMPTS` | No API rate limiting yet |
 | | Fork bomb or memory exhaustion in the sandbox | PID, CPU and memory limits; `noexec` tmpfs | Disk usage of volumes is not capped |
 | **Elevation of privilege** | Sandbox escape via a container breakout | Non-root, no capabilities, `no-new-privileges`, read-only root | Shared kernel with the host: use gVisor/Kata (phase 10.2) |
@@ -114,8 +118,9 @@ Repository content, earlier outputs, tool results and user text are **data**, ne
 | Limits | memory, CPU and 256 PIDs per container |
 | Checkout | owned by root: readable, not writable, by agents |
 | Writers | one git worktree and branch each; git runs with a fixed safe configuration |
-| Image | Alpine pinned by digest; scanners pinned and verified by sha256; offline OSV database |
+| Image | Alpine pinned by digest; scanners pinned and verified by sha256; offline OSV database; the .NET SDK copied from Microsoft's image pinned by digest |
 | Lifecycle | labelled `agentic.run_id`; removed at run end; a fresh sandbox per resumed attempt |
+| Job containers (4.8) | same image, user, read-only root, capabilities and `no-new-privileges`; 2 GB, 2 CPUs, 512 PIDs, their own 256 MB `/tmp`; work under the staging directory only; network `none`, or (a NuGet restore) the internal network of the egress proxy; removed when the job ends, labelled like the sandbox |
 
 ### 4.4 Data integrity and audit
 

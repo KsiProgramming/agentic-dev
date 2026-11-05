@@ -9,7 +9,11 @@ language, or a skipped `Check` saying why:
 - it configures one we cannot run offline (ESLint, flake8, pylint): skipped, never replaced;
 - a language we lint with no linter configured: our linter with the platform's conservative
   rules, its findings marked `platform-default`;
-- a stack we have no linter for (Go, Rust, Java, .NET): skipped.
+- a C# project (4.8): the `dotnet` engine, a build with the SDK's analyzers and the repo's own
+  (`agentic_tools.scan.dotnet`), config `repo` when the repo sets analysis up (an `.editorconfig`
+  with `dotnet_`/`csharp_` settings, a `.globalconfig`, or analysis settings or analyzer packages
+  in a project or `Directory.Build.props`), else `platform-default` (the SDK's defaults);
+- a stack we have no linter for (Go, Rust, Java, F#, VB): skipped.
 
 Shell scripts are checked once, across the repo, by ShellCheck. A config applies to its directory
 and everything under it, as the linters themselves look for it.
@@ -29,22 +33,34 @@ from agentic_tools.repo.stack import (
 )
 from agentic_tools.scan.report import Check, ConfigSource
 
-type Linter = Literal["ruff", "biome", "shellcheck"]
-LINTERS: tuple[Linter, ...] = ("ruff", "biome", "shellcheck")
+type Linter = Literal["ruff", "biome", "shellcheck", "dotnet"]
+LINTERS: tuple[Linter, ...] = ("ruff", "biome", "shellcheck", "dotnet")
 
-type Language = Literal["python", "node", "shell"]
+type Language = Literal["python", "node", "shell", "csharp"]
 
-_LINTER_OF: Mapping[Language, Linter] = {"python": "ruff", "node": "biome", "shell": "shellcheck"}
+_LINTER_OF: Mapping[Language, Linter] = {
+    "python": "ruff",
+    "node": "biome",
+    "shell": "shellcheck",
+    "csharp": "dotnet",
+}
 _LANGUAGE_OF: Mapping[Linter, Language] = {v: k for k, v in _LINTER_OF.items()}
 
 # A config file marks the linter it belongs to. Foreign linters are ones we cannot run offline;
 # a module configured for one is skipped rather than linted by another tool.
-_OWN = {"ruff": "ruff", "biome": "biome"}
+_OWN = {"ruff": "ruff", "biome": "biome", "dotnet": "dotnet"}
 _FOREIGN: Mapping[Language, tuple[str, ...]] = {
     "python": ("flake8", "pylint"),
     "node": ("eslint",),
+    "csharp": (),
 }
-_UNSUPPORTED_KINDS = ("go", "rust", "java", "dotnet")
+_UNSUPPORTED_KINDS = ("go", "rust", "java")
+# What a .NET module holds besides C#, named in its skip reason.
+_DOTNET_OTHERS = (("fsproj", "fsharp"), ("vbproj", "vb"))
+# MSBuild settings that mean the repo set its analysis up (in a project or Directory.Build.props).
+_DOTNET_ANALYSIS = (
+    'AnalysisLevel|AnalysisMode|Analyzers"|CodeAnalysisRuleSet|EnforceCodeStyleInBuild'
+)
 
 _SOURCE_EXTENSIONS: Mapping[str, Language] = {
     ".py": "python",
@@ -82,6 +98,12 @@ _CONFIG_NAMES = " -o ".join(
         "eslint.config.*",
         "package.json",
         ".shellcheckrc",
+        "*.csproj",
+        "*.fsproj",
+        "*.vbproj",
+        "Directory.Build.props",
+        ".editorconfig",
+        "*.globalconfig",
     )
 )
 _SOURCE_NAMES = " -o ".join(f"-name '*{ext}'" for ext in _SOURCE_EXTENSIONS)
@@ -102,6 +124,14 @@ find . -mindepth 1 -maxdepth {MANIFEST_DEPTH + 1} \\( -type d \\( {_PRUNE} \\) -
     */.pylintrc|*/pylintrc) echo "pylint $f" ;;
     */biome.json|*/biome.jsonc) echo "biome $f" ;;
     */.shellcheckrc) echo "shellcheckrc $f" ;;
+    *.csproj)
+      echo "csproj $f"
+      grep -qE '{_DOTNET_ANALYSIS}' "$f" && echo "dotnet $f" ;;
+    *.fsproj) echo "fsproj $f" ;;
+    *.vbproj) echo "vbproj $f" ;;
+    */Directory.Build.props) grep -qE '{_DOTNET_ANALYSIS}' "$f" && echo "dotnet $f" ;;
+    */.editorconfig) grep -qE '^[[:space:]]*(dotnet_|csharp_)' "$f" && echo "dotnet $f" ;;
+    *.globalconfig) echo "dotnet $f" ;;
     *) echo "eslint $f" ;;
   esac
 done
@@ -171,15 +201,17 @@ def _configured(probe: Probe, module: str, tags: Iterable[str]) -> str | None:
     return None
 
 
-def _languages(module: Module, sources: list[str]) -> list[Language]:
+def _languages(module: Module, probe: Probe) -> list[Language]:
     if module.kind == "python":
         return ["python"]
     if module.kind == "node":
         return ["node"]
+    if module.kind == "dotnet":
+        return ["csharp"] if module.path in probe.configs.get("csproj", ()) else []
     if module.kind in ("directory", "repo"):
         found = {
             _SOURCE_EXTENSIONS[posixpath.splitext(s)[1]]
-            for s in sources
+            for s in probe.sources
             if _under(s, module.path) and posixpath.splitext(s)[1] in _SOURCE_EXTENSIONS
         }
         return [lang for lang in ("python", "node") if lang in found]
@@ -222,12 +254,33 @@ def plan_lint(
                     )
                 )
             continue
-        for language in _languages(module, probe.sources):
+        languages = _languages(module, probe)
+        if module.kind == "dotnet" and not languages:
+            if not explicit:
+                other = next(
+                    (
+                        name
+                        for tag, name in _DOTNET_OTHERS
+                        if module.path in probe.configs.get(tag, ())
+                    ),
+                    "dotnet",
+                )
+                skipped.append(
+                    Check(
+                        path=target,
+                        kind=module.kind,
+                        tool=None,
+                        status="skipped",
+                        reason=f"no supported linter for {other}",
+                    )
+                )
+            continue
+        for language in languages:
             linter = _LINTER_OF[language]
             if linter not in wanted:
                 continue
             seen_languages.add(language)
-            kind = module.kind if module.kind in ("python", "node") else language
+            kind = module.kind if module.kind in ("python", "node", "dotnet") else language
             own = _configured(probe, module.path, [_OWN[linter]])
             foreign = _configured(probe, module.path, _FOREIGN[language])
             if own is not None:
