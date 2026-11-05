@@ -43,6 +43,7 @@ from agentic_sandbox.protocol import (
     MAX_PUT_FILE_BYTES,
     MAX_TAKE_FILE_BYTES,
     ExecResult,
+    JobNetwork,
     check_artifact_name,
     decode_capped,
 )
@@ -54,6 +55,7 @@ log = logging.getLogger("agentic_sandbox")
 DEFAULT_IMAGE = "agentic-dev/sandbox:dev"
 SANDBOX_DOCKERFILE_DIR = "packages/sandbox"
 RUN_LABEL = "agentic.run_id"
+JOB_LABEL = "agentic.job"
 WORKSPACE = "/workspace"
 REPO_DIR = f"{WORKSPACE}/repo"
 WORKTREES_DIR = f"{WORKSPACE}/worktrees"
@@ -73,11 +75,104 @@ class SandboxLimits:
     pids: int = 256
 
 
-class DockerSandbox:
-    """Implements `Sandbox` with `docker exec` in the run's container."""
+@dataclass(frozen=True)
+class JobLimits:
+    """A job container's limits (4.8): a .NET restore or build needs more than the sandbox."""
 
-    def __init__(self, container: Container) -> None:
+    memory: str = "2g"
+    cpus: float = 2.0
+    pids: int = 512
+    tmp: str = "256m"
+    """The size of the job's `/tmp` (a tmpfs, counted in its memory)."""
+
+
+@dataclass(frozen=True)
+class NugetEgress:
+    """The NuGet egress proxy a restore job reaches (4.8): the internal Docker network it is on,
+    which has no other way out, and its URL on that network."""
+
+    network: str
+    proxy_url: str
+
+
+@dataclass(frozen=True)
+class _Jobs:
+    """What a run's sandbox needs to start job containers on its volume."""
+
+    client: docker.DockerClient
+    image: str
+    volume: str
+    run_id: UUID
+    limits: JobLimits
+    nuget: NugetEgress | None
+
+    @property
+    def networks(self) -> frozenset[JobNetwork]:
+        return frozenset({"none", "nuget"}) if self.nuget else frozenset({"none"})
+
+    def run(
+        self,
+        argv: Sequence[str],
+        network: JobNetwork,
+        cwd: str,
+        timeout_s: float,
+        env: Mapping[str, str],
+    ) -> tuple[int, bytes, bytes]:
+        environment = dict(env)
+        network_mode = "none"
+        if network == "nuget":
+            assert self.nuget is not None
+            network_mode = self.nuget.network
+            proxy = self.nuget.proxy_url
+            for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+                environment[name] = proxy
+            environment["NO_PROXY"] = environment["no_proxy"] = ""
+        container = self.client.containers.create(
+            self.image,
+            command=["timeout", str(max(1, math.ceil(timeout_s))), *argv],
+            name=f"agentic-job-{self.run_id}-{uuid4().hex[:8]}",
+            labels={RUN_LABEL: str(self.run_id), JOB_LABEL: "1"},
+            user=SANDBOX_USER,
+            working_dir=cwd,
+            environment=environment,
+            network_mode=network_mode,
+            read_only=True,
+            # Its own temp dir, writable by the sandbox user: MSBuild keeps its node sockets there,
+            # and they hang on the run's volume.
+            tmpfs={"/tmp": f"rw,noexec,nosuid,size={self.limits.tmp},mode=1777"},
+            mounts=[Mount(WORKSPACE, self.volume, type="volume")],
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges"],
+            mem_limit=self.limits.memory,
+            nano_cpus=int(self.limits.cpus * 1e9),
+            pids_limit=self.limits.pids,
+            init=True,
+        )
+        try:
+            container.start()
+            try:
+                # `timeout` stops the job; this only bounds the wait if the container hangs.
+                status = cast(dict[str, int], container.wait(timeout=timeout_s + 30))
+                exit_code = int(status.get("StatusCode", 1))
+            except DockerException:
+                raise
+            except Exception:  # the Docker API's read timed out: the job hung past its own
+                container.kill()
+                exit_code = TIMED_OUT
+            out = container.logs(stdout=True, stderr=False)
+            err = container.logs(stdout=False, stderr=True)
+        finally:
+            _remove(container, None)
+        return exit_code, out, err
+
+
+class DockerSandbox:
+    """Implements `Sandbox` with `docker exec` in the run's container, and jobs as containers
+    on its volume (none when `jobs` is not given)."""
+
+    def __init__(self, container: Container, jobs: _Jobs | None = None) -> None:
         self._container = container
+        self._jobs = jobs
 
     @property
     def workdir(self) -> str:
@@ -167,6 +262,37 @@ class DockerSandbox:
             with contextlib.suppress(DockerException):
                 await asyncio.to_thread(self._exec, ["rm", "-f", "--", path], REPO_DIR)
 
+    @property
+    def job_networks(self) -> frozenset[JobNetwork]:
+        return self._jobs.networks if self._jobs else frozenset()
+
+    async def run_job(
+        self,
+        argv: Sequence[str],
+        *,
+        network: JobNetwork,
+        cwd: str,
+        timeout_s: float,
+        env: Mapping[str, str] | None = None,
+    ) -> ExecResult:
+        if posixpath.normpath(cwd) != cwd or not cwd.startswith(f"{INCOMING_DIR}/"):
+            raise ValueError("a job works in a directory under the staging directory")
+        if self._jobs is None or network not in self._jobs.networks:
+            raise SandboxError(f"sandbox jobs have no {network!r} network")
+        try:
+            exit_code, out, err = await asyncio.to_thread(
+                self._jobs.run, argv, network, cwd, timeout_s, env or {}
+            )
+        except DockerException as e:
+            log.warning("sandbox job failed to run: %s", e)
+            raise SandboxError("could not run the sandbox job") from e
+        stdout, out_cut = decode_capped(out)
+        stderr, err_cut = decode_capped(err)
+        if exit_code in _TIMED_OUT_CODES:
+            exit_code = TIMED_OUT
+            stderr += f"\ntimed out after {timeout_s:g} s"
+        return ExecResult(exit_code, stdout, stderr, truncated=out_cut or err_cut)
+
 
 def _checked_cwd(cwd: str | None) -> str:
     """`cwd` (default the checkout) if it is the checkout or a directory under the worktrees."""
@@ -181,7 +307,8 @@ class DockerSandboxManager:
     """Implements `SandboxManager` with one container and one volume per run.
 
     `client` defaults to `docker.from_env()`. `local_root` is the only directory local repo paths
-    may come from (none if unset).
+    may come from (none if unset). Job containers get `job_limits`, and reach NuGet through
+    `nuget` (no `nuget` network for jobs if unset).
     """
 
     def __init__(
@@ -190,11 +317,15 @@ class DockerSandboxManager:
         *,
         image: str = DEFAULT_IMAGE,
         limits: SandboxLimits | None = None,
+        job_limits: JobLimits | None = None,
+        nuget: NugetEgress | None = None,
         local_root: Path | None = None,
     ) -> None:
         self._client = client or docker.from_env()
         self._image = image
         self._limits = limits or SandboxLimits()
+        self._job_limits = job_limits or JobLimits()
+        self._nuget = nuget
         self._local_root = local_root
         self._kept: set[UUID] = set()
 
@@ -227,7 +358,8 @@ class DockerSandboxManager:
             else:
                 container, volume = await self._create_fresh(name, run_id, repo, git_env)
                 log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
-            yield DockerSandbox(container)
+            jobs = _Jobs(self._client, self._image, name, run_id, self._job_limits, self._nuget)
+            yield DockerSandbox(container, jobs)
         finally:
             if run_id in self._kept:
                 self._kept.discard(run_id)

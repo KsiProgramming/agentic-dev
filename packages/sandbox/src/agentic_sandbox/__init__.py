@@ -11,6 +11,7 @@ from agentic_sandbox.protocol import (
     MAX_PUT_FILE_BYTES,
     MAX_TAKE_FILE_BYTES,
     ExecResult,
+    JobNetwork,
     Sandbox,
     SandboxManager,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "ExecResult",
     "FakeSandbox",
     "FakeSandboxManager",
+    "JobNetwork",
     "RepoSource",
     "Sandbox",
     "SandboxError",

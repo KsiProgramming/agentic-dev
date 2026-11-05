@@ -49,6 +49,32 @@ jobs:
           cache-to: type=gha,scope=sandbox,mode=max
       - run: uv run pytest
 
+  sandbox-arm64:
+    # The sandbox image pins the .NET SDK and every scanner per architecture (4.8); the Python job
+    # builds and tests amd64, this checks the arm64 digests and downloads still resolve.
+    name: Sandbox image (arm64 build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4.4.1
+      - name: Build the sandbox image for arm64
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: packages/sandbox
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=sandbox-arm64
+          cache-to: type=gha,scope=sandbox-arm64,mode=max
+      - name: Build the egress proxy image
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: packages/egress-proxy
+          platforms: linux/amd64,linux/arm64
+          push: false
+
   web:
     name: Web (lint, types, unit tests)
     runs-on: ubuntu-latest

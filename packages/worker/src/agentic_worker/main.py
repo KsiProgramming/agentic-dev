@@ -37,7 +37,8 @@ Every run gets the `artifacts.*` tools, which read its artifacts (4.3). They are
 Postgres (`PostgresArtifactStore`), and a run with a sandbox also gets a read-only copy of each
 in its `artifacts_dir`, copied again into a fresh sandbox when an attempt starts.
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
-this host (no isolation).
+this host (no isolation). With Docker, `SANDBOX_NUGET_NETWORK` and `SANDBOX_NUGET_PROXY` name the
+NuGet egress proxy a .NET restore job reaches (4.8); unset, `scan.lint` skips .NET modules.
 
 With `AGENTIC_GITHUB=fake` (local dev and end-to-end tests, never `AGENTIC_ENV=production`), the
 GitHub App is a stand-in: the fake repos (`agentic_github.FAKE_REPOS`, and those it creates)
@@ -194,6 +195,13 @@ class WorkerSettings(BaseSettings):
     sandbox_image: str = DEFAULT_IMAGE
     # The only directory runs may clone local repo paths from; unset allows https URLs only.
     sandbox_local_root: Path | None = None
+    # The NuGet egress proxy a .NET restore job reaches (4.8): the internal Docker network it is on
+    # and its URL there. Unset, `scan.lint` skips .NET modules ("NuGet restore is not configured").
+    sandbox_nuget_network: str | None = None
+    sandbox_nuget_proxy: str | None = None
+    # A job container's limits (a .NET restore or build); the sandbox's own are smaller.
+    sandbox_job_memory: str = "2g"
+    sandbox_job_cpus: float = Field(default=2.0, gt=0)
     # Names this worker in run leases.
     worker_id: str = Field(default_factory=_default_worker_id, min_length=1, max_length=128)
     # A lease not renewed for this long is expired, and its run is reclaimed by another worker.
@@ -374,7 +382,12 @@ def build_sandboxes(
     import docker
     from docker.errors import DockerException
 
-    from agentic_sandbox.docker_backend import DockerSandboxManager, sweep_orphans
+    from agentic_sandbox.docker_backend import (
+        DockerSandboxManager,
+        JobLimits,
+        NugetEgress,
+        sweep_orphans,
+    )
 
     try:
         client = docker.from_env()
@@ -382,8 +395,15 @@ def build_sandboxes(
             log.info("removed %d leftover sandbox(es)", removed)
     except DockerException as e:
         raise ConfigError(f"SANDBOX_BACKEND=docker but Docker is not reachable: {e}") from e
+    nuget = None
+    if settings.sandbox_nuget_network and settings.sandbox_nuget_proxy:
+        nuget = NugetEgress(settings.sandbox_nuget_network, settings.sandbox_nuget_proxy)
     return DockerSandboxManager(
-        client, image=settings.sandbox_image, local_root=settings.sandbox_local_root
+        client,
+        image=settings.sandbox_image,
+        job_limits=JobLimits(memory=settings.sandbox_job_memory, cpus=settings.sandbox_job_cpus),
+        nuget=nuget,
+        local_root=settings.sandbox_local_root,
     )
 
 

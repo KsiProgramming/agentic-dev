@@ -94,6 +94,8 @@ This is a curated set of the decisions that matter most to someone adopting, ope
 
 **Consequences.** A compromised agent cannot reach the network or a credential. Tools that need the network (dependency install, tests that download) are out of scope until an egress allowlist exists (phase 10.2, together with gVisor or Firecracker). In the reference compose setup the worker needs the Docker socket, which is a host-level privilege: see the [security model](../security/security-model.md).
 
+**Exception (phase 4.8): NuGet restore.** To lint C# projects, `scan.lint` must restore their NuGet packages, then build them so the Roslyn analyzers run. Neither happens in the run's sandbox container: each is a short-lived *job container* from the same image, on the run's volume, as the same user, with the same hardening and its own limits. Only the restore job has a network: an internal Docker network whose one other member is an egress proxy that allows HTTPS to `api.nuget.org` and nothing else, and logs every host it refuses. The build job has no network. The restore uses the platform's `nuget.config` only, so a repo cannot point it at another host. Restore and build run code from the repository (MSBuild targets and props, analyzer DLLs); that code has no credentials, and its only route out is the NuGet API. The general allowlist is still phase 10.2.
+
 ### ADR-008: A GitHub App, never personal access tokens
 
 **Decision.** All GitHub access goes through a GitHub App installed on chosen repositories. A workspace stores only the installation id. Short-lived installation tokens are minted on demand from the App's private key.

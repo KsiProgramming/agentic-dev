@@ -16,6 +16,8 @@ gitleaks' `Match`, `Secret` and the line's text are not even in its model.
 import posixpath
 import re
 from collections.abc import Mapping, Sequence
+from typing import NamedTuple
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -28,6 +30,8 @@ SEVERITY_MAPS: Mapping[str, Mapping[str, Severity]] = {
     # Biome's GitLab reporter: error -> critical, warning -> major, information -> minor.
     "biome": {"blocker": "high", "critical": "medium", "major": "low", "minor": "info"},
     "shellcheck": {"error": "medium", "warning": "low", "info": "info", "style": "info"},
+    # SARIF levels of a .NET build (4.8); `none` (a hidden diagnostic) is dropped.
+    "dotnet": {"error": "medium", "warning": "low", "note": "info"},
 }
 
 
@@ -252,6 +256,123 @@ def gitleaks_findings(raw: str, *, workdir: str) -> list[Finding]:
             )
         )
     return findings
+
+
+# .NET (4.8): one SARIF 2.1 log per project and target framework, written by the compiler during
+# `scan.lint`'s build (`agentic_tools.scan.dotnet`), with every compiler and analyzer diagnostic.
+
+
+class _SarifRegion(_In):
+    start_line: int | None = Field(default=None, alias="startLine")
+    end_line: int | None = Field(default=None, alias="endLine")
+
+
+class _SarifArtifact(_In):
+    uri: str
+
+
+class _SarifPhysical(_In):
+    artifact_location: _SarifArtifact = Field(alias="artifactLocation")
+    region: _SarifRegion = Field(default_factory=_SarifRegion)
+
+
+class _SarifLocation(_In):
+    physical_location: _SarifPhysical | None = Field(default=None, alias="physicalLocation")
+
+
+class _SarifMessage(_In):
+    text: str = ""
+
+
+class _SarifResult(_In):
+    rule_id: str = Field(alias="ruleId")
+    level: str = "warning"
+    message: _SarifMessage = Field(default_factory=_SarifMessage)
+    locations: list[_SarifLocation] = Field(default_factory=list[_SarifLocation])
+    suppressions: list[object] = Field(default_factory=list[object])
+
+
+class _SarifRule(_In):
+    id: str
+    help_uri: str | None = Field(default=None, alias="helpUri")
+
+
+class _SarifDriver(_In):
+    rules: list[_SarifRule] = Field(default_factory=list[_SarifRule])
+
+
+class _SarifTool(_In):
+    driver: _SarifDriver = Field(default_factory=_SarifDriver)
+
+
+class _SarifRun(_In):
+    tool: _SarifTool = Field(default_factory=_SarifTool)
+    results: list[_SarifResult] = Field(default_factory=list[_SarifResult])
+
+
+class _SarifLog(_In):
+    runs: list[_SarifRun]
+
+
+_SARIF = TypeAdapter(_SarifLog)
+_GENERATED_DIRS = frozenset({"bin", "obj"})
+
+
+class SarifRead(NamedTuple):
+    """A .NET build's log, read: its findings, and where each compiler error is (a repo path)."""
+
+    findings: list[Finding]
+    compile_errors: list[str]
+
+
+def _sarif_path(uri: str, root: str) -> str | None:
+    """The repo path of a SARIF `file://` URI under `root` (the build's copy of the repo), or
+    `None` outside it or in build output (`bin/`, `obj/`: generated, not the repo's code)."""
+    parsed = urlparse(uri)
+    if parsed.scheme not in ("", "file"):
+        return None
+    path = _relative(unquote(parsed.path), root)
+    if path is None or _GENERATED_DIRS.intersection(path.split("/")):
+        return None
+    return path
+
+
+def sarif_findings(raw: str, *, root: str, config: ConfigSource) -> SarifRead:
+    """The diagnostics of one SARIF log whose file URIs are under `root`. Suppressed ones
+    (`#pragma`, `[SuppressMessage]`), hidden ones and ones with no file location are dropped.
+    A compiler error (`CS…` at level error) is not a finding: the build did not compile, so its
+    path is returned in `compile_errors` for the check to say so."""
+    findings: list[Finding] = []
+    compile_errors: list[str] = []
+    for run in _parse(_SARIF, raw).runs:
+        help_urls = {rule.id: rule.help_uri for rule in run.tool.driver.rules}
+        for result in run.results:
+            level = result.level.lower()
+            if result.suppressions or level not in SEVERITY_MAPS["dotnet"]:
+                continue
+            physical = result.locations[0].physical_location if result.locations else None
+            path = _sarif_path(physical.artifact_location.uri, root) if physical else None
+            if level == "error" and result.rule_id.startswith("CS"):
+                compile_errors.append(path or "")
+                continue
+            if physical is None or path is None:
+                continue
+            findings.append(
+                Finding(
+                    fingerprint=fingerprint("dotnet", result.rule_id, path),
+                    tool="dotnet",
+                    rule=result.rule_id,
+                    severity=_severity("dotnet", level),
+                    category="lint",
+                    path=path,
+                    line=physical.region.start_line,
+                    end_line=physical.region.end_line,
+                    message=clip_message(result.message.text),
+                    help_url=help_urls.get(result.rule_id),
+                    config=config,
+                )
+            )
+    return SarifRead(findings, compile_errors)
 
 
 # osv-scanner: `osv-scanner scan source --format json`.
