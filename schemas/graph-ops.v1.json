@@ -384,7 +384,7 @@
     },
     "Into": {
       "additionalProperties": false,
-      "description": "Into a container: a sequence's step or a parallel's branch at `index`; a loop's, map's or orchestrator's\nbody, which must be empty; a router route's `then`, or its `default`, which must be empty.",
+      "description": "Into a container: a sequence's step or a parallel's branch at `index`; a loop's, map's or\norchestrator's body, which must be empty; a router route's `then`, or its `default`, which must\nbe empty.",
       "properties": {
         "index": {
           "anyOf": [
@@ -659,7 +659,7 @@
     },
     "OrchestratorNode": {
       "additionalProperties": false,
-      "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": …, \"input\": …}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator.",
+      "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": …, \"input\": …}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again.",
       "properties": {
         "body": {
           "description": "The worker: what runs once per task.",
@@ -733,6 +733,18 @@
           "title": "Max Workers",
           "type": "integer"
         },
+        "replan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OrchestratorReplan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset: a failed task fails the orchestrator."
+        },
         "type": {
           "const": "orchestrator",
           "title": "Type",
@@ -766,6 +778,31 @@
         "max_concurrency"
       ],
       "title": "OrchestratorNode",
+      "type": "object"
+    },
+    "OrchestratorReplan": {
+      "additionalProperties": false,
+      "description": "When an orchestrator's hub plans again (6.2). On `failure`: once a task fails, no other\ntask starts, those running finish, those not started are dropped, and the hub plans the\nremaining work from every task's outcome, at most `max_rounds` times.",
+      "properties": {
+        "max_rounds": {
+          "default": 1,
+          "description": "The most times the hub replans.",
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Max Rounds",
+          "type": "integer"
+        },
+        "on": {
+          "const": "failure",
+          "description": "What makes the hub plan again.",
+          "title": "On",
+          "type": "string"
+        }
+      },
+      "required": [
+        "on"
+      ],
+      "title": "OrchestratorReplan",
       "type": "object"
     },
     "ParallelNode": {

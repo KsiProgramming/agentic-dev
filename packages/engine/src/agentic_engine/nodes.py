@@ -382,6 +382,7 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
         ui={
             "ui:order": ["hub", "max_workers", "max_concurrency", "*"],
             "hub": {"instructions": _TEXTAREA, "model": _MODEL},
+            "replan": _ADVANCED,
             "writes": _ADVANCED,
         },
     ),

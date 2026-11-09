@@ -11,6 +11,7 @@ from agentic_engine.policy import PLATFORM_POLICY
 from agentic_engine.ports import check_port
 from agentic_engine.spec import (
     MAX_AGENTS_SPAWNED,
+    MAX_REPLAN_ROUNDS,
     OrchestratorNode,
     ValidationIssue,
     WorkflowSpec,
@@ -332,3 +333,40 @@ def test_the_plan_schema_bounds_the_tasks() -> None:
         plan({"id": "a", "title": "A"}),  # no instructions
     ):
         assert not isinstance(check_port("output", "fix", schema, bad), dict), bad
+
+
+def test_an_orchestrator_may_replan_on_failure() -> None:
+    """6.2: `replan` is optional, and off when unset."""
+    node = OrchestratorNode.model_validate(
+        orchestrator(agent("w"), replan={"on": "failure", "max_rounds": 2})
+    )
+    assert node.replan is not None and node.replan.max_rounds == 2
+    assert OrchestratorNode.model_validate(orchestrator(agent("w"))).replan is None
+    defaulted = OrchestratorNode.model_validate(orchestrator(agent("w"), replan={"on": "failure"}))
+    assert defaulted.replan is not None and defaulted.replan.max_rounds == 1
+    assert validate(orchestrator(agent("w"), replan={"on": "failure"})) == []
+
+
+@pytest.mark.parametrize(
+    "replan",
+    [
+        {"on": "failure", "max_rounds": 0},
+        {"on": "failure", "max_rounds": MAX_REPLAN_ROUNDS + 1},
+        {"on": "always"},
+        {"max_rounds": 1},
+    ],
+    ids=["zero-rounds", "too-many-rounds", "unknown-trigger", "no-trigger"],
+)
+def test_replan_is_bounded(replan: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        WorkflowSpec.model_validate(workflow(orchestrator(agent("w"), replan=replan)))
+
+
+def test_a_replan_schema_takes_fewer_tasks() -> None:
+    node = OrchestratorNode.model_validate(orchestrator(agent("w")))
+    schema = orchestrator_plan_schema(node, max_tasks=1)
+    tasks = [{"id": t, "title": t, "instructions": "Do."} for t in ("a", "b")]
+    one = json.dumps({"tasks": tasks[:1], "reason": "r"})
+    assert isinstance(check_port("output", "fix", schema, one), dict)
+    two = json.dumps({"tasks": tasks, "reason": "r"})
+    assert not isinstance(check_port("output", "fix", schema, two), dict)

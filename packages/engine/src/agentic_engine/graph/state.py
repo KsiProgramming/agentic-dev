@@ -90,6 +90,10 @@ class RunState(TypedDict):
     resumed run runs the same tasks and never asks the hub again. Its workers' results are in
     `map_results`, under the orchestrator's id, by task index. Checkpoints saved before phase 6.1
     have none.
+
+    `rounds` counts the plans each orchestrator's hub made (6.2: one more per replan), by
+    orchestrator id; a replan that planned no task still counts. Checkpoints saved before phase
+    6.2 have none, which counts as one plan.
     """
 
     input: str
@@ -104,6 +108,7 @@ class RunState(TypedDict):
     artifacts: Annotated[dict[str, ArtifactRef], merge_artifacts]
     routes: Annotated[dict[str, str | None], merge_routes]
     plans: Annotated[dict[str, list[JsonValue]], merge_plans]
+    rounds: Annotated[dict[str, int], merge_counts]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -120,6 +125,7 @@ class RunUpdate(TypedDict, total=False):
     artifacts: dict[str, ArtifactRef]
     routes: dict[str, str | None]
     plans: dict[str, list[JsonValue]]
+    rounds: dict[str, int]
 
 
 class MapItem(TypedDict):
@@ -167,6 +173,7 @@ def initial_state(input: str) -> RunState:
         artifacts={},
         routes={},
         plans={},
+        rounds={},
     )
 
 

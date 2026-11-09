@@ -59,13 +59,19 @@ answer."""
 
 PLAN_MADE: Final = "plan_made"
 """An orchestrator's hub planned its tasks (6.1), before any worker starts: `tasks` (`id` and
-`title` of each, in plan order) and `reason`."""
+`title` of each, in plan order), `reason` and `round` (1 for the first plan, then one more per
+replan, 6.2)."""
+REPLAN_STARTED: Final = "replan_started"
+"""A task of an orchestrator failed and its hub is asked to plan again (6.2), once every task of
+the round ended: `round` (the plan's to come), `failed` (`id` and `error` of each task that did not
+complete) and `dropped` (the ids of the tasks that never started)."""
 TASK_STARTED: Final = "task_started"
 """An orchestrator starts its body for one planned task: `index` (from 0), `task_id`, `title`.
 The worker's events carry `item`, the task's index, as a map item's do."""
 TASK_COMPLETED: Final = "task_completed"
 """An orchestrator's body ended for one task: `index`, `task_id`, `status` (`cancelled` once
-another task did not complete), and `error` if it did not complete."""
+another task did not complete; `dropped` when it never started because a task failed and the hub
+will replan, 6.2), and `error` if it did not complete."""
 
 ARTIFACT_WRITTEN: Final = "artifact_written"
 """A node wrote a run artifact (4.3), before its `node_completed`: `name`, `version`,

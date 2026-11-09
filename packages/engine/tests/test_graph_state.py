@@ -26,6 +26,7 @@ def test_initial_state_seeds_last_text_with_input() -> None:
         "artifacts": {},
         "routes": {},
         "plans": {},
+        "rounds": {},
     }
 
 

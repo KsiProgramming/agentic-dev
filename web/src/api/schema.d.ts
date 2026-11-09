@@ -1531,7 +1531,8 @@ export interface components {
          *     `agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own
          *     branch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward
          *     the run's `agents_spawned` limit once the plan is made; one worker that does not complete
-         *     cancels the others and fails the orchestrator.
+         *     cancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the
+         *     remaining work again.
          */
         OrchestratorNode: {
             /**
@@ -1554,11 +1555,33 @@ export interface components {
             max_workers: number;
             /** Max Concurrency */
             max_concurrency: number;
+            /** @description Unset: a failed task fails the orchestrator. */
+            replan?: components["schemas"]["OrchestratorReplan"] | null;
             /**
              * Writes
              * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
              */
             writes?: string | null;
+        };
+        /**
+         * OrchestratorReplan
+         * @description When an orchestrator's hub plans again (6.2). On `failure`: once a task fails, no other
+         *     task starts, those running finish, those not started are dropped, and the hub plans the
+         *     remaining work from every task's outcome, at most `max_rounds` times.
+         */
+        OrchestratorReplan: {
+            /**
+             * On
+             * @description What makes the hub plan again.
+             * @constant
+             */
+            on: "failure";
+            /**
+             * Max Rounds
+             * @description The most times the hub replans.
+             * @default 1
+             */
+            max_rounds: number;
         };
         /**
          * ParallelNode

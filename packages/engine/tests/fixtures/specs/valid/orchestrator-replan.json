@@ -1,0 +1,48 @@
+{
+  "spec_version": "0",
+  "id": "orchestrated-docs-replan",
+  "name": "Orchestrated docs (replan on failure)",
+  "description": "A lead splits the repo into parts to document; one writer documents each part, and the notes are joined.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "tool",
+        "id": "list_modules",
+        "tool": "repo.list_modules"
+      },
+      {
+        "type": "orchestrator",
+        "id": "document",
+        "hub": {
+          "role": "Tech lead",
+          "instructions": "Your input lists the repo's modules. Plan one task per part of the repo worth its own documentation page; group small modules together."
+        },
+        "body": {
+          "type": "agent",
+          "id": "writer",
+          "role": "Technical writer",
+          "instructions": "Your input holds one task: document the part of the repo it names, reading the code with your tools. Answer with the page as Markdown.",
+          "tools": [
+            "repo.list_files",
+            "repo.read_file",
+            "repo.search"
+          ]
+        },
+        "max_workers": 6,
+        "max_concurrency": 3,
+        "replan": {
+          "on": "failure",
+          "max_rounds": 2
+        }
+      },
+      {
+        "type": "reduce",
+        "id": "join",
+        "from": "document",
+        "strategy": "concat"
+      }
+    ]
+  }
+}
