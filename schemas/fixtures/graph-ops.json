@@ -1,5 +1,5 @@
 {
-  "$comment": "Graph operations and what they make of `spec`, applied by both agentic_engine.spec.apply_ops (packages/engine/tests/test_graph_ops_fixtures.py) and the web's applyOps (web/src/workflows/ops.test.ts), so the two stay alike. Each case has `result` or `error`. Regenerate the outcomes from the engine when a case is added.",
+  "$comment": "Graph operations and what they make of `spec`, applied by both agentic_engine.spec.apply_ops (packages/engine/tests/test_graph_ops_fixtures.py) and the web's applyOps (web/src/workflows/ops.test.ts), so the two stay alike. Each case has `result` or `error`, and runs on `spec` unless it brings its own `spec`. Regenerate the outcomes from the engine when a case is added.",
   "spec": {
     "spec_version": "0",
     "id": "flow",
@@ -2554,6 +2554,170 @@
         "code": "unknown_node",
         "op_index": 2,
         "node_id": "a"
+      }
+    },
+    {
+      "name": "add into a taken orchestrator body",
+      "spec": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "fix",
+              "hub": {
+                "role": "Lead",
+                "instructions": "Plan the fixes."
+              },
+              "body": {
+                "type": "agent",
+                "id": "fixer",
+                "role": "fixer",
+                "instructions": "Fix it."
+              },
+              "max_workers": 4,
+              "max_concurrency": 2
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "addNode",
+          "node": {
+            "type": "gate",
+            "id": "g",
+            "title": "Approve"
+          },
+          "at": {
+            "parent": "fix"
+          }
+        }
+      ],
+      "error": {
+        "code": "slot_taken",
+        "op_index": 0,
+        "node_id": "fix"
+      }
+    },
+    {
+      "name": "remove an orchestrator body",
+      "spec": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "fix",
+              "hub": {
+                "role": "Lead",
+                "instructions": "Plan the fixes."
+              },
+              "body": {
+                "type": "agent",
+                "id": "fixer",
+                "role": "fixer",
+                "instructions": "Fix it."
+              },
+              "max_workers": 4,
+              "max_concurrency": 2
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "removeNode",
+          "node_id": "fixer"
+        }
+      ],
+      "error": {
+        "code": "missing_child",
+        "op_index": null,
+        "node_id": "fix"
+      }
+    },
+    {
+      "name": "replace an orchestrator body",
+      "spec": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "fix",
+              "hub": {
+                "role": "Lead",
+                "instructions": "Plan the fixes."
+              },
+              "body": {
+                "type": "agent",
+                "id": "fixer",
+                "role": "fixer",
+                "instructions": "Fix it."
+              },
+              "max_workers": 4,
+              "max_concurrency": 2
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "removeNode",
+          "node_id": "fixer"
+        },
+        {
+          "op": "addNode",
+          "node": {
+            "type": "agent",
+            "id": "w2",
+            "role": "w2",
+            "instructions": "Do w2."
+          },
+          "at": {
+            "parent": "fix"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "fix",
+              "hub": {
+                "role": "Lead",
+                "instructions": "Plan the fixes."
+              },
+              "body": {
+                "type": "agent",
+                "id": "w2",
+                "role": "w2",
+                "instructions": "Do w2."
+              },
+              "max_workers": 4,
+              "max_concurrency": 2
+            }
+          ]
+        }
       }
     }
   ]

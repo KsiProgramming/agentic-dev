@@ -91,8 +91,8 @@ function freeId(taken: Set<string>, kind: string): string {
 
 const idsIn = (node: SpecNode) => allSpecNodes({ root: node } as WorkflowSpec).map((n) => n.id);
 
-/** Where a node is in the spec: the root, a sequence's step, a parallel's branch, a loop's or
- * map's body, or what runs on a router's route (`route`: its id, or `default`). */
+/** Where a node is in the spec: the root, a sequence's step, a parallel's branch, a loop's,
+ * map's or orchestrator's body, or what runs on a router's route (`route`: its id, or `default`). */
 export interface Place {
   node: SpecNode;
   parent: SpecNode | null;
@@ -118,7 +118,7 @@ function* places(place: Place): Generator<Place> {
   let children: Place[] = [];
   if (node.type === "sequence") children = list("steps", node.steps);
   if (node.type === "parallel") children = list("branches", node.branches);
-  if (node.type === "loop" || node.type === "map") {
+  if (node.type === "loop" || node.type === "map" || node.type === "orchestrator") {
     children = [
       { node: node.body, parent: node, slot: "body", siblings: [node.body.id], index: 0 },
     ];
@@ -165,8 +165,10 @@ export function stayReason(place: Place): string | null {
       return place.siblings.length > 1 ? null : "The only step here stays; replace it instead.";
     case "branches":
       return place.siblings.length > 2 ? null : "A parallel needs at least two branches.";
-    case "body":
-      return `A ${place.parent?.type ?? "container"} needs a body; replace it instead.`;
+    case "body": {
+      const kind = place.parent?.type ?? "container";
+      return `${/^[aeiou]/.test(kind) ? "An" : "A"} ${kind} needs a body; replace it instead.`;
+    }
     case "route":
       return place.route === DEFAULT_ROUTE ? null : "A route needs a step; replace it instead.";
   }
@@ -344,8 +346,41 @@ export function newMismatches(spec: WorkflowSpec, edit: Edit): Mismatch[] {
   return portMismatches(after).filter((m) => !had.has(edgeKey(m)));
 }
 
-/** Why `edit` is not offered, as a sentence for its menu item: the first connection it would make
+/** What an orchestrator's worker may hold (6.1): agents and tools, alone or in a sequence. */
+const WORKER_KINDS = new Set(["agent", "tool", "sequence"]);
+
+/** The nodes of `spec` inside an orchestrator's worker that it may not hold, as
+ * `<node> in <orchestrator>`, the mirror of validation's `not_allowed_in_orchestrator` by kind
+ * (a publishing or repo-creating tool is left to the server's check). */
+function misplacedInWorkers(spec: WorkflowSpec): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const node of allSpecNodes(spec)) {
+    if (node.type !== "orchestrator") continue;
+    for (const inner of allSpecNodes({ root: node.body } as WorkflowSpec)) {
+      if (!WORKER_KINDS.has(inner.type)) found.set(inner.id, node.id);
+    }
+  }
+  return found;
+}
+
+/** Why `edit` is not offered, as a sentence for its menu item: a node it would put in an
+ * orchestrator's worker that the worker may not hold, else the first connection it would make
  * whose ports do not fit; `null` when it may be made (or when there is no edit). */
 export function blockReason(spec: WorkflowSpec, edit: Edit | null): string | null {
-  return edit ? (newMismatches(spec, edit)[0]?.reason ?? null) : null;
+  if (!edit) return null;
+  let after: WorkflowSpec | null = null;
+  try {
+    after = applyOps(spec, edit.ops);
+  } catch {
+    after = null;
+  }
+  if (after) {
+    const had = misplacedInWorkers(spec);
+    for (const [nodeId, orchestrator] of misplacedInWorkers(after)) {
+      if (had.get(nodeId) === orchestrator) continue;
+      const kind = allSpecNodes(after).find((n) => n.id === nodeId)?.type ?? "node";
+      return `The worker of '${orchestrator}' holds only agents and tools, not a ${kind}.`;
+    }
+  }
+  return newMismatches(spec, edit)[0]?.reason ?? null;
 }

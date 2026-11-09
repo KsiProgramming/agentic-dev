@@ -19,11 +19,12 @@ OPS: TypeAdapter[list[GraphOp]] = TypeAdapter(list[GraphOp])
 @pytest.mark.parametrize("case", DOC["cases"], ids=[c["name"] for c in DOC["cases"]])
 def test_the_engine_applies_each_shared_case_as_the_fixture_says(case: dict[str, Any]) -> None:
     ops = OPS.validate_python(case["ops"])
+    spec = case.get("spec", DOC["spec"])
     if "result" in case:
-        assert apply_ops(DOC["spec"], ops) == case["result"]
+        assert apply_ops(spec, ops) == case["result"]
         return
     with pytest.raises(OpError) as exc:
-        apply_ops(DOC["spec"], ops)
+        apply_ops(spec, ops)
     error = exc.value
     assert {"code": error.code, "op_index": error.op_index, "node_id": error.node_id} == case[
         "error"
