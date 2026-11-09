@@ -9,6 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- `specs/ideas.md`: ideas taken from Entire's Checkpoints — commit trailers linking a change to its run, why each change was made beside the diff at the gate, rerun from a node, an opt-in run record kept in the repo, the share of a change edited before approval, and reading Entire checkpoints when profiling a repo; hosting repos ourselves recorded as dropped.
 - Phase 6.1 `orchestrator` primitive ([#157](https://github.com/KsiProgramming/agentic-dev/pull/157)):
   - **Hub and workers.** A new `orchestrator` node: a hub agent plans at most `max_workers` tasks at run time (`{tasks: [{id, title, instructions}], reason}`, checked as a typed port), and its body runs once per task, at most `max_concurrency` at once, on `{task, input}` as data. Its output is the tasks' outputs in plan order; a `reduce` can combine them by task id, and `writes` stores them.
   - **Limits and failures.** The hub and every task's agents count on `agents_spawned` once the plan is made (over it, the run stops cleanly before any worker); one task that does not complete cancels the others and fails the orchestrator, naming the task. A resumed run keeps the plan and runs only the unfinished tasks.
