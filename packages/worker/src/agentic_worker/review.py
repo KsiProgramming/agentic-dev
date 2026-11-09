@@ -29,7 +29,8 @@ EDITED_BY = "Edited-by: reviewer"
 
 class SandboxGateReview:
     """Implements `GateReview` over `sandbox` for the writer nodes `writers` of run `run_id`, and
-    the tasks' writers (`<orchestrator>.<task>`, 6.1) of the orchestrators in `task_writers`."""
+    for the orchestrators in `task_writers`: their tasks' writers (`<orchestrator>.<task>`, 6.1)
+    and their integration branches (the orchestrator's id, 6.3)."""
 
     def __init__(
         self,
@@ -44,8 +45,9 @@ class SandboxGateReview:
         self._task_writers = frozenset(task_writers)
 
     def _is_writer(self, node_id: str) -> bool:
-        """Whether `node_id` names a writer of the run: a writer node, or a task's writer."""
-        if node_id in self._writers:
+        """Whether `node_id` names a writer of the run: a writer node, a task's writer, or an
+        orchestrator's integration branch."""
+        if node_id in self._writers or node_id in self._task_writers:
             return True
         orchestrator = task_writer_orchestrator(node_id)
         return orchestrator is not None and orchestrator in self._task_writers

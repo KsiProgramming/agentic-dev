@@ -92,6 +92,7 @@ from agentic_engine.graph import (
     resume_workflow,
     run_workflow,
 )
+from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.logging import configure_logging
 from agentic_engine.policy import PolicyLimitExceeded
 from agentic_engine.spec import (
@@ -161,6 +162,7 @@ from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
 from agentic_tools.scan import open_scan_tools
 from agentic_worker.artifacts import MirroredArtifactStore
+from agentic_worker.integrate import SandboxIntegrator
 from agentic_worker.review import SandboxGateReview
 
 log = logging.getLogger("agentic_worker")
@@ -619,6 +621,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
     async with contextlib.AsyncExitStack() as stack:
         tools: ToolExecutor | None = None
         review: SandboxGateReview | None = None
+        integrator: SandboxIntegrator | None = None
         artifacts: ArtifactStore = PostgresArtifactStore(worker.sessions, run.id)
         mirror_dir: str | None = None
         if to_create and target is not None:
@@ -649,6 +652,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             writers = writer_node_ids(run.spec.root, WRITE_TOOL_NAMES)
             tasked = task_writer_orchestrators(run.spec.root, WRITE_TOOL_NAMES)
             review = SandboxGateReview(sandbox, run.id, writers, tasked)
+            integrator = SandboxIntegrator(sandbox, run.id)
             tools = await stack.enter_async_context(
                 open_repo_tools(sandbox, run_id=run.id, writers=writers, task_writers=tasked)
             )
@@ -657,8 +661,9 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             if target is not None and uses_github(run.spec):
                 assert worker.github is not None  # `_github_target` checked it
                 publishing = await stack.enter_async_context(
+                    # An orchestrator whose tasks write publishes its integration branch (6.3).
                     open_github_tools(
-                        worker.github, target, sandbox, run_id=run.id, writers=writers
+                        worker.github, target, sandbox, run_id=run.id, writers=writers | tasked
                     )
                 )
                 tools = RunTools([tools, publishing])
@@ -673,7 +678,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             await _fail(run, sink, last_seq, str(e))
             return "failed"
         result = await _workflow(
-            worker, run, sink, last_seq, runtime, tools, decision, review, artifacts
+            worker, run, sink, last_seq, runtime, tools, decision, review, artifacts, integrator
         )
         if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
@@ -739,10 +744,12 @@ async def _workflow(
     decision: GateDecision | None = None,
     review: GateReview | None = None,
     artifacts: ArtifactStore | None = None,
+    integrator: BranchIntegrator | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
     run paused at a gate continues with `decision`, and its gates show and edit the writers'
-    branches through `review`. Its artifacts go to `artifacts`. A run with a budget counts what
+    branches through `review`, and its orchestrators merge their tasks' branches through
+    `integrator` (6.3). Its artifacts go to `artifacts`. A run with a budget counts what
     its earlier attempts spent (`runs.estimated_usd` when it was claimed)."""
     if last_seq == 0:
         log.info("run %s started", run.id)
@@ -758,6 +765,7 @@ async def _workflow(
             spent=run.spent,
             review=review,
             artifacts=artifacts,
+            integrator=integrator,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -775,6 +783,7 @@ async def _workflow(
         spent=run.spent,
         review=review,
         artifacts=artifacts,
+        integrator=integrator,
     )
 
 

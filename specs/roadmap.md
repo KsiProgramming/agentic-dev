@@ -116,7 +116,7 @@ A review of the screens shipped in Milestones 2 and 3 found that they work but r
 |---|---|---|---|
 | 6.1 | `orchestrator` primitive: hub plan schema, spawn workers via `Send`, max workers/depth. [Plan](2026-11-09-orchestrator-primitive/requirements.md) | A hub plans N subtasks and the engine spawns N workers | ✅ Done ([#157](https://github.com/KsiProgramming/agentic-dev/pull/157)) |
 | 6.2 | Replan policy (on-failure): settle the round, the hub replans the remaining work from every task's outcome, at most `max_rounds` times. [Plan](2026-11-09-replan-policy/requirements.md) | A failed worker triggers a replan within limits | ✅ Done ([#159](https://github.com/KsiProgramming/agentic-dev/pull/159)) |
-| 6.3 | Integration branch merging worker branches before the final PR | Parallel writers produce one PR | — |
+| 6.3 | Integration branch merging worker branches before the final PR: an orchestrator's completed task branches merged in plan order into `agent/<run>/<orchestrator>`, a conflict failing its task (and so replanned). [Plan](2026-11-09-integration-branch-merge/requirements.md) | Parallel writers produce one PR | — |
 | 6.4 | Monitor shows dynamic children live | Spawned workers appear with progress and cost | — |
 | 6.5 | `subflow` primitive | One workflow calls another by id + version | — |
 | 6.6 | `wrap` / `extract` operations; composite nodes (draft → published) | AC-3: composite saved in one workflow is reused in another, updated by version | — |

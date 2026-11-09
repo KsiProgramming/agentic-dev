@@ -4,7 +4,7 @@ New primitives are added as members of the `Node` union; existing specs keep val
 """
 
 import re
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
 
@@ -697,11 +697,12 @@ def duplicate_id_issues(root: Node) -> list[ValidationIssue]:
 
 def publish_gate_issues(root: Node) -> list[ValidationIssue]:
     """Why the publishing nodes under `root` are not safe to run, in run order (depth first);
-    empty if they are. Each must be a tool node whose `from_node` names an earlier writer, with a
-    gate between that writer and itself, so a human approves what is published."""
+    empty if they are. Each must be a tool node whose `from_node` names an earlier writer (an
+    orchestrator whose tasks write publishes its integration branch, 6.3), with a gate between
+    that writer and itself, so a human approves what is published."""
     issues: list[ValidationIssue] = []
     seen: list[tuple[str, Node]] = []
-    tasked = task_node_ids(root)
+    tasked = task_workers(root)
     for path, node in iter_nodes(root):
         if isinstance(node, OrchestratorNode):
             seen.append((path, node))
@@ -735,7 +736,7 @@ def publish_gate_errors(root: Node) -> list[str]:
 
 
 def _publish_issue(
-    node: "ToolNode", earlier: list[Node], tasked: Collection[str] = ()
+    node: "ToolNode", earlier: list[Node], tasked: Mapping[str, str] | None = None
 ) -> tuple[IssueCode, str] | None:
     source = node.args.get("from_node")
     if not isinstance(source, str):
@@ -743,11 +744,11 @@ def _publish_issue(
             "reference",
             f"node {node.id!r}: {node.tool} needs `from_node`, the writer to publish",
         )
-    if source in tasked:
+    if (orchestrator := (tasked or {}).get(source)) is not None:
         return (
             "reference",
-            f"node {node.id!r}: `from_node` {source!r} is an orchestrator or one of its workers, "
-            "whose task branches cannot be published yet",
+            f"node {node.id!r}: `from_node` {source!r} is a worker of {orchestrator!r}, which "
+            f"writes once per task; publish {orchestrator!r}, its integration branch, instead",
         )
     ids = [n.id for n in earlier]
     if source not in ids:
@@ -756,7 +757,7 @@ def _publish_issue(
             f"node {node.id!r}: `from_node` {source!r} is not a node that runs before it",
         )
     writer = earlier[ids.index(source)]
-    if not WRITE_TOOLS.intersection(node_tools(writer)):
+    if not _writes(writer):
         return "reference", f"node {node.id!r}: `from_node` {source!r} is not a writer"
     between = earlier[ids.index(source) + 1 :]
     if not any(isinstance(n, GateNode) for n in between):
@@ -1116,6 +1117,25 @@ def orchestrator_issues(root: Node) -> list[ValidationIssue]:
                     )
                 )
     return issues
+
+
+def task_workers(root: Node) -> dict[str, str]:
+    """The id of every node in the body of an orchestrator under `root`, to that orchestrator's
+    id: nodes that run once per planned task."""
+    return {
+        inner.id: node.id
+        for _, node in iter_nodes(root)
+        if isinstance(node, OrchestratorNode)
+        for _, inner in iter_nodes(node.body)
+    }
+
+
+def _writes(node: Node) -> bool:
+    """Whether `node` has a branch to publish: it may write itself, or it is an orchestrator
+    whose tasks may write (their integration branch, 6.3)."""
+    if isinstance(node, OrchestratorNode):
+        return any(WRITE_TOOLS.intersection(node_tools(n)) for _, n in iter_nodes(node.body))
+    return bool(WRITE_TOOLS.intersection(node_tools(node)))
 
 
 def task_node_ids(root: Node) -> set[str]:

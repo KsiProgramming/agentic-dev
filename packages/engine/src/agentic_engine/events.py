@@ -65,6 +65,12 @@ REPLAN_STARTED: Final = "replan_started"
 """A task of an orchestrator failed and its hub is asked to plan again (6.2), once every task of
 the round ended: `round` (the plan's to come), `failed` (`id` and `error` of each task that did not
 complete) and `dropped` (the ids of the tasks that never started)."""
+BRANCH_INTEGRATED: Final = "branch_integrated"
+"""An orchestrator whose body writes merged the branches of its completed tasks into its
+integration branch (6.3), once a round's tasks ended: `round`, `branch`
+(`agent/<run>/<orchestrator>`), `head` (its tip), `merged` and `empty` (task ids: merged by now,
+in plan order, and with nothing to merge) and `conflicts` (`id` and conflicting `paths` of each
+task that could not be merged; that task then counts as failed)."""
 TASK_STARTED: Final = "task_started"
 """An orchestrator starts its body for one planned task: `index` (from 0), `task_id`, `title`.
 The worker's events carry `item`, the task's index, as a map item's do."""
