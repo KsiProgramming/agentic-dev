@@ -36,6 +36,7 @@ function stepsById(steps: Step[]): Map<string, Step[]> {
       for (const branch of step.branches ?? []) visit(branch.steps);
       for (const iteration of step.iterations ?? []) visit(iteration.steps);
       if (step.router) visit(step.router.steps);
+      for (const task of step.orchestrator?.tasks ?? []) visit(task.steps);
     }
   };
   visit(steps);
@@ -100,11 +101,31 @@ function routerSummary(runs: Step[], node: RouterSpec): string | null {
   return runs.some((step) => step.status === "running") ? "Choosing a route" : null;
 }
 
+/** How far an orchestrator got, short enough for its card: "Planning", "2 of 4 tasks ·
+ * round 2", "3 of 6 tasks · 2 rounds". */
+function orchestratorSummary(runs: Step[]): string | null {
+  const info = runs.at(-1)?.orchestrator;
+  if (!info) return null;
+  const live = runs.at(-1)!.status === "running";
+  if (info.tasks.length === 0) {
+    if (live) return "Planning";
+    return info.rounds.length > 0 ? "Planned no task" : null;
+  }
+  const done = info.tasks.filter((t) => t.status === "completed").length;
+  const parts = [`${done} of ${plural(info.tasks.length, "task")}`];
+  if (info.rounds.length > 1) {
+    parts.push(live ? `round ${info.rounds.length}` : `${info.rounds.length} rounds`);
+  }
+  return parts.join(" · ");
+}
+
 /** Every node under `node`, itself included. */
 function* under(node: SpecNode): Generator<SpecNode> {
   yield node;
   if (node.type === "sequence") for (const step of node.steps) yield* under(step);
-  if (node.type === "loop" || node.type === "map") yield* under(node.body);
+  if (node.type === "loop" || node.type === "map" || node.type === "orchestrator") {
+    yield* under(node.body);
+  }
   if (node.type === "parallel") for (const branch of node.branches) yield* under(branch);
   if (node.type === "router") for (const [, route] of routesOf(node)) yield* under(route);
 }
@@ -151,7 +172,9 @@ export function nodeStatuses(spec: WorkflowSpec, steps: Step[]): Map<string, Nod
                 ? loopSummary(runs, node.max_iterations)
                 : node.type === "router"
                   ? routerSummary(runs, node)
-                  : null,
+                  : node.type === "orchestrator"
+                    ? orchestratorSummary(runs)
+                    : null,
     });
   }
   return states;
@@ -174,8 +197,8 @@ export function routeStates(spec: WorkflowSpec, steps: Step[]): Map<string, Node
 
 /**
  * What node `nodeId` did, to show it on its own. A node run once is its step. A node inside a
- * map, a parallel, a loop or a router is shown inside its outermost container, which keeps only the items,
- * branches and iterations that ran it, each holding only that node's run: one entry per item,
+ * map, a parallel, a loop, a router or an orchestrator is shown inside its outermost container,
+ * which keeps only the items, branches, iterations and tasks that ran it, each holding only that node's run: one entry per item,
  * branch or iteration.
  * `null` if the node has not run.
  *
@@ -197,7 +220,17 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
       return found ? [{ ...iteration, steps: [found] }] : [];
     });
     const routed = step.router ? focusStep(step.router.steps, nodeId) : null;
-    if (items.length > 0 || branches.length > 0 || iterations.length > 0 || routed) {
+    const tasks = (step.orchestrator?.tasks ?? []).flatMap((task) => {
+      const found = focusStep(task.steps, nodeId);
+      return found ? [{ ...task, steps: [found] }] : [];
+    });
+    if (
+      items.length > 0 ||
+      branches.length > 0 ||
+      iterations.length > 0 ||
+      routed ||
+      tasks.length > 0
+    ) {
       // The container's own turns, usage and outcome are not the node's.
       return {
         ...step,
@@ -211,6 +244,7 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
         branches: step.branches ? branches : null,
         iterations: step.iterations ? iterations : null,
         router: step.router ? { ...step.router, steps: routed ? [routed] : [] } : null,
+        orchestrator: step.orchestrator ? { ...step.orchestrator, tasks } : null,
       };
     }
   }
