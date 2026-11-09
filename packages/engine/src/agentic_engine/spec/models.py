@@ -395,9 +395,9 @@ MAX_TASK_TITLE = 80
 MAX_TASK_INSTRUCTIONS = 4000
 """The longest instructions a hub may give a task."""
 
-TASK_ID_PATTERN = r"^[a-z][a-z0-9_-]{0,39}$"
+TASK_ID_PATTERN = r"^(?!lock$)[a-z][a-z0-9_-]{0,39}$"
 """A task id a hub plans (6.1): a slug with no `.`, so `<orchestrator>.<task>` names one task's
-writer unambiguously (`task_writer_key`)."""
+writer unambiguously (`task_writer_key`); not `lock`, as git refuses a branch ending `.lock`."""
 
 
 class OrchestratorHub(_Base):

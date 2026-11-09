@@ -164,3 +164,61 @@ async def test_claude_commits_on_its_branch_through_the_tools(
     results = [e for e in events if isinstance(e, ToolResult)]
     assert [r.is_error for r in results] == [False, False]
     assert re.fullmatch(rf"[0-9a-f]+ on agent/{run_id}/writer: NOTES\.md", results[1].output)
+
+
+async def test_each_task_of_an_orchestrator_writes_on_its_own_branch(
+    sandbox: Sandbox, run_id: UUID
+) -> None:
+    """6.1: a writer working on task `t1` of orchestrator `fix` calls as `fix.t1`; its server is
+    opened on that first call, on the task's own worktree and branch."""
+    async with open_repo_tools(sandbox, run_id=run_id, task_writers={"fix"}) as tools:
+        names = sorted(d.name for d in tools.definitions())
+        for task in ("t1", "t2"):
+            await tools.call("repo.write_file", write(f"{task}.txt"), node_id=f"fix.{task}")
+        one = await tools.call("repo.commit", {"message": "t1"}, node_id="fix.t1")
+        two = await tools.call("repo.list_files", {}, node_id="fix.t2")
+        other = await tools.call("repo.write_file", write("x.txt"), node_id="other.t1")
+
+    assert names == sorted([*READS, *WRITE_TOOL_NAMES])
+    assert re.fullmatch(rf"[0-9a-f]+ on agent/{run_id}/fix\.t1: t1\.txt", one.text)
+    assert "t1.txt" not in two.text.splitlines()
+    assert "t2.txt" in two.text.splitlines()
+    assert (other.is_error, other.text) == (True, "unknown tool: repo.write_file")
+    code, branches = await sh(sandbox, "git -c safe.directory=* worktree list --porcelain")
+    assert code == 0
+    assert sorted(re.findall(r"branch refs/heads/(agent/\S+)", branches)) == [
+        f"agent/{run_id}/fix.t1",
+        f"agent/{run_id}/fix.t2",
+    ]
+
+
+async def test_task_writers_open_once_when_called_at_the_same_time(
+    sandbox: Sandbox, run_id: UUID
+) -> None:
+    async with open_repo_tools(sandbox, run_id=run_id, task_writers={"fix"}) as tools:
+        outputs = await asyncio.gather(
+            *(tools.call("repo.write_file", write(f"{i}.txt"), node_id="fix.t1") for i in range(3))
+        )
+        listed = await tools.call("repo.list_files", {}, node_id="fix.t1")
+
+    assert not any(o.is_error for o in outputs)
+    assert {"0.txt", "1.txt", "2.txt"} <= set(listed.text.splitlines())
+
+
+async def test_task_writer_clients_close_when_the_run_is_cancelled(
+    sandbox: Sandbox, run_id: UUID
+) -> None:
+    opened = asyncio.Event()
+
+    async def use() -> None:
+        async with open_repo_tools(sandbox, run_id=run_id, task_writers={"fix"}) as tools:
+            await tools.call("repo.write_file", write("x.txt"), node_id="fix.t1")
+            opened.set()
+            await asyncio.sleep(30)
+
+    task = asyncio.create_task(use())
+    await opened.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await sh(sandbox, "true"))[0] == 0

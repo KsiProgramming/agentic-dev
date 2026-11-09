@@ -13,6 +13,7 @@ from agentic_engine.gate import (
     GateReviewError,
     NotEditable,
 )
+from agentic_engine.spec import task_writer_orchestrator
 from agentic_sandbox import Sandbox, SandboxError, Worktree, branch_name
 from agentic_sandbox.review import (
     BranchNotFoundError,
@@ -27,12 +28,27 @@ EDITED_BY = "Edited-by: reviewer"
 
 
 class SandboxGateReview:
-    """Implements `GateReview` over `sandbox` for the writer nodes `writers` of run `run_id`."""
+    """Implements `GateReview` over `sandbox` for the writer nodes `writers` of run `run_id`, and
+    the tasks' writers (`<orchestrator>.<task>`, 6.1) of the orchestrators in `task_writers`."""
 
-    def __init__(self, sandbox: Sandbox, run_id: UUID, writers: Collection[str]) -> None:
+    def __init__(
+        self,
+        sandbox: Sandbox,
+        run_id: UUID,
+        writers: Collection[str],
+        task_writers: Collection[str] = (),
+    ) -> None:
         self._sandbox = sandbox
         self._run_id = run_id
         self._writers = writers
+        self._task_writers = frozenset(task_writers)
+
+    def _is_writer(self, node_id: str) -> bool:
+        """Whether `node_id` names a writer of the run: a writer node, or a task's writer."""
+        if node_id in self._writers:
+            return True
+        orchestrator = task_writer_orchestrator(node_id)
+        return orchestrator is not None and orchestrator in self._task_writers
 
     async def changes(self, ran: Sequence[str]) -> list[FileChange]:
         """The files changed on the branch of each writer among `ran`, in run order. The first
@@ -41,7 +57,7 @@ class SandboxGateReview:
         listed with the reason they are not."""
         shown: list[FileChange] = []
         files, total = 0, 0
-        for node_id in (n for n in ran if n in self._writers):
+        for node_id in (n for n in ran if self._is_writer(n)):
             try:
                 branch = await branch_changes(self._sandbox, branch_name(self._run_id, node_id))
             except BranchNotFoundError:
@@ -103,7 +119,7 @@ class SandboxGateReview:
         writer, or none for a writer whose files already hold them."""
         by_writer: dict[str, list[tuple[str, bytes]]] = {}
         for edit in edits:
-            if edit.node_id not in self._writers:
+            if not self._is_writer(edit.node_id):
                 raise GateReviewError(f"node {edit.node_id!r} is not a writer of this run")
             by_writer.setdefault(edit.node_id, []).append((edit.path, edit.content.encode()))
         message = f"Edit at gate {gate_id}\n\n{EDITED_BY}"

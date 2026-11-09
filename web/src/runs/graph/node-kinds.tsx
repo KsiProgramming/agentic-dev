@@ -3,6 +3,7 @@ import {
   BoxIcon,
   LayersIcon,
   MergeIcon,
+  NetworkIcon,
   RepeatIcon,
   ShieldCheckIcon,
   SignpostIcon,
@@ -24,6 +25,7 @@ const KIND: Record<NodeKind, { icon: LucideIcon; label: string }> = {
   map: { icon: LayersIcon, label: "map" },
   parallel: { icon: SplitIcon, label: "parallel" },
   router: { icon: SignpostIcon, label: "router" },
+  orchestrator: { icon: NetworkIcon, label: "orchestrator" },
   sequence: { icon: LayersIcon, label: "sequence" },
 };
 

@@ -58,7 +58,9 @@ class FileEdit(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    node_id: str = Field(max_length=64)
+    node_id: str = Field(
+        max_length=104, description="The writer: a node id, or a task's writer (`fix.t1`, 6.1)."
+    )
     path: str = Field(min_length=1, max_length=1024)
     content: str
 

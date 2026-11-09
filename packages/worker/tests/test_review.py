@@ -119,3 +119,21 @@ async def test_apply_refuses_a_node_that_is_not_a_writer(sandbox: Sandbox) -> No
 
     with pytest.raises(GateReviewError, match="not a writer"):
         await review.apply("approve", [FileEdit(node_id="other", path="a.md", content="x")])
+
+
+async def test_a_gate_shows_and_edits_each_task_of_an_orchestrator(sandbox: Sandbox) -> None:
+    """6.1: an orchestrator's task writers (`fix.t1`) are shown and edited on their branches;
+    a task of an orchestrator whose workers do not write is not."""
+    await write(sandbox, "fix.t1", "printf 'one\n' > one.md")
+    await write(sandbox, "fix.t2", "printf 'two\n' > two.md")
+    review = SandboxGateReview(sandbox, RUN_ID, set(), {"fix"})
+
+    changes = await review.changes(["fix", "fix.t1", "fix.t2", "other.t1"])
+    commits = await review.apply(
+        "approve", [FileEdit(node_id="fix.t2", path="two.md", content="2\n")]
+    )
+
+    assert [(c.node_id, c.path) for c in changes] == [("fix.t1", "one.md"), ("fix.t2", "two.md")]
+    assert list(commits) == ["fix.t2"]
+    with pytest.raises(GateReviewError, match="not a writer"):
+        await review.apply("approve", [FileEdit(node_id="other.t1", path="x.md", content="x")])

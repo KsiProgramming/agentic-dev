@@ -2472,6 +2472,9 @@
               },
               {
                 "$ref": "#/components/schemas/RouterNode"
+              },
+              {
+                "$ref": "#/components/schemas/OrchestratorNode"
               }
             ],
             "title": "Node",
@@ -2482,6 +2485,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "orchestrator": "#/components/schemas/OrchestratorNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
@@ -3487,8 +3491,9 @@
         "properties": {
           "node_id": {
             "type": "string",
-            "maxLength": 64,
-            "title": "Node Id"
+            "maxLength": 104,
+            "title": "Node Id",
+            "description": "The writer: a node id, or a task's writer (`fix.t1`, 6.1)."
           },
           "path": {
             "type": "string",
@@ -3722,7 +3727,7 @@
           "parent"
         ],
         "title": "Into",
-        "description": "Into a container: a sequence's step or a parallel's branch at `index`; a loop's or map's\nbody, which must be empty; a router route's `then`, or its `default`, which must be empty."
+        "description": "Into a container: a sequence's step or a parallel's branch at `index`; a loop's, map's or\norchestrator's body, which must be empty; a router route's `then`, or its `default`, which must\nbe empty."
       },
       "IssueCode": {
         "type": "string",
@@ -3748,7 +3753,8 @@
           "artifact_unknown",
           "artifact_conflict",
           "invalid_vote",
-          "invalid_router"
+          "invalid_router",
+          "not_allowed_in_orchestrator"
         ]
       },
       "JsonValue": {},
@@ -3810,6 +3816,9 @@
               },
               {
                 "$ref": "#/components/schemas/RouterNode"
+              },
+              {
+                "$ref": "#/components/schemas/OrchestratorNode"
               }
             ],
             "title": "Body",
@@ -3820,6 +3829,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "orchestrator": "#/components/schemas/OrchestratorNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
@@ -3905,6 +3915,9 @@
               },
               {
                 "$ref": "#/components/schemas/RouterNode"
+              },
+              {
+                "$ref": "#/components/schemas/OrchestratorNode"
               }
             ],
             "title": "Body",
@@ -3915,6 +3928,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "orchestrator": "#/components/schemas/OrchestratorNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
@@ -4308,6 +4322,163 @@
         "title": "OpErrorDetail",
         "description": "The `detail` of a batch of graph operations that cannot apply: the op at `op_index` (unset\nwhen it is the batch's result: a node left detached, an empty slot, a spec off the schema)\nand the node it is about. Nothing was stored."
       },
+      "OrchestratorHub": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Role"
+          },
+          "instructions": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Instructions"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "claude"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Unset means the workspace default."
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "instructions"
+        ],
+        "title": "OrchestratorHub",
+        "description": "The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the\ntasks through a typed output the engine makes (`orchestrator_plan_schema`)."
+      },
+      "OrchestratorNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "orchestrator",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "hub": {
+            "$ref": "#/components/schemas/OrchestratorHub"
+          },
+          "body": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgentNode"
+              },
+              {
+                "$ref": "#/components/schemas/ToolNode"
+              },
+              {
+                "$ref": "#/components/schemas/GateNode"
+              },
+              {
+                "$ref": "#/components/schemas/SequenceNode"
+              },
+              {
+                "$ref": "#/components/schemas/LoopNode"
+              },
+              {
+                "$ref": "#/components/schemas/MapNode"
+              },
+              {
+                "$ref": "#/components/schemas/ReduceNode"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelNode"
+              },
+              {
+                "$ref": "#/components/schemas/RouterNode"
+              },
+              {
+                "$ref": "#/components/schemas/OrchestratorNode"
+              }
+            ],
+            "title": "Body",
+            "description": "The worker: what runs once per task.",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "agent": "#/components/schemas/AgentNode",
+                "gate": "#/components/schemas/GateNode",
+                "loop": "#/components/schemas/LoopNode",
+                "map": "#/components/schemas/MapNode",
+                "orchestrator": "#/components/schemas/OrchestratorNode",
+                "parallel": "#/components/schemas/ParallelNode",
+                "reduce": "#/components/schemas/ReduceNode",
+                "router": "#/components/schemas/RouterNode",
+                "sequence": "#/components/schemas/SequenceNode",
+                "tool": "#/components/schemas/ToolNode"
+              }
+            }
+          },
+          "max_workers": {
+            "type": "integer",
+            "maximum": 40.0,
+            "minimum": 1.0,
+            "title": "Max Workers",
+            "description": "The most tasks the hub may plan."
+          },
+          "max_concurrency": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Max Concurrency"
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes",
+            "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "hub",
+          "body",
+          "max_workers",
+          "max_concurrency"
+        ],
+        "title": "OrchestratorNode",
+        "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": \u2026, \"input\": \u2026}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator."
+      },
       "ParallelNode": {
         "properties": {
           "type": {
@@ -4349,6 +4520,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/RouterNode"
+                },
+                {
+                  "$ref": "#/components/schemas/OrchestratorNode"
                 }
               ],
               "discriminator": {
@@ -4358,6 +4532,7 @@
                   "gate": "#/components/schemas/GateNode",
                   "loop": "#/components/schemas/LoopNode",
                   "map": "#/components/schemas/MapNode",
+                  "orchestrator": "#/components/schemas/OrchestratorNode",
                   "parallel": "#/components/schemas/ParallelNode",
                   "reduce": "#/components/schemas/ReduceNode",
                   "router": "#/components/schemas/RouterNode",
@@ -4913,6 +5088,9 @@
               },
               {
                 "$ref": "#/components/schemas/RouterNode"
+              },
+              {
+                "$ref": "#/components/schemas/OrchestratorNode"
               }
             ],
             "title": "Then",
@@ -4924,6 +5102,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "orchestrator": "#/components/schemas/OrchestratorNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
@@ -5034,6 +5213,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/RouterNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/OrchestratorNode"
                   }
                 ],
                 "discriminator": {
@@ -5043,6 +5225,7 @@
                     "gate": "#/components/schemas/GateNode",
                     "loop": "#/components/schemas/LoopNode",
                     "map": "#/components/schemas/MapNode",
+                    "orchestrator": "#/components/schemas/OrchestratorNode",
                     "parallel": "#/components/schemas/ParallelNode",
                     "reduce": "#/components/schemas/ReduceNode",
                     "router": "#/components/schemas/RouterNode",
@@ -6099,6 +6282,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/RouterNode"
+                },
+                {
+                  "$ref": "#/components/schemas/OrchestratorNode"
                 }
               ],
               "discriminator": {
@@ -6108,6 +6294,7 @@
                   "gate": "#/components/schemas/GateNode",
                   "loop": "#/components/schemas/LoopNode",
                   "map": "#/components/schemas/MapNode",
+                  "orchestrator": "#/components/schemas/OrchestratorNode",
                   "parallel": "#/components/schemas/ParallelNode",
                   "reduce": "#/components/schemas/ReduceNode",
                   "router": "#/components/schemas/RouterNode",
@@ -6844,6 +7031,9 @@
               },
               {
                 "$ref": "#/components/schemas/RouterNode"
+              },
+              {
+                "$ref": "#/components/schemas/OrchestratorNode"
               }
             ],
             "title": "Root",
@@ -6854,6 +7044,7 @@
                 "gate": "#/components/schemas/GateNode",
                 "loop": "#/components/schemas/LoopNode",
                 "map": "#/components/schemas/MapNode",
+                "orchestrator": "#/components/schemas/OrchestratorNode",
                 "parallel": "#/components/schemas/ParallelNode",
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
