@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 6.2 replan policy for the `orchestrator`:
+- Phase 6.2 replan policy for the `orchestrator` ([#159](https://github.com/KsiProgramming/agentic-dev/pull/159)):
   - **Replan on failure.** `replan: {on: "failure", max_rounds}` (1 to 3): once a task fails, no other task starts, the running ones finish and those not started are `dropped`; then the hub plans the remaining work from every task's status, output or error (as data), at most `max_workers` less the completed tasks, with new task ids. Completed work is kept; the orchestrator completes when the latest round does, and fails naming the task once no round is left. Unset, 6.1's behaviour is unchanged.
   - **Limits, resume and events.** Each replan's hub and tasks count on `agents_spawned`; rounds are checkpointed (`RunState.rounds`, tasks with their `round`), so a resumed run never asks the hub again for a round it has. New `replan_started` event; `plan_made` has `round`, `node_completed` has `rounds`, `task_completed` may be `dropped`; the orchestrator's `data` adds `plan` and `rounds`, and `tasks`/`outputs` list completed tasks only. The builder's side panel shows `replan` under Advanced.
   - Specs: tech-stack ("Orchestrator (API contract)", five decisions) and the 6.2 plan (`specs/2026-11-09-replan-policy/`).
