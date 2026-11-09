@@ -9,6 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Plan for phase 5.9, flow layout: the canvas and the run map drawn left to right (forks and joins, labelled routes, loop back edges), computed from the spec with no layout library; roadmap row and `specs/2026-11-09-flow-layout/`.
 - Phase 6.5 `subflow` primitive:
   - **Calls by id and version.** A new `subflow` node runs another stored workflow of the workspace, `{workflow: {id, version}, input?}`, inside the caller's run: same repo, sandbox, budget, limits, artifacts and event log. `input` is a CEL value that maps what the called workflow gets; its output is the call's.
   - **Resolved when the run is created.** `POST /runs` resolves every call (and the calls inside them), refuses one that is unknown, calls itself back (`subflow_unknown`, `subflow_cycle`) or cannot run where it is called (each issue on the subflow, naming the workflow and version), and keeps a copy of each version called (`runs.subflows`, Alembic `0026_run_subflows`), so a resumed run or a rerun runs the same versions. `POST /workflows/{id}/validate` and stored versions are checked the same way.
