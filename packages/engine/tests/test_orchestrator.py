@@ -207,7 +207,14 @@ async def run(
 
 def of(events: list[RunEvent], node_id: str = HUB) -> list[tuple[str, dict[str, JsonValue]]]:
     """The orchestrator's own events, its hub's agent events left out."""
-    own = ("node_", "plan_made", "task_", "policy_limit_exceeded", "artifact_written")
+    own = (
+        "node_",
+        "plan_made",
+        "replan_started",
+        "task_",
+        "policy_limit_exceeded",
+        "artifact_written",
+    )
     return [(e.type, e.payload) for e in events if e.node_id == node_id and e.type.startswith(own)]
 
 
@@ -229,8 +236,9 @@ async def test_a_hub_plans_three_tasks_and_three_workers_run() -> None:
     assert planned == {
         "tasks": [{"id": t, "title": f"Fix {t}"} for t in ("api", "engine", "web")],
         "reason": "One task per module.",
+        "round": 1,
     }
-    assert dict(of(sink.events))["node_completed"] == {"tasks": 3, "completed": 3}
+    assert dict(of(sink.events))["node_completed"] == {"tasks": 3, "completed": 3, "rounds": 1}
     # Each worker's events carry its task's index, as a map item's do.
     worker_items = {str(e.payload.get("item")) for e in sink.events if e.node_id == "worker"}
     assert worker_items == {"0", "1", "2"}
@@ -286,7 +294,7 @@ async def test_an_empty_plan_completes_with_no_worker() -> None:
     assert result.status == "completed"
     assert [r.node_id for r in team.workers] == ["after"]
     assert result.results[HUB].text == ""
-    assert dict(of(sink.events))["node_completed"] == {"tasks": 0, "completed": 0}
+    assert dict(of(sink.events))["node_completed"] == {"tasks": 0, "completed": 0, "rounds": 1}
 
 
 @pytest.mark.parametrize(

@@ -412,6 +412,22 @@ class OrchestratorHub(_Base):
     model: NonEmptyStr | None = None
 
 
+MAX_REPLAN_ROUNDS = 3
+"""The most times a hub may replan (6.2): each round is a hub turn and up to `max_workers` more
+workers, so the cap keeps an orchestrator's cost bounded."""
+
+
+class OrchestratorReplan(_Base):
+    """When an orchestrator's hub plans again (6.2). On `failure`: once a task fails, no other
+    task starts, those running finish, those not started are dropped, and the hub plans the
+    remaining work from every task's outcome, at most `max_rounds` times."""
+
+    on: Literal["failure"] = Field(description="What makes the hub plan again.")
+    max_rounds: int = Field(
+        default=1, ge=1, le=MAX_REPLAN_ROUNDS, description="The most times the hub replans."
+    )
+
+
 class OrchestratorNode(_Base):
     """A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per
     task, at most `max_concurrency` at a time (6.1).
@@ -423,7 +439,8 @@ class OrchestratorNode(_Base):
     `agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own
     branch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward
     the run's `agents_spawned` limit once the plan is made; one worker that does not complete
-    cancels the others and fails the orchestrator."""
+    cancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the
+    remaining work again."""
 
     type: Literal["orchestrator"]
     id: NodeId
@@ -433,6 +450,9 @@ class OrchestratorNode(_Base):
         ge=1, le=MAX_AGENTS_SPAWNED, description="The most tasks the hub may plan."
     )
     max_concurrency: int = Field(ge=1, le=MAX_AGENTS_ALIVE)
+    replan: OrchestratorReplan | None = Field(
+        default=None, description="Unset: a failed task fails the orchestrator."
+    )
     writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
 
 
@@ -451,16 +471,19 @@ Node = Annotated[
 ]
 
 
-def orchestrator_plan_schema(node: OrchestratorNode) -> dict[str, JsonValue]:
-    """The output schema of `node`'s hub: at most `max_workers` tasks, and why it split the work
-    so. Unique task ids are checked by the engine once the plan matches."""
+def orchestrator_plan_schema(
+    node: OrchestratorNode, max_tasks: int | None = None
+) -> dict[str, JsonValue]:
+    """The output schema of `node`'s hub: at most `max_tasks` tasks (`max_workers` unless a
+    replan says fewer), and why it split the work so. Unique task ids are checked by the engine
+    once the plan matches."""
     return {
         "type": "object",
         "required": ["tasks", "reason"],
         "properties": {
             "tasks": {
                 "type": "array",
-                "maxItems": node.max_workers,
+                "maxItems": node.max_workers if max_tasks is None else max_tasks,
                 "items": {
                     "type": "object",
                     "required": ["id", "title", "instructions"],

@@ -4448,6 +4448,17 @@
             "minimum": 1.0,
             "title": "Max Concurrency"
           },
+          "replan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrchestratorReplan"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unset: a failed task fails the orchestrator."
+          },
           "writes": {
             "anyOf": [
               {
@@ -4477,7 +4488,32 @@
           "max_concurrency"
         ],
         "title": "OrchestratorNode",
-        "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": \u2026, \"input\": \u2026}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator."
+        "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": \u2026, \"input\": \u2026}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again."
+      },
+      "OrchestratorReplan": {
+        "properties": {
+          "on": {
+            "type": "string",
+            "const": "failure",
+            "title": "On",
+            "description": "What makes the hub plan again."
+          },
+          "max_rounds": {
+            "type": "integer",
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Max Rounds",
+            "description": "The most times the hub replans.",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "on"
+        ],
+        "title": "OrchestratorReplan",
+        "description": "When an orchestrator's hub plans again (6.2). On `failure`: once a task fails, no other\ntask starts, those running finish, those not started are dropped, and the hub plans the\nremaining work from every task's outcome, at most `max_rounds` times."
       },
       "ParallelNode": {
         "properties": {

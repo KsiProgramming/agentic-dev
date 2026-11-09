@@ -26,8 +26,8 @@ Principles that drive it:
 - **Indices continue**: round 2's tasks get the next indices after round 1's, so `item` tags and `map_results` keys stay unique and resume works unchanged.
 - **Output**: only completed tasks, in plan order across rounds; `data` gains `rounds` (number of plans made) and lists every task with its `round` and status. `writers` lists completed writer tasks only, so a gate after shows only those.
 - **End**: the orchestrator completes when the last round's tasks all complete. It fails when a task fails and no rounds are left (``task 'b' failed after 2 replans: …``), or a replan turn fails or is off-schema.
-- **Limits**: each replan turn counts as one agent spawned when it starts; a round's tasks count on `agents_spawned` when it is planned (over it: `policy_limit_exceeded`, a clean stop). Validation's worst case for `agents_spawned` becomes `(1 + max_rounds) × (1 + max_workers × body)`. Wall time and budget stop a run mid-replan as anywhere else.
-- **Resume**: rounds are checkpointed in `RunState.plans` (each task carries its `round`), so a resumed run never asks the hub again for a round it has and runs only tasks that had not ended.
+- **Limits**: each replan turn counts as one agent spawned when it starts; a round's tasks count on `agents_spawned` when it is planned (over it: `policy_limit_exceeded`, a clean stop). As in 6.1, validation counts only the hub (workers are counted at run time). In the last round a failure cancels the others, as in 6.1: waiting for them would only add cost. Wall time and budget stop a run mid-replan as anywhere else.
+- **Resume**: rounds are checkpointed in `RunState.plans` (each task carries its `round`) and counted in a new `RunState.rounds` (an empty replan still counts), so a resumed run never asks the hub again for a round it has and runs only tasks that had not ended.
 - **Events**: `plan_made` gains `round` (1 for the first); a new `replan_started` (`round`, `failed: [{id, error}]`, `dropped: [ids]`) before the replan turn; `task_completed` may carry `status: "dropped"`; `node_completed` gains `rounds`.
 - **Contract** in tech-stack ("Orchestrator (API contract)", updated) and decisions-log rows; `schemas/` export; the manifest's `parameters` gain `replan` (the side panel shows it with no web change); regenerated fixtures and API types.
 
@@ -47,7 +47,7 @@ Principles that drive it:
 | What the hub sees | The original input plus every task's id, title, status, output or error, as JSON input; instructions unchanged plus a fixed replan paragraph | Mission 5: a worker's error text can come from repo content, so it is data. |
 | Task ids across rounds | Unique across all rounds | A writer's key and branch are the task id; reuse would put a new attempt on a failed attempt's branch. |
 | Plan size on replan | At most `max_workers` minus completed tasks | `max_workers` stays the most work an orchestrator does; replans cannot grow it. |
-| State | Rounds appended to the same `plans` list and `map_results` indices | Resume, `item` tags and reduce sources work as in 6.1 with no new state key. |
+| State | Rounds appended to the same `plans` list and `map_results` indices, plus `RunState.rounds` | Resume, `item` tags and reduce sources work as in 6.1; the count is needed because a replan may plan no task. |
 
 ## Open questions
 - None. (The roadmap's "Next up" line still names Milestone 4 at 4.8, done in #156; it should name Milestone 6, in its own PR with a changelog entry.)

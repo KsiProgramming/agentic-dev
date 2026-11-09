@@ -42,7 +42,10 @@ decided, the branches still running end `node_cancelled`. A router writes `node_
 if no route could be chosen. An orchestrator writes `node_started` (payload `max_workers`), its
 hub's agent events, `plan_made` (`tasks`, `reason`), `task_started` and `task_completed` around
 each task's body, whose events carry `item` (the task's index), then its end (`node_completed`
-with `tasks` and `completed`). One task that does not complete cancels the others.
+with `tasks`, `completed` and `rounds`). One task that does not complete cancels the others,
+unless its `replan` (6.2) lets the hub plan again: then the round settles (running tasks finish,
+those not started end `dropped`), `<id>.join` goes to `<id>.replan`, which writes
+`replan_started` and the hub's new `plan_made` (with `round`), and the new tasks run.
 
 An agent or tool node with typed ports (4.2) has its input checked before it starts and its
 output once it completes: a value that does not match fails the node, whose `node_failed` carries
@@ -106,6 +109,7 @@ from agentic_engine.events import (
     PLAN_MADE,
     POLICY_LIMIT_EXCEEDED,
     PR_OPENED,
+    REPLAN_STARTED,
     REPO_CREATED,
     ROUTE_CHOSEN,
     TASK_COMPLETED,
@@ -259,6 +263,11 @@ def tasks_join_node_id(orchestrator: OrchestratorNode) -> str:
     return f"{orchestrator.id}.join"
 
 
+def replan_node_id(orchestrator: OrchestratorNode) -> str:
+    """The LangGraph node where `orchestrator`'s hub plans again once a task failed (6.2)."""
+    return f"{orchestrator.id}.replan"
+
+
 def repo_ready_node_id(node: ToolNode) -> str:
     """The LangGraph node after `node`, which creates the run's repo, where the run stops for a
     new attempt to clone the repo."""
@@ -294,6 +303,8 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return sum(steps(s) for s in node.steps)
             case LoopNode():
                 return node.max_iterations * (steps(node.body) + 2)
+            case OrchestratorNode() if node.replan is not None:
+                return 3 + 3 * node.replan.max_rounds
             case MapNode() | ParallelNode() | OrchestratorNode():
                 return 3
             case RouterNode():
@@ -400,7 +411,15 @@ def compile_workflow(
                 )
                 builder.add_edge(worker, join)
                 builder.add_node(join, _orchestrator_join(node, log, limits))
-                go_on(join, node.id, then)
+                if node.replan is None:
+                    go_on(join, node.id, then)
+                    return node.id
+                again = replan_node_id(node)
+                builder.add_node(again, _orchestrator_replan(node, runtime, log, limits))
+                builder.add_conditional_edges(again, _fan_out_tasks(node), [worker, join, END])
+                builder.add_conditional_edges(
+                    join, _after_tasks(node, then), list(dict.fromkeys([again, then, END]))
+                )
                 return node.id
             case RouterNode():
                 done = router_done_node_id(node)
@@ -1621,22 +1640,42 @@ def hub_instructions(orchestrator: OrchestratorNode) -> str:
     )
 
 
+def hub_replan_instructions(orchestrator: OrchestratorNode, max_tasks: int) -> str:
+    """What `orchestrator`'s hub is asked when a task failed (6.2): its own instructions, then
+    how to replan. The tasks' outcomes are in its input, as data, never here."""
+    return (
+        f"{orchestrator.hub.instructions}\n\nA task of your plan did not complete. Your input is "
+        "the work (`input`) and every task planned so far (`tasks`) with its `status` "
+        "(`completed`, `failed` or `dropped`, never started) and its `output` or `error`. Plan "
+        f"only the work still to do, at most {max_tasks} tasks: never repeat a completed task. "
+        "Give each task a new `id` (a short slug: lower case letters, digits, `_` and `-`, used "
+        "by no earlier task), a `title` (one line) and `instructions` (what its worker must do, "
+        "on its own: a worker sees only its task and the work). Say what you changed and why, in "
+        "one sentence, as `reason`. Plan no task if the work cannot or need not go on."
+    )
+
+
 async def _plan(
-    orchestrator: OrchestratorNode, input: str, scope: _Scope
+    orchestrator: OrchestratorNode,
+    input: str,
+    scope: _Scope,
+    instructions: str | None = None,
+    max_tasks: int | None = None,
 ) -> tuple[AgentNodeResult, PortFailure | None]:
     """Ask `orchestrator`'s hub for its plan, as one agent turn whose events are the
     orchestrator's: its answer checked against `orchestrator_plan_schema`, so it cannot plan more
-    than `max_workers` tasks or an off-shape one. It waits for an `agents_alive` slot, and its
-    usage counts on the run's budget."""
+    than `max_tasks` (`max_workers`) tasks or an off-shape one. `instructions` replace the first
+    plan's (a replan's). It waits for an `agents_alive` slot, and its usage counts on the run's
+    budget."""
     hub = orchestrator.hub
     agent = AgentNode(
         type="agent",
         id=orchestrator.id,
         role=hub.role,
-        instructions=hub_instructions(orchestrator),
+        instructions=instructions or hub_instructions(orchestrator),
         provider=hub.provider,
         model=hub.model,
-        output_schema=orchestrator_plan_schema(orchestrator),
+        output_schema=orchestrator_plan_schema(orchestrator, max_tasks),
     )
     log, limits = scope.log, scope.limits
 
@@ -1658,84 +1697,250 @@ async def _plan(
     return _check_output(agent, result)
 
 
+def task_round(task: JsonValue) -> int:
+    """The plan a task is from: 1 for the first, one more per replan (6.2). Tasks checkpointed
+    before 6.2 have no `round`: they are from the first plan."""
+    found = cast(dict[str, JsonValue], task).get("round", 1)
+    return found if isinstance(found, int) else 1
+
+
+def _plain_task(task: JsonValue) -> dict[str, JsonValue]:
+    """A planned task as its worker and a reduce see it: `id`, `title` and `instructions`."""
+    fields = cast(dict[str, JsonValue], task)
+    return {k: fields[k] for k in ("id", "title", "instructions")}
+
+
+def _task_id(task: JsonValue) -> str:
+    return str(cast(dict[str, JsonValue], task)["id"])
+
+
+def _dropped(result: AgentNodeResult) -> bool:
+    """Whether a task never started because another failed and the hub will replan (6.2)."""
+    return bool((result.data or {}).get("dropped"))
+
+
+def _task_status(result: AgentNodeResult | None) -> str:
+    if result is None:
+        return "pending"
+    return "dropped" if _dropped(result) else result.status
+
+
+@dataclass
+class _Round:
+    """An orchestrator's tasks as they stand: every task planned (each with its `round`), the
+    results of those that ended (by index), and the latest round (`number`, from `rounds`: a
+    replan may plan no task)."""
+
+    tasks: list[JsonValue]
+    results: dict[int, AgentNodeResult]
+    number: int
+
+    @classmethod
+    def of(cls, orchestrator: OrchestratorNode, state: RunState) -> "_Round":
+        tasks = state.get("plans", {}).get(orchestrator.id) or []
+        ended = state["map_results"].get(orchestrator.id, {})
+        made = state.get("rounds", {}).get(orchestrator.id, 1)
+        number = max([made, *(task_round(t) for t in tasks)])
+        return cls(list(tasks), {int(k): v for k, v in ended.items()}, number)
+
+    def indices(self, round: int) -> list[int]:
+        return [i for i, t in enumerate(self.tasks) if task_round(t) == round]
+
+    def failed(self, round: int) -> list[int]:
+        """The tasks of `round` that ended without completing and were not dropped."""
+        ended = [(i, self.results[i]) for i in self.indices(round) if i in self.results]
+        return [i for i, r in ended if r.status != "completed" and not _dropped(r)]
+
+    def completed(self) -> list[int]:
+        return [i for i, r in sorted(self.results.items()) if r.status == "completed"]
+
+
+def _replan_due(orchestrator: OrchestratorNode, state: RunState) -> bool:
+    """Whether `orchestrator`'s hub should plan again (6.2): it replans on failure, has rounds
+    left, has not ended, and a task of its latest round failed."""
+    if orchestrator.replan is None or orchestrator.id in state["results"]:
+        return False
+    tasks = _Round.of(orchestrator, state)
+    return tasks.number - 1 < orchestrator.replan.max_rounds and bool(tasks.failed(tasks.number))
+
+
 def _orchestrator_entry(
     orchestrator: OrchestratorNode, runtime: AgentRuntime, log: RunEventLog, limits: _Limits
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
-    """Starts `orchestrator`: asks its hub for a plan and records it in the state (`plans`), so a
-    resumed run runs the same tasks; `_fan_out_tasks` then sends them. The hub counts as one agent
-    spawned, and once the plan is made every task's agents count too, all at once (the tasks run
-    in one LangGraph step, so they cannot count themselves): over `agents_spawned`, the
-    orchestrator fails without running a task. A plan that does not match its schema, or names a
-    task twice, fails it."""
-    per_task = agents_spawned(orchestrator.body)
+    """Starts `orchestrator`: asks its hub for a plan and records it in the state (`plans`, each
+    task with `round` 1), so a resumed run runs the same tasks; `_fan_out_tasks` then sends them.
+    The hub counts as one agent spawned, and once the plan is made every task's agents count too,
+    all at once (the tasks run in one LangGraph step, so they cannot count themselves): over
+    `agents_spawned`, the orchestrator fails without running a task. A plan that does not match
+    its schema, or names a task twice, fails it."""
     started: dict[str, JsonValue] = {"max_workers": orchestrator.max_workers}
     scope = _Scope(runtime, None, log, limits)
     node_id = orchestrator.id
 
-    def stop(result: AgentNodeResult, spawned: int, usage: list[Usage]) -> RunUpdate:
-        return {
-            "results": {node_id: result},
-            "order": [node_id],
-            "spawned": spawned,
-            "usage": usage,
-        }
-
     async def enter(state: RunState) -> RunUpdate:
         if refused := await _refuse_spawn(node_id, state, 1, limits, log, started):
-            return stop(refused, 0, [])
+            return _stopped(node_id, refused, 0, [])
         await log.emit(NODE_STARTED, node_id=node_id, payload=started)
-        input = state["last_text"]
-        answer, port = await _plan(orchestrator, input, scope)
-        usage = [answer.usage] if answer.usage else []
-        error = answer.error
-        tasks: list[JsonValue] = []
-        if answer.status == "completed":
-            tasks = cast(list[JsonValue], (answer.data or {}).get("tasks", []))
-            ids = [cast(dict[str, JsonValue], t)["id"] for t in tasks]
-            if twice := next((i for i in ids if ids.count(i) > 1), None):
-                error = f"the hub of {node_id!r} planned task {twice!r} twice"
-        if answer.status != "completed" or error is not None:
-            status: AgentNodeStatus = "failed" if answer.status == "completed" else answer.status
-            why = error or "the hub did not plan"
-            end: dict[str, JsonValue] = {"error": why}
-            if port is not None:
-                end["port"] = port.payload()
-            await log.emit(NODE_END[status], node_id=node_id, payload=end)
-            failed = AgentNodeResult(status=status, text=input, usage=None, error=why)
-            return stop(failed, 1, usage)
-        observed = state.get("spawned", 0) + 1 + per_task * len(tasks)
-        if observed > limits.policy.agents_spawned:
-            over = PolicyLimitExceeded(
-                "agents_spawned", limits.policy.agents_spawned, observed, node_id
-            )
-            await log.emit(POLICY_LIMIT_EXCEEDED, node_id=node_id, payload=over.payload())
-            await log.emit(NODE_FAILED, node_id=node_id, payload={"error": over.reason})
-            failed = AgentNodeResult(status="failed", text=input, usage=None, error=over.reason)
-            return stop(failed, 1, usage)
-        planned: list[JsonValue] = [
-            {"id": t["id"], "title": t["title"]} for t in cast(list[dict[str, JsonValue]], tasks)
-        ]
-        reason = (answer.data or {}).get("reason", "")
-        await log.emit(PLAN_MADE, node_id=node_id, payload={"tasks": planned, "reason": reason})
-        return {
-            "spawned": 1 + per_task * len(tasks),
-            "usage": usage,
-            "plans": {node_id: tasks},
-        }
+        return await _make_plan(orchestrator, state, scope, round=1)
 
     return enter
 
 
+def _stopped(node_id: str, result: AgentNodeResult, spawned: int, usage: list[Usage]) -> RunUpdate:
+    """The update of an orchestrator that ended while (re)planning."""
+    return {"results": {node_id: result}, "order": [node_id], "spawned": spawned, "usage": usage}
+
+
+async def _over_spawned(
+    node_id: str, observed: int, text: str, scope: _Scope
+) -> AgentNodeResult | None:
+    """If `observed` agents spawned takes the run past its `agents_spawned` limit, log the limit
+    and `node_id`'s failure, and return its failed result; else `None`. The node has started."""
+    limit = scope.limits.policy.agents_spawned
+    if observed <= limit:
+        return None
+    over = PolicyLimitExceeded("agents_spawned", limit, observed, node_id)
+    await scope.log.emit(POLICY_LIMIT_EXCEEDED, node_id=node_id, payload=over.payload())
+    await scope.log.emit(NODE_FAILED, node_id=node_id, payload={"error": over.reason})
+    return AgentNodeResult(status="failed", text=text, usage=None, error=over.reason)
+
+
+async def _make_plan(
+    orchestrator: OrchestratorNode,
+    state: RunState,
+    scope: _Scope,
+    round: int,
+    input: str | None = None,
+    earlier: Sequence[JsonValue] = (),
+) -> RunUpdate:
+    """One hub turn and its plan: round 1 on the orchestrator's input, a replan (6.2) on
+    `input` (the tasks' outcomes) with no more tasks than `max_workers` less those completed,
+    none reusing the id of a task in `earlier`. The plan, appended to `earlier` with its `round`,
+    goes in the state; a plan off its schema, naming a task twice or more agents than
+    `agents_spawned` allows ends the orchestrator. The hub's agent already counts on
+    `agents_spawned` (its caller checked it)."""
+    node_id, log = orchestrator.id, scope.log
+    per_task = agents_spawned(orchestrator.body)
+    text = state["last_text"]
+    if round == 1:
+        answer, port = await _plan(orchestrator, text, scope)
+    else:
+        done = len(_Round.of(orchestrator, state).completed())
+        cap = orchestrator.max_workers - done
+        answer, port = await _plan(
+            orchestrator,
+            input or text,
+            scope,
+            instructions=hub_replan_instructions(orchestrator, cap),
+            max_tasks=cap,
+        )
+    usage = [answer.usage] if answer.usage else []
+    error = answer.error
+    tasks: list[JsonValue] = []
+    if answer.status == "completed":
+        tasks = cast(list[JsonValue], (answer.data or {}).get("tasks", []))
+        ids = [_task_id(t) for t in tasks]
+        used = {_task_id(t) for t in earlier}
+        if twice := next((i for i in ids if ids.count(i) > 1), None):
+            error = f"the hub of {node_id!r} planned task {twice!r} twice"
+        elif again := next((i for i in ids if i in used), None):
+            error = f"the hub of {node_id!r} planned task {again!r} again"
+    if answer.status != "completed" or error is not None:
+        status: AgentNodeStatus = "failed" if answer.status == "completed" else answer.status
+        why = error or "the hub did not plan"
+        end: dict[str, JsonValue] = {"error": why}
+        if port is not None:
+            end["port"] = port.payload()
+        await log.emit(NODE_END[status], node_id=node_id, payload=end)
+        failed = AgentNodeResult(status=status, text=text, usage=None, error=why)
+        return _stopped(node_id, failed, 1, usage)
+    observed = state.get("spawned", 0) + 1 + per_task * len(tasks)
+    if refused := await _over_spawned(node_id, observed, text, scope):
+        return _stopped(node_id, refused, 1, usage)
+    planned: list[JsonValue] = [
+        {"id": t["id"], "title": t["title"]} for t in cast(list[dict[str, JsonValue]], tasks)
+    ]
+    reason = (answer.data or {}).get("reason", "")
+    await log.emit(
+        PLAN_MADE, node_id=node_id, payload={"tasks": planned, "reason": reason, "round": round}
+    )
+    numbered: list[JsonValue] = [{**_plain_task(t), "round": round} for t in tasks]
+    return {
+        "spawned": 1 + per_task * len(tasks),
+        "usage": usage,
+        "plans": {node_id: [*earlier, *numbered]},
+        "rounds": {node_id: round},
+    }
+
+
+def _orchestrator_replan(
+    orchestrator: OrchestratorNode, runtime: AgentRuntime, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Asks `orchestrator`'s hub to plan again once a round settled with a failed task (6.2):
+    `replan_started`, then one hub turn on `{input, round, tasks}` as JSON, every task so far
+    with its round, status and output or error (data: an error may quote the repo). The new
+    round's tasks are appended to the plan; `_fan_out_tasks` sends them. The hub counts as one
+    more agent spawned."""
+    scope = _Scope(runtime, None, log, limits)
+    node_id = orchestrator.id
+
+    async def replan(state: RunState) -> RunUpdate:
+        tasks = _Round.of(orchestrator, state)
+        round = tasks.number + 1
+        failed: list[JsonValue] = []
+        dropped: list[JsonValue] = []
+        outcomes: list[JsonValue] = []
+        for i, task in enumerate(tasks.tasks):
+            result = tasks.results.get(i)
+            status = _task_status(result)
+            outcome: dict[str, JsonValue] = {
+                **_plain_task(task),
+                "round": task_round(task),
+                "status": status,
+            }
+            if result is not None and status == "completed":
+                outcome["output"] = result.text
+            elif result is not None and status != "dropped":
+                outcome["error"] = result.error or result.status
+            outcomes.append(outcome)
+            if task_round(task) == tasks.number and status == "dropped":
+                dropped.append(_task_id(task))
+        for i in tasks.failed(tasks.number):
+            result = tasks.results[i]
+            failed.append({"id": _task_id(tasks.tasks[i]), "error": result.error or result.status})
+        await log.emit(
+            REPLAN_STARTED,
+            node_id=node_id,
+            payload={"round": round, "failed": failed, "dropped": dropped},
+        )
+        text = state["last_text"]
+        if refused := await _over_spawned(node_id, state.get("spawned", 0) + 1, text, scope):
+            return _stopped(node_id, refused, 0, [])
+        input = json.dumps(
+            {"input": state["last_text"], "round": round, "tasks": outcomes},
+            ensure_ascii=False,
+            indent=2,
+        )
+        return await _make_plan(
+            orchestrator, state, scope, round=round, input=input, earlier=tasks.tasks
+        )
+
+    return replan
+
+
 def _fan_out_tasks(orchestrator: OrchestratorNode) -> Callable[[RunState], Sequence[Send] | str]:
-    """One `Send` to the worker per planned task, with the run's artifacts; to the join if the
-    plan has none; to `END` if the orchestrator failed. Each worker's input is `{"task", "input"}`
-    as JSON: the task is data, and its worker's instructions stay the spec's."""
+    """One `Send` to the worker per planned task that has not run (the latest round's), with the
+    run's artifacts; to the join if there is none; to `END` if the orchestrator failed. Each
+    worker's input is `{"task", "input"}` as JSON: the task is data, and its worker's
+    instructions stay the spec's. A task's index is its place in the whole plan, every round's
+    tasks after the last round's, so `item` tags and results never collide."""
 
     def route(state: RunState) -> Sequence[Send] | str:
         if orchestrator.id in state["results"]:
             return END
-        tasks = state.get("plans", {}).get(orchestrator.id) or []
-        if not tasks:
+        tasks = _Round.of(orchestrator, state)
+        todo = [i for i in range(len(tasks.tasks)) if i not in tasks.results]
+        if not todo:
             return tasks_join_node_id(orchestrator)
         refs = state.get("artifacts", {})
         return [
@@ -1743,14 +1948,16 @@ def _fan_out_tasks(orchestrator: OrchestratorNode) -> Callable[[RunState], Seque
                 task_node_id(orchestrator),
                 OrchestratorTask(
                     index=i,
-                    task=task,
+                    task=tasks.tasks[i],
                     task_input=json.dumps(
-                        {"task": task, "input": state["last_text"]}, ensure_ascii=False, indent=2
+                        {"task": _plain_task(tasks.tasks[i]), "input": state["last_text"]},
+                        ensure_ascii=False,
+                        indent=2,
                     ),
                     task_artifacts=dict(refs),
                 ),
             )
-            for i, task in enumerate(tasks)
+            for i in todo
         ]
 
     return route
@@ -1758,21 +1965,26 @@ def _fan_out_tasks(orchestrator: OrchestratorNode) -> Callable[[RunState], Seque
 
 @dataclass
 class _Workers:
-    """One attempt's view of an orchestrator's tasks: those running, and whether one has not
-    completed, which cancels the others; tasks that have not started then end `cancelled` without
-    running. The join decides from the checkpointed outcomes, so a resumed run joins correctly."""
+    """One round's view of an orchestrator's tasks: those running, and whether one has not
+    completed. Then tasks that have not started never run: they end `cancelled`, or `dropped`
+    when the hub will replan (`settle`, 6.2). Without `settle` the running ones are cancelled;
+    with it they finish, so no work is thrown away. The join decides from the checkpointed
+    outcomes, so a resumed run joins correctly."""
 
+    settle: bool = False
     running: dict[int, "asyncio.Task[tuple[str, AgentNodeResult]]"] = field(
         default_factory=dict[int, "asyncio.Task[tuple[str, AgentNodeResult]]"]
     )
     stopped: bool = False
 
     def end(self, index: int, status: AgentNodeStatus) -> None:
-        """Record how task `index` ended; cancel the others if it did not complete."""
+        """Record how task `index` ended; stop the round if it did not complete."""
         self.running.pop(index, None)
         if status == "completed" or self.stopped:
             return
         self.stopped = True
+        if self.settle:
+            return
         for task in self.running.values():
             task.cancel()
 
@@ -1789,12 +2001,21 @@ def _orchestrator_task(
 ) -> Callable[[OrchestratorTask], Awaitable[RunUpdate]]:
     """Runs `orchestrator`'s body for one task (`_run_inline`), at most `max_concurrency` at once;
     its writers work on the task's own branch (`task_writer_key`). Once a task does not complete,
-    the others are cancelled."""
+    no other task of its round starts and the running ones are cancelled, or, while the hub may
+    still replan (6.2), finish."""
     slots = asyncio.Semaphore(orchestrator.max_concurrency)
-    workers = _Workers()
+    rounds: dict[int, _Workers] = {}
+    replan = orchestrator.replan
+
+    def workers_of(round: int) -> _Workers:
+        if round not in rounds:
+            settle = replan is not None and round - 1 < replan.max_rounds
+            rounds[round] = _Workers(settle=settle)
+        return rounds[round]
 
     async def work(sent: OrchestratorTask) -> RunUpdate:
-        index, task = sent["index"], cast(dict[str, JsonValue], sent["task"])
+        index, task = sent["index"], _plain_task(sent["task"])
+        workers = workers_of(task_round(sent["task"]))
         task_id = str(task["id"])
         marker: dict[str, JsonValue] = {"index": index, "task_id": task_id, "title": task["title"]}
         refs = dict(sent.get("task_artifacts", {}))
@@ -1802,9 +2023,11 @@ def _orchestrator_task(
             runtime, tools, log, limits, item=index, refs=refs, task=(orchestrator.id, task_id)
         )
         cancelled = AgentNodeResult(status="cancelled", text=sent["task_input"], usage=None)
+        dropped = False
         async with slots:
             if workers.stopped:
                 result, error = cancelled, _CANCELLED_BY_ANOTHER
+                dropped = workers.settle
             else:
                 await log.emit(TASK_STARTED, node_id=orchestrator.id, payload=marker)
                 runner = asyncio.create_task(
@@ -1820,17 +2043,20 @@ def _orchestrator_task(
                         raise  # the run itself is being stopped
                     result, error = cancelled, _CANCELLED_BY_ANOTHER
                 workers.end(index, result.status)
-        end: dict[str, JsonValue] = {**marker, "status": result.status}
-        if error:
+        end: dict[str, JsonValue] = {**marker, "status": "dropped" if dropped else result.status}
+        if error and not dropped:
             end["error"] = error
         await log.emit(TASK_COMPLETED, node_id=orchestrator.id, payload=end)
         usage = scope.usage()
+        data: dict[str, JsonValue] = {"task": task}
+        if dropped:
+            data["dropped"] = True
         outcome = AgentNodeResult(
             status=result.status,
             text=result.text,
             usage=sum_usage(usage),
-            error=error,
-            data={"task": task},
+            error=None if dropped else error,
+            data=data,
         )
         return {"map_results": {orchestrator.id: {str(index): outcome}}, "usage": usage}
 
@@ -1840,30 +2066,56 @@ def _orchestrator_task(
 def _orchestrator_join(
     orchestrator: OrchestratorNode, log: RunEventLog, limits: _Limits
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
-    """Ends `orchestrator`. Its output is its tasks' outputs in plan order (`data`: `tasks`, the
-    plan; `outputs`; `writers`, the writer keys of the tasks that completed, when its body writes,
-    for a gate after it to show). It ends like the first task that failed (else the first that
-    did not complete), naming the task. With `writes`, the output is stored as that artifact."""
+    """Ends `orchestrator` once a round's tasks ended, unless its hub replans (6.2: then it
+    changes nothing and `<id>.replan` runs next). Its output is its completed tasks' outputs in
+    plan order (`data`: `tasks`, those tasks; `outputs`; `writers`, their writer keys when its
+    body writes, for a gate after it to show; `plan`, every task planned with its `round` and
+    `status`; `rounds`). It completes when every task of its latest round completed (a replan
+    that plans nothing completes it if a task completed before), else it ends like the first
+    task of that round that failed (else the first that did not complete), naming the task. With
+    `writes`, the output is stored as that artifact."""
     writes = any(WRITE_TOOLS.intersection(node_tools(n)) for _, n in iter_nodes(orchestrator.body))
 
     async def join(state: RunState) -> RunUpdate:
-        tasks = state.get("plans", {}).get(orchestrator.id) or []
-        items = ordered_items(state, orchestrator.id)
-        outputs: list[JsonValue] = [r.text for r in items]
-        ids = [str(cast(dict[str, JsonValue], t)["id"]) for t in tasks]
-        done = [i for i, r in zip(ids, items, strict=True) if r.status == "completed"]
+        if _replan_due(orchestrator, state):
+            return {}
+        tasks = _Round.of(orchestrator, state)
+        rounds = tasks.number
+        done = tasks.completed()
+        done_tasks: list[JsonValue] = [_plain_task(tasks.tasks[i]) for i in done]
+        outputs: list[JsonValue] = [tasks.results[i].text for i in done]
         writers: list[JsonValue] = (
-            [task_writer_key(orchestrator.id, i) for i in done] if writes else []
+            [task_writer_key(orchestrator.id, _task_id(tasks.tasks[i])) for i in done]
+            if writes
+            else []
         )
-        data: dict[str, JsonValue] = {"tasks": tasks, "outputs": outputs, "writers": writers}
-        text = "\n\n".join(r.text for r in items)
-        bad = next(((i, r) for i, r in zip(ids, items, strict=True) if r.status == "failed"), None)
-        bad = bad or next(
-            ((i, r) for i, r in zip(ids, items, strict=True) if r.status != "completed"), None
-        )
+        plan: list[JsonValue] = [
+            {
+                **_plain_task(t),
+                "round": task_round(t),
+                "status": _task_status(tasks.results.get(i)),
+            }
+            for i, t in enumerate(tasks.tasks)
+        ]
+        data: dict[str, JsonValue] = {
+            "tasks": done_tasks,
+            "outputs": outputs,
+            "writers": writers,
+            "plan": plan,
+            "rounds": rounds,
+        }
+        text = "\n\n".join(str(o) for o in outputs)
+        latest = tasks.indices(rounds)
+        if not latest and rounds > 1 and not done:
+            latest = tasks.indices(rounds - 1)  # a replan that planned nothing, nothing done
+        ended = [(i, tasks.results[i]) for i in latest if i in tasks.results]
+        bad = next(((i, r) for i, r in ended if r.status == "failed"), None)
+        bad = bad or next(((i, r) for i, r in ended if r.status != "completed"), None)
         if bad is not None:
-            task_id, stopped = bad
-            error = f"task {task_id!r} {stopped.error}"
+            index, stopped = bad
+            error = f"task {_task_id(tasks.tasks[index])!r} {stopped.error}"
+            if rounds > 1:
+                error += f" (after {rounds - 1} {'replan' if rounds == 2 else 'replans'})"
             await log.emit(
                 NODE_END[stopped.status], node_id=orchestrator.id, payload={"error": error}
             )
@@ -1877,12 +2129,25 @@ def _orchestrator_join(
         end: dict[str, JsonValue] = (
             {"error": result.error}
             if result.error
-            else {"tasks": len(items), "completed": len(done)}
+            else {"tasks": len(tasks.tasks), "completed": len(done), "rounds": rounds}
         )
         await log.emit(NODE_END[result.status], node_id=orchestrator.id, payload=end)
         return _update(orchestrator.id, result)
 
     return join
+
+
+def _after_tasks(orchestrator: OrchestratorNode, then: str) -> Callable[[RunState], str]:
+    """Where a round's join goes (6.2): to `<id>.replan` when the hub replans, else on to `then`
+    if the orchestrator completed (`END` otherwise)."""
+    replan = replan_node_id(orchestrator)
+
+    def route(state: RunState) -> str:
+        if _replan_due(orchestrator, state):
+            return replan
+        return then if state["results"][orchestrator.id].status == "completed" else END
+
+    return route
 
 
 def _results_of(results: Mapping[str, AgentNodeResult]) -> dict[str, JsonValue]:
