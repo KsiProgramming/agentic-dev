@@ -1,0 +1,77 @@
+{
+  "spec_version": "0",
+  "id": "plan-execute-reflect",
+  "name": "Plan, execute, reflect",
+  "description": "A goal is decomposed into subtasks and scheduled, an executor does them, and a monitor checks the result: not OK sends its feedback back to planning, OK goes on to the output. Read-only: it reads the repo and writes artifacts, never code.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "trigger",
+        "role": "Intake",
+        "instructions": "Your input is a request from a person. Restate it as a clear goal: what is wanted, what done looks like, and any limits. Plain Markdown, no greeting.",
+        "writes": "goal.md"
+      },
+      {
+        "type": "loop",
+        "id": "refine",
+        "until": "results.monitor.data.ok == true",
+        "max_iterations": 3,
+        "body": {
+          "type": "sequence",
+          "id": "attempt",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "decomposer",
+              "role": "Planner",
+              "instructions": "Your input is the goal. Call `artifacts.list`: if `review.json` is there, read it with `artifacts.read`; it is the monitor's verdict on the last attempt, and its `feedback` says what to fix. Split the goal into 2 to 5 concrete subtasks, each with what it must produce. Answer with the subtasks as a numbered list.",
+              "tools": ["artifacts.list", "artifacts.read"],
+              "reads": ["goal.md"]
+            },
+            {
+              "type": "agent",
+              "id": "scheduler",
+              "role": "Scheduler",
+              "instructions": "Your input is a list of subtasks. Order them so each one comes after what it depends on, and say for each what it needs from the ones before. Answer with the schedule as a numbered list, nothing else."
+            },
+            {
+              "type": "agent",
+              "id": "executor",
+              "role": "Executor",
+              "instructions": "Your input is a schedule of subtasks. Do them in order, using the repository tools to read what you need. Never invent facts about the code: say what you read. Answer with the result of each subtask, then the combined result.",
+              "tools": ["repo.list_files", "repo.read_file", "repo.search", "artifacts.read"],
+              "writes": "result.md"
+            },
+            {
+              "type": "agent",
+              "id": "monitor",
+              "role": "Monitor",
+              "instructions": "Your input is the executor's result. Read the goal with `artifacts.read` (`goal.md`). Judge whether the result meets the goal completely and correctly. Answer `ok` true only if it does; otherwise `ok` false and, in `feedback`, exactly what is missing or wrong, so the next plan can fix it.",
+              "tools": ["artifacts.read"],
+              "output_schema": {
+                "type": "object",
+                "required": ["ok", "feedback"],
+                "properties": {
+                  "ok": { "type": "boolean" },
+                  "feedback": { "type": "string" }
+                }
+              },
+              "writes": "review.json"
+            }
+          ]
+        }
+      },
+      {
+        "type": "agent",
+        "id": "output",
+        "role": "Writer",
+        "instructions": "Your input is the goal, the last result and the monitor's last review, by name. Write the final output for the person who asked: the result, clearly organised, and, if the monitor still had remarks after the last attempt, a short note on what is not finished.",
+        "reads": ["goal.md", "result.md", "review.json"],
+        "writes": "output.md"
+      }
+    ]
+  }
+}

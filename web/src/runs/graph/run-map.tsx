@@ -16,7 +16,8 @@ import { elapsedMs } from "../console/step-list";
 import { KindIcon, kindLabel, statusLabel } from "./node-kinds";
 import { nodeStatuses, routeStates, type NodeState, type NodeStatus } from "./node-status";
 import { type NodeKind, type WorkflowSpec } from "./spec-graph";
-import { CARD, SpecTree, type MapNode } from "./spec-tree";
+import { SpecView } from "./spec-flow";
+import { CARD, type MapNode } from "./spec-tree";
 
 /** Every run of each node, nested ones included. */
 function runsById(steps: Step[]): Map<string, Step[]> {
@@ -304,7 +305,11 @@ export function RunMap({
       className="flex max-h-[min(75svh,800px)] min-h-60 flex-col overflow-hidden bg-background"
     >
       <div className="@container min-h-0 flex-1 overflow-auto p-4">
-        <SpecTree spec={spec} renderCard={renderCard} />
+        <SpecView
+          spec={spec}
+          renderCard={renderCard}
+          isSkipped={(route) => states.get(route)?.status === "skipped"}
+        />
       </div>
       <p className="border-t bg-surface-subtle px-4 py-2 text-caption text-muted-foreground">
         {footer}

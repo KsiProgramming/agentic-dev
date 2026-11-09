@@ -109,6 +109,9 @@ A review of the screens shipped in Milestones 2 and 3 found that they work but r
 | 5.6 | Live validation on canvas (incompatible ports blocked, errors on nodes) | Invalid connections cannot be made | ✅ Done ([#151](https://github.com/KsiProgramming/agentic-dev/pull/151)) |
 | 5.7 | Versions: history, visual diff, restore, run any version | User restores and runs an older version | ✅ Done ([#152](https://github.com/KsiProgramming/agentic-dev/pull/152)) |
 | 5.8 | Start screen v2: provider picker and "Blank canvas" added to the 2.6 start screen | A user starts a canvas workflow without touching JSON | ✅ Done ([#153](https://github.com/KsiProgramming/agentic-dev/pull/153)) |
+| 5.9 | Flow layout: the canvas and the run map drawn left to right from the spec tree (fork and join lanes, routes as labelled edges, loops as back edges, SVG edges, no layout library), the vertical tree kept below 768 px. [Plan](2026-11-09-flow-layout/requirements.md) | A workflow reads left to right on the canvas and the run map: a parallel, map or orchestrator forks into lanes and joins, a router's routes are labelled edges and a loop has a back edge; below 768 px the vertical tree stays | ✅ Done ([#165](https://github.com/KsiProgramming/agentic-dev/pull/165)) |
+
+5.9 was added after 6.5, when a team workflow (an orchestrator, a synthesizer, a reviewer and a router) read oddly as a card tree: it replaces 11.9's card tree with a flow read left to right, and is worked after 6.5.
 
 ## Milestone 6: Dynamic orchestration and composites
 
