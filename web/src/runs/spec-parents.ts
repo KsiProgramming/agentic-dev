@@ -4,14 +4,14 @@ type SpecNode = components["schemas"]["WorkflowSpec"]["root"];
 
 /**
  * Where a node runs, from the run's spec: in a branch of a parallel, an item of a map, an
- * iteration of a loop or the route of a router. Node ids are unique in a spec, so this places a
- * node's events exactly, where the events' `item` and `branch` tags alone are ambiguous (two
+ * iteration of a loop, the route of a router or a task of an orchestrator. Node ids are unique in
+ * a spec, so this places a node's events exactly, where the events' `item` and `branch` tags alone are ambiguous (two
  * nested parallels, or two routers, running at once).
  */
 export interface SpecParent {
-  /** The id of the loop, map, parallel or router the node is directly in. */
+  /** The id of the loop, map, parallel, router or orchestrator the node is directly in. */
   container: string;
-  kind: "loop" | "map" | "parallel" | "router";
+  kind: "loop" | "map" | "parallel" | "router" | "orchestrator";
   /** For a parallel: the index of the branch the node is in. */
   branch: number | null;
 }
@@ -27,6 +27,7 @@ export function specParents(root: SpecNode): Map<string, SpecParent> {
         break;
       case "loop":
       case "map":
+      case "orchestrator":
         visit(node.body, { container: node.id, kind: node.type, branch: null });
         break;
       case "parallel":

@@ -1,0 +1,882 @@
+{
+  "spec": {
+    "spec_version": "0",
+    "id": "orchestrated",
+    "name": "Orchestrated",
+    "root": {
+      "type": "sequence",
+      "id": "main",
+      "steps": [
+        {
+          "type": "agent",
+          "id": "scan",
+          "role": "R",
+          "instructions": "List the modules.",
+          "tools": [],
+          "reads": []
+        },
+        {
+          "type": "orchestrator",
+          "id": "fix",
+          "hub": {
+            "role": "Lead",
+            "instructions": "Plan the fixes."
+          },
+          "body": {
+            "type": "agent",
+            "id": "fixer",
+            "role": "R",
+            "instructions": "Go.",
+            "tools": [
+              "repo.write_file"
+            ],
+            "reads": []
+          },
+          "max_workers": 6,
+          "max_concurrency": 3,
+          "replan": {
+            "on": "failure",
+            "max_rounds": 1
+          }
+        }
+      ]
+    }
+  },
+  "events": [
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 1,
+      "type": "run_started",
+      "node_id": null,
+      "payload": {
+        "workflow_id": "orchestrated",
+        "workflow_name": "Orchestrated",
+        "input": "the repo"
+      },
+      "created_at": "2026-11-09T12:00:01Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 2,
+      "type": "node_started",
+      "node_id": "scan",
+      "payload": {},
+      "created_at": "2026-11-09T12:00:02Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 3,
+      "type": "message",
+      "node_id": "scan",
+      "payload": {
+        "type": "message",
+        "text": "scan(the repo)"
+      },
+      "created_at": "2026-11-09T12:00:03Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 4,
+      "type": "usage",
+      "node_id": "scan",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-09T12:00:04Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 5,
+      "type": "completed",
+      "node_id": "scan",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-09T12:00:05Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 6,
+      "type": "node_completed",
+      "node_id": "scan",
+      "payload": {},
+      "created_at": "2026-11-09T12:00:06Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 7,
+      "type": "node_started",
+      "node_id": "fix",
+      "payload": {
+        "max_workers": 6
+      },
+      "created_at": "2026-11-09T12:00:07Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 8,
+      "type": "message",
+      "node_id": "fix",
+      "payload": {
+        "type": "message",
+        "text": "{\"tasks\": [{\"id\": \"a\", \"title\": \"Fix a\", \"instructions\": \"Fix module a.\"}, {\"id\": \"b\", \"title\": \"Fix b\", \"instructions\": \"Fix module b.\"}, {\"id\": \"c\", \"title\": \"Fix c\", \"instructions\": \"Fix module c.\"}, {\"id\": \"d\", \"title\": \"Fix d\", \"instructions\": \"Fix module d.\"}], \"reason\": \"One task per module.\"}"
+      },
+      "created_at": "2026-11-09T12:00:08Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 9,
+      "type": "usage",
+      "node_id": "fix",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-09T12:00:09Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 10,
+      "type": "completed",
+      "node_id": "fix",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-09T12:00:10Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 11,
+      "type": "plan_made",
+      "node_id": "fix",
+      "payload": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "Fix a"
+          },
+          {
+            "id": "b",
+            "title": "Fix b"
+          },
+          {
+            "id": "c",
+            "title": "Fix c"
+          },
+          {
+            "id": "d",
+            "title": "Fix d"
+          }
+        ],
+        "reason": "One task per module.",
+        "round": 1
+      },
+      "created_at": "2026-11-09T12:00:11Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 12,
+      "type": "task_started",
+      "node_id": "fix",
+      "payload": {
+        "index": 0,
+        "task_id": "a",
+        "title": "Fix a"
+      },
+      "created_at": "2026-11-09T12:00:12Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 13,
+      "type": "task_started",
+      "node_id": "fix",
+      "payload": {
+        "index": 1,
+        "task_id": "b",
+        "title": "Fix b"
+      },
+      "created_at": "2026-11-09T12:00:13Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 14,
+      "type": "task_started",
+      "node_id": "fix",
+      "payload": {
+        "index": 2,
+        "task_id": "c",
+        "title": "Fix c"
+      },
+      "created_at": "2026-11-09T12:00:14Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 15,
+      "type": "node_started",
+      "node_id": "fixer",
+      "payload": {
+        "item": 0
+      },
+      "created_at": "2026-11-09T12:00:15Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 16,
+      "type": "node_started",
+      "node_id": "fixer",
+      "payload": {
+        "item": 1
+      },
+      "created_at": "2026-11-09T12:00:16Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 17,
+      "type": "node_started",
+      "node_id": "fixer",
+      "payload": {
+        "item": 2
+      },
+      "created_at": "2026-11-09T12:00:17Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 18,
+      "type": "failed",
+      "node_id": "fixer",
+      "payload": {
+        "type": "failed",
+        "error": "cannot fix b",
+        "retryable": false,
+        "item": 1
+      },
+      "created_at": "2026-11-09T12:00:18Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 19,
+      "type": "node_failed",
+      "node_id": "fixer",
+      "payload": {
+        "error": "cannot fix b",
+        "item": 1
+      },
+      "created_at": "2026-11-09T12:00:19Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 20,
+      "type": "task_completed",
+      "node_id": "fix",
+      "payload": {
+        "index": 1,
+        "task_id": "b",
+        "title": "Fix b",
+        "status": "failed",
+        "error": "fixer failed: cannot fix b"
+      },
+      "created_at": "2026-11-09T12:00:20Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 21,
+      "type": "task_completed",
+      "node_id": "fix",
+      "payload": {
+        "index": 3,
+        "task_id": "d",
+        "title": "Fix d",
+        "status": "dropped"
+      },
+      "created_at": "2026-11-09T12:00:21Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 22,
+      "type": "tool_call",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_1",
+        "name": "repo.write_file",
+        "arguments": {
+          "path": "a.py",
+          "content": "x"
+        },
+        "item": 0
+      },
+      "created_at": "2026-11-09T12:00:22Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 23,
+      "type": "tool_result",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_1",
+        "output": "done",
+        "is_error": false,
+        "item": 0
+      },
+      "created_at": "2026-11-09T12:00:23Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 24,
+      "type": "message",
+      "node_id": "fixer",
+      "payload": {
+        "type": "message",
+        "text": "Fixed a.",
+        "item": 0
+      },
+      "created_at": "2026-11-09T12:00:24Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 25,
+      "type": "usage",
+      "node_id": "fixer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "item": 0
+      },
+      "created_at": "2026-11-09T12:00:25Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 26,
+      "type": "completed",
+      "node_id": "fixer",
+      "payload": {
+        "type": "completed",
+        "item": 0
+      },
+      "created_at": "2026-11-09T12:00:26Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 27,
+      "type": "node_completed",
+      "node_id": "fixer",
+      "payload": {
+        "item": 0
+      },
+      "created_at": "2026-11-09T12:00:27Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 28,
+      "type": "task_completed",
+      "node_id": "fix",
+      "payload": {
+        "index": 0,
+        "task_id": "a",
+        "title": "Fix a",
+        "status": "completed"
+      },
+      "created_at": "2026-11-09T12:00:28Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 29,
+      "type": "tool_call",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_1",
+        "name": "repo.write_file",
+        "arguments": {
+          "path": "c.py",
+          "content": "x"
+        },
+        "item": 2
+      },
+      "created_at": "2026-11-09T12:00:29Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 30,
+      "type": "tool_result",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_1",
+        "output": "done",
+        "is_error": false,
+        "item": 2
+      },
+      "created_at": "2026-11-09T12:00:30Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 31,
+      "type": "message",
+      "node_id": "fixer",
+      "payload": {
+        "type": "message",
+        "text": "Fixed c.",
+        "item": 2
+      },
+      "created_at": "2026-11-09T12:00:31Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 32,
+      "type": "usage",
+      "node_id": "fixer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "item": 2
+      },
+      "created_at": "2026-11-09T12:00:32Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 33,
+      "type": "completed",
+      "node_id": "fixer",
+      "payload": {
+        "type": "completed",
+        "item": 2
+      },
+      "created_at": "2026-11-09T12:00:33Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 34,
+      "type": "node_completed",
+      "node_id": "fixer",
+      "payload": {
+        "item": 2
+      },
+      "created_at": "2026-11-09T12:00:34Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 35,
+      "type": "task_completed",
+      "node_id": "fix",
+      "payload": {
+        "index": 2,
+        "task_id": "c",
+        "title": "Fix c",
+        "status": "completed"
+      },
+      "created_at": "2026-11-09T12:00:35Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 36,
+      "type": "branch_integrated",
+      "node_id": "fix",
+      "payload": {
+        "round": 1,
+        "branch": "agent/run/fix",
+        "head": "0000000000000000000000000000000000000001",
+        "merged": [
+          "a"
+        ],
+        "empty": [],
+        "conflicts": [
+          {
+            "id": "c",
+            "paths": [
+              "src/app.py"
+            ]
+          }
+        ]
+      },
+      "created_at": "2026-11-09T12:00:36Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 37,
+      "type": "replan_started",
+      "node_id": "fix",
+      "payload": {
+        "round": 2,
+        "failed": [
+          {
+            "id": "b",
+            "error": "fixer failed: cannot fix b"
+          },
+          {
+            "id": "c",
+            "error": "conflicts with earlier tasks on src/app.py"
+          }
+        ],
+        "dropped": [
+          "d"
+        ]
+      },
+      "created_at": "2026-11-09T12:00:37Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 38,
+      "type": "message",
+      "node_id": "fix",
+      "payload": {
+        "type": "message",
+        "text": "{\"tasks\": [{\"id\": \"b2\", \"title\": \"Fix b2\", \"instructions\": \"Fix module b2.\"}, {\"id\": \"c2\", \"title\": \"Fix c2\", \"instructions\": \"Fix module c2.\"}], \"reason\": \"Retry b and c apart from a.\"}"
+      },
+      "created_at": "2026-11-09T12:00:38Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 39,
+      "type": "usage",
+      "node_id": "fix",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-09T12:00:39Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 40,
+      "type": "completed",
+      "node_id": "fix",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-09T12:00:40Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 41,
+      "type": "plan_made",
+      "node_id": "fix",
+      "payload": {
+        "tasks": [
+          {
+            "id": "b2",
+            "title": "Fix b2"
+          },
+          {
+            "id": "c2",
+            "title": "Fix c2"
+          }
+        ],
+        "reason": "Retry b and c apart from a.",
+        "round": 2
+      },
+      "created_at": "2026-11-09T12:00:41Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 42,
+      "type": "task_started",
+      "node_id": "fix",
+      "payload": {
+        "index": 4,
+        "task_id": "b2",
+        "title": "Fix b2"
+      },
+      "created_at": "2026-11-09T12:00:42Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 43,
+      "type": "task_started",
+      "node_id": "fix",
+      "payload": {
+        "index": 5,
+        "task_id": "c2",
+        "title": "Fix c2"
+      },
+      "created_at": "2026-11-09T12:00:43Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 44,
+      "type": "node_started",
+      "node_id": "fixer",
+      "payload": {
+        "item": 4
+      },
+      "created_at": "2026-11-09T12:00:44Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 45,
+      "type": "node_started",
+      "node_id": "fixer",
+      "payload": {
+        "item": 5
+      },
+      "created_at": "2026-11-09T12:00:45Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 46,
+      "type": "tool_call",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_1",
+        "name": "repo.write_file",
+        "arguments": {
+          "path": "b2.py",
+          "content": "x"
+        },
+        "item": 4
+      },
+      "created_at": "2026-11-09T12:00:46Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 47,
+      "type": "tool_result",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_1",
+        "output": "done",
+        "is_error": false,
+        "item": 4
+      },
+      "created_at": "2026-11-09T12:00:47Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 48,
+      "type": "message",
+      "node_id": "fixer",
+      "payload": {
+        "type": "message",
+        "text": "Fixed b2.",
+        "item": 4
+      },
+      "created_at": "2026-11-09T12:00:48Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 49,
+      "type": "usage",
+      "node_id": "fixer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "item": 4
+      },
+      "created_at": "2026-11-09T12:00:49Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 50,
+      "type": "completed",
+      "node_id": "fixer",
+      "payload": {
+        "type": "completed",
+        "item": 4
+      },
+      "created_at": "2026-11-09T12:00:50Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 51,
+      "type": "node_completed",
+      "node_id": "fixer",
+      "payload": {
+        "item": 4
+      },
+      "created_at": "2026-11-09T12:00:51Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 52,
+      "type": "task_completed",
+      "node_id": "fix",
+      "payload": {
+        "index": 4,
+        "task_id": "b2",
+        "title": "Fix b2",
+        "status": "completed"
+      },
+      "created_at": "2026-11-09T12:00:52Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 53,
+      "type": "tool_call",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_1",
+        "name": "repo.write_file",
+        "arguments": {
+          "path": "c2.py",
+          "content": "x"
+        },
+        "item": 5
+      },
+      "created_at": "2026-11-09T12:00:53Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 54,
+      "type": "tool_result",
+      "node_id": "fixer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_1",
+        "output": "done",
+        "is_error": false,
+        "item": 5
+      },
+      "created_at": "2026-11-09T12:00:54Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 55,
+      "type": "message",
+      "node_id": "fixer",
+      "payload": {
+        "type": "message",
+        "text": "Fixed c2.",
+        "item": 5
+      },
+      "created_at": "2026-11-09T12:00:55Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 56,
+      "type": "usage",
+      "node_id": "fixer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "item": 5
+      },
+      "created_at": "2026-11-09T12:00:56Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 57,
+      "type": "completed",
+      "node_id": "fixer",
+      "payload": {
+        "type": "completed",
+        "item": 5
+      },
+      "created_at": "2026-11-09T12:00:57Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 58,
+      "type": "node_completed",
+      "node_id": "fixer",
+      "payload": {
+        "item": 5
+      },
+      "created_at": "2026-11-09T12:00:58Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 59,
+      "type": "task_completed",
+      "node_id": "fix",
+      "payload": {
+        "index": 5,
+        "task_id": "c2",
+        "title": "Fix c2",
+        "status": "completed"
+      },
+      "created_at": "2026-11-09T12:00:59Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 60,
+      "type": "branch_integrated",
+      "node_id": "fix",
+      "payload": {
+        "round": 2,
+        "branch": "agent/run/fix",
+        "head": "0000000000000000000000000000000000000003",
+        "merged": [
+          "a",
+          "b2",
+          "c2"
+        ],
+        "empty": [],
+        "conflicts": []
+      },
+      "created_at": "2026-11-09T12:01:00Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 61,
+      "type": "node_completed",
+      "node_id": "fix",
+      "payload": {
+        "tasks": 6,
+        "completed": 3,
+        "rounds": 2,
+        "branch": "agent/run/fix",
+        "merged": [
+          "a",
+          "b2",
+          "c2"
+        ]
+      },
+      "created_at": "2026-11-09T12:01:01Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000064",
+      "seq": 62,
+      "type": "run_completed",
+      "node_id": null,
+      "payload": {},
+      "created_at": "2026-11-09T12:01:02Z"
+    }
+  ]
+}
