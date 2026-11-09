@@ -12,7 +12,10 @@ to a worker (`<id>.branch`, one `Send` per branch) that runs the branch, and a j
 (`<id>.join`) that applies its join policy to the branches' outcomes. A router becomes an entry
 node (its id) that chooses a route and records it in the state (`routes`), each route's nodes,
 and a node (`<id>.done`) every route ends at, which ends the router; a resumed run goes on in the
-route it chose. A node that does not complete ends the run.
+route it chose. An orchestrator (6.1) becomes an entry node (its id) that asks its hub for a
+plan and records it in the state (`plans`), a worker (`<id>.task`, one `Send` per task) that runs
+its body for one task, and a join node (`<id>.join`) that collects the tasks' results in plan
+order. A node that does not complete ends the run.
 
 A map item's body and a parallel's branch run in-process, in one LangGraph task: their routers,
 the parallels inside a branch and the reduces of those run there too (`_run_inline`).
@@ -36,7 +39,10 @@ parallel writes `node_started` (payload `branches`, `join`, `quorum`),
 decided, the branches still running end `node_cancelled`. A router writes `node_started` (payload
 `routes`, `mode`), its classifier's agent events if it has one, `route_chosen` (`route`, `mode`,
 `reason`), then the route's events and its end (`node_completed` with `route`), or `node_failed`
-if no route could be chosen.
+if no route could be chosen. An orchestrator writes `node_started` (payload `max_workers`), its
+hub's agent events, `plan_made` (`tasks`, `reason`), `task_started` and `task_completed` around
+each task's body, whose events carry `item` (the task's index), then its end (`node_completed`
+with `tasks` and `completed`). One task that does not complete cancels the others.
 
 An agent or tool node with typed ports (4.2) has its input checked before it starts and its
 output once it completes: a value that does not match fails the node, whose `node_failed` carries
@@ -97,10 +103,13 @@ from agentic_engine.events import (
     NODE_STARTED,
     PARALLEL_BRANCH_COMPLETED,
     PARALLEL_BRANCH_STARTED,
+    PLAN_MADE,
     POLICY_LIMIT_EXCEEDED,
     PR_OPENED,
     REPO_CREATED,
     ROUTE_CHOSEN,
+    TASK_COMPLETED,
+    TASK_STARTED,
     NullEventSink,
     RunEventLog,
 )
@@ -114,7 +123,13 @@ from agentic_engine.expr import (
 from agentic_engine.gate import GateReview, run_gate_node
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
-from agentic_engine.graph.state import MapItem, ParallelBranch, RunState, RunUpdate
+from agentic_engine.graph.state import (
+    MapItem,
+    OrchestratorTask,
+    ParallelBranch,
+    RunState,
+    RunUpdate,
+)
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
 from agentic_engine.spec import (
@@ -122,11 +137,13 @@ from agentic_engine.spec import (
     DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
     PUBLISH_TOOLS,
+    WRITE_TOOLS,
     AgentNode,
     GateNode,
     LoopNode,
     MapNode,
     Node,
+    OrchestratorNode,
     ParallelNode,
     ReduceNode,
     RouterNode,
@@ -136,8 +153,11 @@ from agentic_engine.spec import (
     agents_spawned,
     classifier_schema,
     iter_nodes,
+    node_tools,
+    orchestrator_plan_schema,
     port_edges,
     router_routes,
+    task_writer_key,
 )
 from agentic_engine.tool import run_tool_node
 from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor, Usage
@@ -190,6 +210,7 @@ def step_nodes(root: Node) -> list[StepNode]:
                 | ReduceNode()
                 | ParallelNode()
                 | RouterNode()
+                | OrchestratorNode()
             ):
                 pass
             case _:
@@ -228,6 +249,16 @@ def router_done_node_id(router: RouterNode) -> str:
     return f"{router.id}.done"
 
 
+def task_node_id(orchestrator: OrchestratorNode) -> str:
+    """The LangGraph node that runs `orchestrator`'s body for one task."""
+    return f"{orchestrator.id}.task"
+
+
+def tasks_join_node_id(orchestrator: OrchestratorNode) -> str:
+    """The LangGraph node that collects `orchestrator`'s task results."""
+    return f"{orchestrator.id}.join"
+
+
 def repo_ready_node_id(node: ToolNode) -> str:
     """The LangGraph node after `node`, which creates the run's repo, where the run stops for a
     new attempt to clone the repo."""
@@ -263,7 +294,7 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return sum(steps(s) for s in node.steps)
             case LoopNode():
                 return node.max_iterations * (steps(node.body) + 2)
-            case MapNode() | ParallelNode():
+            case MapNode() | ParallelNode() | OrchestratorNode():
                 return 3
             case RouterNode():
                 return 2 + max(steps(route) for _, _, route in router_routes(node, node.id))
@@ -356,6 +387,19 @@ def compile_workflow(
                 )
                 builder.add_edge(worker, join)
                 builder.add_node(join, _parallel_join(node, log))
+                go_on(join, node.id, then)
+                return node.id
+            case OrchestratorNode():
+                worker, join = task_node_id(node), tasks_join_node_id(node)
+                builder.add_node(node.id, _orchestrator_entry(node, runtime, log, limits))
+                builder.add_conditional_edges(node.id, _fan_out_tasks(node), [worker, join, END])
+                builder.add_node(
+                    worker,
+                    _orchestrator_task(node, runtime, tools, log, limits),
+                    input_schema=OrchestratorTask,
+                )
+                builder.add_edge(worker, join)
+                builder.add_node(join, _orchestrator_join(node, log, limits))
                 go_on(join, node.id, then)
                 return node.id
             case RouterNode():
@@ -468,13 +512,15 @@ async def _run_step(
     refs: Mapping[str, ArtifactRef],
     item: int | None = None,
     branch: int | None = None,
+    route_as: str | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
-    a map, `branch` inside a parallel). A node that reads run artifacts runs on the versions in
-    `refs` instead, and one that writes one stores its output once it completes. An agent waits
-    for one of the run's `agents_alive` slots before it starts, and its usage is counted on the
-    run's budget: once that is spent, the node ends `node_cancelled` and `PolicyLimitExceeded` is
-    raised."""
+    a map or an orchestrator's task, `branch` inside a parallel). `route_as` is what the node is
+    known by to the tools and the runtime: a task's writer key inside an orchestrator. A node that
+    reads run artifacts runs on the versions in `refs` instead, and one that writes one stores its
+    output once it completes. An agent waits for one of the run's `agents_alive` slots before it
+    starts, and its usage is counted on the run's budget: once that is spent, the node ends
+    `node_cancelled` and `PolicyLimitExceeded` is raised."""
 
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item, branch)
@@ -488,14 +534,14 @@ async def _run_step(
     async def run() -> AgentNodeResult:
         match node:
             case ToolNode():
-                return await run_tool_node(node, tools, on_event)
+                return await run_tool_node(node, tools, on_event, route_as)
             case GateNode():
                 return await run_gate_node(
                     node, input, log, limits.review, limits.policy.approval_ttl_s
                 )
             case AgentNode():
                 async with limits.alive:
-                    return await run_agent_node(node, runtime, input, on_event)
+                    return await run_agent_node(node, runtime, input, on_event, route_as)
 
     reads = [] if isinstance(node, GateNode) else node.reads
     # A gate runs again from its start when the run continues; the runner logs its start.
@@ -1117,9 +1163,15 @@ async def _combine(
 
 
 def _reduce_sources(data: dict[str, JsonValue]) -> list[tuple[str, JsonValue, JsonValue]]:
-    """What a reduce combines, from its map's or parallel's `data`, as `(source id, item,
-    output)`: a map item is named by its index, a parallel branch by its id (also its item)."""
+    """What a reduce combines, from its map's, parallel's or orchestrator's `data`, as `(source
+    id, item, output)`: a map item is named by its index, a parallel branch by its id (also its
+    item), an orchestrator's task by its id (its item is the task)."""
     match data:
+        case {"tasks": list() as tasks, "outputs": list() as outputs}:
+            return [
+                (str(cast(dict[str, JsonValue], task)["id"]), task, output)
+                for task, output in zip(tasks, outputs, strict=True)
+            ]
         case {"items": list() as items, "outputs": list() as outputs}:
             return [
                 (str(i), item, output)
@@ -1195,9 +1247,10 @@ class _Tag(TypedDict):
 
 @dataclass
 class _Scope:
-    """Where nodes run in-process (`_run_inline`): a map item (`item`) or a parallel branch
-    (`branch`, the innermost), with the run artifacts it sees (`refs`), every node it ran
-    (`ran`, shared with the parallels inside it) and the artifacts it wrote (`wrote`)."""
+    """Where nodes run in-process (`_run_inline`): a map item or an orchestrator's task
+    (`item`; a task also `task`: the orchestrator's id and the task's) or a parallel branch
+    (`branch`, the innermost), with the run artifacts it sees (`refs`), every node it ran (`ran`,
+    shared with the parallels inside it) and the artifacts it wrote (`wrote`)."""
 
     runtime: AgentRuntime
     tools: ToolExecutor | None
@@ -1208,6 +1261,14 @@ class _Scope:
     refs: dict[str, ArtifactRef] = field(default_factory=dict[str, ArtifactRef])
     ran: dict[str, AgentNodeResult] = field(default_factory=dict[str, AgentNodeResult])
     wrote: dict[str, ArtifactRef] = field(default_factory=dict[str, ArtifactRef])
+    task: tuple[str, str] | None = None
+
+    def route_as(self, node: Node) -> str | None:
+        """What `node` is known by to the tools: inside an orchestrator's task, a writer works as
+        the task (`task_writer_key`), on the task's own branch; else as itself."""
+        if self.task is None or not WRITE_TOOLS.intersection(node_tools(node)):
+            return None
+        return task_writer_key(*self.task)
 
     def tag(self) -> _Tag:
         """The `item` and `branch` its events carry."""
@@ -1241,6 +1302,7 @@ async def _run_inline(node: Node, input: str, scope: _Scope) -> tuple[str, Agent
                 scope.refs,
                 scope.item,
                 scope.branch,
+                scope.route_as(node),
             )
             scope.ran[node.id] = result
             if result.artifact is not None:
@@ -1263,7 +1325,7 @@ async def _run_inline(node: Node, input: str, scope: _Scope) -> tuple[str, Agent
             result = await _combine(node, scope.ran[node.from_].data or {}, scope)
             scope.ran[node.id] = result
             return node.id, result
-        case LoopNode() | MapNode():
+        case LoopNode() | MapNode() | OrchestratorNode():
             raise CompileError(f"{node.type} {node.id!r} cannot run inside a map or a parallel")
 
 
@@ -1546,6 +1608,281 @@ async def _classify(
         await log.emit(NODE_CANCELLED, node_id=router.id, **scope.tag())
         raise
     return _check_output(agent, result)
+
+
+def hub_instructions(orchestrator: OrchestratorNode) -> str:
+    """What `orchestrator`'s hub is asked: its own instructions, then how to plan."""
+    return (
+        f"{orchestrator.hub.instructions}\n\nPlan the tasks for the workers, at most "
+        f"{orchestrator.max_workers}. Give each task an `id` (a short slug: lower case letters, "
+        "digits, `_` and `-`, unique in the plan), a `title` (one line) and `instructions` (what "
+        "its worker must do, on its own: a worker sees only its task and your input). Say why you "
+        "split the work so, in one sentence, as `reason`. Plan no task if there is nothing to do."
+    )
+
+
+async def _plan(
+    orchestrator: OrchestratorNode, input: str, scope: _Scope
+) -> tuple[AgentNodeResult, PortFailure | None]:
+    """Ask `orchestrator`'s hub for its plan, as one agent turn whose events are the
+    orchestrator's: its answer checked against `orchestrator_plan_schema`, so it cannot plan more
+    than `max_workers` tasks or an off-shape one. It waits for an `agents_alive` slot, and its
+    usage counts on the run's budget."""
+    hub = orchestrator.hub
+    agent = AgentNode(
+        type="agent",
+        id=orchestrator.id,
+        role=hub.role,
+        instructions=hub_instructions(orchestrator),
+        provider=hub.provider,
+        model=hub.model,
+        output_schema=orchestrator_plan_schema(orchestrator),
+    )
+    log, limits = scope.log, scope.limits
+
+    async def write(event: AgentEvent) -> None:
+        await log.agent_event(orchestrator.id, event)
+        if isinstance(event, Usage) and limits.budget is not None:
+            limits.budget.add(event, orchestrator.id)
+
+    buffer = DeltaBuffer(write)
+    try:
+        try:
+            async with limits.alive:
+                result = await run_agent_node(agent, scope.runtime, input, buffer.emit)
+        finally:
+            await buffer.close()
+    except (asyncio.CancelledError, PolicyLimitExceeded):
+        await log.emit(NODE_CANCELLED, node_id=orchestrator.id)
+        raise
+    return _check_output(agent, result)
+
+
+def _orchestrator_entry(
+    orchestrator: OrchestratorNode, runtime: AgentRuntime, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Starts `orchestrator`: asks its hub for a plan and records it in the state (`plans`), so a
+    resumed run runs the same tasks; `_fan_out_tasks` then sends them. The hub counts as one agent
+    spawned, and once the plan is made every task's agents count too, all at once (the tasks run
+    in one LangGraph step, so they cannot count themselves): over `agents_spawned`, the
+    orchestrator fails without running a task. A plan that does not match its schema, or names a
+    task twice, fails it."""
+    per_task = agents_spawned(orchestrator.body)
+    started: dict[str, JsonValue] = {"max_workers": orchestrator.max_workers}
+    scope = _Scope(runtime, None, log, limits)
+    node_id = orchestrator.id
+
+    def stop(result: AgentNodeResult, spawned: int, usage: list[Usage]) -> RunUpdate:
+        return {
+            "results": {node_id: result},
+            "order": [node_id],
+            "spawned": spawned,
+            "usage": usage,
+        }
+
+    async def enter(state: RunState) -> RunUpdate:
+        if refused := await _refuse_spawn(node_id, state, 1, limits, log, started):
+            return stop(refused, 0, [])
+        await log.emit(NODE_STARTED, node_id=node_id, payload=started)
+        input = state["last_text"]
+        answer, port = await _plan(orchestrator, input, scope)
+        usage = [answer.usage] if answer.usage else []
+        error = answer.error
+        tasks: list[JsonValue] = []
+        if answer.status == "completed":
+            tasks = cast(list[JsonValue], (answer.data or {}).get("tasks", []))
+            ids = [cast(dict[str, JsonValue], t)["id"] for t in tasks]
+            if twice := next((i for i in ids if ids.count(i) > 1), None):
+                error = f"the hub of {node_id!r} planned task {twice!r} twice"
+        if answer.status != "completed" or error is not None:
+            status: AgentNodeStatus = "failed" if answer.status == "completed" else answer.status
+            why = error or "the hub did not plan"
+            end: dict[str, JsonValue] = {"error": why}
+            if port is not None:
+                end["port"] = port.payload()
+            await log.emit(NODE_END[status], node_id=node_id, payload=end)
+            failed = AgentNodeResult(status=status, text=input, usage=None, error=why)
+            return stop(failed, 1, usage)
+        observed = state.get("spawned", 0) + 1 + per_task * len(tasks)
+        if observed > limits.policy.agents_spawned:
+            over = PolicyLimitExceeded(
+                "agents_spawned", limits.policy.agents_spawned, observed, node_id
+            )
+            await log.emit(POLICY_LIMIT_EXCEEDED, node_id=node_id, payload=over.payload())
+            await log.emit(NODE_FAILED, node_id=node_id, payload={"error": over.reason})
+            failed = AgentNodeResult(status="failed", text=input, usage=None, error=over.reason)
+            return stop(failed, 1, usage)
+        planned: list[JsonValue] = [
+            {"id": t["id"], "title": t["title"]} for t in cast(list[dict[str, JsonValue]], tasks)
+        ]
+        reason = (answer.data or {}).get("reason", "")
+        await log.emit(PLAN_MADE, node_id=node_id, payload={"tasks": planned, "reason": reason})
+        return {
+            "spawned": 1 + per_task * len(tasks),
+            "usage": usage,
+            "plans": {node_id: tasks},
+        }
+
+    return enter
+
+
+def _fan_out_tasks(orchestrator: OrchestratorNode) -> Callable[[RunState], Sequence[Send] | str]:
+    """One `Send` to the worker per planned task, with the run's artifacts; to the join if the
+    plan has none; to `END` if the orchestrator failed. Each worker's input is `{"task", "input"}`
+    as JSON: the task is data, and its worker's instructions stay the spec's."""
+
+    def route(state: RunState) -> Sequence[Send] | str:
+        if orchestrator.id in state["results"]:
+            return END
+        tasks = state.get("plans", {}).get(orchestrator.id) or []
+        if not tasks:
+            return tasks_join_node_id(orchestrator)
+        refs = state.get("artifacts", {})
+        return [
+            Send(
+                task_node_id(orchestrator),
+                OrchestratorTask(
+                    index=i,
+                    task=task,
+                    task_input=json.dumps(
+                        {"task": task, "input": state["last_text"]}, ensure_ascii=False, indent=2
+                    ),
+                    task_artifacts=dict(refs),
+                ),
+            )
+            for i, task in enumerate(tasks)
+        ]
+
+    return route
+
+
+@dataclass
+class _Workers:
+    """One attempt's view of an orchestrator's tasks: those running, and whether one has not
+    completed, which cancels the others; tasks that have not started then end `cancelled` without
+    running. The join decides from the checkpointed outcomes, so a resumed run joins correctly."""
+
+    running: dict[int, "asyncio.Task[tuple[str, AgentNodeResult]]"] = field(
+        default_factory=dict[int, "asyncio.Task[tuple[str, AgentNodeResult]]"]
+    )
+    stopped: bool = False
+
+    def end(self, index: int, status: AgentNodeStatus) -> None:
+        """Record how task `index` ended; cancel the others if it did not complete."""
+        self.running.pop(index, None)
+        if status == "completed" or self.stopped:
+            return
+        self.stopped = True
+        for task in self.running.values():
+            task.cancel()
+
+
+_CANCELLED_BY_ANOTHER = "cancelled: another task did not complete"
+
+
+def _orchestrator_task(
+    orchestrator: OrchestratorNode,
+    runtime: AgentRuntime,
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
+) -> Callable[[OrchestratorTask], Awaitable[RunUpdate]]:
+    """Runs `orchestrator`'s body for one task (`_run_inline`), at most `max_concurrency` at once;
+    its writers work on the task's own branch (`task_writer_key`). Once a task does not complete,
+    the others are cancelled."""
+    slots = asyncio.Semaphore(orchestrator.max_concurrency)
+    workers = _Workers()
+
+    async def work(sent: OrchestratorTask) -> RunUpdate:
+        index, task = sent["index"], cast(dict[str, JsonValue], sent["task"])
+        task_id = str(task["id"])
+        marker: dict[str, JsonValue] = {"index": index, "task_id": task_id, "title": task["title"]}
+        refs = dict(sent.get("task_artifacts", {}))
+        scope = _Scope(
+            runtime, tools, log, limits, item=index, refs=refs, task=(orchestrator.id, task_id)
+        )
+        cancelled = AgentNodeResult(status="cancelled", text=sent["task_input"], usage=None)
+        async with slots:
+            if workers.stopped:
+                result, error = cancelled, _CANCELLED_BY_ANOTHER
+            else:
+                await log.emit(TASK_STARTED, node_id=orchestrator.id, payload=marker)
+                runner = asyncio.create_task(
+                    _run_inline(orchestrator.body, sent["task_input"], scope)
+                )
+                workers.running[index] = runner
+                try:
+                    ended, result = await runner
+                    error = _stop_error(ended, result)
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if not runner.cancelled() or (current is not None and current.cancelling()):
+                        raise  # the run itself is being stopped
+                    result, error = cancelled, _CANCELLED_BY_ANOTHER
+                workers.end(index, result.status)
+        end: dict[str, JsonValue] = {**marker, "status": result.status}
+        if error:
+            end["error"] = error
+        await log.emit(TASK_COMPLETED, node_id=orchestrator.id, payload=end)
+        usage = scope.usage()
+        outcome = AgentNodeResult(
+            status=result.status,
+            text=result.text,
+            usage=sum_usage(usage),
+            error=error,
+            data={"task": task},
+        )
+        return {"map_results": {orchestrator.id: {str(index): outcome}}, "usage": usage}
+
+    return work
+
+
+def _orchestrator_join(
+    orchestrator: OrchestratorNode, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Ends `orchestrator`. Its output is its tasks' outputs in plan order (`data`: `tasks`, the
+    plan; `outputs`; `writers`, the writer keys of the tasks that completed, when its body writes,
+    for a gate after it to show). It ends like the first task that failed (else the first that
+    did not complete), naming the task. With `writes`, the output is stored as that artifact."""
+    writes = any(WRITE_TOOLS.intersection(node_tools(n)) for _, n in iter_nodes(orchestrator.body))
+
+    async def join(state: RunState) -> RunUpdate:
+        tasks = state.get("plans", {}).get(orchestrator.id) or []
+        items = ordered_items(state, orchestrator.id)
+        outputs: list[JsonValue] = [r.text for r in items]
+        ids = [str(cast(dict[str, JsonValue], t)["id"]) for t in tasks]
+        done = [i for i, r in zip(ids, items, strict=True) if r.status == "completed"]
+        writers: list[JsonValue] = (
+            [task_writer_key(orchestrator.id, i) for i in done] if writes else []
+        )
+        data: dict[str, JsonValue] = {"tasks": tasks, "outputs": outputs, "writers": writers}
+        text = "\n\n".join(r.text for r in items)
+        bad = next(((i, r) for i, r in zip(ids, items, strict=True) if r.status == "failed"), None)
+        bad = bad or next(
+            ((i, r) for i, r in zip(ids, items, strict=True) if r.status != "completed"), None
+        )
+        if bad is not None:
+            task_id, stopped = bad
+            error = f"task {task_id!r} {stopped.error}"
+            await log.emit(
+                NODE_END[stopped.status], node_id=orchestrator.id, payload={"error": error}
+            )
+            failed = AgentNodeResult(
+                status=stopped.status, text=text, usage=None, error=error, data=data
+            )
+            return _update(orchestrator.id, failed)
+        result = AgentNodeResult(status="completed", text=text, usage=None, data=data)
+        if orchestrator.writes:
+            result = await _write(orchestrator.id, orchestrator.writes, None, result, limits, log)
+        end: dict[str, JsonValue] = (
+            {"error": result.error}
+            if result.error
+            else {"tasks": len(items), "completed": len(done)}
+        )
+        await log.emit(NODE_END[result.status], node_id=orchestrator.id, payload=end)
+        return _update(orchestrator.id, result)
+
+    return join
 
 
 def _results_of(results: Mapping[str, AgentNodeResult]) -> dict[str, JsonValue]:

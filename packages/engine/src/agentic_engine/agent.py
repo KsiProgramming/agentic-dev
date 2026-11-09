@@ -58,7 +58,10 @@ OUTPUT_SCHEMA_INSTRUCTION = (
 (4.2). The engine parses the answer and checks it (`agentic_engine.ports`)."""
 
 
-def to_request(node: AgentNode, input: str) -> AgentRequest:
+def to_request(node: AgentNode, input: str, route_as: str | None = None) -> AgentRequest:
+    """The runtime request for `node` on `input`. `route_as` replaces the node id the request
+    (and so its tool calls) is known by: a writer working on an orchestrator's task (6.1) writes
+    on that task's branch (`task_writer_key`)."""
     instructions = node.instructions
     if node.tools:
         instructions = f"{instructions}\n\n{TOOL_INTENT_INSTRUCTION}"
@@ -66,7 +69,7 @@ def to_request(node: AgentNode, input: str) -> AgentRequest:
         schema = json.dumps(node.output_schema, ensure_ascii=False)
         instructions = f"{instructions}\n\n{OUTPUT_SCHEMA_INSTRUCTION}\n\n{schema}"
     return AgentRequest(
-        node_id=node.id,
+        node_id=route_as or node.id,
         role=node.role,
         instructions=instructions,
         input=input,
@@ -76,7 +79,11 @@ def to_request(node: AgentNode, input: str) -> AgentRequest:
 
 
 async def run_agent_node(
-    node: AgentNode, runtime: AgentRuntime, input: str, on_event: OnAgentEvent | None = None
+    node: AgentNode,
+    runtime: AgentRuntime,
+    input: str,
+    on_event: OnAgentEvent | None = None,
+    route_as: str | None = None,
 ) -> AgentNodeResult:
     """Run `node` to its terminal event and summarise the stream.
 
@@ -84,7 +91,7 @@ async def run_agent_node(
     `ContractViolation` if the runtime's stream breaks the contract. If the caller is cancelled
     while the run is in flight, the run is cancelled too.
     """
-    run = runtime.start(to_request(node, input))
+    run = runtime.start(to_request(node, input, route_as))
     events: list[AgentEvent] = []
     try:
         async for event in run:

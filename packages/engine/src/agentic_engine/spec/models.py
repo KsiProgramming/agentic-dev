@@ -389,6 +389,53 @@ class RouterNode(_Base):
         return self
 
 
+MAX_TASK_TITLE = 80
+"""The longest title a hub may give a task."""
+
+MAX_TASK_INSTRUCTIONS = 4000
+"""The longest instructions a hub may give a task."""
+
+TASK_ID_PATTERN = r"^(?!lock$)[a-z][a-z0-9_-]{0,39}$"
+"""A task id a hub plans (6.1): a slug with no `.`, so `<orchestrator>.<task>` names one task's
+writer unambiguously (`task_writer_key`); not `lock`, as git refuses a branch ending `.lock`."""
+
+
+class OrchestratorHub(_Base):
+    """The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the
+    tasks through a typed output the engine makes (`orchestrator_plan_schema`)."""
+
+    role: NonEmptyStr
+    instructions: NonEmptyStr
+    provider: Literal["claude"] | None = Field(
+        default=None, description="Unset means the workspace default."
+    )
+    model: NonEmptyStr | None = None
+
+
+class OrchestratorNode(_Base):
+    """A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per
+    task, at most `max_concurrency` at a time (6.1).
+
+    The hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an
+    `id`, a `title` and `instructions`. Each worker's input is `{"task": …, "input": …}` as JSON
+    (the task is data, never the worker's instructions). The output is the workers' outputs in
+    task order, and a `reduce` may combine them (its sources are the task ids). The body is one
+    `agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own
+    branch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward
+    the run's `agents_spawned` limit once the plan is made; one worker that does not complete
+    cancels the others and fails the orchestrator."""
+
+    type: Literal["orchestrator"]
+    id: NodeId
+    hub: OrchestratorHub
+    body: "Node" = Field(description="The worker: what runs once per task.")
+    max_workers: int = Field(
+        ge=1, le=MAX_AGENTS_SPAWNED, description="The most tasks the hub may plan."
+    )
+    max_concurrency: int = Field(ge=1, le=MAX_AGENTS_ALIVE)
+    writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
+
+
 Node = Annotated[
     AgentNode
     | ToolNode
@@ -398,9 +445,55 @@ Node = Annotated[
     | MapNode
     | ReduceNode
     | ParallelNode
-    | RouterNode,
+    | RouterNode
+    | OrchestratorNode,
     Field(discriminator="type"),
 ]
+
+
+def orchestrator_plan_schema(node: OrchestratorNode) -> dict[str, JsonValue]:
+    """The output schema of `node`'s hub: at most `max_workers` tasks, and why it split the work
+    so. Unique task ids are checked by the engine once the plan matches."""
+    return {
+        "type": "object",
+        "required": ["tasks", "reason"],
+        "properties": {
+            "tasks": {
+                "type": "array",
+                "maxItems": node.max_workers,
+                "items": {
+                    "type": "object",
+                    "required": ["id", "title", "instructions"],
+                    "properties": {
+                        "id": {"type": "string", "pattern": TASK_ID_PATTERN},
+                        "title": {"type": "string", "minLength": 1, "maxLength": MAX_TASK_TITLE},
+                        "instructions": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": MAX_TASK_INSTRUCTIONS,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "reason": {"type": "string", "maxLength": 300},
+        },
+        "additionalProperties": False,
+    }
+
+
+def task_writer_key(orchestrator_id: str, task_id: str) -> str:
+    """What a writer in `orchestrator_id`'s body is known by while it works on task `task_id`:
+    its worktree, its branch (`agent/<run>/<key>`) and the node a gate's edits name. A `NodeId`
+    and a task id have no `.`, so the key is never another node's id."""
+    return f"{orchestrator_id}.{task_id}"
+
+
+def task_writer_orchestrator(key: str) -> str | None:
+    """The orchestrator a task writer's key (`task_writer_key`) belongs to; `None` for a node
+    id."""
+    orchestrator, dot, _ = key.partition(".")
+    return orchestrator if dot else None
 
 
 def classifier_schema(router: RouterNode) -> dict[str, JsonValue]:
@@ -435,7 +528,7 @@ def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
         case SequenceNode():
             for i, step in enumerate(node.steps):
                 yield from iter_nodes(step, f"{path}.steps[{i}]")
-        case LoopNode() | MapNode():
+        case LoopNode() | MapNode() | OrchestratorNode():
             yield from iter_nodes(node.body, f"{path}.body")
         case ParallelNode():
             for i, branch in enumerate(node.branches):
@@ -478,6 +571,7 @@ def node_tools(node: Node) -> list[str]:
             | ReduceNode()
             | ParallelNode()
             | RouterNode()
+            | OrchestratorNode()
         ):
             return []
 
@@ -531,6 +625,7 @@ type IssueCode = Literal[
     "artifact_conflict",
     "invalid_vote",
     "invalid_router",
+    "not_allowed_in_orchestrator",
 ]
 
 
@@ -583,7 +678,11 @@ def publish_gate_issues(root: Node) -> list[ValidationIssue]:
     gate between that writer and itself, so a human approves what is published."""
     issues: list[ValidationIssue] = []
     seen: list[tuple[str, Node]] = []
+    tasked = task_node_ids(root)
     for path, node in iter_nodes(root):
+        if isinstance(node, OrchestratorNode):
+            seen.append((path, node))
+            continue
         if isinstance(node, SequenceNode | LoopNode | MapNode | ParallelNode | RouterNode):
             continue
         for tool in sorted(PUBLISH_TOOLS.intersection(node_tools(node))):
@@ -598,7 +697,7 @@ def publish_gate_issues(root: Node) -> list[ValidationIssue]:
             # A writer or gate on a route of a router may not have run: only those whose
             # route holds the publisher too count.
             earlier = [n for at, n in seen if within(path, scope_of(at))]
-            if found := _publish_issue(node, earlier):
+            if found := _publish_issue(node, earlier, tasked):
                 code, message = found
                 issues.append(
                     ValidationIssue(code=code, path=path, node_id=node.id, message=message)
@@ -612,12 +711,20 @@ def publish_gate_errors(root: Node) -> list[str]:
     return messages(publish_gate_issues(root))
 
 
-def _publish_issue(node: "ToolNode", earlier: list[Node]) -> tuple[IssueCode, str] | None:
+def _publish_issue(
+    node: "ToolNode", earlier: list[Node], tasked: Collection[str] = ()
+) -> tuple[IssueCode, str] | None:
     source = node.args.get("from_node")
     if not isinstance(source, str):
         return (
             "reference",
             f"node {node.id!r}: {node.tool} needs `from_node`, the writer to publish",
+        )
+    if source in tasked:
+        return (
+            "reference",
+            f"node {node.id!r}: `from_node` {source!r} is an orchestrator or one of its workers, "
+            "whose task branches cannot be published yet",
         )
     ids = [n.id for n in earlier]
     if source not in ids:
@@ -754,6 +861,8 @@ def _not_in_loop(node: Node) -> str | None:
             return "map"
         case ParallelNode():
             return "parallel"
+        case OrchestratorNode():
+            return "orchestrator"
         case _ if tools & PUBLISH_TOOLS:
             return "publisher"
         case _ if tools & CREATE_TOOLS:
@@ -772,7 +881,7 @@ def map_issues(root: Node) -> list[ValidationIssue]:
     and a vote's `min_votes` must be reachable by that parallel's join (`invalid_vote`; a map's
     item count is only known when it runs)."""
     issues: list[ValidationIssue] = []
-    sources: dict[str, MapNode | ParallelNode] = {}
+    sources: dict[str, MapNode | ParallelNode | OrchestratorNode] = {}
     scopes: dict[str, str] = {}
     for path, node in iter_nodes(root):
         match node:
@@ -802,13 +911,13 @@ def map_issues(root: Node) -> list[ValidationIssue]:
                         )
                 sources[node.id] = node
                 scopes[node.id] = scope_of(path)
-            case ParallelNode():
+            case ParallelNode() | OrchestratorNode():
                 sources[node.id] = node
                 scopes[node.id] = scope_of(path)
             case ReduceNode() if node.from_ not in sources:
                 message = (
-                    f"reduce {node.id!r} at {path}: `from` {node.from_!r} is not a map or "
-                    "parallel that runs before it"
+                    f"reduce {node.id!r} at {path}: `from` {node.from_!r} is not a map, "
+                    "parallel or orchestrator that runs before it"
                 )
                 issues.append(
                     ValidationIssue(code="reference", path=path, node_id=node.id, message=message)
@@ -943,6 +1052,60 @@ def router_issues(root: Node) -> list[ValidationIssue]:
     return issues
 
 
+def _not_in_orchestrator(node: Node) -> str | None:
+    """Why `node` cannot be in an orchestrator's body (its worker) in 6.1: only agent, tool and
+    sequence nodes, and no publisher or repo creator. A writer may be there: it writes on its
+    task's own branch."""
+    tools = set(node_tools(node))
+    match node:
+        case AgentNode() | ToolNode() | SequenceNode():
+            if tools & PUBLISH_TOOLS:
+                return "publisher"
+            if tools & CREATE_TOOLS:
+                return "repo creator"
+            return None
+        case _:
+            return node.type
+
+
+def orchestrator_issues(root: Node) -> list[ValidationIssue]:
+    """Why the orchestrators under `root` cannot run, in run order; empty if they can. Its body
+    may hold only agent, tool and sequence nodes, none of them a publisher or a repo creator
+    (`not_allowed_in_orchestrator`, on that node). An orchestrator may not be inside a map, a
+    parallel or another orchestrator (the map and parallel rules and this one say so), nor a
+    loop (the loop rules)."""
+    issues: list[ValidationIssue] = []
+    for path, node in iter_nodes(root):
+        if not isinstance(node, OrchestratorNode):
+            continue
+        for inner_path, inner in iter_nodes(node.body, f"{path}.body"):
+            if reason := _not_in_orchestrator(inner):
+                message = (
+                    f"orchestrator {node.id!r} at {path}: {reason} {inner.id!r} at {inner_path} "
+                    "cannot be inside an orchestrator's worker yet"
+                )
+                issues.append(
+                    ValidationIssue(
+                        code="not_allowed_in_orchestrator",
+                        path=inner_path,
+                        node_id=inner.id,
+                        message=message,
+                    )
+                )
+    return issues
+
+
+def task_node_ids(root: Node) -> set[str]:
+    """The ids of the orchestrators under `root` and of every node in their bodies: nodes that
+    run once per planned task."""
+    ids: set[str] = set()
+    for _, node in iter_nodes(root):
+        if isinstance(node, OrchestratorNode):
+            ids.add(node.id)
+            ids.update(inner.id for _, inner in iter_nodes(node.body))
+    return ids
+
+
 def tool_issues(root: Node, known_tools: Collection[str] = PLATFORM_TOOLS) -> list[ValidationIssue]:
     """Each tool a node under `root` names that is not one of `known_tools`, in run order."""
     issues: list[ValidationIssue] = []
@@ -995,7 +1158,7 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
                 over(
                     node, path, "loop_iterations", policy.loop_iterations, node.max_iterations, why
                 )
-            case MapNode() if node.max_concurrency > policy.agents_alive:
+            case MapNode() | OrchestratorNode() if node.max_concurrency > policy.agents_alive:
                 why = (
                     f"max_concurrency {node.max_concurrency} is above the workspace limit of "
                     f"{policy.agents_alive} agents alive"
@@ -1016,7 +1179,7 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
             case _:
                 pass
         match node:
-            case LoopNode() | MapNode() | ParallelNode():
+            case LoopNode() | MapNode() | ParallelNode() | OrchestratorNode():
                 if depth + 1 > policy.max_depth:
                     why = (
                         f"nesting depth {depth + 1} is above the workspace limit of "
@@ -1043,7 +1206,8 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
 
 def agents_spawned(node: Node) -> int:
     """The most agents `node` starts, counted before it runs: a router its classifier and its
-    largest route. A map's items are only known when it runs, so a map counts none here."""
+    largest route. A map's items are only known when it runs, so a map counts none here, and an
+    orchestrator only its hub (its workers are counted once it has planned them)."""
     match node:
         case AgentNode():
             return 1
@@ -1051,6 +1215,8 @@ def agents_spawned(node: Node) -> int:
             return 1 if node.agent is not None else 0
         case ToolNode() | GateNode() | MapNode():
             return 0
+        case OrchestratorNode():
+            return 1
         case SequenceNode():
             return sum(agents_spawned(step) for step in node.steps)
         case LoopNode():
@@ -1085,6 +1251,8 @@ def budget_issues(
                 model = node.agent.model
             case RouterNode() if node.classifier is not None:
                 model = node.classifier.model
+            case OrchestratorNode():
+                model = node.hub.model
             case _:
                 continue
         model = model or default_model
@@ -1190,6 +1358,17 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                 return {**seen, node.writes: node} if node.writes else seen
             case ReduceNode():
                 return {**seen, node.writes: node} if node.writes else seen
+            case OrchestratorNode():
+                for inner_path, inner in iter_nodes(node.body, f"{path}.body"):
+                    if isinstance(inner, AgentNode | ToolNode | ReduceNode) and inner.writes:
+                        conflict(
+                            inner,
+                            inner_path,
+                            f"writes {inner.writes!r} inside orchestrator {node.id!r}, which runs "
+                            "it once per task; give the orchestrator `writes` instead",
+                        )
+                visit(node.body, f"{path}.body", seen)
+                return {**seen, node.writes: _UNTYPED} if node.writes else seen
             case GateNode():
                 return seen
             case SequenceNode():
@@ -1297,7 +1476,7 @@ def port_edges(root: Node) -> list[tuple[PortProducer, PortNode, str]]:
                     previous = step
                 case GateNode():
                     pass
-                case LoopNode() | MapNode():
+                case LoopNode() | MapNode() | OrchestratorNode():
                     previous = None
                     visit(step.body, f"{step_path}.body")
                 case ParallelNode():
@@ -1321,15 +1500,15 @@ def merge_sources(root: Node) -> list[tuple[ReduceNode, PortNode, str]]:
     """Each node whose output a `dedupe` or `vote` reduce under `root` merges, as
     `(reduce, source, source's path)`: the last step of a map's body or of each parallel branch
     (gates looked through), when it is an agent or tool node."""
-    containers: dict[str, tuple[str, MapNode | ParallelNode]] = {}
+    containers: dict[str, tuple[str, MapNode | ParallelNode | OrchestratorNode]] = {}
     found: list[tuple[ReduceNode, PortNode, str]] = []
     for path, node in iter_nodes(root):
         match node:
-            case MapNode() | ParallelNode():
+            case MapNode() | ParallelNode() | OrchestratorNode():
                 containers[node.id] = (path, node)
             case ReduceNode() if node.merges and node.from_ in containers:
                 at, source = containers[node.from_]
-                if isinstance(source, MapNode):
+                if isinstance(source, MapNode | OrchestratorNode):
                     outputs = [(f"{at}.body", source.body)]
                 else:
                     outputs = [(f"{at}.branches[{i}]", b) for i, b in enumerate(source.branches)]
@@ -1448,7 +1627,7 @@ def structure_issues(root: Node) -> list[ValidationIssue]:
     map, parallel and router rules, references to other nodes, a gate before every publisher, the
     rules for creating the repo, typed ports and run artifacts."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
-    issues += parallel_issues(root) + router_issues(root)
+    issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root)
     issues += port_issues(root) + artifact_issues(root)
     return in_run_order(root, issues)
@@ -1468,11 +1647,25 @@ def in_run_order(root: Node, issues: list[ValidationIssue]) -> list[ValidationIs
 
 def writer_node_ids(root: Node, write_tools: Collection[str] = WRITE_TOOLS) -> set[str]:
     """The ids of the nodes under `root` that may call one of `write_tools` (each gets its own
-    worktree and branch)."""
+    worktree and branch), but those in an orchestrator's body: they write per task
+    (`task_writer_orchestrators`)."""
+    tasked = task_node_ids(root)
     return {
         node.id
         for _, node in iter_nodes(root)
-        if any(tool in write_tools for tool in node_tools(node))
+        if node.id not in tasked and any(tool in write_tools for tool in node_tools(node))
+    }
+
+
+def task_writer_orchestrators(root: Node, write_tools: Collection[str] = WRITE_TOOLS) -> set[str]:
+    """The ids of the orchestrators under `root` whose body holds a node that may call one of
+    `write_tools`: each task's writer gets its own worktree and branch, named by
+    `task_writer_key`, made on its first call."""
+    return {
+        node.id
+        for _, node in iter_nodes(root)
+        if isinstance(node, OrchestratorNode)
+        and any(set(write_tools) & set(node_tools(inner)) for _, inner in iter_nodes(node.body))
     }
 
 

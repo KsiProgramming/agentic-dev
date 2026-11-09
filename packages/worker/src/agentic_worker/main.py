@@ -99,6 +99,7 @@ from agentic_engine.spec import (
     creates_repo,
     iter_nodes,
     node_tools,
+    task_writer_orchestrators,
     writer_node_ids,
 )
 from agentic_github import (
@@ -646,9 +647,10 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             artifacts, mirror_dir = mirrored, sandbox.artifacts_dir
             # Entered after the sandbox, so the MCP clients close before the sandbox is destroyed.
             writers = writer_node_ids(run.spec.root, WRITE_TOOL_NAMES)
-            review = SandboxGateReview(sandbox, run.id, writers)
+            tasked = task_writer_orchestrators(run.spec.root, WRITE_TOOL_NAMES)
+            review = SandboxGateReview(sandbox, run.id, writers, tasked)
             tools = await stack.enter_async_context(
-                open_repo_tools(sandbox, run_id=run.id, writers=writers)
+                open_repo_tools(sandbox, run_id=run.id, writers=writers, task_writers=tasked)
             )
             scanning = await stack.enter_async_context(open_scan_tools(sandbox))
             tools = RunTools([tools, scanning])

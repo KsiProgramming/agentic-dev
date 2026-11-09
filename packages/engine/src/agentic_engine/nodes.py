@@ -18,6 +18,7 @@ from agentic_engine.spec import (
     LoopNode,
     MapNode,
     Node,
+    OrchestratorNode,
     ParallelNode,
     ReduceNode,
     RouterNode,
@@ -359,6 +360,30 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
             "max_concurrency": 4,
         },
         ui={"over": {"ui:placeholder": "A CEL list, e.g. results.modules.data.modules"}},
+    ),
+    _manifest(
+        OrchestratorNode,
+        label="Orchestrator",
+        description="A hub agent plans tasks at run time; its body runs once per task.",
+        category="flow",
+        icon="network",
+        slots=["body"],
+        default={
+            "type": "orchestrator",
+            "id": "orchestrator",
+            "hub": {
+                "role": "Lead",
+                "instructions": "Split the work in your input into tasks for the workers.",
+            },
+            "body": _agent(),
+            "max_workers": 4,
+            "max_concurrency": 4,
+        },
+        ui={
+            "ui:order": ["hub", "max_workers", "max_concurrency", "*"],
+            "hub": {"instructions": _TEXTAREA, "model": _MODEL},
+            "writes": _ADVANCED,
+        },
     ),
     _manifest(
         ReduceNode,

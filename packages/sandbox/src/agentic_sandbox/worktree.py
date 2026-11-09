@@ -33,8 +33,9 @@ AGENT_IDENTITY = ("agentic-dev agent", "agent@agentic-dev.invalid")
 writes a ref must set it: without one, git asks DNS for the host's full name, which in a sandbox
 with no network takes seconds to time out."""
 
-# The spec's node id pattern: lowercase, ref- and path-safe.
-_NODE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
+# The spec's node id pattern (lowercase, ref- and path-safe), or an orchestrator's task writer
+# (6.1): `<node>.<task>`, the task a slug that is not `lock` (git refuses `….lock` refs).
+_NODE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,62}(\.(?!lock$)[a-z][a-z0-9_-]{0,39})?$")
 _WRONG_BRANCH = 9
 
 WRITE_OUTSIDE = 4

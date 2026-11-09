@@ -744,7 +744,7 @@ export interface components {
              */
             op: "addNode";
             /** Node */
-            node: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+            node: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
             /**
              * At
              * @description Where it goes; unset: detached.
@@ -1154,7 +1154,10 @@ export interface components {
          * @description The approver's new text for an editable file of a writer's branch.
          */
         FileEdit: {
-            /** Node Id */
+            /**
+             * Node Id
+             * @description The writer: a node id, or a task's writer (`fix.t1`, 6.1).
+             */
             node_id: string;
             /** Path */
             path: string;
@@ -1257,8 +1260,9 @@ export interface components {
         };
         /**
          * Into
-         * @description Into a container: a sequence's step or a parallel's branch at `index`; a loop's or map's
-         *     body, which must be empty; a router route's `then`, or its `default`, which must be empty.
+         * @description Into a container: a sequence's step or a parallel's branch at `index`; a loop's, map's or
+         *     orchestrator's body, which must be empty; a router route's `then`, or its `default`, which must
+         *     be empty.
          */
         Into: {
             /**
@@ -1278,7 +1282,7 @@ export interface components {
             route?: string | null;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1309,7 +1313,7 @@ export interface components {
             /** Id */
             id: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
             /**
              * Until
              * @description CEL condition checked after each iteration; true stops the loop.
@@ -1345,7 +1349,7 @@ export interface components {
              */
             over: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
             /** Max Concurrency */
             max_concurrency: number;
         };
@@ -1498,6 +1502,65 @@ export interface components {
             node_id: string | null;
         };
         /**
+         * OrchestratorHub
+         * @description The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the
+         *     tasks through a typed output the engine makes (`orchestrator_plan_schema`).
+         */
+        OrchestratorHub: {
+            /** Role */
+            role: string;
+            /** Instructions */
+            instructions: string;
+            /**
+             * Provider
+             * @description Unset means the workspace default.
+             */
+            provider?: "claude" | null;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * OrchestratorNode
+         * @description A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per
+         *     task, at most `max_concurrency` at a time (6.1).
+         *
+         *     The hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an
+         *     `id`, a `title` and `instructions`. Each worker's input is `{"task": …, "input": …}` as JSON
+         *     (the task is data, never the worker's instructions). The output is the workers' outputs in
+         *     task order, and a `reduce` may combine them (its sources are the task ids). The body is one
+         *     `agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own
+         *     branch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward
+         *     the run's `agents_spawned` limit once the plan is made; one worker that does not complete
+         *     cancels the others and fails the orchestrator.
+         */
+        OrchestratorNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "orchestrator";
+            /** Id */
+            id: string;
+            hub: components["schemas"]["OrchestratorHub"];
+            /**
+             * Body
+             * @description The worker: what runs once per task.
+             */
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
+            /**
+             * Max Workers
+             * @description The most tasks the hub may plan.
+             */
+            max_workers: number;
+            /** Max Concurrency */
+            max_concurrency: number;
+            /**
+             * Writes
+             * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
+             */
+            writes?: string | null;
+        };
+        /**
          * ParallelNode
          * @description Runs its branches at the same time, each on the parallel's input, and joins them.
          *
@@ -1521,7 +1584,7 @@ export interface components {
             /** Id */
             id: string;
             /** Branches */
-            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"])[];
+            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"])[];
             /**
              * Join
              * @enum {string}
@@ -1760,7 +1823,7 @@ export interface components {
              * Then
              * @description What runs on this route: one agent, tool or sequence node.
              */
-            then: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+            then: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
         };
         /**
          * RouterClassifier
@@ -1804,7 +1867,7 @@ export interface components {
              * Default
              * @description What runs when no route is chosen.
              */
-            default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"]) | null;
+            default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"]) | null;
             /** @description Classifier mode: the agent that chooses the route. */
             classifier?: components["schemas"]["RouterClassifier"] | null;
         };
@@ -2290,7 +2353,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"])[];
         };
         /**
          * SetParam
@@ -2603,7 +2666,7 @@ export interface components {
              */
             budget_usd?: number | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
         };
         /** WorkflowSummary */
         WorkflowSummary: {

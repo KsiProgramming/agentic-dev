@@ -49,6 +49,13 @@ def merge_routes(
     return {**left, **right}
 
 
+def merge_plans(
+    left: dict[str, list[JsonValue]], right: dict[str, list[JsonValue]]
+) -> dict[str, list[JsonValue]]:
+    """Reducer for `RunState.plans`: an orchestrator's plan, by its id."""
+    return {**left, **right}
+
+
 class RunState(TypedDict):
     """What flows through the compiled graph.
 
@@ -78,6 +85,11 @@ class RunState(TypedDict):
 
     `routes` holds the route each router chose, by router id (`None` if it could not choose), so
     a resumed run goes on in that route. Checkpoints saved before phase 4.6 have none.
+
+    `plans` holds the tasks each orchestrator's hub planned (6.1), by orchestrator id, so a
+    resumed run runs the same tasks and never asks the hub again. Its workers' results are in
+    `map_results`, under the orchestrator's id, by task index. Checkpoints saved before phase 6.1
+    have none.
     """
 
     input: str
@@ -91,6 +103,7 @@ class RunState(TypedDict):
     parallel_results: Annotated[dict[str, dict[str, AgentNodeResult]], merge_map_results]
     artifacts: Annotated[dict[str, ArtifactRef], merge_artifacts]
     routes: Annotated[dict[str, str | None], merge_routes]
+    plans: Annotated[dict[str, list[JsonValue]], merge_plans]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -106,6 +119,7 @@ class RunUpdate(TypedDict, total=False):
     parallel_results: dict[str, dict[str, AgentNodeResult]]
     artifacts: dict[str, ArtifactRef]
     routes: dict[str, str | None]
+    plans: dict[str, list[JsonValue]]
 
 
 class MapItem(TypedDict):
@@ -128,6 +142,17 @@ class ParallelBranch(TypedDict):
     branch_artifacts: NotRequired[dict[str, ArtifactRef]]
 
 
+class OrchestratorTask(TypedDict):
+    """What an orchestrator sends the worker that runs its body for one planned task: the task's
+    index in the plan, the task (`id`, `title`, `instructions`), the body's input (`{"task",
+    "input"}` as JSON) and the run's artifacts when the orchestrator started."""
+
+    index: int
+    task: JsonValue
+    task_input: str
+    task_artifacts: dict[str, ArtifactRef]
+
+
 def initial_state(input: str) -> RunState:
     return RunState(
         input=input,
@@ -141,6 +166,7 @@ def initial_state(input: str) -> RunState:
         parallel_results={},
         artifacts={},
         routes={},
+        plans={},
     )
 
 

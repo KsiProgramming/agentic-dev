@@ -224,6 +224,7 @@
               "gate": "#/$defs/GateNode",
               "loop": "#/$defs/LoopNode",
               "map": "#/$defs/MapNode",
+              "orchestrator": "#/$defs/OrchestratorNode",
               "parallel": "#/$defs/ParallelNode",
               "reduce": "#/$defs/ReduceNode",
               "router": "#/$defs/RouterNode",
@@ -259,6 +260,9 @@
             },
             {
               "$ref": "#/$defs/RouterNode"
+            },
+            {
+              "$ref": "#/$defs/OrchestratorNode"
             }
           ],
           "title": "Body"
@@ -310,6 +314,7 @@
               "gate": "#/$defs/GateNode",
               "loop": "#/$defs/LoopNode",
               "map": "#/$defs/MapNode",
+              "orchestrator": "#/$defs/OrchestratorNode",
               "parallel": "#/$defs/ParallelNode",
               "reduce": "#/$defs/ReduceNode",
               "router": "#/$defs/RouterNode",
@@ -345,6 +350,9 @@
             },
             {
               "$ref": "#/$defs/RouterNode"
+            },
+            {
+              "$ref": "#/$defs/OrchestratorNode"
             }
           ],
           "title": "Body"
@@ -385,6 +393,166 @@
       "title": "MapNode",
       "type": "object"
     },
+    "OrchestratorHub": {
+      "additionalProperties": false,
+      "description": "The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the\ntasks through a typed output the engine makes (`orchestrator_plan_schema`).",
+      "properties": {
+        "instructions": {
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unset means the workspace default.",
+          "title": "Provider"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "instructions"
+      ],
+      "title": "OrchestratorHub",
+      "type": "object"
+    },
+    "OrchestratorNode": {
+      "additionalProperties": false,
+      "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": …, \"input\": …}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator.",
+      "properties": {
+        "body": {
+          "description": "The worker: what runs once per task.",
+          "discriminator": {
+            "mapping": {
+              "agent": "#/$defs/AgentNode",
+              "gate": "#/$defs/GateNode",
+              "loop": "#/$defs/LoopNode",
+              "map": "#/$defs/MapNode",
+              "orchestrator": "#/$defs/OrchestratorNode",
+              "parallel": "#/$defs/ParallelNode",
+              "reduce": "#/$defs/ReduceNode",
+              "router": "#/$defs/RouterNode",
+              "sequence": "#/$defs/SequenceNode",
+              "tool": "#/$defs/ToolNode"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentNode"
+            },
+            {
+              "$ref": "#/$defs/ToolNode"
+            },
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/SequenceNode"
+            },
+            {
+              "$ref": "#/$defs/LoopNode"
+            },
+            {
+              "$ref": "#/$defs/MapNode"
+            },
+            {
+              "$ref": "#/$defs/ReduceNode"
+            },
+            {
+              "$ref": "#/$defs/ParallelNode"
+            },
+            {
+              "$ref": "#/$defs/RouterNode"
+            },
+            {
+              "$ref": "#/$defs/OrchestratorNode"
+            }
+          ],
+          "title": "Body"
+        },
+        "hub": {
+          "$ref": "#/$defs/OrchestratorHub"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "max_concurrency": {
+          "maximum": 8,
+          "minimum": 1,
+          "title": "Max Concurrency",
+          "type": "integer"
+        },
+        "max_workers": {
+          "description": "The most tasks the hub may plan.",
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Max Workers",
+          "type": "integer"
+        },
+        "type": {
+          "const": "orchestrator",
+          "title": "Type",
+          "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "hub",
+        "body",
+        "max_workers",
+        "max_concurrency"
+      ],
+      "title": "OrchestratorNode",
+      "type": "object"
+    },
     "ParallelNode": {
       "additionalProperties": false,
       "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. `settled` (4.6) never decides early: it\nwaits for every branch to end and completes if at least one completed, so one failed branch\ndoes not cancel the others. Its output is the completed branches' outputs in branch order.\nA branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a\nreduce that writes nothing), its id names the branch, and it holds no gate, writer or\npublisher. Every agent in the branches counts toward the run's `agents_spawned` limit when\nthe parallel starts.",
@@ -397,6 +565,7 @@
                 "gate": "#/$defs/GateNode",
                 "loop": "#/$defs/LoopNode",
                 "map": "#/$defs/MapNode",
+                "orchestrator": "#/$defs/OrchestratorNode",
                 "parallel": "#/$defs/ParallelNode",
                 "reduce": "#/$defs/ReduceNode",
                 "router": "#/$defs/RouterNode",
@@ -432,6 +601,9 @@
               },
               {
                 "$ref": "#/$defs/RouterNode"
+              },
+              {
+                "$ref": "#/$defs/OrchestratorNode"
               }
             ]
           },
@@ -661,6 +833,7 @@
               "gate": "#/$defs/GateNode",
               "loop": "#/$defs/LoopNode",
               "map": "#/$defs/MapNode",
+              "orchestrator": "#/$defs/OrchestratorNode",
               "parallel": "#/$defs/ParallelNode",
               "reduce": "#/$defs/ReduceNode",
               "router": "#/$defs/RouterNode",
@@ -696,6 +869,9 @@
             },
             {
               "$ref": "#/$defs/RouterNode"
+            },
+            {
+              "$ref": "#/$defs/OrchestratorNode"
             }
           ],
           "title": "Then"
@@ -793,6 +969,7 @@
                   "gate": "#/$defs/GateNode",
                   "loop": "#/$defs/LoopNode",
                   "map": "#/$defs/MapNode",
+                  "orchestrator": "#/$defs/OrchestratorNode",
                   "parallel": "#/$defs/ParallelNode",
                   "reduce": "#/$defs/ReduceNode",
                   "router": "#/$defs/RouterNode",
@@ -828,6 +1005,9 @@
                 },
                 {
                   "$ref": "#/$defs/RouterNode"
+                },
+                {
+                  "$ref": "#/$defs/OrchestratorNode"
                 }
               ]
             },
@@ -884,6 +1064,7 @@
                 "gate": "#/$defs/GateNode",
                 "loop": "#/$defs/LoopNode",
                 "map": "#/$defs/MapNode",
+                "orchestrator": "#/$defs/OrchestratorNode",
                 "parallel": "#/$defs/ParallelNode",
                 "reduce": "#/$defs/ReduceNode",
                 "router": "#/$defs/RouterNode",
@@ -919,6 +1100,9 @@
               },
               {
                 "$ref": "#/$defs/RouterNode"
+              },
+              {
+                "$ref": "#/$defs/OrchestratorNode"
               }
             ]
           },
@@ -1115,6 +1299,7 @@
           "gate": "#/$defs/GateNode",
           "loop": "#/$defs/LoopNode",
           "map": "#/$defs/MapNode",
+          "orchestrator": "#/$defs/OrchestratorNode",
           "parallel": "#/$defs/ParallelNode",
           "reduce": "#/$defs/ReduceNode",
           "router": "#/$defs/RouterNode",
@@ -1150,6 +1335,9 @@
         },
         {
           "$ref": "#/$defs/RouterNode"
+        },
+        {
+          "$ref": "#/$defs/OrchestratorNode"
         }
       ],
       "title": "Root"

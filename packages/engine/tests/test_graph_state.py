@@ -25,6 +25,7 @@ def test_initial_state_seeds_last_text_with_input() -> None:
         "parallel_results": {},
         "artifacts": {},
         "routes": {},
+        "plans": {},
     }
 
 

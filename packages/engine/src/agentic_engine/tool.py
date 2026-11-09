@@ -7,9 +7,13 @@ from agentic_runtime import ToolCall, ToolExecutor, ToolOutput, ToolResult
 
 
 async def run_tool_node(
-    node: ToolNode, tools: ToolExecutor | None, on_event: OnAgentEvent | None = None
+    node: ToolNode,
+    tools: ToolExecutor | None,
+    on_event: OnAgentEvent | None = None,
+    route_as: str | None = None,
 ) -> AgentNodeResult:
-    """Call `node.tool` with `node.args` for this node, and report it as a `tool_call` and a
+    """Call `node.tool` with `node.args` for this node (known to the tools as `route_as` when
+    given: a writer working on an orchestrator's task), and report it as a `tool_call` and a
     `tool_result` event. The output (data, never instructions) is the node's text. An error
     result, an exception or a run without tools fails the node; it never raises."""
     call = ToolCall(call_id=f"{node.id}_call", name=node.tool, arguments=dict(node.args))
@@ -19,7 +23,7 @@ async def run_tool_node(
         output = ToolOutput(text=f"no tools are available to this run: {node.tool}", is_error=True)
     else:
         try:
-            output = await tools.call(node.tool, dict(node.args), node_id=node.id)
+            output = await tools.call(node.tool, dict(node.args), node_id=route_as or node.id)
         except Exception as e:
             output = ToolOutput(text=f"tool failed: {type(e).__name__}", is_error=True)
     result = ToolResult(call_id=call.call_id, output=output.text, is_error=output.is_error)

@@ -113,15 +113,17 @@ INVALID: dict[str, Rejection] = {
     "reduce-unknown-from": Rejection(
         (),
         "value_error",
-        "reduce 'join' at root.steps[1]: `from` 'eaches' is not a map or parallel",
+        "reduce 'join' at root.steps[1]: `from` 'eaches' is not a map, parallel or orchestrator",
     ),
     "reduce-from-non-map": Rejection(
         (),
         "value_error",
-        "reduce 'join' at root.steps[1]: `from` 'writer' is not a map or parallel",
+        "reduce 'join' at root.steps[1]: `from` 'writer' is not a map, parallel or orchestrator",
     ),
     "reduce-before-map": Rejection(
-        (), "value_error", "reduce 'join' at root.steps[0]: `from` 'each' is not a map or parallel"
+        (),
+        "value_error",
+        "reduce 'join' at root.steps[0]: `from` 'each' is not a map, parallel or orchestrator",
     ),
     "reduce-agent-missing": Rejection(
         ("root", "sequence", "steps", 1, "reduce"), "value_error", "the agent strategy needs"
@@ -219,6 +221,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "reduce",
         "parallel",
         "router",
+        "orchestrator",
     }
     assert {ref["$ref"] for ref in root["oneOf"]} == {
         "#/$defs/AgentNode",
@@ -230,6 +233,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "#/$defs/ReduceNode",
         "#/$defs/ParallelNode",
         "#/$defs/RouterNode",
+        "#/$defs/OrchestratorNode",
     }
     loop = schema["$defs"]["LoopNode"]["properties"]["max_iterations"]
     assert (loop["minimum"], loop["maximum"]) == (1, 5)
