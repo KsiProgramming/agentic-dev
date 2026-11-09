@@ -219,26 +219,45 @@ def test_a_reduce_combines_an_orchestrator() -> None:
     assert validate(root) == []
 
 
-def test_publishing_a_worker_branch_is_refused_until_the_integration_branch() -> None:
-    writer = agent("fixer", tools=["repo.write_file", "repo.commit"])
-    for source in ("fix", "fixer"):
-        root = {
-            "type": "sequence",
-            "id": "main",
-            "steps": [
-                orchestrator(writer),
-                {"type": "gate", "id": "approve", "title": "Publish?"},
-                {
-                    "type": "tool",
-                    "id": "publish",
-                    "tool": "github.openPR",
-                    "args": {"from_node": source, "title": "Fixes"},
-                },
-            ],
+def publishing(source: str, body: dict[str, Any], gate: bool = True) -> dict[str, Any]:
+    """An orchestrator over `body`, a gate unless `gate` is false, then `openPR` from `source`."""
+    steps: list[dict[str, Any]] = [orchestrator(body)]
+    if gate:
+        steps.append({"type": "gate", "id": "approve", "title": "Publish?"})
+    steps.append(
+        {
+            "type": "tool",
+            "id": "publish",
+            "tool": "github.openPR",
+            "args": {"from_node": source, "title": "Fixes"},
         }
-        issues = validate(root)
-        assert where(issues) == [("reference", "root.steps[2]", "publish")], source
-        assert "cannot be published yet" in issues[0].message
+    )
+    return {"type": "sequence", "id": "main", "steps": steps}
+
+
+WRITER = agent("fixer", tools=["repo.write_file", "repo.commit"])
+
+
+def test_the_orchestrator_publishes_its_integration_branch_after_a_gate() -> None:
+    assert validate(publishing("fix", WRITER)) == []
+
+
+def test_publishing_the_orchestrator_needs_a_gate() -> None:
+    issues = validate(publishing("fix", WRITER, gate=False))
+    assert where(issues) == [("publish_without_gate", "root.steps[1]", "publish")]
+
+
+def test_publishing_a_worker_names_its_orchestrator_instead() -> None:
+    issues = validate(publishing("fixer", WRITER))
+    assert where(issues) == [("reference", "root.steps[2]", "publish")]
+    assert "is a worker of 'fix'" in issues[0].message
+    assert "publish 'fix', its integration branch, instead" in issues[0].message
+
+
+def test_an_orchestrator_whose_tasks_do_not_write_has_nothing_to_publish() -> None:
+    issues = validate(publishing("fix", agent("reader", tools=["repo.read_file"])))
+    assert where(issues) == [("reference", "root.steps[2]", "publish")]
+    assert "is not a writer" in issues[0].message
 
 
 def test_a_worker_cannot_write_an_artifact_but_the_orchestrator_can() -> None:

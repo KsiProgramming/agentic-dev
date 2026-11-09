@@ -42,6 +42,7 @@ from agentic_engine.graph.state import (
     WorkflowRunStatus,
     initial_state,
 )
+from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.spec import WorkflowSpec
 from agentic_runtime import AgentRuntime, ToolExecutor
@@ -62,6 +63,7 @@ async def run_workflow(
     spent: Decimal = Decimal(0),
     review: GateReview | None = None,
     artifacts: ArtifactStore | None = None,
+    integrator: BranchIntegrator | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -77,7 +79,8 @@ async def run_workflow(
     gate, and
     `resume_workflow` continues it with the decision. `changes` are the files the writers that
     ran before the gate changed, from `review` (none without one), and an approval's edits are
-    committed through it. The gate expires `ttl_s` after it paused (`expires_at`).
+    committed through it. The gate expires `ttl_s` after it paused (`expires_at`). An
+    orchestrator whose body writes merges its tasks' branches through `integrator` (6.3).
     A run that created its repo ends the attempt `suspended`, with no event: `resume_workflow`
     continues it, in an attempt that has the repo cloned.
 
@@ -99,7 +102,16 @@ async def run_workflow(
     return await _finish(
         log,
         lambda: compile_workflow(
-            spec, runtime, log, checkpointer, tools, policy, budget, review, artifacts
+            spec,
+            runtime,
+            log,
+            checkpointer,
+            tools,
+            policy,
+            budget,
+            review,
+            artifacts,
+            integrator=integrator,
         ),
         initial_state(input),
         _config(spec, log.run_id),
@@ -124,6 +136,7 @@ async def resume_workflow(
     spent: Decimal = Decimal(0),
     review: GateReview | None = None,
     artifacts: ArtifactStore | None = None,
+    integrator: BranchIntegrator | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -143,7 +156,16 @@ async def resume_workflow(
     log = RunEventLog(run_id, sink, next_seq=next_seq)
     budget = budget_meter(policy, spent)
     graph = compile_workflow(
-        spec, runtime, log, checkpointer, tools, policy, budget, review, artifacts
+        spec,
+        runtime,
+        log,
+        checkpointer,
+        tools,
+        policy,
+        budget,
+        review,
+        artifacts,
+        integrator=integrator,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
@@ -258,6 +280,7 @@ async def _wait(
     gate pauses without them and says why (`changes_error`)."""
     ran = [n for n in dict.fromkeys(state["order"]) if state["results"][n].status == "completed"]
     ran += [key for n in ran for key in _task_writers(state["results"][n])]
+    ran = list(dict.fromkeys(ran))  # an integrated orchestrator is its own writer (6.3)
     changes: list[FileChange] = []
     error: str | None = None
     if review is not None:
@@ -281,8 +304,9 @@ async def _wait(
 
 
 def _task_writers(result: AgentNodeResult) -> list[str]:
-    """The writer keys of the tasks an orchestrator ran (6.1; `writers` in its `data`): a gate
-    after it shows what each task's writers changed on its own branch."""
+    """The writers an orchestrator names in its `data` (`writers`): its own id once its tasks'
+    branches were merged into its integration branch (6.3), so a gate after it shows that branch;
+    without an integrator, each task's writer key (6.1), so it shows each task's branch."""
     writers = (result.data or {}).get("writers")
     return [w for w in writers if isinstance(w, str)] if isinstance(writers, list) else []
 

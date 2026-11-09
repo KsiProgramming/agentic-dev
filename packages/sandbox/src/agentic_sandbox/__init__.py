@@ -4,6 +4,7 @@ branches bundled for publishing."""
 from agentic_sandbox.bundle import BranchBundle, export_branch
 from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.fake import FakeSandbox, FakeSandboxManager
+from agentic_sandbox.integrate import IntegrationOutcome, MergeSource, integrate_branches
 from agentic_sandbox.protocol import (
     ARTIFACT_NAME,
     DEFAULT_EXEC_TIMEOUT_S,
@@ -42,7 +43,9 @@ __all__ = [
     "ExecResult",
     "FakeSandbox",
     "FakeSandboxManager",
+    "IntegrationOutcome",
     "JobNetwork",
+    "MergeSource",
     "RepoSource",
     "Sandbox",
     "SandboxError",
@@ -52,4 +55,5 @@ __all__ = [
     "branch_name",
     "clone_shallow",
     "export_branch",
+    "integrate_branches",
 ]

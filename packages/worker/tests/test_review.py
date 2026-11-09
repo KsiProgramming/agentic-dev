@@ -1,4 +1,5 @@
-"""A gate's review of a run's writer branches in its sandbox (phase 3.6)."""
+"""A gate's review of a run's writer branches in its sandbox (phase 3.6), and an
+orchestrator's integration branch (6.3)."""
 
 import shutil
 from collections.abc import AsyncIterator
@@ -13,8 +14,10 @@ from agentic_engine.gate import (
     FileEdit,
     GateReviewError,
 )
+from agentic_engine.integrate import IntegrationError, MergeRequest
 from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, Worktree, add_worktree
 from agentic_sandbox.testing import make_repo
+from agentic_worker.integrate import SandboxIntegrator
 from agentic_worker.review import SandboxGateReview
 
 RUN_ID = UUID("00000000-0000-4000-8000-000000000003")
@@ -137,3 +140,42 @@ async def test_a_gate_shows_and_edits_each_task_of_an_orchestrator(sandbox: Sand
     assert list(commits) == ["fix.t2"]
     with pytest.raises(GateReviewError, match="not a writer"):
         await review.apply("approve", [FileEdit(node_id="other.t1", path="x.md", content="x")])
+
+
+async def test_a_gate_shows_and_edits_an_orchestrators_integration_branch(
+    sandbox: Sandbox,
+) -> None:
+    """6.3: the orchestrator's id names its integration branch, made of its tasks' branches."""
+    await write(sandbox, "fix.t1", "printf 'one\n' > one.md")
+    await write(sandbox, "fix.t2", "printf 'two\n' > two.md")
+    merged = await SandboxIntegrator(sandbox, RUN_ID).integrate(
+        "fix",
+        [MergeRequest(key="fix.t1", message="Merge t1"), MergeRequest(key="fix.t2", message="t2")],
+    )
+    review = SandboxGateReview(sandbox, RUN_ID, set(), {"fix"})
+
+    changes = await review.changes(["fix"])
+    commits = await review.apply("approve", [FileEdit(node_id="fix", path="two.md", content="2\n")])
+
+    assert merged.merged == ["fix.t1", "fix.t2"] and merged.branch == f"agent/{RUN_ID}/fix"
+    assert [(c.node_id, c.path, c.status) for c in changes] == [
+        ("fix", "one.md", "added"),
+        ("fix", "two.md", "added"),
+    ]
+    assert list(commits) == ["fix"]
+
+
+async def test_the_integrator_reports_conflicts_and_wraps_git_failures(sandbox: Sandbox) -> None:
+    await write(sandbox, "fix.t1", "printf 'one\n' > README.md")
+    await write(sandbox, "fix.t2", "printf 'two\n' > README.md")
+    integrator = SandboxIntegrator(sandbox, RUN_ID)
+
+    outcome = await integrator.integrate(
+        "fix", [MergeRequest(key="fix.t1", message="t1"), MergeRequest(key="fix.t2", message="t2")]
+    )
+
+    assert outcome.merged == ["fix.t1"] and outcome.conflicts == {"fix.t2": ["README.md"]}
+    # A directory in the way of the integration branch's worktree is a failure, not a conflict.
+    (Path(sandbox.worktrees_dir) / "other").mkdir()
+    with pytest.raises(IntegrationError):
+        await SandboxIntegrator(sandbox, RUN_ID).integrate("other", [])

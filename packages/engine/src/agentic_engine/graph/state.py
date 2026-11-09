@@ -56,6 +56,13 @@ def merge_plans(
     return {**left, **right}
 
 
+def merge_integrated(
+    left: dict[str, dict[str, JsonValue]], right: dict[str, dict[str, JsonValue]]
+) -> dict[str, dict[str, JsonValue]]:
+    """Reducer for `RunState.integrated`: an orchestrator's latest integration, by its id."""
+    return {**left, **right}
+
+
 class RunState(TypedDict):
     """What flows through the compiled graph.
 
@@ -94,6 +101,11 @@ class RunState(TypedDict):
     `rounds` counts the plans each orchestrator's hub made (6.2: one more per replan), by
     orchestrator id; a replan that planned no task still counts. Checkpoints saved before phase
     6.2 have none, which counts as one plan.
+
+    `integrated` holds each orchestrator's latest integration (6.3), by orchestrator id: its
+    integration branch (`branch`, `head`) and the task ids `merged` into it and `empty`. A
+    conflicting task's result in `map_results` is replaced by a failure. Checkpoints saved before
+    phase 6.3 have none.
     """
 
     input: str
@@ -109,6 +121,7 @@ class RunState(TypedDict):
     routes: Annotated[dict[str, str | None], merge_routes]
     plans: Annotated[dict[str, list[JsonValue]], merge_plans]
     rounds: Annotated[dict[str, int], merge_counts]
+    integrated: Annotated[dict[str, dict[str, JsonValue]], merge_integrated]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -126,6 +139,7 @@ class RunUpdate(TypedDict, total=False):
     routes: dict[str, str | None]
     plans: dict[str, list[JsonValue]]
     rounds: dict[str, int]
+    integrated: dict[str, dict[str, JsonValue]]
 
 
 class MapItem(TypedDict):
@@ -174,6 +188,7 @@ def initial_state(input: str) -> RunState:
         routes={},
         plans={},
         rounds={},
+        integrated={},
     )
 
 

@@ -45,7 +45,10 @@ each task's body, whose events carry `item` (the task's index), then its end (`n
 with `tasks`, `completed` and `rounds`). One task that does not complete cancels the others,
 unless its `replan` (6.2) lets the hub plan again: then the round settles (running tasks finish,
 those not started end `dropped`), `<id>.join` goes to `<id>.replan`, which writes
-`replan_started` and the hub's new `plan_made` (with `round`), and the new tasks run.
+`replan_started` and the hub's new `plan_made` (with `round`), and the new tasks run. An
+orchestrator whose body writes merges its completed tasks' branches into its integration branch
+after each round (6.3, `<id>.integrate`): `branch_integrated`; a task that conflicts counts as
+failed.
 
 An agent or tool node with typed ports (4.2) has its input checked before it starts and its
 output once it completes: a value that does not match fails the node, whose `node_failed` carries
@@ -96,6 +99,7 @@ from agentic_engine.artifacts import (
 from agentic_engine.budget import BudgetMeter
 from agentic_engine.events import (
     ARTIFACT_WRITTEN,
+    BRANCH_INTEGRATED,
     LOOP_CONDITION_EVALUATED,
     LOOP_ITERATION_STARTED,
     MAP_ITEM_COMPLETED,
@@ -133,6 +137,12 @@ from agentic_engine.graph.state import (
     ParallelBranch,
     RunState,
     RunUpdate,
+)
+from agentic_engine.integrate import (
+    BranchIntegrator,
+    IntegrationError,
+    MergeRequest,
+    conflict_error,
 )
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
@@ -185,14 +195,15 @@ class CompileError(ValueError):
 class _Limits:
     """A run's policy, the slots of its `agents_alive` limit, its budget meter if it has a
     budget, the review its gates show and edit branches through, the node each typed input
-    comes from (consumer id → producer id, `port_edges`) and the store of its artifacts, shared
-    by all its nodes for one attempt."""
+    comes from (consumer id → producer id, `port_edges`), the store of its artifacts and what
+    merges its orchestrators' task branches (6.3), shared by all its nodes for one attempt."""
 
     policy: Policy
     budget: BudgetMeter | None = None
     review: GateReview | None = None
     sources: dict[str, str] = field(default_factory=dict[str, str])
     artifacts: ArtifactStore = field(default_factory=InMemoryArtifactStore)
+    integrator: BranchIntegrator | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -263,6 +274,17 @@ def tasks_join_node_id(orchestrator: OrchestratorNode) -> str:
     return f"{orchestrator.id}.join"
 
 
+def integrate_node_id(orchestrator: OrchestratorNode) -> str:
+    """The LangGraph node that merges `orchestrator`'s completed task branches (6.3)."""
+    return f"{orchestrator.id}.integrate"
+
+
+def body_writes(orchestrator: OrchestratorNode) -> bool:
+    """Whether a node in `orchestrator`'s body may write to the repo: then each task writes on
+    its own branch, and the completed ones are merged into the orchestrator's (6.3)."""
+    return any(WRITE_TOOLS.intersection(node_tools(n)) for _, n in iter_nodes(orchestrator.body))
+
+
 def replan_node_id(orchestrator: OrchestratorNode) -> str:
     """The LangGraph node where `orchestrator`'s hub plans again once a task failed (6.2)."""
     return f"{orchestrator.id}.replan"
@@ -303,9 +325,12 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return sum(steps(s) for s in node.steps)
             case LoopNode():
                 return node.max_iterations * (steps(node.body) + 2)
-            case OrchestratorNode() if node.replan is not None:
-                return 3 + 3 * node.replan.max_rounds
-            case MapNode() | ParallelNode() | OrchestratorNode():
+            case OrchestratorNode():
+                # Entry, tasks and join, then per replan the replan, tasks and join; and an
+                # integrate step per round when the body writes (6.3).
+                rounds = 1 + (0 if node.replan is None else node.replan.max_rounds)
+                return 3 * rounds + (rounds if body_writes(node) else 0)
+            case MapNode() | ParallelNode():
                 return 3
             case RouterNode():
                 return 2 + max(steps(route) for _, _, route in router_routes(node, node.id))
@@ -334,10 +359,12 @@ def compile_workflow(
     budget: BudgetMeter | None = None,
     review: GateReview | None = None,
     artifacts: ArtifactStore | None = None,
+    integrator: BranchIntegrator | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
     commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
-    one), and all write to `log`, if given. With `checkpointer`,
+    one), orchestrators merge their tasks' branches through `integrator` (6.3; none are merged
+    without one), and all write to `log`, if given. With `checkpointer`,
     the state is saved after each node, in the run's thread; a spec with a gate needs one, since
     a paused run continues from it. The run's agents are held to `policy`'s `agents_alive` and
     `agents_spawned`, and their usage to `budget`; the spec itself is checked against it before
@@ -349,7 +376,9 @@ def compile_workflow(
         raise CompileError(f"gate {gate.id!r} needs a checkpointer to pause the run")
     builder = StateGraph(RunState)
     sources = {consumer.id: producer.id for producer, consumer, _ in port_edges(spec.root)}
-    limits = _Limits(policy, budget, review, sources, artifacts or InMemoryArtifactStore())
+    limits = _Limits(
+        policy, budget, review, sources, artifacts or InMemoryArtifactStore(), integrator
+    )
 
     def add(node: Node, then: str) -> str:
         """Add `node`, going on to `then` once it completes (to `END` otherwise), and return the
@@ -409,7 +438,13 @@ def compile_workflow(
                     _orchestrator_task(node, runtime, tools, log, limits),
                     input_schema=OrchestratorTask,
                 )
-                builder.add_edge(worker, join)
+                if body_writes(node):
+                    merge = integrate_node_id(node)
+                    builder.add_node(merge, _orchestrator_integrate(node, log, limits))
+                    builder.add_edge(worker, merge)
+                    builder.add_edge(merge, join)
+                else:
+                    builder.add_edge(worker, join)
                 builder.add_node(join, _orchestrator_join(node, log, limits))
                 if node.replan is None:
                     go_on(join, node.id, then)
@@ -2063,32 +2098,114 @@ def _orchestrator_task(
     return work
 
 
+def _orchestrator_integrate(
+    orchestrator: OrchestratorNode, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Merges the branches of `orchestrator`'s completed tasks, in plan order, into its
+    integration branch once a round's tasks ended (6.3), before the join decides. It asks for
+    every completed task each time, as the integrator merges none twice, so a resumed run merges
+    what it missed. `branch_integrated` says what was merged. A task that conflicts with those
+    merged before it becomes a failure (`conflicts with earlier tasks on …`), which the join and
+    a replan (6.2) treat as any failed task; its own branch is left as it was. Without an
+    integrator, or with no completed task, nothing happens. An integration branch that cannot be
+    built fails the orchestrator."""
+    node_id = orchestrator.id
+
+    async def integrate(state: RunState) -> RunUpdate:
+        integrator = limits.integrator
+        if integrator is None or node_id in state["results"]:
+            return {}
+        tasks = _Round.of(orchestrator, state)
+        done = tasks.completed()
+        if not done:
+            return {}
+        keys = {task_writer_key(node_id, _task_id(tasks.tasks[i])): i for i in done}
+        sources = [
+            MergeRequest(key=key, message=_merge_message(tasks.tasks[i])) for key, i in keys.items()
+        ]
+        try:
+            outcome = await integrator.integrate(node_id, sources)
+        except IntegrationError as e:
+            error = f"cannot build the integration branch: {e}"
+            await log.emit(NODE_FAILED, node_id=node_id, payload={"error": error})
+            failed = AgentNodeResult(
+                status="failed", text=state["last_text"], usage=None, error=error
+            )
+            return _stopped(node_id, failed, 0, [])
+        merged: list[JsonValue] = [_task_id(tasks.tasks[keys[k]]) for k in outcome.merged]
+        empty: list[JsonValue] = [_task_id(tasks.tasks[keys[k]]) for k in outcome.empty]
+        conflicts: list[JsonValue] = []
+        failures: dict[str, AgentNodeResult] = {}
+        for key, paths in outcome.conflicts.items():
+            index = keys[key]
+            conflicts.append({"id": _task_id(tasks.tasks[index]), "paths": list(paths)})
+            failures[str(index)] = tasks.results[index].model_copy(
+                update={"status": "failed", "error": conflict_error(paths)}
+            )
+        await log.emit(
+            BRANCH_INTEGRATED,
+            node_id=node_id,
+            payload={
+                "round": tasks.number,
+                "branch": outcome.branch,
+                "head": outcome.head,
+                "merged": merged,
+                "empty": empty,
+                "conflicts": conflicts,
+            },
+        )
+        update: RunUpdate = {
+            "integrated": {
+                node_id: {
+                    "branch": outcome.branch,
+                    "head": outcome.head,
+                    "merged": merged,
+                    "empty": empty,
+                }
+            }
+        }
+        if failures:
+            update["map_results"] = {node_id: failures}
+        return update
+
+    return integrate
+
+
+def _merge_message(task: JsonValue) -> str:
+    """A task's merge commit message: `Merge task '<id>': <title>`."""
+    title = cast(dict[str, JsonValue], task).get("title", "")
+    return f"Merge task '{_task_id(task)}': {title}"
+
+
 def _orchestrator_join(
     orchestrator: OrchestratorNode, log: RunEventLog, limits: _Limits
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     """Ends `orchestrator` once a round's tasks ended, unless its hub replans (6.2: then it
     changes nothing and `<id>.replan` runs next). Its output is its completed tasks' outputs in
-    plan order (`data`: `tasks`, those tasks; `outputs`; `writers`, their writer keys when its
-    body writes, for a gate after it to show; `plan`, every task planned with its `round` and
-    `status`; `rounds`). It completes when every task of its latest round completed (a replan
-    that plans nothing completes it if a task completed before), else it ends like the first
+    plan order (`data`: `tasks`, those tasks; `outputs`; `writers`, for a gate after it to show:
+    the orchestrator's id once its integration branch (6.3) merged a task, else none, or each
+    completed task's writer key when there is no integrator; `branch` and `merged` once
+    integrated; `plan`, every task planned with its `round` and `status`; `rounds`). It
+    completes when every task of its latest round completed (a replan that plans nothing
+    completes it if a task completed before), else it ends like the first
     task of that round that failed (else the first that did not complete), naming the task. With
     `writes`, the output is stored as that artifact."""
-    writes = any(WRITE_TOOLS.intersection(node_tools(n)) for _, n in iter_nodes(orchestrator.body))
+    writes = body_writes(orchestrator)
 
     async def join(state: RunState) -> RunUpdate:
-        if _replan_due(orchestrator, state):
-            return {}
+        if orchestrator.id in state["results"] or _replan_due(orchestrator, state):
+            return {}  # it failed integrating, or its hub plans again
         tasks = _Round.of(orchestrator, state)
         rounds = tasks.number
         done = tasks.completed()
         done_tasks: list[JsonValue] = [_plain_task(tasks.tasks[i]) for i in done]
         outputs: list[JsonValue] = [tasks.results[i].text for i in done]
-        writers: list[JsonValue] = (
-            [task_writer_key(orchestrator.id, _task_id(tasks.tasks[i])) for i in done]
-            if writes
-            else []
-        )
+        integrated = state.get("integrated", {}).get(orchestrator.id)
+        writers: list[JsonValue] = []
+        if writes and integrated is not None:
+            writers = [orchestrator.id] if integrated.get("merged") else []
+        elif writes and limits.integrator is None:
+            writers = [task_writer_key(orchestrator.id, _task_id(tasks.tasks[i])) for i in done]
         plan: list[JsonValue] = [
             {
                 **_plain_task(t),
@@ -2104,6 +2221,9 @@ def _orchestrator_join(
             "plan": plan,
             "rounds": rounds,
         }
+        if integrated is not None:
+            data["branch"] = integrated.get("branch")
+            data["merged"] = integrated.get("merged", [])
         text = "\n\n".join(str(o) for o in outputs)
         latest = tasks.indices(rounds)
         if not latest and rounds > 1 and not done:
@@ -2131,6 +2251,9 @@ def _orchestrator_join(
             if result.error
             else {"tasks": len(tasks.tasks), "completed": len(done), "rounds": rounds}
         )
+        if integrated is not None and not result.error:
+            end["branch"] = integrated.get("branch")
+            end["merged"] = integrated.get("merged", [])
         await log.emit(NODE_END[result.status], node_id=orchestrator.id, payload=end)
         return _update(orchestrator.id, result)
 
