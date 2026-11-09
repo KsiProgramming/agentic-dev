@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 6.1 `orchestrator` primitive:
+- Phase 6.1 `orchestrator` primitive ([#157](https://github.com/KsiProgramming/agentic-dev/pull/157)):
   - **Hub and workers.** A new `orchestrator` node: a hub agent plans at most `max_workers` tasks at run time (`{tasks: [{id, title, instructions}], reason}`, checked as a typed port), and its body runs once per task, at most `max_concurrency` at once, on `{task, input}` as data. Its output is the tasks' outputs in plan order; a `reduce` can combine them by task id, and `writes` stores them.
   - **Limits and failures.** The hub and every task's agents count on `agents_spawned` once the plan is made (over it, the run stops cleanly before any worker); one task that does not complete cancels the others and fails the orchestrator, naming the task. A resumed run keeps the plan and runs only the unfinished tasks.
   - **Task branches.** A writer in a worker writes on its task's own branch, `agent/<run>/<orchestrator>.<task>`; a gate after the orchestrator shows and edits every task's changes. Publishing them waits for the integration branch (6.3).
