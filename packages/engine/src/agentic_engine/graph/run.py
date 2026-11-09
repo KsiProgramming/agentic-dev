@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 from pydantic import JsonValue
 
-from agentic_engine.agent import sum_usage
+from agentic_engine.agent import AgentNodeResult, sum_usage
 from agentic_engine.artifacts import ArtifactStore, GateArtifact
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
@@ -257,6 +257,7 @@ async def _wait(
     when the gate expires (`expires_at`, its `ttl_s` from now). If the files cannot be read, the
     gate pauses without them and says why (`changes_error`)."""
     ran = [n for n in dict.fromkeys(state["order"]) if state["results"][n].status == "completed"]
+    ran += [key for n in ran for key in _task_writers(state["results"][n])]
     changes: list[FileChange] = []
     error: str | None = None
     if review is not None:
@@ -277,6 +278,13 @@ async def _wait(
     await log.emit(NODE_STARTED, node_id=gate_id)
     await log.emit(GATE_WAITING, node_id=gate_id, payload=payload)
     return _result(log, state, "waiting", waiting_at=gate_id)
+
+
+def _task_writers(result: AgentNodeResult) -> list[str]:
+    """The writer keys of the tasks an orchestrator ran (6.1; `writers` in its `data`): a gate
+    after it shows what each task's writers changed on its own branch."""
+    writers = (result.data or {}).get("writers")
+    return [w for w in writers if isinstance(w, str)] if isinstance(writers, list) else []
 
 
 async def _report(log: RunEventLog, final: RunState) -> WorkflowRunResult:
