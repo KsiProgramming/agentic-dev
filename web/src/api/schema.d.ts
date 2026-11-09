@@ -75,6 +75,10 @@ export interface paths {
          *     App is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and
          *     `github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the
          *     start.
+         *
+         *     A workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read
+         *     from the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not
+         *     allowed where it is called) is refused with `422` and the issues.
          */
         post: operations["createRun"];
         delete?: never;
@@ -137,7 +141,8 @@ export interface paths {
         };
         /**
          * Get
-         * @description One run's summary, with its `input`, its workflow `spec` and, if it failed, why.
+         * @description One run's summary, with its `input`, its workflow `spec` and the workflows it calls
+         *     (`calls`), and, if it failed, why.
          */
         get: operations["getRun"];
         put?: never;
@@ -744,7 +749,7 @@ export interface components {
              */
             op: "addNode";
             /** Node */
-            node: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
+            node: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /**
              * At
              * @description Where it goes; unset: detached.
@@ -1282,7 +1287,7 @@ export interface components {
             route?: string | null;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1313,7 +1318,7 @@ export interface components {
             /** Id */
             id: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /**
              * Until
              * @description CEL condition checked after each iteration; true stops the loop.
@@ -1349,7 +1354,7 @@ export interface components {
              */
             over: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /** Max Concurrency */
             max_concurrency: number;
         };
@@ -1476,7 +1481,7 @@ export interface components {
             };
             /**
              * Ui
-             * @description How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, `orderable`).
+             * @description How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`, `workflow_ref`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, `orderable`).
              */
             ui?: {
                 [key: string]: unknown;
@@ -1547,7 +1552,7 @@ export interface components {
              * Body
              * @description The worker: what runs once per task.
              */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /**
              * Max Workers
              * @description The most tasks the hub may plan.
@@ -1607,7 +1612,7 @@ export interface components {
             /** Id */
             id: string;
             /** Branches */
-            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"])[];
+            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"])[];
             /**
              * Join
              * @enum {string}
@@ -1846,7 +1851,7 @@ export interface components {
              * Then
              * @description What runs on this route: one agent, tool or sequence node.
              */
-            then: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
+            then: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
         };
         /**
          * RouterClassifier
@@ -1890,7 +1895,7 @@ export interface components {
              * Default
              * @description What runs when no route is chosen.
              */
-            default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"]) | null;
+            default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"]) | null;
             /** @description Classifier mode: the agent that chooses the route. */
             classifier?: components["schemas"]["RouterClassifier"] | null;
         };
@@ -1984,6 +1989,41 @@ export interface components {
             content: string;
         };
         /**
+         * RunCall
+         * @description One `subflow` of a run (6.5): the workflow it calls, and that workflow's root as it runs
+         *     in the run. A node of it whose id the run already had runs under another id, its run id;
+         *     `renamed` maps each such run id to the id the called workflow gives it.
+         */
+        RunCall: {
+            workflow: components["schemas"]["RunCallWorkflow"];
+            /**
+             * Root
+             * @description The called workflow's root node, with the ids its nodes run under.
+             */
+            root: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Renamed
+             * @description Run id to the called workflow's own id, for the nodes that run renamed.
+             */
+            renamed: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * RunCallWorkflow
+         * @description The stored workflow version a subflow calls, as the run was created with it.
+         */
+        RunCallWorkflow: {
+            /** Id */
+            id: string;
+            /** Version */
+            version: number;
+            /** Name */
+            name: string;
+        };
+        /**
          * RunCounts
          * @description How many of the workspace's runs each saved view of the runs list holds.
          */
@@ -2016,7 +2056,7 @@ export interface components {
              */
             workspace_id: string;
             status: components["schemas"]["RunStatus"];
-            workflow: components["schemas"]["WorkflowRef"];
+            workflow: components["schemas"]["agentic_api__runs__models__WorkflowRef"];
             /**
              * Template Id
              * @description The template the workflow was built from.
@@ -2087,6 +2127,13 @@ export interface components {
             failure_reason: string | null;
             /** @description The workflow spec the run was created with. */
             spec: components["schemas"]["WorkflowSpec"];
+            /**
+             * Calls
+             * @description Each `subflow` of the run (6.5), by its node id: the workflow it calls and that workflow's root as it runs in this run, a subflow inside it having an entry of its own. Empty when the run calls no workflow.
+             */
+            calls?: {
+                [key: string]: components["schemas"]["RunCall"];
+            };
             /**
              * Duration Ms
              * @deprecated
@@ -2249,7 +2296,7 @@ export interface components {
              */
             workspace_id: string;
             status: components["schemas"]["RunStatus"];
-            workflow: components["schemas"]["WorkflowRef"];
+            workflow: components["schemas"]["agentic_api__runs__models__WorkflowRef"];
             /**
              * Template Id
              * @description The template the workflow was built from.
@@ -2376,7 +2423,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"])[];
         };
         /**
          * SetParam
@@ -2427,6 +2474,34 @@ export interface components {
              * @description Default: the latest.
              */
             version?: number | null;
+        };
+        /**
+         * SubflowNode
+         * @description Runs another stored workflow, by id and version, as one step of this one (6.5).
+         *
+         *     The called workflow is read from the run's workspace when the run is created and runs inside
+         *     this run: its nodes share the run's repo, sandbox, limits, budget, artifacts and event log,
+         *     and their ids are its own. Its input is the subflow's input, or the value
+         *     of `input`; its output is the called workflow's. A spec names the workflow only: the engine
+         *     attaches the called workflow's root (`call`) when it resolves the run (`expand_workflow`). A
+         *     node of the called workflow whose id the run already uses runs as `<subflow>-<id>`; the
+         *     called workflow's own expressions still name it by its id.
+         */
+        SubflowNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "subflow";
+            /** Id */
+            id: string;
+            /** @description The workflow to run, and which version. */
+            workflow: components["schemas"]["WorkflowRef-Input"];
+            /**
+             * Input
+             * @description A CEL expression over `last`, `results` and `artifacts` whose value is the called workflow's input (a string as it is, any other value as JSON); unset, it gets the subflow's input.
+             */
+            input?: string | null;
         };
         /** TemplateOut */
         TemplateOut: {
@@ -2655,17 +2730,21 @@ export interface components {
             /** Issues */
             issues?: components["schemas"]["ValidationIssue"][];
         };
-        /** WorkflowRef */
-        WorkflowRef: {
-            /** Id */
+        /**
+         * WorkflowRef
+         * @description A stored workflow of the run's workspace, by id and version (6.5).
+         */
+        "WorkflowRef-Input": {
+            /**
+             * Id
+             * @description The stored workflow's id.
+             */
             id: string;
-            /** Name */
-            name: string;
             /**
              * Version
-             * @description The version of the stored workflow `id` the run was started from (5.7); `null` for a run of a template or of a spec sent with it.
+             * @description The version to run; a version never changes.
              */
-            version?: number | null;
+            version: number;
         };
         /**
          * WorkflowSpec
@@ -2689,7 +2768,7 @@ export interface components {
              */
             budget_usd?: number | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
         };
         /** WorkflowSummary */
         WorkflowSummary: {
@@ -2841,6 +2920,34 @@ export interface components {
             as_of: string;
             /** Models */
             models: components["schemas"]["ModelPricingOut"][];
+        };
+        /** WorkflowRef */
+        agentic_api__runs__models__WorkflowRef: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Version
+             * @description The version of the stored workflow `id` the run was started from (5.7); `null` for a run of a template or of a spec sent with it.
+             */
+            version?: number | null;
+        };
+        /**
+         * WorkflowRef
+         * @description A stored workflow of the run's workspace, by id and version (6.5).
+         */
+        agentic_engine__spec__models__WorkflowRef: {
+            /**
+             * Id
+             * @description The stored workflow's id.
+             */
+            id: string;
+            /**
+             * Version
+             * @description The version to run; a version never changes.
+             */
+            version: number;
         };
         /**
          * RunEvent

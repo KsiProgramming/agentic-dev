@@ -104,7 +104,7 @@ export function WorkflowsView({
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const workflows = useWorkflows(workspaceId, baseUrl);
+  const workflows = useWorkflows(workspaceId, true, baseUrl);
   const items = workflows.data ?? [];
   const now = useNow(60_000, items.length > 0);
   const blank = searchParams.get("blank") === "1";

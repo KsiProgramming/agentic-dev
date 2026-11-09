@@ -23,6 +23,7 @@ from agentic_engine.spec import (
     ReduceNode,
     RouterNode,
     SequenceNode,
+    SubflowNode,
     ToolNode,
     WorkflowSpec,
 )
@@ -44,8 +45,9 @@ tool node may call those (`publish_not_tool_node`, `create_not_tool_node`)."""
 UI_WIDGETS = frozenset({"textarea", "checkboxes"})
 """The `ui:widget`s a manifest's `ui` may name; the side panel draws each."""
 
-UI_FIELDS = frozenset({"json"})
-"""The `ui:field`s a manifest's `ui` may name: `json` edits an object as JSON text."""
+UI_FIELDS = frozenset({"json", "workflow_ref"})
+"""The `ui:field`s a manifest's `ui` may name: `json` edits an object as JSON text,
+`workflow_ref` picks a stored workflow of the workspace and one of its versions (6.5)."""
 
 UI_OPTIONS = frozenset({"advanced", "addable", "removable", "orderable"})
 """The `ui:options` a manifest's `ui` may set: `advanced` puts a field in the panel's collapsed
@@ -84,9 +86,9 @@ class NodeManifest(BaseModel):
     ui: dict[str, Any] = Field(
         default_factory=dict[str, Any],
         description="How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by "
-        "field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`), "
-        "`ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, "
-        "`orderable`).",
+        "field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`, "
+        "`workflow_ref`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, "
+        "`addable`, `removable`, `orderable`).",
     )
 
     @field_serializer("default")
@@ -384,6 +386,22 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
             "hub": {"instructions": _TEXTAREA, "model": _MODEL},
             "replan": _ADVANCED,
             "writes": _ADVANCED,
+        },
+    ),
+    _manifest(
+        SubflowNode,
+        label="Subflow",
+        description="Runs another workflow of the workspace, at a version you pick.",
+        category="flow",
+        icon="workflow",
+        default={"type": "subflow", "id": "subflow", "workflow": {"id": "workflow", "version": 1}},
+        ui={
+            "ui:order": ["workflow", "*"],
+            "workflow": {"ui:field": "workflow_ref"},
+            "input": {
+                "ui:placeholder": "A CEL value, e.g. results.plan.data.summary",
+                **_ADVANCED,
+            },
         },
     ),
     _manifest(

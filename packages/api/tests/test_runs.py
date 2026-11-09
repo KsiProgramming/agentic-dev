@@ -1475,3 +1475,114 @@ async def test_a_rerun_takes_its_own_budget_or_the_current_default(
     assert default_run is not None and default_run.policy.budget_usd == Decimal("1")
     assert own_run is not None and own_run.policy.budget_usd == Decimal("7")
     assert default_run.spent == 0
+
+
+def calling(workflow_id: str, *steps: dict[str, Any]) -> dict[str, Any]:
+    root = {"type": "sequence", "id": "main", "steps": list(steps)}
+    return {"spec_version": "0", "id": workflow_id, "name": "Caller", "root": root}
+
+
+def a(node_id: str, role: str = "R") -> dict[str, Any]:
+    return {"type": "agent", "id": node_id, "role": role, "instructions": "Go."}
+
+
+def call(node_id: str, workflow_id: str, version: int) -> dict[str, Any]:
+    return {"type": "subflow", "id": node_id, "workflow": {"id": workflow_id, "version": version}}
+
+
+async def child_workspace(
+    sessions: async_sessionmaker[AsyncSession], client: httpx.AsyncClient
+) -> UUID:
+    """A new workspace holding `child` (agents `x` then `y`) at version 2, whose `x` is renamed."""
+    workspace_id = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=workspace_id, name="subflows"))
+    params = {"workspace_id": str(workspace_id)}
+    child = {**calling("child", a("x", "First"), a("y")), "name": "Child"}
+    created = await client.post("/workflows", params=params, json={"spec": child})
+    assert created.status_code == 201, created.text
+    rename = {"op": "setParam", "node_id": "x", "path": "role", "value": "Renamed"}
+    patched = await client.patch(
+        "/workflows/child", params=params, json={"base_version": 1, "ops": [rename]}
+    )
+    assert patched.status_code == 201, patched.text
+    return workspace_id
+
+
+async def test_a_run_calls_a_stored_workflow_at_the_version_it_names(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Done when (6.5): one workflow calls another by id + version. The run keeps a copy of the
+    version it called, runs it inside itself, and a rerun calls the same version."""
+    async with api(postgres_url, redis_url) as client:
+        workspace_id = await child_workspace(sessions, client)
+        body = {
+            "workflow": calling("caller", a("before"), call("run_child", "child", 1), a("after")),
+            "workspace_id": str(workspace_id),
+            "input": "go",
+        }
+        async with worker(postgres_url, redis_url):
+            response = await client.post("/runs", json=body)
+            assert response.status_code == 202, response.text
+            run_id = UUID(response.json()["run_id"])
+            frames = await collect(client, run_id)
+        detail = (await client.get(f"/runs/{run_id}")).json()
+        rerun = await client.post(f"/runs/{run_id}/rerun")
+        assert rerun.status_code == 202, rerun.text
+        await unqueue(redis_url, rerun.json()["run_id"])
+
+    assert frames[-1].event == "run_completed"
+    started = [f.data.get("node_id") for f in frames if f.event == "node_started"]
+    assert started == ["before", "run_child", "x", "y", "after"]
+    [entry] = [f for f in frames if f.event == "node_started" and f.data["node_id"] == "run_child"]
+    assert entry.data["payload"]["workflow"] == {"id": "child", "version": 1, "name": "Child"}
+    row = await stored_row(sessions, str(run_id))
+    copies: Any = row.subflows
+    written: Any = row.spec
+    assert set(copies) == {"child@1"}
+    assert copies["child@1"]["root"]["steps"][0]["role"] == "First"
+    # The spec kept is the one written: the call, not the workflow it calls.
+    assert written["root"]["steps"][1] == {**call("run_child", "child", 1), "input": None}
+    assert detail["calls"]["run_child"]["workflow"] == {
+        "id": "child",
+        "version": 1,
+        "name": "Child",
+    }
+    assert [s["id"] for s in detail["calls"]["run_child"]["root"]["steps"]] == ["x", "y"]
+    # The caller's root is `main` too: the called one runs renamed.
+    assert detail["calls"]["run_child"]["renamed"] == {"run_child-main": "main"}
+    copy = await stored_row(sessions, rerun.json()["run_id"])
+    assert copy.subflows == row.subflows
+
+
+async def test_a_call_that_cannot_run_refuses_the_run(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        workspace_id = await child_workspace(sessions, client)
+        ws = {"workspace_id": str(workspace_id)}
+        before = await count_runs(sessions)
+        missing = await client.post(
+            "/runs", json={"workflow": calling("caller", call("c", "child", 9)), **ws}
+        )
+        clash = await client.post(
+            "/runs",
+            json={"workflow": calling("caller", call("c", "child", 1), a("y", ""))} | ws,
+        )
+        validated = await client.post(
+            "/workflows/child/validate",
+            params=ws,
+            json={"workflow": calling("child", a("z"), call("again", "child", 2)), **ws},
+        )
+
+    assert missing.status_code == 422
+    assert [(i["code"], i["node_id"]) for i in missing.json()["detail"]["issues"]] == [
+        ("subflow_unknown", "c")
+    ]
+    # Not a clash of ids (the called `y` runs renamed), but the caller's own empty role.
+    assert clash.status_code == 422
+    assert await count_runs(sessions) == before
+    assert validated.status_code == 200, validated.text
+    assert [(i["code"], i["node_id"]) for i in validated.json()["issues"]] == [
+        ("subflow_cycle", "again")
+    ]

@@ -1,3 +1,4 @@
+import { calledRoot } from "../calls";
 import type { Step, StepStatus } from "../timeline";
 import {
   allSpecNodes,
@@ -36,6 +37,7 @@ function stepsById(steps: Step[]): Map<string, Step[]> {
       for (const branch of step.branches ?? []) visit(branch.steps);
       for (const iteration of step.iterations ?? []) visit(iteration.steps);
       if (step.router) visit(step.router.steps);
+      if (step.subflow) visit(step.subflow.steps);
       for (const task of step.orchestrator?.tasks ?? []) visit(task.steps);
     }
   };
@@ -128,6 +130,26 @@ function* under(node: SpecNode): Generator<SpecNode> {
   }
   if (node.type === "parallel") for (const branch of node.branches) yield* under(branch);
   if (node.type === "router") for (const [, route] of routesOf(node)) yield* under(route);
+  const called = calledRoot(node);
+  if (called) yield* under(called);
+}
+
+/** How far the workflow a subflow called got (6.5): its steps done of all of them. */
+function subflowSummary(runs: Step[], node: SpecNode): string | null {
+  const called = calledRoot(node);
+  const step = runs.at(-1);
+  if (!called || !step?.subflow) return null;
+  const total = [...under(called)].filter((n) => n.type !== "sequence").length;
+  const done = new Set(
+    [...stepsById(step.subflow.steps).values()]
+      .flat()
+      .filter((s) => s.status === "completed")
+      .map((s) => s.id),
+  ).size;
+  const failed = [...stepsById(step.subflow.steps).values()]
+    .flat()
+    .some((s) => s.status === "failed");
+  return `${done} of ${plural(total, "step")}${failed ? " · 1 failed" : ""}`;
 }
 
 /** The routes the routers of `spec` did not take, by `routeNodeId`, and every node on them: a
@@ -174,7 +196,9 @@ export function nodeStatuses(spec: WorkflowSpec, steps: Step[]): Map<string, Nod
                   ? routerSummary(runs, node)
                   : node.type === "orchestrator"
                     ? orchestratorSummary(runs)
-                    : null,
+                    : node.type === "subflow"
+                      ? subflowSummary(runs, node)
+                      : null,
     });
   }
   return states;
@@ -197,7 +221,7 @@ export function routeStates(spec: WorkflowSpec, steps: Step[]): Map<string, Node
 
 /**
  * What node `nodeId` did, to show it on its own. A node run once is its step. A node inside a
- * map, a parallel, a loop, a router or an orchestrator is shown inside its outermost container,
+ * map, a parallel, a loop, a router, an orchestrator or a subflow is shown inside its outermost container,
  * which keeps only the items, branches, iterations and tasks that ran it, each holding only that node's run: one entry per item,
  * branch or iteration.
  * `null` if the node has not run.
@@ -220,6 +244,7 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
       return found ? [{ ...iteration, steps: [found] }] : [];
     });
     const routed = step.router ? focusStep(step.router.steps, nodeId) : null;
+    const called = step.subflow ? focusStep(step.subflow.steps, nodeId) : null;
     const tasks = (step.orchestrator?.tasks ?? []).flatMap((task) => {
       const found = focusStep(task.steps, nodeId);
       return found ? [{ ...task, steps: [found] }] : [];
@@ -229,6 +254,7 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
       branches.length > 0 ||
       iterations.length > 0 ||
       routed ||
+      called ||
       tasks.length > 0
     ) {
       // The container's own turns, usage and outcome are not the node's.
@@ -244,6 +270,7 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
         branches: step.branches ? branches : null,
         iterations: step.iterations ? iterations : null,
         router: step.router ? { ...step.router, steps: routed ? [routed] : [] } : null,
+        subflow: step.subflow ? { ...step.subflow, steps: called ? [called] : [] } : null,
         orchestrator: step.orchestrator ? { ...step.orchestrator, tasks } : null,
       };
     }

@@ -907,6 +907,86 @@
     }
   },
   {
+    "kind": "subflow",
+    "label": "Subflow",
+    "description": "Runs another workflow of the workspace, at a version you pick.",
+    "category": "flow",
+    "icon": "workflow",
+    "parameters": {
+      "$defs": {
+        "WorkflowRef": {
+          "additionalProperties": false,
+          "description": "A stored workflow of the run's workspace, by id and version (6.5).",
+          "properties": {
+            "id": {
+              "description": "The stored workflow's id.",
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "title": "Id",
+              "type": "string"
+            },
+            "version": {
+              "description": "The version to run; a version never changes.",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "version"
+          ],
+          "title": "WorkflowRef",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Runs another stored workflow, by id and version, as one step of this one (6.5).\n\nThe called workflow is read from the run's workspace when the run is created and runs inside\nthis run: its nodes share the run's repo, sandbox, limits, budget, artifacts and event log,\nand their ids are its own. Its input is the subflow's input, or the value\nof `input`; its output is the called workflow's. A spec names the workflow only: the engine\nattaches the called workflow's root (`call`) when it resolves the run (`expand_workflow`). A\nnode of the called workflow whose id the run already uses runs as `<subflow>-<id>`; the\ncalled workflow's own expressions still name it by its id.",
+      "properties": {
+        "workflow": {
+          "$ref": "#/$defs/WorkflowRef",
+          "description": "The workflow to run, and which version.",
+          "title": "Workflow"
+        },
+        "input": {
+          "minLength": 1,
+          "type": "string",
+          "description": "A CEL expression over `last`, `results` and `artifacts` whose value is the called workflow's input (a string as it is, any other value as JSON); unset, it gets the subflow's input.",
+          "title": "Input"
+        }
+      },
+      "required": [
+        "workflow"
+      ],
+      "title": "SubflowNode",
+      "type": "object"
+    },
+    "slots": [],
+    "default": {
+      "type": "subflow",
+      "id": "subflow",
+      "workflow": {
+        "id": "workflow",
+        "version": 1
+      }
+    },
+    "fill": {},
+    "ui": {
+      "ui:order": [
+        "workflow",
+        "*"
+      ],
+      "workflow": {
+        "ui:field": "workflow_ref"
+      },
+      "input": {
+        "ui:placeholder": "A CEL value, e.g. results.plan.data.summary",
+        "ui:options": {
+          "advanced": true
+        }
+      }
+    }
+  },
+  {
     "kind": "reduce",
     "label": "Reduce",
     "description": "Combines the outputs of the map or parallel before it.",

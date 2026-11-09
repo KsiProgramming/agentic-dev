@@ -21,10 +21,7 @@ Principles that drive it:
 
 - **Spec:** `{type: "subflow", id, workflow: {id, version}, input?}`. `version` is required. `input` is an optional CEL expression over `last`, `input`, `results` and `artifacts` that gives the child's input. Without it, the child gets the subflow's input (the previous output), as any step does.
 - **Resolution at run start, inline execution:** `POST /runs` and rerun resolve every subflow (and the subflows inside it) from the run's workspace. They keep a snapshot in the run (`runs.subflows`, `{"<id>@<version>": spec}`), and the worker compiles the child's root as the subflow's body in the same run. The child shares the parent's run, sandbox, repo, budget, policy limits, event log and artifacts. The subflow's output and `data` are the child's.
-- **Scoping:**
-  - A child's node ids are scoped by the subflow's id, so they may repeat the parent's.
-  - Their events carry `subflow` (the path of subflow ids, outermost first).
-  - A writer inside the child works as `<subflow>.<node>`, on branch `agent/<run>/<subflow>.<node>`, as an orchestrator's task does (6.1).
+- **Ids:** a child's node keeps its id unless the run already has it; then it runs as `<subflow>-<id>` (cut to fit a `NodeId`, numbered when taken), and its references (a reduce's `from`, a publisher's `from_node`) follow. The child's own expressions still name its nodes by its ids. Run ids stay `NodeId`s, so a child's writer gets `agent/<run>/<id>` as any writer does. *(Changed while building, see Decisions.)*
 - **Validation:**
   - `subflow_unknown`: the workspace has no such workflow or version.
   - `subflow_cycle`: a workflow on the call path is called again.
@@ -32,8 +29,8 @@ Principles that drive it:
   - A subflow is one level of `max_depth`. Limits and budget checks count the expanded tree.
   - A subflow cannot be in an orchestrator's body (`not_allowed_in_orchestrator`).
   - The validator takes a resolver, so it stays free of the database. `POST /workflows/{id}/validate` and stored-version issues resolve from the workspace.
-- **Events:** `node_started` for the subflow carries `workflow {id, version, name}`. The child's events follow with the `subflow` tag, then the subflow's `node_completed` / `node_failed` / `node_cancelled`. A gate inside the child pauses the run as usual, and resume continues inside the child (the checkpointer covers it).
-- **API:** `GET /runs/{id}` returns `subflows` (the snapshot) beside `spec`, so the console can draw the children. This needs one Alembic migration (`0026_run_subflows`).
+- **Events:** `node_started` for the subflow carries `workflow {id, version, name}`. The child's events follow under their run ids (no extra tag: the console places them from `calls`), then the subflow's `node_completed` / `node_failed` / `node_cancelled`. A gate inside the child pauses the run as usual, and resume continues inside the child (the checkpointer covers it).
+- **API:** `runs.subflows` keeps the copies (Alembic `0026_run_subflows`). `GET /runs/{id}` returns `calls`: per subflow id, the workflow it calls and its root as it runs (run ids), and which ids were renamed, so the console draws and nests what ran without mirroring the renaming. *(Changed while building: the plan had the raw copies here.)*
 - **Manifest and palette:** a `subflow` manifest (category `flow`, a lucide icon) with no slots. Its `workflow` field uses a new side-panel field `ui:field: workflow_ref`: a combobox of the workspace's workflows (`GET /workflows`, excluding the one being edited) and a version select (`GET /workflows/{id}/versions`, the latest by default).
 - **Canvas:** the subflow card reads "Calls docs · version 3", and links to `/workflows/docs?version=3`. When a newer version exists it also says "Version 5 is the latest" in muted text. The child is not drawn or edited inline: it is another workflow, edited on its own page. Live validation shows the child's issues on the subflow card.
 - **Run console:**
@@ -47,7 +44,7 @@ Principles that drive it:
 
 - A child as a separate run (its own run row, console and history). It stays one run (see Decisions).
 - Calling "the latest" version, or a version range. The parent must be edited to move a call to a newer version. 6.6's composites add "updated by version".
-- Publishing a child's writer from the parent: `github.openPR` with `from_node` set to a subflow, or to a node in its child, is a `reference` issue. The child publishes behind its own gate. Revisit in 6.6/6.8.
+- Publishing a subflow as one writer from the parent (`from_node` set to the subflow is a `reference` issue: it is not a writer). A parent's publisher may name a writer of the child by its run id, behind a gate, as any earlier writer; the builder does not offer it. Revisit in 6.6/6.8.
 - Drawing or editing the child inline on the parent's canvas, and `wrap` / `extract` (6.6).
 - Calling a workflow of another workspace, or a template by id (templates are not stored workflows. "Edit in builder" stores one first).
 - Typed ports through a subflow: like a container, a subflow breaks the `port_mismatch` edge. Mismatches inside the child are still checked, and runtime checks still apply.
@@ -63,9 +60,11 @@ Principles that drive it:
 | Where the snapshot lives | A new `runs.subflows` JSONB column, with `runs.spec` unchanged | `runs.spec` stays the parent as written (the console's map, search on `spec->>'name'`). Children are keyed `<id>@<version>`, so a child called twice is stored once. |
 | Validation of the child | Validate the parent with children expanded, issues reported on the subflow node | One validator. A child is allowed exactly where its contents are allowed, so there are no special rules per container. The message names the child and version, so the fix is clear. |
 | Validator and the database | `validate_workflow` takes a `resolve(id, version)` callable | It keeps the validator pure and testable, as `priced` already is. The API passes a workspace-backed resolver. |
-| Node id clashes | The child's ids are scoped by the subflow id (events tag `subflow`, step keys `<subflow>/<node>`, writer keys `<subflow>.<node>`) | A child is authored on its own and cannot know the parent's ids. The scoping follows the step-key and writer-key shapes 6.1/6.4 set. |
+| Node id clashes | Kept, renamed `<subflow>-<id>` only when the run already has the id; the child's expressions see its own ids (`expression_views`) | **Changed while building.** Scoping every id (`<subflow>/<node>`) breaks the `NodeId` pattern that branches, worktrees, tool routing and approvals check. Requiring unique ids instead refused almost every call: root sequences are `main`, and every blank workflow starts with `sequence_1` and `agent_1`. |
+| What the console gets | `calls` on `GET /runs/{id}`: each call's root as it runs | **Changed while building.** The console draws and nests what ran, with its run ids, and never mirrors the renaming. |
+| Structure check of a calling spec | Skipped when the spec is parsed; run on the expanded tree (`expand_workflow`, `validate_workflow`) | What a caller reads or publishes may come from a call, so it can only be checked once the calls are resolved. Every path that runs a spec expands it first, and an unresolved call never compiles. |
 | Artifacts | One namespace for the run: the child reads and writes the run's artifacts | The main use is a child producing `findings.json` or `report.md` for the parent. Conflicts and unknown reads are caught on the expanded tree. |
-| Depth | A subflow is one level of `max_depth` | Bounds nesting of calls (mission "Safe by construction"). Cycles are a separate, earlier check. |
+| Depth | A subflow is one level of `max_depth`; calls are resolved at most `max_depth + 1` deep | Bounds nesting of calls (mission "Safe by construction") and keeps a chain of calls from growing the tree. Cycles are a separate, earlier check, by workflow id. |
 | Order of work | Contract, then engine, then web | Chosen in the interview: the spec, validation codes and tech-stack contract settle first, so the engine and web build to a fixed shape. |
 
 ## Open questions

@@ -27,6 +27,7 @@ from agentic_api.runs.models import (
     RerunRequest,
     RunArtifact,
     RunArtifactContent,
+    RunCall,
     RunCounts,
     RunDetail,
     RunGate,
@@ -41,7 +42,13 @@ from agentic_api.runs.models import (
 from agentic_api.workspaces.models import to_usd
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
-from agentic_engine.spec import WorkflowSpec, creates_repo
+from agentic_engine.spec import (
+    ValidationIssue,
+    WorkflowSpec,
+    call_documents,
+    creates_repo,
+    messages,
+)
 from agentic_engine.templates import wrap_with_create_repo
 from agentic_github import GithubApiError, github_remote
 from agentic_sandbox import ARTIFACT_NAME, RepoSource, branch_name
@@ -76,6 +83,8 @@ from agentic_store import (
     pending_gate,
     record_approval,
     request_cancel,
+    resolve_workflow,
+    run_spec,
 )
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -300,7 +309,8 @@ async def stream_summaries(
     responses={404: {"description": "No run with this id"}},
 )
 async def get(run_id: UUID, request: Request) -> RunDetail:
-    """One run's summary, with its `input`, its workflow `spec` and, if it failed, why."""
+    """One run's summary, with its `input`, its workflow `spec` and the workflows it calls
+    (`calls`), and, if it failed, why."""
     row = await get_run_summary(_sessions(request), run_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
@@ -309,7 +319,16 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
         input=row.input,
         failure_reason=row.failure_reason,
         spec=WorkflowSpec.model_validate(row.spec),
+        calls=_calls(row.spec, row.subflows),
     )
+
+
+def _calls(spec: dict[str, Any] | None, subflows: dict[str, Any] | None) -> dict[str, RunCall]:
+    """The run's subflows as they run, from its spec and the copies it was created with."""
+    if spec is None or not subflows:
+        return {}
+    documents = call_documents(run_spec(spec, subflows).root)
+    return {node_id: RunCall.model_validate(found) for node_id, found in documents.items()}
 
 
 @router.post(
@@ -343,7 +362,11 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     With `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub
     App is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and
     `github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the
-    start."""
+    start.
+
+    A workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read
+    from the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not
+    allowed where it is called) is refused with `422` and the issues."""
     redis: Redis = request.app.state.redis
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
@@ -355,8 +378,19 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     spec, repo = body.spec(), body.repo
     if body.new_repo is not None:
         spec, repo = await _on_new_repo(request, workspace_id, body)
-    elif body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
+    resolved = await resolve_workflow(sessions, workspace_id, spec)
+    if resolved.issues:
+        raise _cannot_run(resolved.issues)
+    spec = resolved.spec
+    if body.new_repo is None:
+        if resolved.called:
+            # The workflows it calls need what their tools need too.
+            try:
+                body = body.with_spec(spec)
+            except ValueError as e:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from None
+        if body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
+            raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
     try:
         run_id = await create_run(
             sessions,
@@ -369,6 +403,7 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
             budget_usd=to_usd(body.budget_usd),
             trigger=body.trigger,
             workflow_version=stored,
+            subflows=resolved.called,
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e
@@ -434,6 +469,16 @@ async def _on_new_repo(
 def _repo_exists(message: str) -> HTTPException:
     detail = GithubErrorDetail(code="repo_exists", message=message)
     return HTTPException(status.HTTP_409_CONFLICT, detail.model_dump())
+
+
+def _cannot_run(issues: list[ValidationIssue]) -> HTTPException:
+    """A run refused because a workflow its spec calls (6.5) is unknown, calls back into it, or
+    cannot run where it is called."""
+    errors = messages(issues)
+    detail = PolicyErrorDetail(
+        message=f"The workflow cannot run: {'; '.join(errors)}", errors=errors, issues=issues
+    )
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump())
 
 
 def _over_policy(error: PolicyViolationError) -> HTTPException:

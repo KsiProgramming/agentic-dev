@@ -1,17 +1,20 @@
 import type { components } from "@/api/schema";
 
+import { calledRoot } from "./calls";
+
 type SpecNode = components["schemas"]["WorkflowSpec"]["root"];
 
 /**
  * Where a node runs, from the run's spec: in a branch of a parallel, an item of a map, an
- * iteration of a loop, the route of a router or a task of an orchestrator. Node ids are unique in
+ * iteration of a loop, the route of a router, a task of an orchestrator or the workflow a subflow
+ * calls (with the run's `calls` attached, `withCalls`). Node ids are unique in
  * a spec, so this places a node's events exactly, where the events' `item` and `branch` tags alone are ambiguous (two
  * nested parallels, or two routers, running at once).
  */
 export interface SpecParent {
-  /** The id of the loop, map, parallel, router or orchestrator the node is directly in. */
+  /** The id of the loop, map, parallel, router, orchestrator or subflow the node is directly in. */
   container: string;
-  kind: "loop" | "map" | "parallel" | "router" | "orchestrator";
+  kind: "loop" | "map" | "parallel" | "router" | "orchestrator" | "subflow";
   /** For a parallel: the index of the branch the node is in. */
   branch: number | null;
 }
@@ -39,6 +42,11 @@ export function specParents(root: SpecNode): Map<string, SpecParent> {
         const inRoute: SpecParent = { container: node.id, kind: "router", branch: null };
         for (const route of node.routes) visit(route.then, inRoute);
         if (node.default) visit(node.default, inRoute);
+        break;
+      }
+      case "subflow": {
+        const called = calledRoot(node);
+        if (called) visit(called, { container: node.id, kind: "subflow", branch: null });
         break;
       }
       default:

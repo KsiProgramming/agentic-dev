@@ -1,4 +1,5 @@
-"""Sandboxed CEL expressions: conditions (`loop.until`, `router` routes) and lists (`map.over`).
+"""Sandboxed CEL expressions: conditions (`loop.until`, `router` routes), lists (`map.over`) and
+values (`subflow.input`).
 
 An expression is CEL text from the spec, run with `cel-python`. It can only read the variables it
 is given and call CEL's standard functions and macros: no custom functions are registered, so an
@@ -39,6 +40,10 @@ ROUTE_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
 """What a router's `when` can read: `last` (string, the router's input), `results` and
 `artifacts` (as for a condition). Inside a map item or a parallel branch, `results` holds the
 nodes that ran in it so far."""
+
+VALUE_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
+"""What a subflow's `input` can read (6.5): `last` (string, the subflow's input), `results` and
+`artifacts` (as for a condition)."""
 
 _MACROS: Final = frozenset({"has", "all", "exists", "exists_one", "map", "filter"})
 _FUNCTIONS: Final = frozenset(n for n in base_functions if not n.startswith("_") and n != "!_")
@@ -128,6 +133,32 @@ class CompiledList(CompiledExpression):
         return cast(list[JsonValue], items)
 
 
+class CompiledValue(CompiledExpression):
+    """A value expression: any value, returned as the text it stands for (6.5)."""
+
+    def evaluate(
+        self,
+        *,
+        last: str,
+        results: Mapping[str, JsonValue],
+        artifacts: Mapping[str, JsonValue] | None = None,
+    ) -> str:
+        """Evaluate against the run's state: a string as it is, any other value as JSON. Raises
+        `ExpressionError` if evaluation fails."""
+        value = self._evaluate(
+            {
+                "last": celtypes.StringType(last),
+                "results": json_to_cel(dict(results)),
+                "artifacts": json_to_cel(dict(artifacts or {})),
+            }
+        )
+        if isinstance(value, str):
+            return str(value)
+        return json.dumps(
+            json.loads(json.dumps(value, cls=CELJSONEncoder)), indent=2, ensure_ascii=False
+        )
+
+
 _environment: celpy.Environment | None = None
 
 
@@ -150,6 +181,12 @@ def compile_condition(
 def compile_list(source: str, variables: frozenset[str] = LIST_VARIABLES) -> CompiledList:
     """As `compile_condition`, for an expression that must evaluate to a list."""
     return CompiledList(source, _compile(source, variables, "expression"))
+
+
+def compile_value(source: str, variables: frozenset[str] = VALUE_VARIABLES) -> CompiledValue:
+    """As `compile_condition`, for an expression whose value is used as text (a subflow's
+    `input`)."""
+    return CompiledValue(source, _compile(source, variables, "expression"))
 
 
 def _compile(source: str, variables: frozenset[str], kind: str) -> celpy.Runner:

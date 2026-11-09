@@ -8,9 +8,15 @@ from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, model_validator
 
-from agentic_engine.expr import ROUTE_VARIABLES, ExpressionError, compile_condition, compile_list
+from agentic_engine.expr import (
+    ROUTE_VARIABLES,
+    ExpressionError,
+    compile_condition,
+    compile_list,
+    compile_value,
+)
 from agentic_engine.policy import (
     BUDGET_MAX_USD,
     BUDGET_MIN_USD,
@@ -456,6 +462,63 @@ class OrchestratorNode(_Base):
     writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
 
 
+class WorkflowRef(_Base):
+    """A stored workflow of the run's workspace, by id and version (6.5)."""
+
+    id: NodeId = Field(description="The stored workflow's id.")
+    version: int = Field(ge=1, description="The version to run; a version never changes.")
+
+
+class SubflowNode(_Base):
+    """Runs another stored workflow, by id and version, as one step of this one (6.5).
+
+    The called workflow is read from the run's workspace when the run is created and runs inside
+    this run: its nodes share the run's repo, sandbox, limits, budget, artifacts and event log,
+    and their ids are its own. Its input is the subflow's input, or the value
+    of `input`; its output is the called workflow's. A spec names the workflow only: the engine
+    attaches the called workflow's root (`call`) when it resolves the run (`expand_workflow`). A
+    node of the called workflow whose id the run already uses runs as `<subflow>-<id>`; the
+    called workflow's own expressions still name it by its id."""
+
+    type: Literal["subflow"]
+    id: NodeId
+    workflow: WorkflowRef = Field(description="The workflow to run, and which version.")
+    input: NonEmptyStr | None = Field(
+        default=None,
+        description="A CEL expression over `last`, `results` and `artifacts` whose value is the "
+        "called workflow's input (a string as it is, any other value as JSON); unset, it gets "
+        "the subflow's input.",
+    )
+    _call: "Node | None" = PrivateAttr(default=None)
+    _name: str | None = PrivateAttr(default=None)
+    _ids: dict[str, str] = PrivateAttr(default_factory=dict[str, str])
+
+    @property
+    def call(self) -> "Node | None":
+        """The called workflow's root, once resolved; `None` before."""
+        return self._call
+
+    @property
+    def called_name(self) -> str | None:
+        """The called workflow's name, once resolved."""
+        return self._name
+
+    @property
+    def ids(self) -> dict[str, str]:
+        """Once resolved, each node id of the called workflow (its own, not those of the
+        workflows it calls in turn) to the id it runs under in this run: itself, unless another
+        node of the run has it (`expand_workflow`)."""
+        return dict(self._ids)
+
+    def resolved(self, root: "Node", name: str, ids: Mapping[str, str]) -> "SubflowNode":
+        """This subflow with the called workflow's `root`, `name` and node `ids` attached."""
+        copy = self.model_copy()
+        copy._call = root
+        copy._name = name
+        copy._ids = dict(ids)
+        return copy
+
+
 Node = Annotated[
     AgentNode
     | ToolNode
@@ -466,7 +529,8 @@ Node = Annotated[
     | ReduceNode
     | ParallelNode
     | RouterNode
-    | OrchestratorNode,
+    | OrchestratorNode
+    | SubflowNode,
     Field(discriminator="type"),
 ]
 
@@ -559,6 +623,8 @@ def iter_nodes(node: Node, path: str = "root") -> Iterator[tuple[str, Node]]:
         case RouterNode():
             for _, route_path, route in router_routes(node, path):
                 yield from iter_nodes(route, route_path)
+        case SubflowNode() if node.call is not None:
+            yield from iter_nodes(node.call, f"{path}.call")
         case _:
             pass
 
@@ -595,6 +661,7 @@ def node_tools(node: Node) -> list[str]:
             | ParallelNode()
             | RouterNode()
             | OrchestratorNode()
+            | SubflowNode()
         ):
             return []
 
@@ -649,6 +716,8 @@ type IssueCode = Literal[
     "invalid_vote",
     "invalid_router",
     "not_allowed_in_orchestrator",
+    "subflow_unknown",
+    "subflow_cycle",
 ]
 
 
@@ -993,7 +1062,8 @@ def map_errors(root: Node) -> list[str]:
 
 def _not_in_map(node: Node) -> str | None:
     match node:
-        case AgentNode() | ToolNode() | SequenceNode() | RouterNode():
+        # A subflow's called nodes are checked as nodes of the map themselves.
+        case AgentNode() | ToolNode() | SequenceNode() | RouterNode() | SubflowNode():
             return _not_in_loop(node)
         case _:
             return node.type
@@ -1240,6 +1310,17 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
             case RouterNode():
                 for _, route_path, route in router_routes(node, path):
                     visit(route, route_path, depth)
+            case SubflowNode() if node.call is not None:
+                # A call is a level of nesting, so calls nest only as deep as `max_depth`. One
+                # that was not resolved has its own issue (`expand_workflow`).
+                if depth + 1 > policy.max_depth:
+                    why = (
+                        f"nesting depth {depth + 1} is above the workspace limit of "
+                        f"{policy.max_depth}"
+                    )
+                    over(node, path, "max_depth", policy.max_depth, depth + 1, why)
+                else:
+                    visit(node.call, f"{path}.call", depth + 1)
             case _:
                 pass
 
@@ -1269,6 +1350,8 @@ def agents_spawned(node: Node) -> int:
         case RouterNode():
             routes = [agents_spawned(route) for _, _, route in router_routes(node, "")]
             return (1 if node.classifier is not None else 0) + max(routes)
+        case SubflowNode():
+            return 0 if node.call is None else agents_spawned(node.call)
 
 
 def policy_errors(root: Node, policy: Policy) -> list[str]:
@@ -1466,6 +1549,9 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                     )
                     after[name] = writer if alike else _UNTYPED
                 return after
+            case SubflowNode():
+                # The called workflow runs in this run: what it writes is the run's.
+                return seen if node.call is None else visit(node.call, f"{path}.call", seen)
 
     visit(root, "root", {})
     return flow
@@ -1532,6 +1618,10 @@ def port_edges(root: Node) -> list[tuple[PortProducer, PortNode, str]]:
                         visit(route, route_path)
                 case ReduceNode():
                     previous = step if step.merges else None
+                case SubflowNode():
+                    previous = None
+                    if step.call is not None:
+                        visit(step.call, f"{step_path}.call")
                 case SequenceNode():
                     previous = None
 
@@ -1672,8 +1762,31 @@ def structure_issues(root: Node) -> list[ValidationIssue]:
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root)
-    issues += port_issues(root) + artifact_issues(root)
+    issues += port_issues(root) + artifact_issues(root) + subflow_issues(root)
     return in_run_order(root, issues)
+
+
+def subflow_issues(root: Node) -> list[ValidationIssue]:
+    """Why the subflows under `root` cannot run, in run order, as far as their own fields say: an
+    `input` that is not a valid expression (`invalid_expression`, on the `input`). What they call
+    is checked once resolved (`expand_workflow`)."""
+    issues: list[ValidationIssue] = []
+    for path, node in iter_nodes(root):
+        if not isinstance(node, SubflowNode) or node.input is None:
+            continue
+        try:
+            compile_value(node.input)
+        except ExpressionError as e:
+            message = f"subflow {node.id!r} at {path}: invalid input: {e}"
+            issues.append(
+                ValidationIssue(
+                    code="invalid_expression",
+                    path=f"{path}.input",
+                    node_id=node.id,
+                    message=message,
+                )
+            )
+    return issues
 
 
 def in_run_order(root: Node, issues: list[ValidationIssue]) -> list[ValidationIssue]:
@@ -1730,6 +1843,10 @@ class WorkflowSpec(_Base):
 
     @model_validator(mode="after")
     def _can_run(self) -> Self:
+        # A spec that calls other workflows (6.5) is checked once they are resolved, on the
+        # expanded tree (`expand_workflow`): what it reads or publishes may come from them.
+        if any(isinstance(node, SubflowNode) for _, node in iter_nodes(self.root)):
+            return self
         if issues := structure_issues(self.root):
             raise ValueError("; ".join(messages(issues)))
         return self

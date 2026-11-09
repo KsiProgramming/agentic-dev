@@ -42,10 +42,12 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+import { WorkflowRefField } from "./workflow-ref-field";
+
 /**
  * The side panel's form theme (5.4): `@rjsf/core` drawn with this app's primitives, tokens and
  * type scale. No rjsf stylesheet is used. A manifest's `ui` picks among these by name
- * (`textarea`, `checkboxes`, `json`); see tech-stack → Node manifests.
+ * (`textarea`, `checkboxes`, `json`, `workflow_ref`); see tech-stack → Node manifests.
  */
 
 /** Schema descriptions are written for the spec (with `code` in backticks); shown as text. */
@@ -516,7 +518,7 @@ export const widgets: RegistryWidgetsType = {
   usd: UsdWidget,
 };
 
-export const fields: RegistryFieldsType = { json: JsonField };
+export const fields: RegistryFieldsType = { json: JsonField, workflow_ref: WorkflowRefField };
 
 /** Form props every panel form shares. */
 export const formDefaults = {

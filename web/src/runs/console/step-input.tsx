@@ -116,6 +116,17 @@ function NodeFields({ node }: { node: SpecNode }) {
           </Field>
         </>
       );
+    case "subflow":
+      return (
+        <>
+          <Field label="Calls">
+            <Mono>{node.workflow.id}</Mono> · version {node.workflow.version}
+          </Field>
+          <Field label="Input">
+            {node.input ? <Mono>{node.input}</Mono> : "The subflow's input, unchanged"}
+          </Field>
+        </>
+      );
     case "reduce":
       return (
         <>

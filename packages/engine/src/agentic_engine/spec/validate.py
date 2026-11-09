@@ -22,6 +22,7 @@ from agentic_engine.spec.models import (
     structure_issues,
     tool_issues,
 )
+from agentic_engine.spec.subflows import Resolve, expand_root, no_subflows, on_subflows
 
 _NODE: TypeAdapter[Node] = TypeAdapter(Node)
 
@@ -33,6 +34,7 @@ def validate_workflow(
     priced: Callable[[str], bool],
     default_model: str,
     known_tools: Collection[str] = PLATFORM_TOOLS,
+    resolve: Resolve = no_subflows,
 ) -> list[ValidationIssue]:
     """Why the decoded JSON document `raw` cannot run under `policy`; empty if it can. Never
     raises for a bad document.
@@ -40,14 +42,22 @@ def validate_workflow(
     A document that does not match the schema gets only `schema` issues: the other checks need
     its nodes. Otherwise the issues are its structure (`structure_issues`), unknown tools, the
     policy's limits and, with a budget, agents on models `priced` does not know (an agent with no
-    `model` runs on `default_model`), in run order."""
+    `model` runs on `default_model`), in run order.
+
+    Its subflows (6.5) are resolved through `resolve`, which knows none by default, and the
+    checks run on the expanded tree: a call that is unknown or cyclic is an issue on its
+    subflow, and so is anything wrong inside the workflow it calls (`on_subflows`)."""
     root = _parse_root(raw)
     if isinstance(root, list):
         return root
-    issues = structure_issues(root) + tool_issues(root, known_tools)
+    workflow_id = cast(Mapping[str, object], raw).get("id")
+    root, _, issues = expand_root(
+        root, resolve, workflow_id if isinstance(workflow_id, str) else None
+    )
+    issues += structure_issues(root) + tool_issues(root, known_tools)
     issues += policy_issues(root, policy)
     issues += budget_issues(root, policy, priced, default_model)
-    return in_run_order(root, issues)
+    return on_subflows(root, in_run_order(root, issues))
 
 
 def schema_issues(raw: object) -> list[ValidationIssue]:

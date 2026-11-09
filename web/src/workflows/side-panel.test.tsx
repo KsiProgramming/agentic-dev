@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import type { SpecNode, WorkflowSpec } from "@/runs/graph/spec-graph";
+
+import { json, renderWithQueries, stubApi } from "@/testing/api";
 
 import type { Edit } from "./edits";
 import type { NodeManifest } from "./node-types";
@@ -43,7 +45,7 @@ const AGENT = {
 
 function panel(node: SpecNode, extra: Partial<Parameters<typeof NodePanel>[0]> = {}) {
   const onEdit = vi.fn<(edit: Edit) => void>();
-  const view = render(
+  const view = renderWithQueries(
     <NodePanel
       node={node}
       manifests={[...NODE_TYPES, ECHO]}
@@ -210,4 +212,101 @@ test("the workflow's budget is set and cleared", () => {
   rerender(<WorkflowPanel spec={{ ...spec, budget_usd: 2.5 } as WorkflowSpec} onEdit={onEdit} />);
   fireEvent.change(screen.getByLabelText(/^Budget/), { target: { value: "" } });
   expect(lastOps(onEdit)).toEqual([{ op: "setParam", path: "budget_usd", value: null }]);
+});
+
+describe("a subflow's workflow (6.5)", () => {
+  const LOCAL = "http://localhost:8000";
+  const WS = "ws-1";
+  const CALL = {
+    type: "subflow",
+    id: "call",
+    workflow: { id: "child", version: 1 },
+  } as unknown as SpecNode;
+  const summary = (workflow_id: string, name: string, latest_version: number) => ({
+    workflow_id,
+    name,
+    description: null,
+    latest_version,
+    created_at: "2026-11-09T10:00:00Z",
+    updated_at: "2026-11-09T10:00:00Z",
+  });
+  const version = (n: number) => ({
+    version: n,
+    base_version: n > 1 ? n - 1 : null,
+    created_at: "2026-11-09T10:00:00Z",
+    op_count: 1,
+    restored_from: null,
+  });
+
+  function stub() {
+    return stubApi({
+      [`GET ${LOCAL}/workflows?workspace_id=${WS}`]: () =>
+        json(200, {
+          items: [
+            summary("parent", "Parent", 1),
+            summary("child", "Child", 3),
+            summary("other", "Other", 2),
+          ],
+        }),
+      [`GET ${LOCAL}/workflows/child/versions?workspace_id=${WS}`]: () =>
+        json(200, { items: [version(3), version(2), version(1)] }),
+      [`GET ${LOCAL}/workflows/other/versions?workspace_id=${WS}`]: () =>
+        json(200, { items: [version(2), version(1)] }),
+    });
+  }
+
+  test("lists the other workflows and the called one's versions, the latest marked", async () => {
+    stub();
+    panel(CALL, { context: { workspaceId: WS, workflowId: "parent" } });
+
+    const workflow = (await screen.findByLabelText("Workflow")) as HTMLSelectElement;
+    await waitFor(() => expect(workflow.options.length).toBeGreaterThan(1));
+    const names = [...workflow.options].map((o) => o.textContent);
+    // The workflow being edited may not call itself.
+    expect(names).toEqual(["Pick a workflow", "Child (child)", "Other (other)"]);
+    expect(workflow.value).toBe("child");
+    const versions = (await screen.findByLabelText("Version")) as HTMLSelectElement;
+    await waitFor(() =>
+      expect([...versions.options].map((o) => o.textContent)).toEqual([
+        "Version 3 (latest)",
+        "Version 2",
+        "Version 1",
+      ]),
+    );
+    expect(versions.value).toBe("1");
+    expect(screen.getByText(/Version 3 is the latest/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open workflow/ }).getAttribute("href")).toBe(
+      "/workflows/child?version=1",
+    );
+  });
+
+  test("picking a workflow calls its latest version; picking a version changes only it", async () => {
+    stub();
+    const { onEdit } = panel(CALL, { context: { workspaceId: WS, workflowId: "parent" } });
+    const workflow = (await screen.findByLabelText("Workflow")) as HTMLSelectElement;
+    await waitFor(() => expect(workflow.options.length).toBeGreaterThan(1));
+
+    fireEvent.change(workflow, { target: { value: "other" } });
+    expect(lastOps(onEdit)).toContainEqual({
+      op: "setParam",
+      node_id: "call",
+      path: "workflow.id",
+      value: "other",
+    });
+    expect(lastOps(onEdit)).toContainEqual({
+      op: "setParam",
+      node_id: "call",
+      path: "workflow.version",
+      value: 2,
+    });
+  });
+
+  test("an older version is shown, not edited", async () => {
+    stub();
+    panel(CALL, { context: { workspaceId: WS, workflowId: "parent" }, readOnly: true });
+    const workflow = (await screen.findByLabelText("Workflow")) as HTMLSelectElement;
+    await waitFor(() => expect(workflow.options.length).toBeGreaterThan(1));
+    expect(workflow.disabled).toBe(true);
+    expect((screen.getByLabelText("Version") as HTMLSelectElement).disabled).toBe(true);
+  });
 });

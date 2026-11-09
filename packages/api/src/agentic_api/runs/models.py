@@ -398,6 +398,34 @@ class RunDetail(RunSummary):
     input: str
     failure_reason: str | None = Field(description="Why the run failed, if it did.")
     spec: WorkflowSpec = Field(description="The workflow spec the run was created with.")
+    calls: dict[str, "RunCall"] = Field(
+        default_factory=dict[str, "RunCall"],
+        description="Each `subflow` of the run (6.5), by its node id: the workflow it calls and "
+        "that workflow's root as it runs in this run, a subflow inside it having an entry of its "
+        "own. Empty when the run calls no workflow.",
+    )
+
+
+class RunCallWorkflow(BaseModel):
+    """The stored workflow version a subflow calls, as the run was created with it."""
+
+    id: str
+    version: int
+    name: str
+
+
+class RunCall(BaseModel):
+    """One `subflow` of a run (6.5): the workflow it calls, and that workflow's root as it runs
+    in the run. A node of it whose id the run already had runs under another id, its run id;
+    `renamed` maps each such run id to the id the called workflow gives it."""
+
+    workflow: RunCallWorkflow
+    root: dict[str, JsonValue] = Field(
+        description="The called workflow's root node, with the ids its nodes run under."
+    )
+    renamed: dict[str, str] = Field(
+        description="Run id to the called workflow's own id, for the nodes that run renamed."
+    )
 
 
 class RunCounts(BaseModel):

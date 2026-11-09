@@ -31,6 +31,7 @@ export function guessKind(step: Step): NodeKind {
   if (step.iterations) return "loop";
   if (step.router) return "router";
   if (step.orchestrator) return "orchestrator";
+  if (step.subflow) return "subflow";
   if (step.gate) return "gate";
   return step.turns.some((t) => t.kind === "message") ? "agent" : "tool";
 }

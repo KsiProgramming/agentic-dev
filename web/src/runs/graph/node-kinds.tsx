@@ -8,6 +8,7 @@ import {
   ShieldCheckIcon,
   SignpostIcon,
   SplitIcon,
+  WorkflowIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const KIND: Record<NodeKind, { icon: LucideIcon; label: string }> = {
   parallel: { icon: SplitIcon, label: "parallel" },
   router: { icon: SignpostIcon, label: "router" },
   orchestrator: { icon: NetworkIcon, label: "orchestrator" },
+  subflow: { icon: WorkflowIcon, label: "subflow" },
   sequence: { icon: LayersIcon, label: "sequence" },
 };
 

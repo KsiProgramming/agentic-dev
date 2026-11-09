@@ -56,6 +56,8 @@ class RunSummaryRow:
     times: "RunTimesRow"
     # The workflow spec the run was created with; read only for one run's detail.
     spec: dict[str, Any] | None = None
+    # The copies of the workflows the spec calls (6.5), by `<id>@<version>`; with `spec`.
+    subflows: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -147,7 +149,9 @@ def _select() -> Select[*tuple[Any, ...]]:
     )
 
 
-def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
+def _summary(
+    row: Any, *, spec: dict[str, Any] | None = None, subflows: dict[str, Any] | None = None
+) -> RunSummaryRow:
     return RunSummaryRow(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -184,6 +188,7 @@ def _summary(row: Any, *, spec: dict[str, Any] | None = None) -> RunSummaryRow:
             waiting_since=row.waiting_since,
         ),
         spec=spec,
+        subflows=subflows,
     )
 
 
@@ -316,6 +321,6 @@ async def get_run_summary(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID
 ) -> RunSummaryRow | None:
     async with sessions() as session:
-        query = _select().add_columns(Run.spec).where(Run.id == run_id)
+        query = _select().add_columns(Run.spec, Run.subflows).where(Run.id == run_id)
         row = (await session.execute(query)).one_or_none()
-    return None if row is None else _summary(row, spec=row.spec)
+    return None if row is None else _summary(row, spec=row.spec, subflows=row.subflows)
