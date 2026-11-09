@@ -1,6 +1,7 @@
 import {
   BanIcon,
   CircleCheckIcon,
+  CircleDashedIcon,
   CirclePauseIcon,
   CircleXIcon,
   LoaderCircleIcon,
@@ -10,7 +11,7 @@ import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-import type { StepStatus } from "../timeline";
+import type { TaskStatus } from "../timeline";
 import { stepBadge } from "./step-status";
 
 /**
@@ -59,27 +60,38 @@ export function RailItem({
   );
 }
 
-const STATUS_ICON: Record<StepStatus, { icon: LucideIcon; className: string }> = {
+const STATUS_ICON: Record<TaskStatus, { icon: LucideIcon; className: string }> = {
   running: { icon: LoaderCircleIcon, className: "text-status-running motion-safe:animate-spin" },
   waiting: { icon: CirclePauseIcon, className: "text-status-waiting" },
   completed: { icon: CircleCheckIcon, className: "text-status-succeeded" },
   failed: { icon: CircleXIcon, className: "text-status-failed" },
   cancelled: { icon: BanIcon, className: "text-status-cancelled" },
+  // A task not started yet, or dropped by a replan: no status colour (it neither ran nor failed).
+  pending: { icon: CircleDashedIcon, className: "text-muted-foreground" },
+  dropped: { icon: CircleDashedIcon, className: "text-muted-foreground" },
 };
 
-/** A step's or map item's status as the marker: an icon, with its label for screen readers
- * (status is never colour alone). */
-export function StatusMarker({ status, small = false }: { status: StepStatus; small?: boolean }) {
+const TASK_LABEL = { pending: "Not started", dropped: "Dropped" } as const;
+
+function statusLabel(status: TaskStatus): string {
+  return status === "pending" || status === "dropped"
+    ? TASK_LABEL[status]
+    : stepBadge(status).label;
+}
+
+/** A step's, map item's or task's status as the marker: an icon, with its label for screen
+ * readers (status is never colour alone). */
+export function StatusMarker({ status, small = false }: { status: TaskStatus; small?: boolean }) {
   return (
     <>
       <StatusIcon status={status} small={small} />
-      <span className="sr-only">{stepBadge(status).label}</span>
+      <span className="sr-only">{statusLabel(status)}</span>
     </>
   );
 }
 
 /** The status icon alone, beside a status label that is already shown. */
-export function StatusIcon({ status, small = false }: { status: StepStatus; small?: boolean }) {
+export function StatusIcon({ status, small = false }: { status: TaskStatus; small?: boolean }) {
   const { icon: Icon, className } = STATUS_ICON[status];
   return <Icon aria-hidden="true" className={cn(small ? "size-3.5" : "size-4", className)} />;
 }

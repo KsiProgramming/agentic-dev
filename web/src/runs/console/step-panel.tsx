@@ -118,6 +118,7 @@ export function StepPanel({
             kind={kind}
             entries={entries}
             extra={extra}
+            now={now}
             onSelect={onSelect}
           />
         </TabsContent>

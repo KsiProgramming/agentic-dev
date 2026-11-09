@@ -23,6 +23,7 @@ import type { NodeKind } from "../graph/spec-graph";
 import type { RouterInfo, Step } from "../timeline";
 import { AgentMessage } from "./agent-message";
 import { GateDecision } from "./gate-decision";
+import { OrchestratorPlan } from "./orchestrator-plan";
 import { isLongOutput } from "./long-output";
 import { PortErrors } from "./port-errors";
 import { StatusMarker } from "./rail";
@@ -255,6 +256,7 @@ export function StepOutput({
   kind,
   entries,
   extra,
+  now = 0,
   onSelect,
 }: {
   runId: string;
@@ -265,6 +267,9 @@ export function StepOutput({
   entries: StepEntry[];
   /** E.g. the waiting gate's pointer to the decision. */
   extra?: ReactNode;
+  /** The time running tasks' durations count up to. */
+  /** The time running tasks' durations count up to (the console's clock). */
+  now?: number;
   onSelect: (key: string) => void;
 }) {
   const message = lastMessage(step);
@@ -280,9 +285,22 @@ export function StepOutput({
   if (step.gate) parts.push(<GateDecision key="gate" gate={step.gate} />);
   if (extra) parts.push(<div key="extra">{extra}</div>);
   if (step.router) parts.push(<RouteChoice key="route" step={step} router={step.router} />);
-  // A router's own turns are its classifier's: its answer is the choice above, its work is in
-  // the Activity tab.
-  if (final && final.work.length > 0 && !step.router) {
+  if (step.orchestrator) {
+    parts.push(
+      <OrchestratorPlan
+        key="plan"
+        step={step}
+        info={step.orchestrator}
+        entries={entries}
+        now={now}
+        onSelect={onSelect}
+      />,
+    );
+  }
+  // A router's own turns are its classifier's, an orchestrator's its hub's: the answer is the
+  // choice or the plan above, the work is in the Activity tab.
+  const own = !step.router && !step.orchestrator;
+  if (final && final.work.length > 0 && own) {
     // The work behind the answer, folded: one line above it.
     parts.push(
       <WorkBlock
@@ -293,7 +311,7 @@ export function StepOutput({
       />,
     );
   }
-  if (message && message.text.trim() && !step.router) {
+  if (message && message.text.trim() && own) {
     parts.push(
       <Answer
         key="answer"
@@ -327,7 +345,7 @@ export function StepOutput({
     );
   }
   if (step.items) parts.push(<MapTotals key="totals" step={step} />);
-  if (children.length > 0) {
+  if (children.length > 0 && !step.orchestrator) {
     parts.push(<Children key="children" items={children} onSelect={onSelect} />);
   }
   if (step.createdRepo) {

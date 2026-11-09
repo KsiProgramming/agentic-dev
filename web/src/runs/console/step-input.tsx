@@ -96,6 +96,26 @@ function NodeFields({ node }: { node: SpecNode }) {
           <Mono>{node.join}</Mono>
         </Field>
       );
+    case "orchestrator":
+      return (
+        <>
+          <Field label="Hub role">{node.hub.role}</Field>
+          <Field label="Hub instructions">
+            <p className="max-w-prose break-words whitespace-pre-wrap">{node.hub.instructions}</p>
+          </Field>
+          <Field label="Hub model">
+            {node.hub.model ? <Mono>{node.hub.model}</Mono> : "Workspace default"}
+          </Field>
+          <Field label="At most">
+            {node.max_workers} tasks, {node.max_concurrency} at once
+          </Field>
+          <Field label="Replan">
+            {node.replan
+              ? `On failure, up to ${node.replan.max_rounds} ${node.replan.max_rounds === 1 ? "time" : "times"}`
+              : "Off: a failed task fails the orchestrator"}
+          </Field>
+        </>
+      );
     case "reduce":
       return (
         <>
@@ -158,8 +178,8 @@ function ArtifactFields({ node }: { node: SpecNode }) {
   );
 }
 
-/** What the step was given: the run artifacts it read, its node in the spec, the map item it ran
- * for, and the run's input for the run's first step. */
+/** What the step was given: the run artifacts it read, its node in the spec, the map item or
+ * orchestrator task it ran for, and the run's input for the run's first step. */
 export function StepInput({
   runId,
   baseUrl,
@@ -195,6 +215,18 @@ export function StepInput({
           </Field>
         ) : null}
         {row.iteration ? <Field label="Iteration">{row.iteration.index}</Field> : null}
+        {row.task ? (
+          <Field label="Task">
+            {/* The hub's words reach the worker as data: shown as text. */}
+            <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+              <Mono>{row.task.id}</Mono>
+              <span>{row.task.title}</span>
+              {row.task.round > 1 ? (
+                <span className="text-meta text-foreground-secondary">round {row.task.round}</span>
+              ) : null}
+            </span>
+          </Field>
+        ) : null}
         {first && runInput ? (
           <Field label="Run input">
             <OutputView text={runInput} label="Run input" />
