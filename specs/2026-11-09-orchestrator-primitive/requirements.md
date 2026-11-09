@@ -22,16 +22,16 @@ Principles that drive it:
 - **Spec model** `OrchestratorNode`: `{type: "orchestrator", id, hub: {role, instructions, provider?, model?}, body: <worker node>, max_workers, max_concurrency, writes?}`.
   - `body` is the worker: one `agent` or a `sequence` of `agent`/`tool` nodes (no gate, publisher, repo creation, map, parallel, loop, router or orchestrator inside it in 6.1).
   - `max_workers` 1 to the platform's `agents_spawned`; `max_concurrency` 1 to `agents_alive`.
-- **The plan**: the hub is one agent turn (role `hub`) whose `output_schema` is made by the engine: `{tasks: [{id, title, instructions}], reason}`, `tasks` at most `max_workers`, task ids unique slugs. An off-schema answer fails the orchestrator as a typed port (4.2) with `node_failed`'s `port`. An empty plan completes with no workers.
+- **The plan**: the hub is one agent turn (with the hub's `role`) whose `output_schema` is made by the engine: `{tasks: [{id, title, instructions}], reason}`, `tasks` at most `max_workers`, task ids unique slugs (not `lock`, which git refuses as a branch suffix). An off-schema answer fails the orchestrator as a typed port (4.2) with `node_failed`'s `port`. An empty plan completes with no workers.
 - **Workers**: one per task, at most `max_concurrency` at a time, each on input `{task: {id, title, instructions}, input: <the orchestrator's input>}` as JSON. Their agents get their own instructions from the spec; the task arrives as data.
-- **Writer workers**: a worker agent with write tools gets its own worktree and branch, made when its task starts: writer key `<orchestrator>--<task>`, branch `agent/<run>/<orchestrator>--<task>`. The repo tools route its calls by that key. A gate after the orchestrator shows every worker's changes (gate review learns the dynamic writers from the run state) and commits edits to their branches.
+- **Writer workers**: a worker agent with write tools gets its own worktree and branch, made when its task starts: writer key `<orchestrator>.<task>`, branch `agent/<run>/<orchestrator>.<task>`. The repo tools route its calls by that key. A gate after the orchestrator shows every worker's changes (gate review learns the dynamic writers from the run state) and commits edits to their branches.
 - **Output**: the workers' outputs in task order; a `reduce` may name an orchestrator in `from` (source ids are the task ids). `writes` on the orchestrator stores its output as an artifact.
 - **Limits**: the hub and every worker's agents count on `agents_spawned` when the plan is made (over it: `policy_limit_exceeded`, a clean stop); workers wait for `agents_alive` slots; an orchestrator is one level of `max_depth`.
 - **Resume**: the plan is checkpointed in `RunState.plans` (orchestrator id → tasks), so a resumed run never asks the hub again; each task is checkpointed like a map item.
-- **Events**: `node_started` (`max_workers`), the hub's agent events, `plan_made` (`tasks: [{id, title}]`, `reason`), workers' events tagged `task: <id>` (as a map item's `item`), the orchestrator's `node_completed` (`tasks`, `completed`).
+- **Events**: `node_started` (`max_workers`), the hub's agent events, `plan_made` (`tasks: [{id, title}]`, `reason`), `task_started` / `task_completed` around each task, workers' events tagged `item` (the task's index, as a map item's), the orchestrator's `node_completed` (`tasks`, `completed`).
 - **Validation** issues: `not_allowed_in_orchestrator` (on the forbidden node in the body), `reference` for a publisher whose `from_node` is an orchestrator or a node in its body, policy issues for `max_concurrency` and depth.
 - **Contract in tech-stack** ("Orchestrator (API contract)") and a decisions-log row per choice below; the `schemas/` JSON Schema export.
-- **Node manifest** (category `flow`, icon `network`) and regenerated `schemas/fixtures/node-types.json`, so the builder palette offers it with no web change.
+- **Node manifest** (category `flow`, icon `network`) and regenerated `schemas/fixtures/node-types.json`, so the builder palette offers it. The web gets the regenerated API types and the kind's icon (its typecheck requires one per kind); the canvas and run map draw the orchestrator as one card, its worker not shown or editable inside it (they hard-code `loop` and `map` as the kinds with a `body`), until 6.4.
 
 ### Out of scope
 - Replan on failure (6.2): one failed worker fails the orchestrator; there is no `replan` field yet.
@@ -47,12 +47,12 @@ Principles that drive it:
 |---|---|---|
 | Plan shape | An engine-made `output_schema` on the hub turn (`orchestrator_plan_schema`), checked as a typed port | Same path as the router's classifier: no new parser, a hub cannot plan more than `max_workers` or an off-shape task. |
 | Task text | Passed to the worker as its input (data), never appended to its instructions | Mission 5; the worker's instructions stay the ones a human wrote and reviewed. |
-| Worker slot name | `body`, as on `map` and `loop` | The graph ops (`at {parent}`), `SpecTree` and validation already handle a container's single `body`, so the builder draws and edits it with no web change. |
+| Worker slot name | `body`, as on `map` and `loop` | The engine's graph ops (`at {parent}`) and validation already handle a container's single `body`. The web's canvas, ops mirror and console still list `loop` and `map` by name, so drawing and editing the worker there is a small change left to 6.4. |
 | Execution | One `Send` per task, each task run with the in-process runner (`_run_inline`), per-task checkpoints | Reuses the map's fan-out and resume path; no new LangGraph node per task. |
-| Writer workers | Allowed; a worktree and branch per task (`<orchestrator>--<task>`), made when the task starts; publishing them refused until 6.3 | User's choice for 6.1. The branch keeps writers apart; without an integration branch one PR cannot hold them, so the publish rule stays strict. A gate can still review them. |
+| Writer workers | Allowed; a worktree and branch per task (`<orchestrator>.<task>`), made on the task's first write; publishing them refused until 6.3 | User's choice for 6.1. The branch keeps writers apart, and a `.` is in no node id, so a key never names a node (`--` could). Without an integration branch one PR cannot hold them, so the publish rule stays strict. A gate can still review and edit them. |
 | Failed worker | Fails the orchestrator (running workers `node_cancelled`) | Replan is 6.2; a partial result that looks complete is worse than a clear failure. |
 | Depth | An orchestrator is a level of `max_depth`, and none may nest in 6.1 | Product spec's "orchestrator nesting depth"; nesting dynamic fan-outs multiplies spawned agents and is not needed by 6.2–6.8. |
 
 ## Open questions
-- The `NodeId` pattern must accept `<orchestrator>--<task>` as a writer key and branch segment; if it does not, the key becomes `<orchestrator>.<task>` (confirmed in task group 1).
+- Resolved: the writer key is `<orchestrator>.<task>` (a `--` key could equal a real node id).
 - The roadmap's "Next up" line still names Milestone 4 at 4.8 (done in #156); it should name Milestone 6, in its own PR with a changelog entry.

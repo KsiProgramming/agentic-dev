@@ -97,6 +97,7 @@ class Team:
         self._scripts = dict(scripts or {})
         self._tools = tools
         self.requests: list[AgentRequest] = []
+        self.answers: dict[str, str] = {}
         self.live = 0
         self.peak = 0
 
@@ -115,7 +116,8 @@ class Team:
             if task in self._fail:
                 script.append(Failed(error=f"cannot fix {task}"))
             else:
-                script += [Message(text=f"{request.node_id}:{task}"), ECHO_USAGE]
+                text = self.answers.get(task, f"{request.node_id}:{task}")
+                script += [Message(text=text), ECHO_USAGE]
         run = FakeRuntime({request.node_id: script}, tools=self._tools).start(request)
         return _Live(run, self)
 
@@ -540,3 +542,45 @@ async def test_resume_runs_only_unfinished_tasks_and_never_asks_the_hub_again() 
 def test_an_orchestrator_takes_three_steps() -> None:
     flow = spec(orchestrator(agent("worker")))
     assert recursion_limit(flow) == 3 + 10
+
+
+async def test_a_concat_reduce_joins_the_tasks_in_plan_order() -> None:
+    concat = {"type": "reduce", "id": "join", "from": HUB, "strategy": "concat", "separator": " | "}
+    team = Team(plan("b", "a"), delays={"b": 0.03})
+    result = await run(spec(orchestrator(agent("worker")), concat), team)
+    assert result.results["join"].text == "worker:b | worker:a"
+
+
+async def test_a_dedupe_reduce_merges_the_tasks_reports_by_task_id() -> None:
+    def report(path: str) -> str:
+        finding = {
+            "fingerprint": "same",
+            "tool": "agent",
+            "rule": "R1",
+            "severity": "high",
+            "category": "security",
+            "path": path,
+            "line": 1,
+            "message": "Bad.",
+        }
+        return json.dumps(
+            {
+                "scanner": "agent",
+                "checks": [{"path": ".", "kind": "repo", "tool": "agent", "status": "ran"}],
+                "findings": [finding],
+                "counts": {"high": 1},
+                "truncated": False,
+            }
+        )
+
+    team = Team(plan("api", "web"))
+    team.answers = {"api": report("api.py"), "web": report("api.py")}
+    dedupe = {"type": "reduce", "id": "merge", "from": HUB, "strategy": "dedupe"}
+
+    result = await run(spec(orchestrator(agent("worker")), dedupe), team)
+
+    assert result.status == "completed", result.results["merge"].error
+    data = result.results["merge"].data
+    assert data is not None
+    [merged] = cast(list[dict[str, JsonValue]], data["findings"])
+    assert merged["sources"] == ["api", "web"]

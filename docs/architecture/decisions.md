@@ -32,7 +32,7 @@ This is a curated set of the decisions that matter most to someone adopting, ope
 
 **Context.** Docs generation, audits and feature work each need a different mix of sequential steps, parallel workers, review loops and approvals. Single-agent tools run one loop; workflow builders do not understand code. A fixed menu of patterns would never fit every team.
 
-**Decision.** The engine understands a small, versioned set of primitives: `agent`, `tool`, `sequence`, `parallel`, `map`, `reduce`, `router`, `loop`, `gate`, plus `orchestrator` and `subflow` (planned). Every pattern (hub-and-spoke, map-reduce, pipeline, debate, review loop) is a graph of them. Users extend the set with composite nodes (no code) and plugin nodes (code) without an engine release.
+**Decision.** The engine understands a small, versioned set of primitives: `agent`, `tool`, `sequence`, `parallel`, `map`, `reduce`, `router`, `loop`, `gate` and `orchestrator` (a hub plans tasks at run time, 6.1), plus `subflow` (planned). Every pattern (hub-and-spoke, map-reduce, pipeline, debate, review loop) is a graph of them. Users extend the set with composite nodes (no code) and plugin nodes (code) without an engine release.
 
 **Alternatives.** A catalogue of named patterns: simpler UI, but every new pattern needs a release. Arbitrary code nodes: maximally flexible, but impossible to validate, cap or explain.
 
