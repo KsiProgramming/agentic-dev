@@ -64,7 +64,8 @@ import {
   type SpecNode,
   type WorkflowSpec,
 } from "@/runs/graph/spec-graph";
-import { CARD, SpecTree, type MapNode } from "@/runs/graph/spec-tree";
+import { SpecView } from "@/runs/graph/spec-flow";
+import { CARD, type MapNode } from "@/runs/graph/spec-tree";
 import { WorkflowRunSheet } from "@/runs/new-run/new-run-sheet";
 import { workflowRequires } from "@/runs/new-run/readiness";
 import { useWorkspaceId } from "@/workspace";
@@ -701,7 +702,7 @@ function Editor({
             ) : null}
           </div>
           <div className="@container overflow-auto p-4" data-testid="builder-canvas">
-            <SpecTree spec={spec} renderCard={renderCard} />
+            <SpecView spec={spec} renderCard={renderCard} />
           </div>
         </section>
         {wide ? (

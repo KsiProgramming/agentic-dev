@@ -1,0 +1,116 @@
+{
+  "spec_version": "0",
+  "id": "team-review-pr",
+  "name": "Team change with review and PR",
+  "description": "A lead splits the requested change between two engineers; each task is reviewed and redone with the feedback until it passes; a synthesizer writes the PR description, a reviewer checks the whole, and an approved change is opened as a PR.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "orchestrator",
+        "id": "implement",
+        "hub": {
+          "role": "Tech lead",
+          "instructions": "Split the change requested in your input into at most two independent tasks, one per engineer, each touching different files so their work merges cleanly. Each task's instructions must say exactly which files to change and what done looks like.\n\nWhen you plan again, a task failed because its reviewer rejected it: its error holds the reviewer's feedback (in the text after 'output of 'task_review''). Plan that work again as a new task, with the feedback written into its instructions so the engineer fixes exactly what was rejected. Keep the tasks that completed."
+        },
+        "body": {
+          "type": "sequence",
+          "id": "task",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "engineer",
+              "role": "Software engineer",
+              "instructions": "Do the task in your input (`task.instructions`) in the repository: read the code you need, change only the files the task names, and commit your work with a clear message. End your answer with a list of every file you changed and, for each, its full new content, so a reviewer can check it without the repository.",
+              "tools": [
+                "repo.list_files",
+                "repo.read_file",
+                "repo.search",
+                "repo.write_file",
+                "repo.commit"
+              ]
+            },
+            {
+              "type": "agent",
+              "id": "task_review",
+              "role": "Code reviewer",
+              "instructions": "Review the engineer's work in your input against the task it was given: correctness, completeness, and nothing changed outside the task. If it is good, answer with `verdict` set to exactly \"approved\". If it is not, set `verdict` to your feedback for the engineer instead: one short paragraph saying exactly what to fix. Never approve work you have doubts about.",
+              "tools": ["repo.read_file", "repo.search"],
+              "output_schema": {
+                "type": "object",
+                "required": ["verdict"],
+                "properties": {
+                  "verdict": { "type": "string", "enum": ["approved"] }
+                }
+              }
+            }
+          ]
+        },
+        "max_workers": 2,
+        "max_concurrency": 2,
+        "replan": { "on": "failure", "max_rounds": 3 }
+      },
+      {
+        "type": "agent",
+        "id": "synthesizer",
+        "role": "Release writer",
+        "instructions": "Your input is the engineers' reports, one per task. Write one pull request description for the whole change: a short summary, then what changed per file and why, then how to check it. Plain Markdown, no greeting."
+      },
+      {
+        "type": "agent",
+        "id": "reviewer",
+        "role": "Senior reviewer",
+        "instructions": "Review the whole change described in your input as one pull request: does it do what was asked, do the parts fit together, is anything missing or risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` say why in a few sentences.",
+        "tools": ["repo.read_file", "repo.search"],
+        "output_schema": {
+          "type": "object",
+          "required": ["verdict", "feedback"],
+          "properties": {
+            "verdict": { "type": "string", "enum": ["ok", "changes"] },
+            "feedback": { "type": "string" }
+          }
+        }
+      },
+      {
+        "type": "router",
+        "id": "decision",
+        "routes": [
+          {
+            "id": "ok",
+            "when": "results.reviewer.data.verdict == \"ok\"",
+            "description": "The reviewer approved the whole change.",
+            "then": {
+              "type": "sequence",
+              "id": "publish",
+              "steps": [
+                {
+                  "type": "gate",
+                  "id": "approve_pr",
+                  "title": "Open the pull request?",
+                  "prompt": "The reviewer approved the change. Check the diff, then approve to open the pull request."
+                },
+                {
+                  "type": "tool",
+                  "id": "open_pr",
+                  "tool": "github.openPR",
+                  "args": {
+                    "from_node": "implement",
+                    "title": "Team change, reviewed",
+                    "body": "Planned by a lead, implemented by two engineers, each task reviewed and reworked until approved, then reviewed as a whole. See the run for the full report."
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "default": {
+          "type": "agent",
+          "id": "report_changes",
+          "role": "Reviewer",
+          "instructions": "The final review asked for changes, so no pull request is opened. Your input is the review. Write a short report for the person who started the run: what the reviewer found and what to change before running again."
+        }
+      }
+    ]
+  }
+}

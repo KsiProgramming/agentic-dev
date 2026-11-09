@@ -23,12 +23,12 @@ Mission principles: **Enterprise-grade, calm UI (8)** (a workflow should read th
   - a sequence is its steps left to right;
   - a parallel, map or orchestrator is a fork, one lane per branch (a map's and an orchestrator's body as one lane, marked "× each item" / "× each task"), and a join;
   - a router's routes are lanes whose edges carry the route's name (`ok`, `default`); a route not taken is dashed on the run map;
-  - a loop is its body with a back edge from its end to its start, labelled with its `until`;
+  - a loop is its body in a framed lane ("Repeats until <until>") with a dashed back edge from its end to the loop *(changed while building: the condition on the edge collided with other lines)*;
   - a subflow on the run map is its called workflow inline in a framed lane (6.5); on the canvas it stays one card.
 - **One renderer for both views**: the cards as today (`CARD`, status dot, menus, selection, accessible names), positioned by the model, with edges drawn in SVG (`border-strong`, 1 px, arrowheads; status colours never on edges). It replaces `SpecTree` as the drawing of the canvas and the run map.
 - **Run map**: orchestrator task cards (6.4) sit in the orchestrator's lane; statuses, the selection and "Go to step" work as now.
 - **Builder**: every edit menu, the palette, the side panel, live issues on cards, blocked edits, the version diff badges and keyboard focus after an edit work as now; only positions change. "Add first step" stays in the pane header.
-- **Narrow screens**: below 768 px of pane width, both views keep today's vertical tree (the current `SpecTree` drawing), so a phone scrolls down, not sideways. From 768 px the flow scrolls inside its own box when wider than the pane (the page never scrolls sideways).
+- **Fitting the pane** *(changed while building)*: every sequence wraps like text within the columns its lane has, and a container starts a new row when that keeps it more compact: a step that would go past the columns the pane holds starts a new row below, joined by a return edge; a step is never split (a fork's lanes, a route, a call stay whole), so one wider than the pane has a row of its own and scrolls in its box. Below 560 px of pane width both views keep today's vertical tree (the current `SpecTree` drawing), so a phone scrolls down. The plan's 768 px threshold measured the pane, which beside the builder's side panel is about 730 px at 1440, so the builder would never have shown the flow; 560 px is where the tree itself starts hanging children to the right.
 - **Specs**: tech-stack (UI design system → Canvas, Run map, Builder canvas; a decisions-log row superseding "card tree"), design-language (Run map → flow: lanes, joins, edge labels, back edges), roadmap `[Plan]` link, changelog.
 
 ### Out of scope
@@ -44,7 +44,9 @@ Mission principles: **Enterprise-grade, calm UI (8)** (a workflow should read th
 | What changes | Both the canvas and the run map, in one phase | They share one drawing today; splitting them would leave two layouts to keep alike (interview). |
 | Layout | Computed from the spec tree, no library | Workflows are series-parallel (sequences, forks and joins, routes, loops), so positions follow from the tree in one recursive pass; no new dependency, no reversal of 11.9's "no layout engine" reason (interview). |
 | Edges | SVG lines under the cards, from the model's edge list | Elbow lines in CSS cannot draw a join or a back edge; SVG can, and stays inside the pane's own scroll box. |
-| Narrow screens | Keep today's vertical tree below 768 px | A flow read left to right does not fit 375 px; the vertical tree already passes the layout and axe checks there. |
+| Narrow screens | Keep today's vertical tree below 560 px of pane width | A flow read left to right does not fit 375 px; the vertical tree already passes the layout and axe checks there. 768 px of *pane* would have kept the builder on the tree at 1440 (changed while building). |
+| A flow wider than the pane | Wrap the root sequence into rows, never splitting a step | Eight steps need about 2,000 px, the builder's pane has about 730: scrolling showed three cards at a time. Wrapping keeps the whole flow in view with no sideways scroll (chosen with the user from screenshots). |
+| Route names | Over the route's first card, not on the edge | The column gap (32 px) is narrower than a route's name; over the card it never touches a line or a card. |
 | Order of work | Layout model first, then the run map, then the builder | The model is unit-tested on every fixture before anything is drawn (interview). |
 
 ## Open questions
