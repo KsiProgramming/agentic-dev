@@ -127,6 +127,7 @@ from agentic_engine.expr import (
     ExpressionError,
     compile_condition,
     compile_list,
+    compile_value,
 )
 from agentic_engine.gate import GateReview, run_gate_node
 from agentic_engine.graph.checkpoint import Checkpointer
@@ -162,6 +163,7 @@ from agentic_engine.spec import (
     ReduceNode,
     RouterNode,
     SequenceNode,
+    SubflowNode,
     ToolNode,
     WorkflowSpec,
     agents_spawned,
@@ -173,6 +175,7 @@ from agentic_engine.spec import (
     router_routes,
     task_writer_key,
 )
+from agentic_engine.spec.subflows import expression_views
 from agentic_engine.tool import run_tool_node
 from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor, Usage
 from agentic_runtime.findings import (
@@ -204,6 +207,7 @@ class _Limits:
     sources: dict[str, str] = field(default_factory=dict[str, str])
     artifacts: ArtifactStore = field(default_factory=InMemoryArtifactStore)
     integrator: BranchIntegrator | None = None
+    views: dict[str, dict[str, str]] = field(default_factory=dict[str, dict[str, str]])
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -226,6 +230,7 @@ def step_nodes(root: Node) -> list[StepNode]:
                 | ParallelNode()
                 | RouterNode()
                 | OrchestratorNode()
+                | SubflowNode()
             ):
                 pass
             case _:
@@ -290,6 +295,11 @@ def replan_node_id(orchestrator: OrchestratorNode) -> str:
     return f"{orchestrator.id}.replan"
 
 
+def subflow_done_node_id(subflow: SubflowNode) -> str:
+    """The LangGraph node the workflow `subflow` calls ends at, which ends the subflow (6.5)."""
+    return f"{subflow.id}.done"
+
+
 def repo_ready_node_id(node: ToolNode) -> str:
     """The LangGraph node after `node`, which creates the run's repo, where the run stops for a
     new attempt to clone the repo."""
@@ -334,6 +344,8 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return 3
             case RouterNode():
                 return 2 + max(steps(route) for _, _, route in router_routes(node, node.id))
+            case SubflowNode():
+                return 2 + (steps(node.call) if node.call is not None else 0)
             case ToolNode() if creates_repo(node):
                 return 2  # and its `<id>.ready` node
             case AgentNode() | ToolNode() | GateNode() | ReduceNode():
@@ -377,7 +389,13 @@ def compile_workflow(
     builder = StateGraph(RunState)
     sources = {consumer.id: producer.id for producer, consumer, _ in port_edges(spec.root)}
     limits = _Limits(
-        policy, budget, review, sources, artifacts or InMemoryArtifactStore(), integrator
+        policy,
+        budget,
+        review,
+        sources,
+        artifacts or InMemoryArtifactStore(),
+        integrator,
+        expression_views(spec.root),
     )
 
     def add(node: Node, then: str) -> str:
@@ -403,7 +421,7 @@ def compile_workflow(
                 items: dict[str, list[JsonValue]] = {}
                 builder.add_node(node.id, _map_entry(node, over, log, limits, items))
                 builder.add_conditional_edges(
-                    node.id, _fan_out(node, over, items), [worker, join, END]
+                    node.id, _fan_out(node, over, items, limits), [worker, join, END]
                 )
                 builder.add_node(
                     worker, _map_item(node, runtime, tools, log, limits), input_schema=MapItem
@@ -467,6 +485,21 @@ def compile_workflow(
                     node.id, _to_route(node, starts), list(dict.fromkeys([*starts.values(), END]))
                 )
                 builder.add_node(done, _router_done(node, log))
+                go_on(done, node.id, then)
+                return node.id
+            case SubflowNode():
+                if node.call is None:
+                    raise CompileError(
+                        f"subflow {node.id!r}: workflow {node.workflow.id!r} version "
+                        f"{node.workflow.version} was not resolved for this run"
+                    )
+                done = subflow_done_node_id(node)
+                builder.add_node(node.id, _subflow_entry(node, log, limits))
+                start = add(node.call, done)
+                builder.add_conditional_edges(
+                    node.id, _continue_unless_failed(node.id, start), [start, END]
+                )
+                builder.add_node(done, _subflow_done(node, log))
                 go_on(done, node.id, then)
                 return node.id
             case ToolNode() if creates_repo(node):
@@ -724,7 +757,7 @@ def _loop_check(
 
     async def check(state: RunState) -> RunUpdate:
         iteration = state["iterations"][loop.id]
-        results = _results_context(state)
+        results = _results_for(loop.id, state["results"], limits)
         artifacts = await _artifacts_context(loop.until, state, limits)
         try:
             met = condition.evaluate(
@@ -768,9 +801,16 @@ def _after_check(loop: LoopNode, then: str) -> Callable[[RunState], str]:
     return route
 
 
-def _results_context(state: RunState) -> dict[str, JsonValue]:
-    """`results` as a CEL expression sees it: node id → `{status, text, data}`."""
-    return _results_of(state["results"])
+def _results_for(
+    node_id: str, results: Mapping[str, AgentNodeResult], limits: _Limits
+) -> dict[str, JsonValue]:
+    """`results` as the expressions of the node `node_id` see it: node id → `{status, text,
+    data}`. Inside a called workflow (6.5), its own nodes by the ids it gives them, whatever ids
+    they run under."""
+    view = limits.views.get(node_id)
+    if view is None:
+        return _results_of(results)
+    return _results_of({own: results[run] for own, run in view.items() if run in results})
 
 
 async def _artifacts_context(source: str, state: RunState, limits: _Limits) -> dict[str, JsonValue]:
@@ -798,7 +838,9 @@ def _map_entry(
         try:
             artifacts = await _artifacts_context(map.over, state, limits)
             items = over.evaluate(
-                last=state["last_text"], results=_results_context(state), artifacts=artifacts
+                last=state["last_text"],
+                results=_results_for(map.id, state["results"], limits),
+                artifacts=artifacts,
             )
             evaluated[map.id] = items
         except ExpressionError as e:
@@ -820,7 +862,7 @@ def _map_entry(
 
 
 def _fan_out(
-    map: MapNode, over: CompiledList, evaluated: dict[str, list[JsonValue]]
+    map: MapNode, over: CompiledList, evaluated: dict[str, list[JsonValue]], limits: _Limits
 ) -> Callable[[RunState], Sequence[Send] | str]:
     """One `Send` to the worker per item, with the run's artifacts; to the join if there are
     none; to `END` if the map failed. The items are those the entry evaluated in the same task
@@ -832,7 +874,8 @@ def _fan_out(
             return END
         items = evaluated.pop(map.id, None)
         if items is None:
-            items = over.evaluate(last=state["last_text"], results=_results_context(state))
+            results = _results_for(map.id, state["results"], limits)
+            items = over.evaluate(last=state["last_text"], results=results)
         if not items:
             return join_node_id(map)
         refs = state.get("artifacts", {})
@@ -1373,6 +1416,8 @@ async def _run_inline(node: Node, input: str, scope: _Scope) -> tuple[str, Agent
             return ended, result
         case RouterNode():
             return await _router_inline(node, input, scope)
+        case SubflowNode():
+            return await _subflow_inline(node, input, scope)
         case ParallelNode():
             return await _parallel_inline(node, input, scope)
         case ReduceNode():
@@ -1447,7 +1492,7 @@ def _router_entry(
                 "order": [router.id],
                 "routes": {router.id: None},
             }
-        results = _results_of(state["results"])
+        results = _results_for(router.id, state["results"], limits)
         choice = await _choose(
             router, state["last_text"], results, state.get("artifacts", {}), scope
         )
@@ -1508,7 +1553,8 @@ async def _router_inline(
 ) -> tuple[str, AgentNodeResult]:
     """Run a router inside a map item or a branch: choose, then run the route in `scope`. Its
     classifier was counted as spawned with the rest of the item or branch."""
-    choice = await _choose(router, input, _results_of(scope.ran), scope.refs, scope)
+    results = _results_for(router.id, scope.ran, scope.limits)
+    choice = await _choose(router, input, results, scope.refs, scope)
     route_id = _chosen(choice)
     if route_id is None:
         scope.ran[router.id] = choice
@@ -1608,6 +1654,113 @@ async def _rule(
     if router.default is None:
         return None, ""
     return DEFAULT_ROUTE, "no route matched"
+
+
+def _subflow_started(subflow: SubflowNode) -> dict[str, JsonValue]:
+    """The payload of `subflow`'s `node_started`: the workflow it calls."""
+    workflow: dict[str, JsonValue] = {
+        "id": subflow.workflow.id,
+        "version": subflow.workflow.version,
+        "name": subflow.called_name or subflow.workflow.id,
+    }
+    return {"workflow": workflow}
+
+
+async def _subflow_input(
+    subflow: SubflowNode,
+    last: str,
+    results: dict[str, JsonValue],
+    refs: Mapping[str, ArtifactRef],
+    limits: _Limits,
+) -> str:
+    """What the workflow `subflow` calls gets: the value of its `input`, else `last`. Raises
+    `ExpressionError` when `input` fails."""
+    if subflow.input is None:
+        return last
+    reads = "artifacts" in subflow.input
+    artifacts = await artifact_values(limits.artifacts, refs) if reads else {}
+    return compile_value(subflow.input).evaluate(last=last, results=results, artifacts=artifacts)
+
+
+def _subflow_entry(
+    subflow: SubflowNode, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Starts `subflow` and gives the workflow it calls its input; fails the subflow if its
+    `input` cannot be evaluated."""
+
+    async def enter(state: RunState) -> RunUpdate:
+        await log.emit(NODE_STARTED, node_id=subflow.id, payload=_subflow_started(subflow))
+        try:
+            text = await _subflow_input(
+                subflow,
+                state["last_text"],
+                _results_for(subflow.id, state["results"], limits),
+                state.get("artifacts", {}),
+                limits,
+            )
+        except ExpressionError as e:
+            error = f"input failed: {e}"
+            await log.emit(NODE_FAILED, node_id=subflow.id, payload={"error": error})
+            failed = AgentNodeResult(
+                status="failed", text=state["last_text"], usage=None, error=error
+            )
+            return {"results": {subflow.id: failed}, "order": [subflow.id]}
+        return {"last_text": text}
+
+    return enter
+
+
+def _subflow_done(
+    subflow: SubflowNode, log: RunEventLog
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Ends `subflow` once the workflow it calls completed. Its output is that workflow's, and
+    its `data` the workflow's last node's."""
+    assert subflow.call is not None
+    output = _output_id(subflow.call)
+
+    async def done(state: RunState) -> RunUpdate:
+        source = state["results"].get(output)
+        await log.emit(NODE_COMPLETED, node_id=subflow.id)
+        data = source.data if source is not None else None
+        result = AgentNodeResult(status="completed", text=state["last_text"], usage=None, data=data)
+        return _update(subflow.id, result)
+
+    return done
+
+
+async def _subflow_inline(
+    subflow: SubflowNode, input: str, scope: _Scope
+) -> tuple[str, AgentNodeResult]:
+    """Run `subflow` inside a map item or a branch: the workflow it calls runs in `scope`. Its
+    agents were counted with the rest of the item or branch."""
+    assert subflow.call is not None
+    log, tag = scope.log, scope.tag()
+    await log.emit(NODE_STARTED, node_id=subflow.id, payload=_subflow_started(subflow), **tag)
+    try:
+        input = await _subflow_input(
+            subflow,
+            input,
+            _results_for(subflow.id, scope.ran, scope.limits),
+            scope.refs,
+            scope.limits,
+        )
+    except ExpressionError as e:
+        error = f"input failed: {e}"
+        await log.emit(NODE_FAILED, node_id=subflow.id, payload={"error": error}, **tag)
+        failed = AgentNodeResult(status="failed", text=input, usage=None, error=error)
+        scope.ran[subflow.id] = failed
+        return subflow.id, failed
+    ended, result = await _run_inline(subflow.call, input, scope)
+    end: dict[str, JsonValue] = {}
+    if (error := _stop_error(ended, result)) is not None:
+        end["error"] = error
+    await log.emit(NODE_END[result.status], node_id=subflow.id, payload=end, **tag)
+    if result.status != "completed":
+        scope.ran[subflow.id] = result.model_copy(update={"usage": None, "error": error})
+        return ended, result
+    done = AgentNodeResult(status="completed", text=result.text, usage=None, data=result.data)
+    scope.ran[subflow.id] = done
+    return subflow.id, done
 
 
 CLASSIFIER_ROLE = "router"
@@ -2303,6 +2456,16 @@ def _created_repo(node: StepNode, result: AgentNodeResult) -> dict[str, JsonValu
     if result.status != "completed" or not result.data or "full_name" not in result.data:
         return None
     return {k: result.data[k] for k in _CREATED_REPO_FIELDS if k in result.data}
+
+
+def _continue_unless_failed(node_id: str, next_id: str) -> Callable[[RunState], str]:
+    """On to `next_id` unless the node `node_id` ended without completing (to `END` then)."""
+
+    def route(state: RunState) -> str:
+        result = state["results"].get(node_id)
+        return END if result is not None and result.status != "completed" else next_id
+
+    return route
 
 
 def _continue_if_completed(node_id: str, next_id: str) -> Callable[[RunState], str]:

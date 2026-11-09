@@ -1,5 +1,7 @@
 import type { components } from "@/api/schema";
 
+import { calledRoot } from "../calls";
+
 /**
  * The run's workflow spec as the console reads it: its node types, what each node does in one
  * line, a router's routes and every node in run order. The Graph tab draws it as a map
@@ -55,6 +57,8 @@ export function nodeDetail(node: SpecNode): string {
     }
     case "orchestrator":
       return `Up to ${node.max_workers} tasks, ${node.max_concurrency} at a time`;
+    case "subflow":
+      return `Calls ${node.workflow.id} · version ${node.workflow.version}`;
     case "sequence":
       return "";
     default:
@@ -78,6 +82,8 @@ function* specNodes(node: SpecNode): Generator<SpecNode> {
   }
   if (node.type === "parallel") for (const branch of node.branches) yield* specNodes(branch);
   if (node.type === "router") for (const [, route] of routesOf(node)) yield* specNodes(route);
+  const called = calledRoot(node);
+  if (called) yield* specNodes(called);
 }
 
 /** Every node of the spec, depth first in run order, sequences included. */

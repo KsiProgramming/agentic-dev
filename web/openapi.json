@@ -218,7 +218,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored\nworkflow (`stored_workflow`, which the run records), with `input` for its first node,\nworking on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.",
+        "description": "Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored\nworkflow (`stored_workflow`, which the run records), with `input` for its first node,\nworking on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.\n\nA workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read\nfrom the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not\nallowed where it is called) is refused with `422` and the issues.",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -435,7 +435,7 @@
           "runs"
         ],
         "summary": "Get",
-        "description": "One run's summary, with its `input`, its workflow `spec` and, if it failed, why.",
+        "description": "One run's summary, with its `input`, its workflow `spec` and the workflows it calls\n(`calls`), and, if it failed, why.",
         "operationId": "getRun",
         "parameters": [
           {
@@ -2475,6 +2475,9 @@
               },
               {
                 "$ref": "#/components/schemas/OrchestratorNode"
+              },
+              {
+                "$ref": "#/components/schemas/SubflowNode"
               }
             ],
             "title": "Node",
@@ -2490,6 +2493,7 @@
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
+                "subflow": "#/components/schemas/SubflowNode",
                 "tool": "#/components/schemas/ToolNode"
               }
             }
@@ -3754,7 +3758,9 @@
           "artifact_conflict",
           "invalid_vote",
           "invalid_router",
-          "not_allowed_in_orchestrator"
+          "not_allowed_in_orchestrator",
+          "subflow_unknown",
+          "subflow_cycle"
         ]
       },
       "JsonValue": {},
@@ -3819,6 +3825,9 @@
               },
               {
                 "$ref": "#/components/schemas/OrchestratorNode"
+              },
+              {
+                "$ref": "#/components/schemas/SubflowNode"
               }
             ],
             "title": "Body",
@@ -3834,6 +3843,7 @@
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
+                "subflow": "#/components/schemas/SubflowNode",
                 "tool": "#/components/schemas/ToolNode"
               }
             }
@@ -3918,6 +3928,9 @@
               },
               {
                 "$ref": "#/components/schemas/OrchestratorNode"
+              },
+              {
+                "$ref": "#/components/schemas/SubflowNode"
               }
             ],
             "title": "Body",
@@ -3933,6 +3946,7 @@
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
+                "subflow": "#/components/schemas/SubflowNode",
                 "tool": "#/components/schemas/ToolNode"
               }
             }
@@ -4235,7 +4249,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Ui",
-            "description": "How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, `orderable`)."
+            "description": "How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`, `workflow_ref`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, `orderable`)."
           }
         },
         "additionalProperties": false,
@@ -4415,6 +4429,9 @@
               },
               {
                 "$ref": "#/components/schemas/OrchestratorNode"
+              },
+              {
+                "$ref": "#/components/schemas/SubflowNode"
               }
             ],
             "title": "Body",
@@ -4431,6 +4448,7 @@
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
+                "subflow": "#/components/schemas/SubflowNode",
                 "tool": "#/components/schemas/ToolNode"
               }
             }
@@ -4559,6 +4577,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/OrchestratorNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SubflowNode"
                 }
               ],
               "discriminator": {
@@ -4573,6 +4594,7 @@
                   "reduce": "#/components/schemas/ReduceNode",
                   "router": "#/components/schemas/RouterNode",
                   "sequence": "#/components/schemas/SequenceNode",
+                  "subflow": "#/components/schemas/SubflowNode",
                   "tool": "#/components/schemas/ToolNode"
                 }
               }
@@ -5127,6 +5149,9 @@
               },
               {
                 "$ref": "#/components/schemas/OrchestratorNode"
+              },
+              {
+                "$ref": "#/components/schemas/SubflowNode"
               }
             ],
             "title": "Then",
@@ -5143,6 +5168,7 @@
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
+                "subflow": "#/components/schemas/SubflowNode",
                 "tool": "#/components/schemas/ToolNode"
               }
             }
@@ -5252,6 +5278,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/OrchestratorNode"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SubflowNode"
                   }
                 ],
                 "discriminator": {
@@ -5266,6 +5295,7 @@
                     "reduce": "#/components/schemas/ReduceNode",
                     "router": "#/components/schemas/RouterNode",
                     "sequence": "#/components/schemas/SequenceNode",
+                    "subflow": "#/components/schemas/SubflowNode",
                     "tool": "#/components/schemas/ToolNode"
                   }
                 }
@@ -5424,6 +5454,61 @@
         "title": "RunArtifactContent",
         "description": "One version of a run artifact with its content: data written by an agent or a tool,\nnever instructions."
       },
+      "RunCall": {
+        "properties": {
+          "workflow": {
+            "$ref": "#/components/schemas/RunCallWorkflow"
+          },
+          "root": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Root",
+            "description": "The called workflow's root node, with the ids its nodes run under."
+          },
+          "renamed": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Renamed",
+            "description": "Run id to the called workflow's own id, for the nodes that run renamed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow",
+          "root",
+          "renamed"
+        ],
+        "title": "RunCall",
+        "description": "One `subflow` of a run (6.5): the workflow it calls, and that workflow's root as it runs\nin the run. A node of it whose id the run already had runs under another id, its run id;\n`renamed` maps each such run id to the id the called workflow gives it."
+      },
+      "RunCallWorkflow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "version",
+          "name"
+        ],
+        "title": "RunCallWorkflow",
+        "description": "The stored workflow version a subflow calls, as the run was created with it."
+      },
       "RunCounts": {
         "properties": {
           "all": {
@@ -5471,7 +5556,7 @@
             "$ref": "#/components/schemas/RunStatus"
           },
           "workflow": {
-            "$ref": "#/components/schemas/WorkflowRef"
+            "$ref": "#/components/schemas/agentic_api__runs__models__WorkflowRef"
           },
           "template_id": {
             "anyOf": [
@@ -5638,6 +5723,14 @@
           "spec": {
             "$ref": "#/components/schemas/WorkflowSpec",
             "description": "The workflow spec the run was created with."
+          },
+          "calls": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RunCall"
+            },
+            "type": "object",
+            "title": "Calls",
+            "description": "Each `subflow` of the run (6.5), by its node id: the workflow it calls and that workflow's root as it runs in this run, a subflow inside it having an entry of its own. Empty when the run calls no workflow."
           },
           "duration_ms": {
             "anyOf": [
@@ -5996,7 +6089,7 @@
             "$ref": "#/components/schemas/RunStatus"
           },
           "workflow": {
-            "$ref": "#/components/schemas/WorkflowRef"
+            "$ref": "#/components/schemas/agentic_api__runs__models__WorkflowRef"
           },
           "template_id": {
             "anyOf": [
@@ -6321,6 +6414,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/OrchestratorNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SubflowNode"
                 }
               ],
               "discriminator": {
@@ -6335,6 +6431,7 @@
                   "reduce": "#/components/schemas/ReduceNode",
                   "router": "#/components/schemas/RouterNode",
                   "sequence": "#/components/schemas/SequenceNode",
+                  "subflow": "#/components/schemas/SubflowNode",
                   "tool": "#/components/schemas/ToolNode"
                 }
               }
@@ -6446,6 +6543,46 @@
         ],
         "title": "StoredWorkflowRun",
         "description": "A stored workflow (`POST /workflows`) to run, at one of its versions (5.7)."
+      },
+      "SubflowNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "subflow",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowRef-Input",
+            "description": "The workflow to run, and which version."
+          },
+          "input": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input",
+            "description": "A CEL expression over `last`, `results` and `artifacts` whose value is the called workflow's input (a string as it is, any other value as JSON); unset, it gets the subflow's input."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "workflow"
+        ],
+        "title": "SubflowNode",
+        "description": "Runs another stored workflow, by id and version, as one step of this one (6.5).\n\nThe called workflow is read from the run's workspace when the run is created and runs inside\nthis run: its nodes share the run's repo, sandbox, limits, budget, artifacts and event log,\nand their ids are its own. Its input is the subflow's input, or the value\nof `input`; its output is the called workflow's. A spec names the workflow only: the engine\nattaches the called workflow's root (`call`) when it resolves the run (`expand_workflow`). A\nnode of the called workflow whose id the run already uses runs as `<subflow>-<id>`; the\ncalled workflow's own expressions still name it by its id."
       },
       "TemplateOut": {
         "properties": {
@@ -6967,35 +7104,29 @@
         "title": "WorkflowErrorDetail",
         "description": "The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`\n(`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does\nnot match the schema, with its `issues`), `already_latest` (a restore of the latest\nversion)."
       },
-      "WorkflowRef": {
+      "WorkflowRef-Input": {
         "properties": {
           "id": {
             "type": "string",
-            "title": "Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id",
+            "description": "The stored workflow's id."
           },
           "version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "integer",
+            "minimum": 1.0,
             "title": "Version",
-            "description": "The version of the stored workflow `id` the run was started from (5.7); `null` for a run of a template or of a spec sent with it."
+            "description": "The version to run; a version never changes."
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
-          "name"
+          "version"
         ],
-        "title": "WorkflowRef"
+        "title": "WorkflowRef",
+        "description": "A stored workflow of the run's workspace, by id and version (6.5)."
       },
       "WorkflowSpec": {
         "properties": {
@@ -7070,6 +7201,9 @@
               },
               {
                 "$ref": "#/components/schemas/OrchestratorNode"
+              },
+              {
+                "$ref": "#/components/schemas/SubflowNode"
               }
             ],
             "title": "Root",
@@ -7085,6 +7219,7 @@
                 "reduce": "#/components/schemas/ReduceNode",
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
+                "subflow": "#/components/schemas/SubflowNode",
                 "tool": "#/components/schemas/ToolNode"
               }
             }
@@ -7395,6 +7530,60 @@
         ],
         "title": "WorkspacePricing",
         "description": "The prices the workspace's runs are priced with: each model's `override`, else its\n`default`. A run keeps the cost it was priced with when its usage was logged."
+      },
+      "agentic_api__runs__models__WorkflowRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "The version of the stored workflow `id` the run was started from (5.7); `null` for a run of a template or of a spec sent with it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "WorkflowRef"
+      },
+      "agentic_engine__spec__models__WorkflowRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id",
+            "description": "The stored workflow's id."
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version",
+            "description": "The version to run; a version never changes."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "WorkflowRef",
+        "description": "A stored workflow of the run's workspace, by id and version (6.5)."
       },
       "RunEvent": {
         "additionalProperties": false,

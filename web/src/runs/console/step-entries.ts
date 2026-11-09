@@ -7,6 +7,7 @@ import type {
   Step,
   StepStatus,
   TaskStatus,
+  SubflowInfo,
 } from "../timeline";
 import { isFindingsReport, SEVERITIES, type FindingsReport } from "../findings/findings";
 import { itemName } from "./item-name";
@@ -140,6 +141,8 @@ function visit(
   for (const routed of step.router?.steps ?? []) {
     visit(routed, { ...inner, prefix: `${key}>${step.router?.chosen ?? "route"}` }, out);
   }
+  // The workflow a subflow called (6.5): its steps under it, keyed `<subflow>/<node>`.
+  for (const called of step.subflow?.steps ?? []) visit(called, { ...inner, prefix: key }, out);
   for (const iteration of step.iterations ?? []) {
     const last = iteration.steps.at(-1);
     visitScope(
@@ -240,14 +243,15 @@ export function findEntry(entries: StepEntry[], key: string | null): StepRow | n
   return stepRows(entries).find((e) => e.key === key) ?? null;
 }
 
-/** A map, a parallel, a loop, a router or an orchestrator: its children do the work. */
+/** A map, a parallel, a loop, a router, an orchestrator or a subflow: its children do the work. */
 export function isContainer(step: Step): boolean {
   return (
     step.items !== null ||
     step.branches !== null ||
     step.iterations !== null ||
     step.router !== null ||
-    step.orchestrator !== null
+    step.orchestrator !== null ||
+    step.subflow !== null
   );
 }
 
@@ -403,6 +407,7 @@ export function stepOutline(step: Step): string | null {
   }
   if (step.iterations) return count(step.iterations.length, "iteration");
   if (step.orchestrator) return orchestratorOutline(step);
+  if (step.subflow) return subflowOutline(step.subflow, step.status);
   if (step.router) {
     if (step.router.chosen) return `Routed to ${step.router.chosen}`;
     return step.status === "running" ? "Choosing a route" : null;
@@ -426,4 +431,13 @@ export function stepOutline(step: Step): string | null {
     return d.target ? `${d.done} ${d.target}` : d.done;
   }
   return null;
+}
+
+/** A subflow's line (6.5): the workflow it calls, then how many of its steps ran. */
+function subflowOutline(subflow: SubflowInfo, status: Step["status"]): string {
+  const { name, version } = subflow.workflow;
+  const ran = subflow.steps.filter((s) => s.status === "completed").length;
+  const called = `${name} · version ${version}`;
+  if (status === "running" || status === "waiting") return `Calling ${called}`;
+  return `Called ${called} · ${count(ran, "step")}`;
 }

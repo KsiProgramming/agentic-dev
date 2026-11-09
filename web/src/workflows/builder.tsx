@@ -75,6 +75,7 @@ import {
   useValidation,
   useWorkflow,
   useWorkflowVersion,
+  useWorkflows,
   useWorkflowVersions,
   type ValidationIssue,
   type WorkflowVersion,
@@ -230,6 +231,8 @@ function Editor({
   const versions = useWorkflowVersions(workspaceId, version.workflow_id);
   const compared = useWorkflowVersion(workspaceId, version.workflow_id, compare);
   const nodeTypes = useNodeTypes();
+  // The workspace's workflows, to name what each subflow calls (6.5).
+  const stored = useWorkflows(workspaceId);
   const manifests = useMemo(() => nodeTypes.data ?? [], [nodeTypes.data]);
   const palette: Palette = {
     groups: paletteGroups(manifests),
@@ -408,6 +411,19 @@ function Editor({
     }
   }
 
+  /** A subflow's card line (6.5): the workflow it calls by name and version, and the latest
+   * version when the call names an older one. */
+  function callLine(nodeId: string): string | null {
+    const node = allSpecNodes(spec).find((n) => n.id === nodeId);
+    if (node?.type !== "subflow") return null;
+    const { id, version: called } = node.workflow;
+    const found = stored.data?.find((w) => w.workflow_id === id);
+    if (!found) return null;
+    const newer =
+      found.latest_version > called ? ` · version ${found.latest_version} is the latest` : "";
+    return `Calls ${found.name} · version ${called}${newer}`;
+  }
+
   function renderCard(node: MapNode): ReactNode {
     // Every node is edited where it is; a route's card is not a node.
     const place = node.kind === "route" || readOnly ? null : placeOf(spec, node.id);
@@ -500,7 +516,9 @@ function Editor({
           <span className="truncate text-caption text-foreground-secondary">
             {node.kind === "route"
               ? "Route"
-              : node.detail || (known ? kindLabel(node.kind) : (manifest?.label ?? node.kind))}
+              : (node.kind === "subflow" ? callLine(node.id) : null) ||
+                node.detail ||
+                (known ? kindLabel(node.kind) : (manifest?.label ?? node.kind))}
           </span>
         )}
       </div>
@@ -535,6 +553,7 @@ function Editor({
             : null
         }
         readOnly={readOnly}
+        context={{ workspaceId, workflowId: version.workflow_id }}
         onEdit={apply}
         onClose={onClose}
       />

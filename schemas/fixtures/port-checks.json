@@ -1229,6 +1229,60 @@
         }
       },
       "mismatches": []
+    },
+    {
+      "name": "a subflow breaks the edge",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 1
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
     }
   ]
 }

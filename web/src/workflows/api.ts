@@ -246,8 +246,9 @@ function workflowsKey(workspaceId: string) {
 }
 
 /** `GET /workflows`: the workspace's workflows, the most recently changed first. */
-export function useWorkflows(workspaceId: string, baseUrl = apiBaseUrl()) {
+export function useWorkflows(workspaceId: string, enabled = true, baseUrl = apiBaseUrl()) {
   return useQuery({
+    enabled,
     queryKey: workflowsKey(workspaceId),
     queryFn: async () => {
       const { data, error, response } = await call(() =>

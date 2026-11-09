@@ -222,6 +222,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "parallel",
         "router",
         "orchestrator",
+        "subflow",
     }
     assert {ref["$ref"] for ref in root["oneOf"]} == {
         "#/$defs/AgentNode",
@@ -234,6 +235,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "#/$defs/ParallelNode",
         "#/$defs/RouterNode",
         "#/$defs/OrchestratorNode",
+        "#/$defs/SubflowNode",
     }
     loop = schema["$defs"]["LoopNode"]["properties"]["max_iterations"]
     assert (loop["minimum"], loop["maximum"]) == (1, 5)

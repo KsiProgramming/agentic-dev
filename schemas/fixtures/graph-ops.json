@@ -2719,6 +2719,252 @@
           ]
         }
       }
+    },
+    {
+      "name": "set a subflow's version",
+      "spec": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 1
+              }
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "setParam",
+          "node_id": "call",
+          "path": "workflow.version",
+          "value": 3
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 3
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "set a subflow's input",
+      "spec": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 1
+              }
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "setParam",
+          "node_id": "call",
+          "path": "input",
+          "value": "results.a.text"
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 1
+              },
+              "input": "results.a.text"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "add into a subflow",
+      "spec": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 1
+              }
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "addNode",
+          "node": {
+            "type": "gate",
+            "id": "g",
+            "title": "Approve"
+          },
+          "at": {
+            "parent": "call"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_placement",
+        "op_index": 0,
+        "node_id": "call"
+      }
+    },
+    {
+      "name": "add a subflow after a step",
+      "spec": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 1
+              }
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "addNode",
+          "node": {
+            "type": "subflow",
+            "id": "again",
+            "workflow": {
+              "id": "review",
+              "version": 2
+            }
+          },
+          "at": {
+            "after": "a"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "again",
+              "workflow": {
+                "id": "review",
+                "version": 2
+              }
+            },
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "docs",
+                "version": 1
+              }
+            }
+          ]
+        }
+      }
     }
   ]
 }

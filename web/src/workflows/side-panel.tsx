@@ -15,6 +15,7 @@ import type { NodeKind, SpecNode, WorkflowSpec } from "@/runs/graph/spec-graph";
 import type { ValueChange } from "./diff";
 import type { Edit } from "./edits";
 import { formDefaults } from "./form/theme";
+import type { BuilderFormContext } from "./form/workflow-ref-field";
 import { ManifestIcon, type NodeManifest } from "./node-types";
 import { ValueChanges } from "./history";
 import { documentParams, nodeParams, paramEdit, sameParams, type Schema } from "./params";
@@ -41,6 +42,7 @@ function ParamForm({
   ui,
   values,
   readOnly = false,
+  context,
   onChange,
 }: {
   idPrefix: string;
@@ -49,6 +51,8 @@ function ParamForm({
   values: Json;
   /** An older version (5.7): shown, not edited. */
   readOnly?: boolean;
+  /** Where the form is, for fields that look things up (a subflow's workflow, 6.5). */
+  context?: BuilderFormContext;
   onChange: (next: Json) => void;
 }) {
   const [draft, setDraft] = useState(values);
@@ -71,6 +75,7 @@ function ParamForm({
       uiSchema={{ ...GLOBAL_UI, ...ui }}
       formData={draft}
       readonly={readOnly}
+      formContext={context}
       validator={validator}
       className="flex flex-col gap-4"
       onChange={(event: IChangeEvent<Json>) => {
@@ -147,6 +152,7 @@ export function NodePanel({
   issues = [],
   changes = null,
   readOnly = false,
+  context,
   onEdit,
   onClose,
 }: {
@@ -161,6 +167,8 @@ export function NodePanel({
   issues?: string[];
   changes?: PanelChanges | null;
   readOnly?: boolean;
+  /** The workspace and the workflow being edited, for a subflow's workflow picker (6.5). */
+  context?: BuilderFormContext;
   onEdit: (edit: Edit) => void;
   onClose?: () => void;
 }) {
@@ -194,6 +202,7 @@ export function NodePanel({
         ui={(manifest.ui ?? {}) as UiSchema}
         values={values}
         readOnly={readOnly}
+        context={context}
         onChange={(next) => {
           const edit = paramEdit(node.id, values, next, schema);
           if (edit) onEdit(edit);

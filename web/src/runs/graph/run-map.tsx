@@ -28,6 +28,7 @@ function runsById(steps: Step[]): Map<string, Step[]> {
       for (const branch of step.branches ?? []) visit(branch.steps);
       for (const iteration of step.iterations ?? []) visit(iteration.steps);
       if (step.router) visit(step.router.steps);
+      if (step.subflow) visit(step.subflow.steps);
       for (const task of step.orchestrator?.tasks ?? []) visit(task.steps);
     }
   };

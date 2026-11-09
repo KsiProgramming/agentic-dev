@@ -7,12 +7,12 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_engine.spec import parse_spec
 from agentic_store.approvals import RunNotFoundError
 from agentic_store.audit import audit, usd
 from agentic_store.cancel import ENDED_STATUSES
 from agentic_store.models import Run
 from agentic_store.policy import run_policy
+from agentic_store.subflows import run_spec
 
 
 class RunNotEndedError(Exception):
@@ -23,7 +23,8 @@ async def create_rerun(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID, budget_usd: Decimal | None = None
 ) -> UUID:
     """Insert a `queued` copy of the ended run `run_id` (its spec, input, repo, workspace,
-    template and template options, and the workflow version it ran) with `rerun_of` set to it,
+    template and template options, the workflow version it ran and the copies of the workflows it
+    calls, so it runs the same versions) with `rerun_of` set to it,
     and return the new run's id. Raises `RunNotFoundError`, or `RunNotEndedError` if the run is
     still queued, running or waiting. The new run gets the workspace's policy as it is now, not
     the original's, with `budget_usd` as its budget if given, and `PolicyViolationError` is
@@ -37,7 +38,10 @@ async def create_rerun(
         if original.status not in ENDED_STATUSES:
             raise RunNotEndedError(f"run {run_id} has not ended ({original.status})")
         policy = await run_policy(
-            session, original.workspace_id, parse_spec(original.spec), budget_usd
+            session,
+            original.workspace_id,
+            run_spec(original.spec, original.subflows),
+            budget_usd,
         )
         session.add(
             Run(
@@ -53,6 +57,7 @@ async def create_rerun(
                 template_parameters=original.template_parameters,
                 workflow_id=original.workflow_id,
                 workflow_version=original.workflow_version,
+                subflows=original.subflows,
                 rerun_of=original.id,
                 trigger="rerun",
                 branch=original.repo.get("ref") if original.repo else None,

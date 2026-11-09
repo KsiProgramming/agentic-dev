@@ -16,7 +16,7 @@ Related documents:
 
 ## 1. What the system does
 
-The platform runs **AI agent workflows on a code repository**. A workflow is a graph built from a small set of primitives (`agent`, `tool`, `sequence`, `parallel`, `map`, `reduce`, `router`, `loop`, `gate`, `orchestrator`, and later `subflow`). The platform:
+The platform runs **AI agent workflows on a code repository**. A workflow is a graph built from a small set of primitives (`agent`, `tool`, `sequence`, `parallel`, `map`, `reduce`, `router`, `loop`, `gate`, `orchestrator` and `subflow`). The platform:
 
 1. stores the workflow as a **versioned spec** (JSON, validated by Pydantic and exported as JSON Schema);
 2. compiles it to a **LangGraph** graph and executes it on a **worker**, with durable checkpoints in Postgres;

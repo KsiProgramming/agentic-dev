@@ -1,6 +1,13 @@
 "use client";
 
-import { CircleDashedIcon, ExternalLinkIcon, FileIcon, InboxIcon } from "lucide-react";
+import {
+  CircleDashedIcon,
+  ExternalLinkIcon,
+  FileIcon,
+  InboxIcon,
+  WorkflowIcon,
+} from "lucide-react";
+import Link from "next/link";
 import { useId, useState, type ReactNode } from "react";
 
 import { Duration } from "@/components/display";
@@ -20,7 +27,7 @@ import { ArtifactBody, ArtifactCards } from "../artifacts/artifact-cards";
 import { isFindingsReport } from "../findings/findings";
 import { FindingsView } from "../findings/findings-view";
 import type { NodeKind } from "../graph/spec-graph";
-import type { RouterInfo, Step } from "../timeline";
+import type { RouterInfo, Step, SubflowInfo } from "../timeline";
 import { AgentMessage } from "./agent-message";
 import { GateDecision } from "./gate-decision";
 import { OrchestratorPlan } from "./orchestrator-plan";
@@ -163,6 +170,34 @@ function Children({
   );
 }
 
+/** The workflow a subflow called (6.5), linked to that version in the builder, then its answer:
+ * what its last step answered. The called workflow's steps are listed below. */
+function SubflowCall({ subflow }: { subflow: SubflowInfo }) {
+  const { id, version, name } = subflow.workflow;
+  const last = subflow.steps.at(-1);
+  const answer = last ? lastMessage(last) : null;
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <p className="flex min-w-0 items-center gap-1.5 text-meta text-foreground-secondary">
+        <WorkflowIcon aria-hidden="true" className="size-4 shrink-0" />
+        <span>Called</span>
+        <Link
+          href={`/workflows/${encodeURIComponent(id)}?version=${version}`}
+          className="min-w-0 truncate rounded-sm font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {name}
+        </Link>
+        <span>
+          · <span className="font-mono">{id}</span> · version {version}
+        </span>
+      </p>
+      {answer && answer.text.trim() ? (
+        <Answer text={answer.text} streaming={!answer.final} />
+      ) : null}
+    </div>
+  );
+}
+
 /** The router's choice (4.6): the route it took and why, then every route, those not taken
  * marked Skipped. Reasons are data: a rule's condition in mono, a classifier's words as text. */
 function RouteChoice({ step, router }: { step: Step; router: RouterInfo }) {
@@ -285,6 +320,7 @@ export function StepOutput({
   if (step.gate) parts.push(<GateDecision key="gate" gate={step.gate} />);
   if (extra) parts.push(<div key="extra">{extra}</div>);
   if (step.router) parts.push(<RouteChoice key="route" step={step} router={step.router} />);
+  if (step.subflow) parts.push(<SubflowCall key="call" subflow={step.subflow} />);
   if (step.orchestrator) {
     parts.push(
       <OrchestratorPlan

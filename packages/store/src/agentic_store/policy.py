@@ -22,7 +22,9 @@ from agentic_engine.spec import (
     WorkflowSpec,
     budget_issues,
     messages,
+    on_subflows,
     policy_issues,
+    resolve_from,
     validate_workflow,
 )
 from agentic_runtime.claude import DEFAULT_MODEL
@@ -30,6 +32,7 @@ from agentic_store.audit import audit
 from agentic_store.connections import WorkspaceNotFoundError
 from agentic_store.models import Run, RunEventRow, Workspace, WorkspacePolicy
 from agentic_store.pricing import price_table
+from agentic_store.subflows import load_subflows
 
 
 class PolicyViolationError(Exception):
@@ -90,7 +93,8 @@ async def run_policy(
     """The policy a new run of `spec` in the workspace gets, with the run's own `budget_usd` in
     place of the workspace's if it set one, else the spec's own `budget_usd`. Raises
     `PolicyViolationError` if the spec is above it, or if it has a budget and an agent's model
-    has no price in the workspace (an agent with no `model` runs on the platform's default)."""
+    has no price in the workspace (an agent with no `model` runs on the platform's default). A
+    spec that calls other workflows is checked expanded, each issue inside one on its call."""
     overrides = await _overrides(session, workspace_id)
     policy = with_budget(effective_policy(overrides), budget_usd, spec.budget_usd)
     issues = policy_issues(spec.root, policy)
@@ -98,7 +102,7 @@ async def run_policy(
         prices = await price_table(session, workspace_id)
         issues += budget_issues(spec.root, policy, prices.__contains__, DEFAULT_MODEL)
     if issues:
-        raise PolicyViolationError(issues)
+        raise PolicyViolationError(on_subflows(spec.root, issues))
     return policy
 
 
@@ -110,17 +114,22 @@ async def check_workflow(
 ) -> tuple[Policy, list[ValidationIssue]]:
     """Why the decoded workflow document `raw` could not run in the workspace now
     (`validate_workflow`), with the policy a run of it would get: the workspace's, with
-    `budget_usd` in place of its budget if given, else the document's own `budget_usd`. Writes
-    nothing. Raises
+    `budget_usd` in place of its budget if given, else the document's own `budget_usd`. The
+    workflows it calls (6.5) are read from the workspace. Writes nothing. Raises
     `WorkspaceNotFoundError`."""
     async with sessions() as session:
         if await session.get(Workspace, workspace_id) is None:
             raise WorkspaceNotFoundError(workspace_id)
         overrides = await _overrides(session, workspace_id)
         prices = await price_table(session, workspace_id)
+        called = await load_subflows(session, workspace_id, raw)
     policy = with_budget(effective_policy(overrides), budget_usd, _document_budget(raw))
     issues = validate_workflow(
-        raw, policy=policy, priced=prices.__contains__, default_model=DEFAULT_MODEL
+        raw,
+        policy=policy,
+        priced=prices.__contains__,
+        default_model=DEFAULT_MODEL,
+        resolve=resolve_from(called),
     )
     return policy, issues
 

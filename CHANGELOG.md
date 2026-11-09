@@ -9,6 +9,13 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 6.5 `subflow` primitive:
+  - **Calls by id and version.** A new `subflow` node runs another stored workflow of the workspace, `{workflow: {id, version}, input?}`, inside the caller's run: same repo, sandbox, budget, limits, artifacts and event log. `input` is a CEL value that maps what the called workflow gets; its output is the call's.
+  - **Resolved when the run is created.** `POST /runs` resolves every call (and the calls inside them), refuses one that is unknown, calls itself back (`subflow_unknown`, `subflow_cycle`) or cannot run where it is called (each issue on the subflow, naming the workflow and version), and keeps a copy of each version called (`runs.subflows`, Alembic `0026_run_subflows`), so a resumed run or a rerun runs the same versions. `POST /workflows/{id}/validate` and stored versions are checked the same way.
+  - **Ids.** A called node whose id the run already has runs as `<subflow>-<id>`; its own expressions still name it by its id. `GET /runs/{id}` returns `calls`: each call's workflow and root as it runs.
+  - **Builder.** The palette's Subflow step picks its workflow and version in the side panel (the latest by default, with "Open workflow"); its card names the workflow and says when a newer version exists.
+  - **Console.** The called workflow's steps nest under the subflow in the step list (keyed `<subflow>/<node>`) and hang off its card on the run map; its Output links the version it called and shows its answer, and its cost is its steps'. Tests read a run the engine records (`schemas/fixtures/subflow-run.json`).
+  - Specs: tech-stack ("Subflow (API contract)", validation codes, run history, node manifests, five decisions) and the 6.5 plan (`specs/2026-11-09-subflow-primitive/`).
 - Phase 6.4 an orchestrator's dynamic children in the console and the canvas ([#162](https://github.com/KsiProgramming/agentic-dev/pull/162)):
   - **Live tasks.** The run console reads the orchestrator's events: its tasks nest under it in the step list as soon as they are planned (a heading per round once it replanned), each with its status, title, duration and cost, keyed `<orchestrator>.<task>/<node>`; dropped and not-started tasks are muted with no status colour, and a task whose branch conflicted shows as failed with its paths.
   - **The plan.** The orchestrator's Output shows each round's plan, the hub's reason, what a replan was made from and the integration branch; its Usage lists the hub and each task, its Input its hub, limits and replan, and a worker's Input the task it ran for. The run map draws the worker beside the orchestrator and a card per task, which selects its step.

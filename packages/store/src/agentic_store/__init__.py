@@ -94,6 +94,7 @@ from agentic_store.sink import (
     max_event_seq,
     repo_created,
 )
+from agentic_store.subflows import load_subflows, resolve_workflow, run_spec
 from agentic_store.summaries import (
     InvalidCursorError,
     RunCountsRow,
@@ -207,6 +208,7 @@ __all__ = [
     "list_workspaces",
     "listen",
     "load_secret",
+    "load_subflows",
     "max_event_seq",
     "metadata",
     "open_checkpointer",
@@ -222,8 +224,10 @@ __all__ = [
     "replace_price_overrides",
     "repo_created",
     "request_cancel",
+    "resolve_workflow",
     "restore_workflow",
     "run_ended",
+    "run_spec",
     "update_workflow",
     "waiting_run_ids",
     "workspace_price_table",

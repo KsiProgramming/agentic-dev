@@ -28,6 +28,7 @@ import { allSpecNodes, type NodeKind } from "../graph/spec-graph";
 import { displayStatus } from "../status";
 import { badgeStatus, runTimes, statusLabel, wallClockLine } from "../summaries";
 import { usageOfRun } from "../cost";
+import { withCalls } from "../calls";
 import { specParents } from "../spec-parents";
 import {
   buildTimeline,
@@ -240,7 +241,11 @@ function Console({
   const { events, status } = useRunEvents(runId, baseUrl);
   const detail = useRunDetail(runId, baseUrl);
   const client = useQueryClient();
-  const spec = detail.data?.spec ?? null;
+  // A subflow's called workflow is part of the run (6.5): its steps nest under the subflow.
+  const spec = useMemo(
+    () => (detail.data ? withCalls(detail.data.spec, detail.data.calls) : null),
+    [detail.data],
+  );
   // Nested nodes are placed by the spec once it loaded (4.6): their tags alone are ambiguous.
   const parents = useMemo(() => (spec ? specParents(spec.root) : null), [spec]);
   const timeline = useMemo(() => buildTimeline(events, parents), [events, parents]);

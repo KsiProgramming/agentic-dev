@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
+import { calledRoot } from "../calls";
+
 import {
   nodeDetail,
   routeNodeId,
@@ -36,6 +38,10 @@ function chain(node: SpecNode): MapNode[] {
     children = [chain(node.body)];
   }
   if (node.type === "parallel") children = node.branches.map(chain);
+  // In a run, the workflow a subflow called hangs off it like a body (6.5); in the builder a
+  // subflow is a leaf: the workflow it calls is edited on its own page.
+  const called = calledRoot(node);
+  if (called) children = [chain(called)];
   if (node.type === "router") {
     children = routesOf(node).map(([routeId, route]) => [
       {

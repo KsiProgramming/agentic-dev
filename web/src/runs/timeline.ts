@@ -98,6 +98,21 @@ export interface Step {
   router: RouterInfo | null;
   /** Set for an orchestrator node (6.4): its plans by round and its tasks, each with its steps. */
   orchestrator: OrchestratorInfo | null;
+  /** Set for a subflow node (6.5): the workflow it calls and that workflow's steps. */
+  subflow: SubflowInfo | null;
+}
+
+/** The stored workflow version a subflow calls (6.5), from its `node_started`. */
+export interface CalledWorkflow {
+  id: string;
+  version: number;
+  name: string;
+}
+
+export interface SubflowInfo {
+  workflow: CalledWorkflow;
+  /** The steps of the called workflow, under the ids they ran as. */
+  steps: Step[];
 }
 
 /** A task's status: `pending` once planned and before it starts, `dropped` when a replan round
@@ -325,7 +340,16 @@ function newStep(id: string, at: string): Step {
     merged: null,
     router: null,
     orchestrator: null,
+    subflow: null,
   };
+}
+
+/** The workflow a subflow's `node_started` names (6.5), if it names one. */
+function calledWorkflow(value: unknown): CalledWorkflow | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { id, version, name } = value as Record<string, unknown>;
+  if (typeof id !== "string" || typeof version !== "number") return null;
+  return { id, version, name: typeof name === "string" ? name : id };
 }
 
 /** A GitHub pull request URL; anything else (e.g. a `javascript:` URL) is not offered as a link. */
@@ -601,6 +625,12 @@ class Builder {
         };
         if (!this.open.includes(step)) this.open.push(step);
       }
+      const called = calledWorkflow(payload.workflow);
+      if (called) {
+        // A subflow: the workflow it calls runs inside it. Resumed, it keeps its steps.
+        step.subflow ??= { workflow: called, steps: [] };
+        if (!this.open.includes(step)) this.open.push(step);
+      }
       // A step run again reads (and writes) afresh.
       step.artifactsRead = parseArtifacts(payload.reads);
       step.artifactsWritten = [];
@@ -782,16 +812,18 @@ class Builder {
               ? known.iterations?.at(-1)
               : parent.kind === "orchestrator"
                 ? known.orchestrator?.tasks.find((t) => t.index === item)
-                : known.router;
+                : parent.kind === "subflow"
+                  ? known.subflow
+                  : known.router;
       if (scope) return scope;
     }
     for (let i = this.open.length - 1; i >= 0; i--) {
       const container = this.open[i]!;
       if (container.id === nodeId) continue;
-      if (container.router) {
+      if (container.router || container.subflow) {
         const tags = this.tags.get(container);
         if ((tags?.item ?? null) === item && (tags?.branch ?? null) === branch) {
-          return container.router;
+          return container.router ?? container.subflow!;
         }
         continue;
       }
@@ -854,6 +886,7 @@ class Builder {
         }
         for (const iteration of step.iterations ?? []) visit(iteration.steps);
         if (step.router) visit(step.router.steps);
+        if (step.subflow) visit(step.subflow.steps);
         for (const task of step.orchestrator?.tasks ?? []) {
           if (task.status === "pending") task.status = "cancelled";
           else if (task.status === "running" || task.status === "waiting") {
@@ -1010,6 +1043,7 @@ export function foldDeltas<E extends RunEvent>(events: readonly E[]): RawRow<E>[
 export function stepUsage(step: Step): TokenUsage | null {
   let total = step.usage;
   if (step.router) total = addUsage(total, stepsUsage(step.router.steps));
+  if (step.subflow) total = addUsage(total, stepsUsage(step.subflow.steps));
   for (const item of step.items ?? []) total = addUsage(total, stepsUsage(item.steps));
   for (const branch of step.branches ?? []) total = addUsage(total, stepsUsage(branch.steps));
   for (const iteration of step.iterations ?? []) {

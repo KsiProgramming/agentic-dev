@@ -179,6 +179,8 @@ class Run(Base):
     # The stored workflow version the spec was read from, if any (5.7).
     workflow_id: Mapped[str | None] = mapped_column(String(64))
     workflow_version: Mapped[int | None] = mapped_column(Integer)
+    # A copy of each stored workflow version the spec calls (6.5), by `<id>@<version>`.
+    subflows: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     repo_url: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

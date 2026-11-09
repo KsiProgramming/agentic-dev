@@ -39,6 +39,7 @@ def test_palette_order_and_categories() -> None:
         ("loop", "flow"),
         ("map", "flow"),
         ("orchestrator", "flow"),
+        ("subflow", "flow"),
         ("reduce", "combine"),
     ]
     assert manifest_for("router") is MANIFESTS["router"]
