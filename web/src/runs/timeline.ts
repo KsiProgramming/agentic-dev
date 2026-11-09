@@ -96,6 +96,58 @@ export interface Step {
   merged: MergeCounts | null;
   /** Set for a router node (4.6): its routes, the one it took and why, and that route's steps. */
   router: RouterInfo | null;
+  /** Set for an orchestrator node (6.4): its plans by round and its tasks, each with its steps. */
+  orchestrator: OrchestratorInfo | null;
+}
+
+/** A task's status: `pending` once planned and before it starts, `dropped` when a replan round
+ * stopped before it started (6.2). A task that conflicted at integration (6.3) is `failed`. */
+export type TaskStatus = StepStatus | "pending" | "dropped";
+
+export interface OrchestratorTask {
+  /** Its index across every round, the `item` its worker's events carry. */
+  index: number;
+  /** The task id the hub gave it: unique across rounds, its writer key's suffix. */
+  id: string;
+  /** The hub's title for it: model output, shown as text. */
+  title: string;
+  round: number;
+  status: TaskStatus;
+  startedAt: string | null;
+  endedAt: string | null;
+  error: string | null;
+  /** The paths it conflicted on when its branch was merged, else `null`. */
+  conflict: string[] | null;
+  steps: Step[];
+}
+
+export interface Integration {
+  branch: string;
+  head: string | null;
+  merged: string[];
+  empty: string[];
+  conflicts: { id: string; paths: string[] }[];
+}
+
+export interface PlanRound {
+  /** 1 for the first plan. */
+  round: number;
+  /** The tasks planned, in plan order; empty until its `plan_made`. */
+  taskIds: string[];
+  /** Why the hub planned so (`plan_made`'s `reason`): model output, shown as text. */
+  reason: string | null;
+  /** For a replan: what the round before ended with (`replan_started`). */
+  replan: { failed: { id: string; error: string }[]; dropped: string[] } | null;
+  /** The integration branch after this round (`branch_integrated`), when the body writes. */
+  integration: Integration | null;
+}
+
+export interface OrchestratorInfo {
+  /** The most tasks the hub may plan (`node_started`'s `max_workers`). */
+  maxWorkers: number | null;
+  rounds: PlanRound[];
+  /** Every task planned, in index order. */
+  tasks: OrchestratorTask[];
 }
 
 export interface RouterInfo {
@@ -272,6 +324,7 @@ function newStep(id: string, at: string): Step {
     artifactsRead: [],
     merged: null,
     router: null,
+    orchestrator: null,
   };
 }
 
@@ -421,6 +474,86 @@ class Builder {
         }
         return;
       }
+      case "plan_made": {
+        const info = this.orchestrator(nodeId, at, item, branch);
+        const round = roundOf(info, num(payload.round) ?? info.rounds.length + 1);
+        round.taskIds = [];
+        round.reason = str(payload.reason);
+        for (const task of records(payload.tasks)) {
+          const id = str(task.id);
+          if (id === null) continue;
+          round.taskIds.push(id);
+          if (info.tasks.some((t) => t.id === id)) continue;
+          info.tasks.push({
+            index: info.tasks.length,
+            id,
+            title: str(task.title) ?? id,
+            round: round.round,
+            status: "pending",
+            startedAt: null,
+            endedAt: null,
+            error: null,
+            conflict: null,
+            steps: [],
+          });
+        }
+        return;
+      }
+      case "task_started":
+      case "task_completed": {
+        const info = this.orchestrator(nodeId, at, item, branch);
+        const task = taskOf(info, payload);
+        if (event.type === "task_started") {
+          task.status = "running";
+          task.startedAt ??= at;
+          task.endedAt = null;
+          task.error = null;
+        } else {
+          const status = str(payload.status);
+          task.status =
+            status === "dropped" || status === "failed" || status === "cancelled"
+              ? status
+              : "completed";
+          task.endedAt = at;
+          task.error = str(payload.error);
+        }
+        return;
+      }
+      case "replan_started": {
+        const info = this.orchestrator(nodeId, at, item, branch);
+        const round = roundOf(info, num(payload.round) ?? info.rounds.length + 1);
+        round.replan = {
+          failed: records(payload.failed).flatMap((f) => {
+            const id = str(f.id);
+            return id === null ? [] : [{ id, error: str(f.error) ?? "" }];
+          }),
+          dropped: strings(payload.dropped),
+        };
+        return;
+      }
+      case "branch_integrated": {
+        const info = this.orchestrator(nodeId, at, item, branch);
+        const round = roundOf(info, num(payload.round) ?? Math.max(1, info.rounds.length));
+        round.integration = {
+          branch: str(payload.branch) ?? "",
+          head: str(payload.head),
+          merged: strings(payload.merged),
+          empty: strings(payload.empty),
+          conflicts: records(payload.conflicts).flatMap((c) => {
+            const id = str(c.id);
+            return id === null ? [] : [{ id, paths: strings(c.paths) }];
+          }),
+        };
+        // The worker completed, but its branch did not merge: the task failed (6.3).
+        for (const { id, paths } of round.integration.conflicts) {
+          const task = info.tasks.find((t) => t.id === id);
+          if (!task) continue;
+          task.status = "failed";
+          task.conflict = paths;
+          task.error = conflictError(paths);
+        }
+        return;
+      }
       case "parallel_branch_completed": {
         const parallel = this.container(nodeId, at, item, branch);
         const entry = parallel.branches?.find((b) => b.index === num(payload.index));
@@ -451,6 +584,12 @@ class Builder {
         step.itemCount = num(payload.items);
       }
       if (payload.branches !== undefined) step.branches ??= [];
+      if (payload.max_workers !== undefined) {
+        // An orchestrator: its tasks run inside it. Resumed, it keeps the plans it made.
+        step.orchestrator ??= { maxWorkers: null, rounds: [], tasks: [] };
+        step.orchestrator.maxWorkers = num(payload.max_workers);
+        if (!this.open.includes(step)) this.open.push(step);
+      }
       if (Array.isArray(payload.routes)) {
         // A router: the route it takes runs inside it. Run again, it chooses afresh.
         step.router = {
@@ -604,6 +743,18 @@ class Builder {
     return step;
   }
 
+  /** The orchestrator `nodeId`'s plans and tasks, set up if its `node_started` did not. */
+  private orchestrator(
+    nodeId: string,
+    at: string,
+    item: number | null,
+    branch: number | null,
+  ): OrchestratorInfo {
+    const step = this.container(nodeId, at, item, branch);
+    step.orchestrator ??= { maxWorkers: null, rounds: [], tasks: [] };
+    return step.orchestrator;
+  }
+
   /** The innermost open container `nodeId` whose events carry `item` (any, without one). */
   private findOpen(nodeId: string, item: number | null): Step | undefined {
     return this.open.findLast(
@@ -629,7 +780,9 @@ class Builder {
             ? known.items?.find((e) => e.index === item)
             : parent.kind === "loop"
               ? known.iterations?.at(-1)
-              : known.router;
+              : parent.kind === "orchestrator"
+                ? known.orchestrator?.tasks.find((t) => t.index === item)
+                : known.router;
       if (scope) return scope;
     }
     for (let i = this.open.length - 1; i >= 0; i--) {
@@ -640,6 +793,11 @@ class Builder {
         if ((tags?.item ?? null) === item && (tags?.branch ?? null) === branch) {
           return container.router;
         }
+        continue;
+      }
+      if (item !== null && container.orchestrator) {
+        const task = container.orchestrator.tasks.find((t) => t.index === item);
+        if (task) return task;
         continue;
       }
       if (item !== null && container.items) {
@@ -696,6 +854,14 @@ class Builder {
         }
         for (const iteration of step.iterations ?? []) visit(iteration.steps);
         if (step.router) visit(step.router.steps);
+        for (const task of step.orchestrator?.tasks ?? []) {
+          if (task.status === "pending") task.status = "cancelled";
+          else if (task.status === "running" || task.status === "waiting") {
+            task.status = status;
+            task.endedAt ??= at;
+          }
+          visit(task.steps);
+        }
         for (const entry of [...(step.items ?? []), ...(step.branches ?? [])]) {
           if (entry.status === "running") {
             entry.status = status;
@@ -708,6 +874,64 @@ class Builder {
     visit(this.timeline.steps);
     this.open = [];
   }
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** The objects in a payload's list (events are data: anything else is left out). */
+function records(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (v): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v),
+  );
+}
+
+/** Round `n` of an orchestrator's plans, added (with any rounds before it) if it is new. */
+function roundOf(info: OrchestratorInfo, n: number): PlanRound {
+  while (info.rounds.length < n) {
+    info.rounds.push({
+      round: info.rounds.length + 1,
+      taskIds: [],
+      reason: null,
+      replan: null,
+      integration: null,
+    });
+  }
+  return info.rounds[n - 1]!;
+}
+
+/** The task a `task_started` or `task_completed` names, added if no `plan_made` listed it. */
+function taskOf(info: OrchestratorInfo, payload: Record<string, unknown>): OrchestratorTask {
+  const index = num(payload.index) ?? info.tasks.length;
+  const id = str(payload.task_id) ?? String(index);
+  let task = info.tasks.find((t) => t.index === index) ?? info.tasks.find((t) => t.id === id);
+  if (!task) {
+    task = {
+      index,
+      id,
+      title: str(payload.title) ?? id,
+      round: Math.max(1, info.rounds.length),
+      status: "pending",
+      startedAt: null,
+      endedAt: null,
+      error: null,
+      conflict: null,
+      steps: [],
+    };
+    info.tasks.push(task);
+    info.tasks.sort((a, b) => a.index - b.index);
+  }
+  return task;
+}
+
+/** The engine's words for a task whose branch conflicted (`conflict_error`): ten paths, then
+ * how many more. */
+export function conflictError(paths: string[]): string {
+  const shown = paths.slice(0, 10).join(", ");
+  const more = paths.length > 10 ? ` and ${paths.length - 10} more` : "";
+  return `conflicts with earlier tasks on ${shown}${more}`;
 }
 
 /** The call's `description` argument, trimmed to one line; `null` when there is none. */
@@ -781,8 +1005,8 @@ export function foldDeltas<E extends RunEvent>(events: readonly E[]): RawRow<E>[
   return rows;
 }
 
-/** A step's usage with that of its map items, branches, loop iterations and route: what the
- * node cost. */
+/** A step's usage with that of its map items, branches, loop iterations, route and tasks:
+ * what the node cost. */
 export function stepUsage(step: Step): TokenUsage | null {
   let total = step.usage;
   if (step.router) total = addUsage(total, stepsUsage(step.router.steps));
@@ -790,6 +1014,9 @@ export function stepUsage(step: Step): TokenUsage | null {
   for (const branch of step.branches ?? []) total = addUsage(total, stepsUsage(branch.steps));
   for (const iteration of step.iterations ?? []) {
     total = addUsage(total, stepsUsage(iteration.steps));
+  }
+  for (const task of step.orchestrator?.tasks ?? []) {
+    total = addUsage(total, stepsUsage(task.steps));
   }
   return total;
 }

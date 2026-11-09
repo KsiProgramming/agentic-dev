@@ -157,6 +157,10 @@ function artifactWriters(root: SpecNode): Map<string, Seen> {
       case "map":
         visit(node.body, seen);
         return seen;
+      case "orchestrator":
+        // Its worker runs once per task; its output, stored by its own `writes`, is untyped.
+        visit(node.body, seen);
+        return node.writes ? new Map([...seen, [node.writes, UNTYPED]]) : seen;
       case "parallel": {
         const after = new Map(seen);
         const written = new Set<string>();
@@ -218,6 +222,7 @@ function portEdges(root: SpecNode): [Producer, PortNode][] {
           break;
         case "loop":
         case "map":
+        case "orchestrator":
           previous = null;
           visit(step.body);
           break;
@@ -249,17 +254,22 @@ function lastStep(node: SpecNode): PortNode | null {
   return last ? lastStep(last) : null;
 }
 
-/** Each node a `dedupe` or `vote` reduce merges, with the reduce: the last step of a map's body or
- * of each parallel branch. */
+/** Each node a `dedupe` or `vote` reduce merges, with the reduce: the last step of a map's or
+ * orchestrator's body or of each parallel branch. */
 function mergeSources(nodes: SpecNode[]): [ReduceNode, PortNode][] {
   const containers = new Map<string, SpecNode>();
   const found: [ReduceNode, PortNode][] = [];
   for (const node of nodes) {
-    if (node.type === "map" || node.type === "parallel") containers.set(node.id, node);
-    else if (merges(node) && containers.has(node.from)) {
+    if (node.type === "map" || node.type === "parallel" || node.type === "orchestrator") {
+      containers.set(node.id, node);
+    } else if (merges(node) && containers.has(node.from)) {
       const source = containers.get(node.from)!;
       const outputs =
-        source.type === "map" ? [source.body] : source.type === "parallel" ? source.branches : [];
+        source.type === "map" || source.type === "orchestrator"
+          ? [source.body]
+          : source.type === "parallel"
+            ? source.branches
+            : [];
       for (const out of outputs) {
         const last = lastStep(out);
         if (last) found.push([node, last]);
@@ -272,7 +282,9 @@ function mergeSources(nodes: SpecNode[]): [ReduceNode, PortNode][] {
 function* depthFirst(node: SpecNode): Generator<SpecNode> {
   yield node;
   if (node.type === "sequence") for (const step of node.steps) yield* depthFirst(step);
-  if (node.type === "loop" || node.type === "map") yield* depthFirst(node.body);
+  if (node.type === "loop" || node.type === "map" || node.type === "orchestrator") {
+    yield* depthFirst(node.body);
+  }
   if (node.type === "parallel") for (const branch of node.branches) yield* depthFirst(branch);
   if (node.type === "router") for (const [, route] of routesOf(node)) yield* depthFirst(route);
 }

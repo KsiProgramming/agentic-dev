@@ -32,7 +32,9 @@ export interface MapNode {
 function chain(node: SpecNode): MapNode[] {
   if (node.type === "sequence") return node.steps.flatMap(chain);
   let children: MapNode[][] = [];
-  if (node.type === "loop" || node.type === "map") children = [chain(node.body)];
+  if (node.type === "loop" || node.type === "map" || node.type === "orchestrator") {
+    children = [chain(node.body)];
+  }
   if (node.type === "parallel") children = node.branches.map(chain);
   if (node.type === "router") {
     children = routesOf(node).map(([routeId, route]) => [

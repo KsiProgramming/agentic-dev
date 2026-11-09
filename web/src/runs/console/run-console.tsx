@@ -29,7 +29,14 @@ import { displayStatus } from "../status";
 import { badgeStatus, runTimes, statusLabel, wallClockLine } from "../summaries";
 import { usageOfRun } from "../cost";
 import { specParents } from "../spec-parents";
-import { buildTimeline, clockAt, stepsUsage, type Step, type Timeline } from "../timeline";
+import {
+  buildTimeline,
+  clockAt,
+  stepsUsage,
+  type OrchestratorTask,
+  type Step,
+  type Timeline,
+} from "../timeline";
 import type { ReceivedRunEvent, StreamStatus } from "../types";
 import { PHONE, useMediaQuery } from "@/lib/use-media-query";
 import { useFollowScroll } from "../use-follow-scroll";
@@ -289,6 +296,15 @@ function Console({
     [rows, select],
   );
 
+  const openTask = useCallback(
+    (task: OrchestratorTask) => {
+      // A task's first step: its worker, or the first step of its sequence.
+      const row = rows.find((r) => r.task === task);
+      if (row) select(row.key);
+    },
+    [rows, select],
+  );
+
   if (status === "not_found" || detail.data === null) {
     // Every page has one heading, a missing run too.
     return (
@@ -432,7 +448,9 @@ function Console({
                 spec={spec}
                 steps={timeline.steps}
                 selected={selected?.step.id ?? null}
+                selectedTask={selected?.task ?? null}
                 onOpen={openNode}
+                onOpenTask={openTask}
                 now={now}
               />
             ) : detail.isError ? (

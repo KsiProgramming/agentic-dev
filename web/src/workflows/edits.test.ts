@@ -341,3 +341,59 @@ describe("blocked connections (5.6)", () => {
     expect(newMismatches(TYPED, removeStep("nope"))).toEqual([]);
   });
 });
+
+describe("an orchestrator's worker on the canvas (6.4)", () => {
+  const ORCHESTRATED = {
+    spec_version: "0",
+    id: "flow",
+    name: "Flow",
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [
+        agent("a"),
+        {
+          type: "orchestrator",
+          id: "fix",
+          hub: { role: "Lead", instructions: "Plan." },
+          body: agent("fixer"),
+          max_workers: 4,
+          max_concurrency: 2,
+        },
+        agent("c"),
+      ],
+    },
+  } as unknown as WorkflowSpec;
+
+  it("is the orchestrator's body, which stays", () => {
+    const place = placeOf(ORCHESTRATED, "fixer")!;
+    expect(place).toMatchObject({ slot: "body", parent: { id: "fix" } });
+    expect(stayReason(place)).toBe("An orchestrator needs a body; replace it instead.");
+    expect(moveTargets(ORCHESTRATED, "fixer")).toEqual([]);
+  });
+
+  it("can be replaced, and grows into a sequence when a step is added after it", () => {
+    const replaced = applyOps(
+      ORCHESTRATED,
+      replaceNode(ORCHESTRATED, "fixer", "agent", NODE_TYPES)!.ops,
+    );
+    expect(placeOf(replaced, "agent_1")).toMatchObject({ slot: "body", parent: { id: "fix" } });
+    const grown = applyOps(ORCHESTRATED, addStep(ORCHESTRATED, "fixer", "tool", NODE_TYPES).ops);
+    const body = placeOf(grown, "sequence_1")!;
+    expect(body).toMatchObject({ slot: "body", parent: { id: "fix" } });
+    expect(
+      blockReason(ORCHESTRATED, addStep(ORCHESTRATED, "fixer", "agent", NODE_TYPES)),
+    ).toBeNull();
+  });
+
+  it("refuses what a worker may not hold, with the reason", () => {
+    expect(blockReason(ORCHESTRATED, addStep(ORCHESTRATED, "fixer", "gate", NODE_TYPES))).toBe(
+      "The worker of 'fix' holds only agents and tools, not a gate.",
+    );
+    expect(blockReason(ORCHESTRATED, replaceNode(ORCHESTRATED, "fixer", "loop", NODE_TYPES))).toBe(
+      "The worker of 'fix' holds only agents and tools, not a loop.",
+    );
+    // A gate after the orchestrator, outside its worker, is fine.
+    expect(blockReason(ORCHESTRATED, addStep(ORCHESTRATED, "fix", "gate", NODE_TYPES))).toBeNull();
+  });
+});

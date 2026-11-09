@@ -1105,6 +1105,130 @@
         "c1",
         "c2"
       ]
+    },
+    {
+      "name": "a worker's steps that do not fit",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "o",
+              "hub": {
+                "role": "Lead",
+                "instructions": "Plan."
+              },
+              "body": {
+                "type": "sequence",
+                "id": "w",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "p",
+                    "role": "p",
+                    "instructions": "Do p.",
+                    "output_schema": {
+                      "type": "object",
+                      "properties": {
+                        "a": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "agent",
+                    "id": "c",
+                    "role": "c",
+                    "instructions": "Do c.",
+                    "input_schema": {
+                      "type": "object",
+                      "properties": {
+                        "b": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "b"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "max_workers": 3,
+              "max_concurrency": 2
+            }
+          ]
+        }
+      },
+      "mismatches": [
+        "c"
+      ]
+    },
+    {
+      "name": "an orchestrator's output is untyped for its reader",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "o",
+              "hub": {
+                "role": "Lead",
+                "instructions": "Plan."
+              },
+              "body": {
+                "type": "agent",
+                "id": "p",
+                "role": "p",
+                "instructions": "Do p.",
+                "output_schema": {
+                  "type": "object",
+                  "properties": {
+                    "a": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "max_workers": 3,
+              "max_concurrency": 2,
+              "writes": "out.json"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "reads": [
+                "out.json"
+              ],
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
     }
   ]
 }

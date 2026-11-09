@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { KindIcon } from "../graph/node-kinds";
 import type { NodeKind } from "../graph/spec-graph";
 import { stepUsage, type Step } from "../timeline";
-import { StatusIcon, StatusMarker } from "./rail";
+import { StatusMarker } from "./rail";
 import { stepOutline, type StepEntry, type StepRow } from "./step-entries";
 
 /** Indents nested rows: an item's or iteration's steps sit under their node. */
@@ -30,6 +30,7 @@ export function guessKind(step: Step): NodeKind {
   if (step.branches) return "parallel";
   if (step.iterations) return "loop";
   if (step.router) return "router";
+  if (step.orchestrator) return "orchestrator";
   if (step.gate) return "gate";
   return step.turns.some((t) => t.kind === "message") ? "agent" : "tool";
 }
@@ -102,19 +103,47 @@ function StepButton({
   );
 }
 
-/** A map item, branch or iteration that holds several steps: a heading over them. */
+/** A map item, branch or iteration that holds several steps, an orchestrator's task or round:
+ * a heading over them. A task's title and note are model output: text only. */
 function ScopeHeading({ entry }: { entry: Extract<StepEntry, { kind: "scope" }> }) {
+  const quiet = entry.status === "dropped" || entry.status === "pending";
   return (
     <div
       data-testid="step-scope"
-      className={cn(
-        "flex min-w-0 items-center gap-2 py-1.5 pr-2 text-caption font-semibold text-foreground-secondary",
-        indent(entry.depth),
-      )}
+      data-key={entry.key}
+      data-status={entry.status}
+      className={cn("flex min-w-0 flex-col py-1.5 pr-2", indent(entry.depth))}
     >
-      <StatusIcon status={entry.status} small />
-      <span className="min-w-0 truncate font-mono font-medium text-foreground">{entry.name}</span>
-      {entry.itemKind ? <span className="shrink-0">{entry.itemKind}</span> : null}
+      <span
+        className={cn(
+          "flex min-w-0 items-center gap-2 text-caption font-semibold text-foreground-secondary",
+          quiet && "text-muted-foreground",
+        )}
+      >
+        <StatusMarker status={entry.status} small />
+        <span
+          className={cn(
+            "shrink-0 truncate font-mono font-medium",
+            quiet ? "text-muted-foreground" : "text-foreground",
+          )}
+        >
+          {entry.name}
+        </span>
+        {entry.itemKind ? (
+          <span className="min-w-0 truncate font-medium">{entry.itemKind}</span>
+        ) : null}
+      </span>
+      {entry.note ? (
+        <span
+          data-testid="step-scope-note"
+          className={cn(
+            "truncate pl-5 text-caption",
+            entry.status === "failed" ? "text-status-failed" : "text-muted-foreground",
+          )}
+        >
+          {entry.note}
+        </span>
+      ) : null}
     </div>
   );
 }

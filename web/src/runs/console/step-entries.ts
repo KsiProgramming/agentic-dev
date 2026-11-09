@@ -1,13 +1,24 @@
-import type { Branch, Iteration, MapItem, MessageTurn, Step, StepStatus } from "../timeline";
+import type {
+  Branch,
+  Iteration,
+  MapItem,
+  MessageTurn,
+  OrchestratorTask,
+  Step,
+  StepStatus,
+  TaskStatus,
+} from "../timeline";
 import { isFindingsReport, SEVERITIES, type FindingsReport } from "../findings/findings";
 import { itemName } from "./item-name";
 import { describeTool } from "./tool-describe";
 
 /**
  * The run's steps as the console's step list shows them: one row per step in run order, map
- * items, parallel branches, loop iterations and a router's route nested under their node. A scope (item, branch,
- * iteration) that holds one step is that step's row, named by the scope; one that holds several
- * is a heading row with its steps under it.
+ * items, parallel branches, loop iterations, a router's route and an orchestrator's tasks nested
+ * under their node. A scope (item, branch, iteration) that holds one step is that step's row,
+ * named by the scope; one that holds several is a heading row with its steps under it. A task is
+ * always a heading (its own status can differ from its worker's: a merge conflict, 6.3), and an
+ * orchestrator that replanned has a heading per round.
  */
 export type StepEntry = StepRow | ScopeRow;
 
@@ -15,7 +26,8 @@ export interface StepRow {
   kind: "step";
   /** Unique in the run, stable while it grows, and readable in a link: the node id with its
    * scope (`document[2]/writer`, `revise#2/reviewer`, `checks:lint/scan`,
-   * `report_path>fix_first/fix_first_report`). */
+   * `report_path>fix_first/fix_first_report`, `fix.b2/fixer` for an orchestrator's task, whose
+   * id is unique across rounds). */
   key: string;
   step: Step;
   /** The node id, or the name of the scope the step is alone in. */
@@ -27,17 +39,22 @@ export interface StepRow {
   item: MapItem | null;
   branch: Branch | null;
   iteration: Iteration | null;
+  /** The orchestrator task the step runs for. */
+  task: OrchestratorTask | null;
 }
 
 export interface ScopeRow {
   kind: "scope";
   key: string;
   name: string;
+  /** Shown beside the name as text: a map item's kind, a task's title, a round's cause. */
   itemKind: string | null;
   depth: number;
-  status: StepStatus;
+  status: TaskStatus;
   startedAt: string | null;
   endedAt: string | null;
+  /** One line under the heading: why a task failed, or that it was dropped. */
+  note?: string | null;
 }
 
 interface Scope {
@@ -46,6 +63,7 @@ interface Scope {
   item: MapItem | null;
   branch: Branch | null;
   iteration: Iteration | null;
+  task: OrchestratorTask | null;
 }
 
 function keyOf(scope: Scope, nodeId: string): string {
@@ -85,8 +103,10 @@ function visit(
     item: scope.item,
     branch: scope.branch,
     iteration: scope.iteration,
+    task: scope.task,
   });
   const inner = { ...scope, depth: scope.depth + 1 };
+  if (step.orchestrator) visitTasks(step, key, inner, out);
   for (const item of step.items ?? []) {
     const { name, kind } = itemName(item.item, item.index);
     visitScope(
@@ -137,10 +157,76 @@ function visit(
   }
 }
 
+/** The status of a group of tasks, for a round's heading: running while any is still to end,
+ * else failed when one failed, else done. */
+function roundStatus(tasks: OrchestratorTask[]): StepStatus {
+  if (tasks.some((t) => t.status === "running" || t.status === "pending")) return "running";
+  if (tasks.some((t) => t.status === "failed")) return "failed";
+  if (tasks.some((t) => t.status === "cancelled")) return "cancelled";
+  return "completed";
+}
+
+/** An orchestrator's tasks, each a heading over its worker's steps (key `<orchestrator>.<task>`),
+ * under a heading per round once it replanned. */
+function visitTasks(step: Step, key: string, inner: Scope, out: StepEntry[]) {
+  const { rounds, tasks } = step.orchestrator!;
+  const byRound = rounds.length > 1;
+  for (const round of byRound ? rounds : [null]) {
+    const mine = round ? tasks.filter((t) => t.round === round.round) : tasks;
+    let depth = inner.depth;
+    if (round) {
+      const failures = round.replan ? round.replan.failed.length : 0;
+      out.push({
+        kind: "scope",
+        key: `${key}~round-${round.round}`,
+        name: `Round ${round.round}`,
+        itemKind: round.replan
+          ? `replanned after ${count(failures, "failure")}`
+          : round.round === 1
+            ? "first plan"
+            : null,
+        depth,
+        status: roundStatus(mine),
+        startedAt: mine[0]?.startedAt ?? null,
+        endedAt: mine.at(-1)?.endedAt ?? null,
+      });
+      depth += 1;
+    }
+    for (const task of mine) {
+      const prefix = `${key}.${task.id}`;
+      out.push({
+        kind: "scope",
+        key: prefix,
+        name: task.id,
+        itemKind: task.title,
+        depth,
+        status: task.status,
+        startedAt: task.startedAt,
+        endedAt: task.endedAt,
+        note:
+          task.status === "dropped"
+            ? "Dropped: the round stopped before it started"
+            : task.status === "failed" && task.error
+              ? firstLine(task.error)
+              : null,
+      });
+      const scope: Scope = { ...inner, prefix, depth: depth + 1, task };
+      for (const ran of task.steps) visit(ran, scope, out);
+    }
+  }
+}
+
 /** Every row of the step list, in run order. */
 export function stepEntries(steps: Step[]): StepEntry[] {
   const out: StepEntry[] = [];
-  const root: Scope = { prefix: "", depth: 0, item: null, branch: null, iteration: null };
+  const root: Scope = {
+    prefix: "",
+    depth: 0,
+    item: null,
+    branch: null,
+    iteration: null,
+    task: null,
+  };
   for (const step of steps) visit(step, root, out);
   return out;
 }
@@ -154,13 +240,14 @@ export function findEntry(entries: StepEntry[], key: string | null): StepRow | n
   return stepRows(entries).find((e) => e.key === key) ?? null;
 }
 
-/** A map, a parallel, a loop or a router: its children do the work. */
+/** A map, a parallel, a loop, a router or an orchestrator: its children do the work. */
 export function isContainer(step: Step): boolean {
   return (
     step.items !== null ||
     step.branches !== null ||
     step.iterations !== null ||
-    step.router !== null
+    step.router !== null ||
+    step.orchestrator !== null
   );
 }
 
@@ -270,6 +357,28 @@ function isJson(text: string): boolean {
   return /^(?:```(?:json)?\s*)?[{[]/.test(text.trim());
 }
 
+/** How far an orchestrator got: "Planning", "2 of 4 tasks · round 2", then at the end "3 of 6
+ * tasks · 2 rounds · merged 3 into agent/…/fix". */
+export function orchestratorOutline(step: Step): string | null {
+  const { rounds, tasks } = step.orchestrator!;
+  const live = step.status === "running";
+  const planned = rounds.some((r) => r.taskIds.length > 0) || tasks.length > 0;
+  if (!planned) {
+    if (live) return "Planning";
+    return rounds.length > 0 ? "Planned no task" : null;
+  }
+  const done = tasks.filter((t) => t.status === "completed").length;
+  const failed = tasks.filter((t) => t.status === "failed").length;
+  const parts = [`${done} of ${count(tasks.length, "task")}`];
+  if (failed > 0) parts.push(`${failed} failed`);
+  if (rounds.length > 1) parts.push(live ? `round ${rounds.length}` : `${rounds.length} rounds`);
+  const integration = rounds.findLast((r) => r.integration)?.integration;
+  if (!live && integration && integration.merged.length > 0) {
+    parts.push(`merged ${integration.merged.length} into ${integration.branch}`);
+  }
+  return parts.join(" · ");
+}
+
 /** One line on what a step did, for its row: the agent's answer, the tool's call, the gate's
  * decision, or how far a container got. Plain text: it comes from agent and repo content. */
 export function stepOutline(step: Step): string | null {
@@ -293,6 +402,7 @@ export function stepOutline(step: Step): string | null {
     return `${done} of ${count(step.branches.length, "branch", "branches")}`;
   }
   if (step.iterations) return count(step.iterations.length, "iteration");
+  if (step.orchestrator) return orchestratorOutline(step);
   if (step.router) {
     if (step.router.chosen) return `Routed to ${step.router.chosen}`;
     return step.status === "running" ? "Choosing a route" : null;

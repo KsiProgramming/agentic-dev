@@ -10,6 +10,8 @@ import { applyOps, OpError, type GraphOp } from "./ops";
 interface Case {
   name: string;
   ops: GraphOp[];
+  /** The spec the case runs on, when not the fixture's. */
+  spec?: unknown;
   result?: unknown;
   error?: { code: string; op_index: number | null; node_id: string | null };
 }
@@ -20,13 +22,14 @@ const doc = JSON.parse(
 
 describe("applyOps", () => {
   it.each(doc.cases.map((c) => [c.name, c] as const))("%s, as the engine does", (_, c) => {
-    const before = structuredClone(doc.spec);
+    const spec = c.spec ?? doc.spec;
+    const before = structuredClone(spec);
     if (c.result !== undefined) {
-      expect(applyOps(doc.spec, c.ops)).toEqual(c.result);
+      expect(applyOps(spec, c.ops)).toEqual(c.result);
     } else {
       let error: unknown;
       try {
-        applyOps(doc.spec, c.ops);
+        applyOps(spec, c.ops);
       } catch (e) {
         error = e;
       }
@@ -34,6 +37,6 @@ describe("applyOps", () => {
       const { code, op_index, node_id } = error as OpError;
       expect({ code, op_index, node_id }).toEqual(c.error);
     }
-    expect(doc.spec).toEqual(before);
+    expect(spec).toEqual(before);
   });
 });

@@ -216,7 +216,7 @@ function insertInto(
   if (position !== null) {
     throw refuse("invalid_placement", `\`index\` is for sequences and parallels, not a ${kind}`);
   }
-  if (kind === "loop" || kind === "map") {
+  if (kind === "loop" || kind === "map" || kind === "orchestrator") {
     if (route !== null) throw refuse("invalid_placement", `${kind} '${at.parent}' has no routes`);
     if (parent.body != null) {
       throw refuse("slot_taken", `${kind} '${at.parent}' already has a body; remove it first`);
@@ -405,7 +405,10 @@ function checkResult(tree: Tree): void {
     );
   }
   for (const [node] of tree.places()) {
-    if ((node.type === "loop" || node.type === "map") && node.body == null) {
+    if (
+      (node.type === "loop" || node.type === "map" || node.type === "orchestrator") &&
+      node.body == null
+    ) {
       missing(node, "has no body");
     }
     if (node.type === "router" && Array.isArray(node.routes)) {

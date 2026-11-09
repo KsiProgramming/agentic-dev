@@ -53,6 +53,8 @@ export function nodeDetail(node: SpecNode): string {
       const by = node.classifier ? "a classifier" : "rules";
       return `One of ${n} ${n === 1 ? "route" : "routes"}, by ${by}`;
     }
+    case "orchestrator":
+      return `Up to ${node.max_workers} tasks, ${node.max_concurrency} at a time`;
     case "sequence":
       return "";
     default:
@@ -71,7 +73,9 @@ export function routesOf(router: RouterSpec): [string, SpecNode][] {
 function* specNodes(node: SpecNode): Generator<SpecNode> {
   yield node;
   if (node.type === "sequence") for (const step of node.steps) yield* specNodes(step);
-  if (node.type === "loop" || node.type === "map") yield* specNodes(node.body);
+  if (node.type === "loop" || node.type === "map" || node.type === "orchestrator") {
+    yield* specNodes(node.body);
+  }
   if (node.type === "parallel") for (const branch of node.branches) yield* specNodes(branch);
   if (node.type === "router") for (const [, route] of routesOf(node)) yield* specNodes(route);
 }

@@ -5,10 +5,11 @@ import { CoinsIcon } from "lucide-react";
 import { Money, StatStrip, StatTile, TokenCount } from "@/components/display";
 import { EmptyState } from "@/components/states";
 
-import { stepUsage, type Step } from "../timeline";
+import { stepsUsage, stepUsage, type Step } from "../timeline";
 import type { StepRow } from "./step-entries";
 
-/** The tokens and cost of the step; a container's total, then each of its steps. */
+/** The tokens and cost of the step; a container's total, then each of its steps (an
+ * orchestrator's: its hub, then each task with every step it ran). */
 export function StepUsage({
   step,
   items,
@@ -19,9 +20,18 @@ export function StepUsage({
 }) {
   const usage = stepUsage(step);
   if (!usage) return <EmptyState icon={CoinsIcon} message="This step used no model." />;
-  const parts = items
-    .map(({ name, row }) => ({ name, key: row.key, usage: stepUsage(row.step) }))
-    .filter((c) => c.usage !== null);
+  const parts = (
+    step.orchestrator
+      ? [
+          { name: "hub", key: `${step.id}~hub`, usage: step.usage },
+          ...step.orchestrator.tasks.map((task) => ({
+            name: task.id,
+            key: `${step.id}.${task.id}`,
+            usage: stepsUsage(task.steps),
+          })),
+        ]
+      : items.map(({ name, row }) => ({ name, key: row.key, usage: stepUsage(row.step) }))
+  ).filter((c) => c.usage !== null);
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <StatStrip columns={4}>

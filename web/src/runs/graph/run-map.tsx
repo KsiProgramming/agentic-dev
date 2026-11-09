@@ -5,7 +5,13 @@ import type { ReactNode } from "react";
 import { Duration, Money } from "@/components/display";
 import { cn } from "@/lib/utils";
 
-import { stepUsage, type Step } from "../timeline";
+import {
+  stepsUsage,
+  stepUsage,
+  type OrchestratorTask,
+  type Step,
+  type TaskStatus,
+} from "../timeline";
 import { elapsedMs } from "../console/step-list";
 import { KindIcon, kindLabel, statusLabel } from "./node-kinds";
 import { nodeStatuses, routeStates, type NodeState, type NodeStatus } from "./node-status";
@@ -22,6 +28,7 @@ function runsById(steps: Step[]): Map<string, Step[]> {
       for (const branch of step.branches ?? []) visit(branch.steps);
       for (const iteration of step.iterations ?? []) visit(iteration.steps);
       if (step.router) visit(step.router.steps);
+      for (const task of step.orchestrator?.tasks ?? []) visit(task.steps);
     }
   };
   visit(steps);
@@ -43,6 +50,99 @@ const DOT: Record<NodeStatus, string> = {
 
 function Dot({ status }: { status: NodeStatus }) {
   return <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", DOT[status])} />;
+}
+
+/** A task's status as a map dot: not started yet is hollow, dropped by a replan dashed (it
+ * neither ran nor failed). */
+function taskDot(status: TaskStatus): NodeStatus {
+  if (status === "pending") return "not_started";
+  if (status === "dropped") return "skipped";
+  return status;
+}
+
+/** An orchestrator's tasks under its card, as they are planned (6.4): each a small card with
+ * its status, id, title and what it cost, that selects its worker's step. Titles are the hub's
+ * words: text only. */
+function TaskCards({
+  orchestratorId,
+  tasks,
+  selected,
+  now,
+  onOpen,
+}: {
+  orchestratorId: string;
+  tasks: OrchestratorTask[];
+  selected: OrchestratorTask | null;
+  now: number;
+  onOpen?: (task: OrchestratorTask) => void;
+}) {
+  return (
+    <ul
+      aria-label={`Tasks of ${orchestratorId}`}
+      data-testid="map-tasks"
+      className="mt-2 ml-7 flex w-52 flex-col gap-1"
+    >
+      {tasks.map((task) => {
+        const status = taskDot(task.status);
+        const usage = stepsUsage(task.steps);
+        const ran = task.steps.length > 0 && onOpen;
+        const line =
+          task.status === "dropped" ? (
+            "Dropped"
+          ) : task.startedAt ? (
+            <>
+              <Duration ms={elapsedMs(task.startedAt, task.endedAt, now)} />
+              {usage ? (
+                <>
+                  {" · "}
+                  <Money usage={usage} focusable={false} />
+                </>
+              ) : null}
+            </>
+          ) : (
+            "Not started"
+          );
+        const body = (
+          <>
+            <span className="flex min-w-0 items-center gap-2">
+              <Dot status={status} />
+              <span className="shrink-0 font-mono text-caption font-medium">
+                {task.id}
+                <span className="sr-only">, {statusLabel(status)},</span>
+              </span>
+              <span className="min-w-0 truncate text-caption text-foreground-secondary">
+                {task.title}
+              </span>
+            </span>
+            <span className="truncate pl-4 text-caption text-foreground-secondary">
+              {line}
+              <span className="sr-only">, task</span>
+            </span>
+          </>
+        );
+        const card = cn(
+          "flex w-full min-w-0 flex-col gap-0.5 rounded-md border bg-card px-2.5 py-1.5 text-left",
+          status === "skipped" && "border-dashed text-muted-foreground",
+        );
+        return (
+          <li key={task.id} data-testid="map-task" data-task={task.id} data-status={task.status}>
+            {ran ? (
+              <button
+                type="button"
+                aria-pressed={selected === task}
+                onClick={() => onOpen(task)}
+                className={cn(card, "hover:bg-muted", selected === task && "ring-2 ring-primary")}
+              >
+                {body}
+              </button>
+            ) : (
+              <div className={card}>{body}</div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 /** What a node did once it ran ("8s · $0.031"), how far a container got, else what it does. */
@@ -77,13 +177,19 @@ export function RunMap({
   spec,
   steps,
   selected = null,
+  selectedTask = null,
   onOpen,
+  onOpenTask,
   now,
 }: {
   spec: WorkflowSpec;
   steps: Step[];
   selected?: string | null;
+  /** The orchestrator task the shown step runs for. */
+  selectedTask?: OrchestratorTask | null;
   onOpen: (nodeId: string) => void;
+  /** Selects a task's worker step. */
+  onOpenTask?: (task: OrchestratorTask) => void;
   now: number;
 }) {
   const states = new Map([...nodeStatuses(spec, steps), ...routeStates(spec, steps)]);
@@ -113,8 +219,10 @@ export function RunMap({
         </div>
       );
     }
-    const isSelected = selected === node.id;
-    return (
+    const isSelected = selected === node.id && selectedTask === null;
+    const tasks =
+      node.kind === "orchestrator" ? runs.get(node.id)?.at(-1)?.orchestrator?.tasks : null;
+    const card = (
       <button
         type="button"
         data-testid="map-node"
@@ -148,6 +256,19 @@ export function RunMap({
         </span>
       </button>
     );
+    if (!tasks || tasks.length === 0) return card;
+    return (
+      <div className="flex flex-col">
+        {card}
+        <TaskCards
+          orchestratorId={node.id}
+          tasks={tasks}
+          selected={selectedTask}
+          now={now}
+          onOpen={onOpenTask}
+        />
+      </div>
+    );
   }
 
   // A route its router did not take is not work left to do: it is counted apart.
@@ -156,12 +277,20 @@ export function RunMap({
   const skipped = all.length - nodes.length;
   const done = nodes.filter((s) => s.status === "completed").length;
   const failed = nodes.filter((s) => s.status === "failed").length;
+  const tasks = [...runs.values()].flat().flatMap((step) => step.orchestrator?.tasks ?? []);
+  const tasksDone = tasks.filter((t) => t.status === "completed").length;
+  const tasksDropped = tasks.filter((t) => t.status === "dropped").length;
   const footer = [
     done === nodes.length
       ? `${nodes.length} steps · All completed`
       : `${done} of ${nodes.length} steps done`,
     failed > 0 ? `${failed} failed` : null,
     skipped > 0 ? `${skipped} skipped` : null,
+    tasks.length > 0
+      ? `${tasksDone} of ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} done${
+          tasksDropped > 0 ? ` (${tasksDropped} dropped)` : ""
+        }`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
