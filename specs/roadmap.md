@@ -115,7 +115,7 @@ A review of the screens shipped in Milestones 2 and 3 found that they work but r
 | # | Phase | Done when | Status |
 |---|---|---|---|
 | 6.1 | `orchestrator` primitive: hub plan schema, spawn workers via `Send`, max workers/depth. [Plan](2026-11-09-orchestrator-primitive/requirements.md) | A hub plans N subtasks and the engine spawns N workers | ✅ Done ([#157](https://github.com/KsiProgramming/agentic-dev/pull/157)) |
-| 6.2 | Replan policy (on-failure): settle the round, the hub replans the remaining work from every task's outcome, at most `max_rounds` times. [Plan](2026-11-09-replan-policy/requirements.md) | A failed worker triggers a replan within limits | — |
+| 6.2 | Replan policy (on-failure): settle the round, the hub replans the remaining work from every task's outcome, at most `max_rounds` times. [Plan](2026-11-09-replan-policy/requirements.md) | A failed worker triggers a replan within limits | ✅ Done ([#159](https://github.com/KsiProgramming/agentic-dev/pull/159)) |
 | 6.3 | Integration branch merging worker branches before the final PR | Parallel writers produce one PR | — |
 | 6.4 | Monitor shows dynamic children live | Spawned workers appear with progress and cost | — |
 | 6.5 | `subflow` primitive | One workflow calls another by id + version | — |
