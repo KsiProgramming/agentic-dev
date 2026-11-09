@@ -40,8 +40,9 @@ class After(_Op):
 
 
 class Into(_Op):
-    """Into a container: a sequence's step or a parallel's branch at `index`; a loop's or map's
-    body, which must be empty; a router route's `then`, or its `default`, which must be empty."""
+    """Into a container: a sequence's step or a parallel's branch at `index`; a loop's, map's or
+    orchestrator's body, which must be empty; a router route's `then`, or its `default`, which must
+    be empty."""
 
     parent: NodeId = Field(description="The container.")
     index: int | None = Field(
@@ -151,6 +152,9 @@ class OpError(Exception):
 
 
 type _Json = dict[str, object]
+
+_BODY_KINDS = ("loop", "map", "orchestrator")
+"""Kinds with one `body`, which must hold a node."""
 
 _SINGLE_SLOTS = ("body", "default")
 _LIST_SLOTS = {"sequence": "steps", "parallel": "branches"}
@@ -337,7 +341,7 @@ def _insert_into(tree: _Tree, at: Into, node: _Json, index: int) -> None:
         return
     if at.index is not None:
         raise refuse("invalid_placement", f"`index` is for sequences and parallels, not a {kind}")
-    if kind in ("loop", "map"):
+    if kind in _BODY_KINDS:
         if at.route is not None:
             raise refuse("invalid_placement", f"{kind} {at.parent!r} has no routes")
         if parent.get("body") is not None:
@@ -521,7 +525,7 @@ def _check_result(tree: _Tree) -> None:
         )
     for node, _ in tree.places():
         kind = node.get("type")
-        if kind in ("loop", "map") and node.get("body") is None:
+        if kind in _BODY_KINDS and node.get("body") is None:
             _missing(node, "has no body")
         if kind == "router":
             for route in cast(list[_Json], node.get("routes") or []):
