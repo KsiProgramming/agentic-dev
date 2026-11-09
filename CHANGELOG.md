@@ -9,6 +9,11 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 6.4 an orchestrator's dynamic children in the console and the canvas:
+  - **Live tasks.** The run console reads the orchestrator's events: its tasks nest under it in the step list as soon as they are planned (a heading per round once it replanned), each with its status, title, duration and cost, keyed `<orchestrator>.<task>/<node>`; dropped and not-started tasks are muted with no status colour, and a task whose branch conflicted shows as failed with its paths.
+  - **The plan.** The orchestrator's Output shows each round's plan, the hub's reason, what a replan was made from and the integration branch; its Usage lists the hub and each task, its Input its hub, limits and replan, and a worker's Input the task it ran for. The run map draws the worker beside the orchestrator and a card per task, which selects its step.
+  - **The canvas.** The worker is drawn as the orchestrator's body and edited like a map's; adding a gate or a container to it is disabled with the reason. The browser's graph-op and port mirrors handle it as the engine does (new shared cases).
+  - Tests read an orchestrator run the engine records (`schemas/fixtures/orchestrator-run.json`). Specs: tech-stack (run console, run map, builder canvas, "Orchestrator → In the web", four decisions) and the 6.4 plan (`specs/2026-11-09-dynamic-children-monitor/`).
 - Phase 6.3 integration branch for the `orchestrator`:
   - **One branch for every task.** When its workers write, the orchestrator merges the branches of its completed tasks, in plan order, into `agent/<run>/<orchestrator>` after each round (one `--no-ff` merge commit per task, in the sandbox, nothing pushed). A gate after it shows and edits that branch as one writer, and `github.openPR` with the orchestrator as `from_node` publishes it as one PR; publishing a worker is refused and names the orchestrator instead.
   - **Conflicts.** A task that conflicts with the tasks merged before it fails ("conflicts with earlier tasks on …"), the others still merge and its own branch is kept: a replan (6.2) retries it, otherwise the orchestrator fails naming the task. A resumed run merges only what it missed.

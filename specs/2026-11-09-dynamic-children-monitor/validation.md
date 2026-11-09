@@ -6,7 +6,7 @@
 Made checkable: while an orchestrator runs, each planned task appears in the step list and the run map as soon as it is planned, with its status, duration and cost updating live; the orchestrator shows how many tasks are done and in which round; a replan, a dropped task and a merge conflict are visible; the worker is drawn and editable on the canvas.
 
 ## Automated checks
-- [ ] Engine: `test_orchestrator.py` writes and checks `schemas/fixtures/orchestrator-run-events.json` (stale fixture fails); ops fixture cases for the orchestrator body pass on both sides.
+- [ ] Engine: `test_orchestrator.py` writes and checks `schemas/fixtures/orchestrator-run.json` (stale fixture fails); ops fixture cases for the orchestrator body pass on both sides.
 - [ ] Vitest, timeline: the 2-round fixture folds into tasks with the right round, status (`completed`, `failed`, `dropped`, a conflict as `failed` with paths), duration and cost; the orchestrator's totals equal hub + tasks; a stream cut mid-round folds into running tasks; pre-6.1 events and orchestrator-free runs are unchanged (existing tests stay green).
 - [ ] Vitest, step list and keys: task rows under the orchestrator keyed `<orch>.<task>/<node>`, round headings only with two rounds, dropped row muted with no status colour, the orchestrator's one-liner at each stage.
 - [ ] Vitest, Output / Usage: plan, reason, replan inputs and integration shown as text (a `<b>` in a task title renders as text); task rows select their step; per-task tokens and cost.
