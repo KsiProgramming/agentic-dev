@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 
@@ -25,3 +25,9 @@ class AgentRequest(BaseModel):
     model: NonEmptyStr | None = Field(default=None, description="Unset means the provider default.")
     tools: list[str] = Field(default_factory=list[str])
     context: str = Field(default="", description="The run's context from the platform, if any.")
+    output_schema: dict[str, JsonValue] | None = Field(
+        default=None,
+        description="The JSON Schema the answer must match, if the node is typed (4.2); its "
+        "instructions already say so. The engine checks the answer; a fake runtime may fit its "
+        "answer to it (6.8).",
+    )

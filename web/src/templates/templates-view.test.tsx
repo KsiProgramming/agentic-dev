@@ -169,6 +169,54 @@ test("starting sends the template, its options and the repo, then opens the run"
   );
 });
 
+test("a template that asks for an input shows the field, needs it and sends it", async () => {
+  const team = {
+    id: "plan-build-review",
+    name: "Plan, build and review",
+    description: "Two analysts, a lead, two engineers and a reviewer.",
+    parameters: { type: "object", properties: {} },
+    requires: ["claude", "github"],
+    input: {
+      required: true,
+      label: "What should the team change?",
+      description: "The change to make in the repository.",
+      example: "Add input validation to the signup form, with tests.",
+    },
+  };
+  const fetch = stubApi({
+    ...connected({ "POST /runs": () => json(201, { run_id: RUN_ID }) }),
+    "GET /templates": () => json(200, [DOCS_TEMPLATE, team]),
+  });
+  show("plan-build-review");
+
+  await pickRepo("acme/web");
+  const field = sheet().getByLabelText("What should the team change?");
+  expect(field.getAttribute("aria-required")).toBe("true");
+  expect(field.getAttribute("placeholder")).toBe(
+    "e.g. Add input validation to the signup form, with tests.",
+  );
+  fireEvent.click(sheet().getByRole("button", { name: "Start run" }));
+  expect(await sheet().findByText("This workflow needs it to know what to do.")).toBeDefined();
+  expect(fetch.mock.calls.some(([r]) => r.method === "POST")).toBe(false);
+
+  fireEvent.change(field, { target: { value: "Validate the signup form." } });
+  fireEvent.click(sheet().getByRole("button", { name: "Start run" }));
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith(`/runs/${RUN_ID}`));
+  const post = fetch.mock.calls.find(([r]) => r.method === "POST")?.[0];
+  expect(await post?.json()).toMatchObject({
+    template: { id: "plan-build-review", parameters: {} },
+    input: "Validate the signup form.",
+  });
+});
+
+test("a template with no input asks for none", async () => {
+  stubApi(connected());
+  show("generate-docs");
+
+  await pickRepo("acme/web");
+  expect(sheet().queryByLabelText("Input")).toBeNull();
+});
+
 test("the last used repo is preselected while it is still listed", async () => {
   window.localStorage.setItem(
     `agentic:last-repo:${DEFAULT_WORKSPACE_ID}`,

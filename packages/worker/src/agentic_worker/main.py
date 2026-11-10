@@ -267,13 +267,18 @@ def build_keys(settings: WorkerSettings) -> KeyProvider | None:
 
 
 def fake_runtime_factory(settings: WorkerSettings) -> RuntimeFactory:
+    """The stack's fake agents: they echo their input, fitted to a typed node's schema (6.8), so
+    a hub plans and a typed reviewer answers on a stack with no provider."""
     if settings.fake_step_delay_s > 0:
         delay = settings.fake_step_delay_s
         # Tool calls wait twice as long as a chunk: a live work block stays on screen a while.
         return lambda tools: FakeRuntime(
-            default=lambda text: slow_echo_script(text, delay), tools=tools, call_delay_s=2 * delay
+            default=lambda text: slow_echo_script(text, delay),
+            tools=tools,
+            call_delay_s=2 * delay,
+            fit_schemas=True,
         )
-    return lambda tools: FakeRuntime(tools=tools)
+    return lambda tools: FakeRuntime(tools=tools, fit_schemas=True)
 
 
 def fixed_runtimes(make_runtime: RuntimeFactory) -> RunRuntimes:
@@ -737,10 +742,14 @@ async def _clone_token(
 
 def run_context(run: StoredRun) -> RunContext | None:
     """What every agent of `run` is told about it: the repository it works on, by its
-    `owner/name` when it is on GitHub, else its URL."""
+    `owner/name` when it is on GitHub, else its URL, and what the person who started it asked
+    for (its input, 6.8)."""
+    request = run.input if run.input.strip() else None
     if run.repo is None:
-        return None
-    return RunContext(repo=repo_full_name(run.repo.url) or run.repo.url, repo_url=run.repo.url)
+        return RunContext(request=request) if request else None
+    return RunContext(
+        repo=repo_full_name(run.repo.url) or run.repo.url, repo_url=run.repo.url, request=request
+    )
 
 
 async def _workflow(

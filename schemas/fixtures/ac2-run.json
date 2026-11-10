@@ -1,0 +1,1498 @@
+{
+  "spec": {
+    "spec_version": "0",
+    "id": "plan-build-review",
+    "name": "Plan, build and review",
+    "description": "Two analysts study the requested change in parallel, a lead splits it between two engineers, and a reviewer checks the whole; while the reviewer asks for changes, the lead plans them on top of the work so far (at most 3 passes). Writes to the repository on agent branches, then opens one pull request after you approve.",
+    "input": {
+      "required": true,
+      "label": "What should the team change?",
+      "description": "The change to make in the repository, in a few sentences: two analysts study it, then a lead splits it between two engineers.",
+      "example": "Add input validation to the signup form, with tests."
+    },
+    "root": {
+      "type": "sequence",
+      "id": "main",
+      "steps": [
+        {
+          "type": "parallel",
+          "id": "explore",
+          "branches": [
+            {
+              "type": "agent",
+              "id": "code_analyst",
+              "role": "Code analyst",
+              "instructions": "Your input is the change the person who started the run asked for. Your tools read the repository. Find the code the change touches: list the folders, search for the names in the request, and read the files involved and the code that calls them. Answer with a short map for the lead engineer: each file to change and why, the patterns the code already uses there, and any risk (shared code, public interfaces). Do not change anything.",
+              "tools": [
+                "repo.list_files",
+                "repo.read_file",
+                "repo.search"
+              ],
+              "reads": []
+            },
+            {
+              "type": "agent",
+              "id": "test_analyst",
+              "role": "Test analyst",
+              "instructions": "Your input is the change the person who started the run asked for. Your tools read the repository. Find how this change will be checked: the tests that cover the code it touches, where new tests belong and how they are written here, and the commands that build and test the project (from its README, package files or CI configuration). Answer with a short note for the lead engineer: the test files to add or change and what each should check. Do not change anything.",
+              "tools": [
+                "repo.list_files",
+                "repo.read_file",
+                "repo.search"
+              ],
+              "reads": []
+            }
+          ],
+          "join": "all"
+        },
+        {
+          "type": "loop",
+          "id": "review_loop",
+          "body": {
+            "type": "sequence",
+            "id": "pass",
+            "steps": [
+              {
+                "type": "orchestrator",
+                "id": "implement",
+                "hub": {
+                  "role": "Lead engineer",
+                  "instructions": "Your input is two analysts' notes on the requested change: a map of the code it touches and how to test it. The request itself is in the run's context. First check the notes with your tools: read the files they name. Then split the change into at most two independent tasks, one per engineer, each touching different files so their work merges cleanly; a task includes the tests for its code. Each task's instructions name exactly which files to change and what done looks like, following the patterns the code already uses.\n\nIn a later pass, your input is the reviewer's answer (`input`: its `verdict` and `feedback`) and the tasks of the earlier passes (`previous`). Their work is already in the code you read: plan only what the feedback asks to change, with the feedback written into each task's instructions so the engineer fixes exactly what was asked.",
+                  "tools": [
+                    "repo.list_files",
+                    "repo.read_file",
+                    "repo.search"
+                  ]
+                },
+                "body": {
+                  "type": "agent",
+                  "id": "engineer",
+                  "role": "Software engineer",
+                  "instructions": "Your input is your task (`task.instructions`) and the lead's input. Your tools read the repository on your own branch and write to it. Read the code you need, change only the files your task names, and commit your work with a clear message. End your answer with a short report: every file you changed and what you changed in it.",
+                  "tools": [
+                    "repo.list_files",
+                    "repo.read_file",
+                    "repo.search",
+                    "repo.write_file",
+                    "repo.commit"
+                  ],
+                  "reads": []
+                },
+                "max_workers": 2,
+                "max_concurrency": 2,
+                "replan": {
+                  "on": "failure",
+                  "max_rounds": 1
+                }
+              },
+              {
+                "type": "agent",
+                "id": "synthesizer",
+                "role": "Release writer",
+                "instructions": "Your input is the engineers' reports, one per task, for all the work done so far (every pass). Your tools read the code with that work in it: read the files the reports name to check what actually changed. Then write one pull request description for the whole change: a short summary, then what changed per file and why, then how to check it. Plain Markdown, no greeting; your answer is the description itself, never a tool call written out as text.",
+                "tools": [
+                  "repo.list_files",
+                  "repo.read_file",
+                  "repo.search"
+                ],
+                "reads": [],
+                "writes": "pr-description.md"
+              },
+              {
+                "type": "agent",
+                "id": "reviewer",
+                "role": "Senior reviewer",
+                "instructions": "Your input is the pull request description of the change. Your tools read the code with the change in it: read the files it names and check them against the request in the run's context and against what the description says. Review it as one pull request: does it do what was asked, do the parts fit together, are there tests, is anything missing or risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` say exactly what to change in a few sentences.",
+                "tools": [
+                  "repo.list_files",
+                  "repo.read_file",
+                  "repo.search"
+                ],
+                "output_schema": {
+                  "type": "object",
+                  "required": [
+                    "verdict",
+                    "feedback"
+                  ],
+                  "properties": {
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "changes"
+                      ]
+                    },
+                    "feedback": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "reads": []
+              }
+            ]
+          },
+          "until": "results.reviewer.data.verdict == \"ok\"",
+          "max_iterations": 3
+        },
+        {
+          "type": "gate",
+          "id": "approve_pr",
+          "title": "Open the pull request?",
+          "prompt": "Every pass's work is merged on one branch. Check the diff and the reviewer's last verdict: if it still asked for changes after the last pass, its feedback says what is missing. Approving pushes the branch to GitHub and opens a pull request."
+        },
+        {
+          "type": "tool",
+          "id": "publish",
+          "tool": "github.openPR",
+          "args": {
+            "from_node": "implement",
+            "title": "Planned, built and reviewed change",
+            "body": "Agents planned, built and reviewed this change; the run was approved at a gate before this pull request was opened. Review it as you would any change: agents can be wrong.",
+            "body_from": "pr-description.md"
+          },
+          "reads": []
+        }
+      ]
+    }
+  },
+  "events": [
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 1,
+      "type": "run_started",
+      "node_id": null,
+      "payload": {
+        "workflow_id": "plan-build-review",
+        "workflow_name": "Plan, build and review",
+        "input": "Add input validation to the signup form, with tests."
+      },
+      "created_at": "2026-11-10T12:00:01Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 2,
+      "type": "node_started",
+      "node_id": "explore",
+      "payload": {
+        "branches": 2,
+        "join": "all"
+      },
+      "created_at": "2026-11-10T12:00:02Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 3,
+      "type": "parallel_branch_started",
+      "node_id": "explore",
+      "payload": {
+        "index": 0,
+        "branch_id": "code_analyst"
+      },
+      "created_at": "2026-11-10T12:00:03Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 4,
+      "type": "parallel_branch_started",
+      "node_id": "explore",
+      "payload": {
+        "index": 1,
+        "branch_id": "test_analyst"
+      },
+      "created_at": "2026-11-10T12:00:04Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 5,
+      "type": "node_started",
+      "node_id": "code_analyst",
+      "payload": {
+        "branch": 0
+      },
+      "created_at": "2026-11-10T12:00:05Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 6,
+      "type": "node_started",
+      "node_id": "test_analyst",
+      "payload": {
+        "branch": 1
+      },
+      "created_at": "2026-11-10T12:00:06Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 7,
+      "type": "message",
+      "node_id": "code_analyst",
+      "payload": {
+        "type": "message",
+        "text": "code_analyst: notes on the signup form.",
+        "branch": 0
+      },
+      "created_at": "2026-11-10T12:00:07Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 8,
+      "type": "usage",
+      "node_id": "code_analyst",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "branch": 0
+      },
+      "created_at": "2026-11-10T12:00:08Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 9,
+      "type": "completed",
+      "node_id": "code_analyst",
+      "payload": {
+        "type": "completed",
+        "branch": 0
+      },
+      "created_at": "2026-11-10T12:00:09Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 10,
+      "type": "node_completed",
+      "node_id": "code_analyst",
+      "payload": {
+        "branch": 0
+      },
+      "created_at": "2026-11-10T12:00:10Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 11,
+      "type": "parallel_branch_completed",
+      "node_id": "explore",
+      "payload": {
+        "index": 0,
+        "branch_id": "code_analyst",
+        "status": "completed"
+      },
+      "created_at": "2026-11-10T12:00:11Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 12,
+      "type": "message",
+      "node_id": "test_analyst",
+      "payload": {
+        "type": "message",
+        "text": "test_analyst: notes on the signup form.",
+        "branch": 1
+      },
+      "created_at": "2026-11-10T12:00:12Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 13,
+      "type": "usage",
+      "node_id": "test_analyst",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "branch": 1
+      },
+      "created_at": "2026-11-10T12:00:13Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 14,
+      "type": "completed",
+      "node_id": "test_analyst",
+      "payload": {
+        "type": "completed",
+        "branch": 1
+      },
+      "created_at": "2026-11-10T12:00:14Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 15,
+      "type": "node_completed",
+      "node_id": "test_analyst",
+      "payload": {
+        "branch": 1
+      },
+      "created_at": "2026-11-10T12:00:15Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 16,
+      "type": "parallel_branch_completed",
+      "node_id": "explore",
+      "payload": {
+        "index": 1,
+        "branch_id": "test_analyst",
+        "status": "completed"
+      },
+      "created_at": "2026-11-10T12:00:16Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 17,
+      "type": "node_completed",
+      "node_id": "explore",
+      "payload": {
+        "completed": [
+          "code_analyst",
+          "test_analyst"
+        ],
+        "failed": [],
+        "cancelled": []
+      },
+      "created_at": "2026-11-10T12:00:17Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 18,
+      "type": "node_started",
+      "node_id": "review_loop",
+      "payload": {},
+      "created_at": "2026-11-10T12:00:18Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 19,
+      "type": "loop_iteration_started",
+      "node_id": "review_loop",
+      "payload": {
+        "iteration": 1
+      },
+      "created_at": "2026-11-10T12:00:19Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 20,
+      "type": "node_started",
+      "node_id": "implement",
+      "payload": {
+        "max_workers": 2
+      },
+      "created_at": "2026-11-10T12:00:20Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 21,
+      "type": "message",
+      "node_id": "implement",
+      "payload": {
+        "type": "message",
+        "text": "{\"tasks\": [{\"id\": \"form\", \"title\": \"Do form\", \"instructions\": \"Change form.py only.\"}, {\"id\": \"api\", \"title\": \"Do api\", \"instructions\": \"Change api.py only.\"}], \"reason\": \"One task per file.\"}"
+      },
+      "created_at": "2026-11-10T12:00:21Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 22,
+      "type": "usage",
+      "node_id": "implement",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-10T12:00:22Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 23,
+      "type": "completed",
+      "node_id": "implement",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-10T12:00:23Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 24,
+      "type": "plan_made",
+      "node_id": "implement",
+      "payload": {
+        "tasks": [
+          {
+            "id": "form",
+            "title": "Do form"
+          },
+          {
+            "id": "api",
+            "title": "Do api"
+          }
+        ],
+        "reason": "One task per file.",
+        "round": 1,
+        "iteration": 1
+      },
+      "created_at": "2026-11-10T12:00:24Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 25,
+      "type": "task_started",
+      "node_id": "implement",
+      "payload": {
+        "index": 0,
+        "task_id": "form",
+        "title": "Do form",
+        "iteration": 1
+      },
+      "created_at": "2026-11-10T12:00:25Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 26,
+      "type": "task_started",
+      "node_id": "implement",
+      "payload": {
+        "index": 1,
+        "task_id": "api",
+        "title": "Do api",
+        "iteration": 1
+      },
+      "created_at": "2026-11-10T12:00:26Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 27,
+      "type": "node_started",
+      "node_id": "engineer",
+      "payload": {
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:00:27Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 28,
+      "type": "node_started",
+      "node_id": "engineer",
+      "payload": {
+        "item": 1
+      },
+      "created_at": "2026-11-10T12:00:28Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 29,
+      "type": "tool_call",
+      "node_id": "engineer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_1",
+        "name": "repo.write_file",
+        "arguments": {
+          "path": "form.py",
+          "content": "x"
+        },
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:00:29Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 30,
+      "type": "tool_result",
+      "node_id": "engineer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_1",
+        "output": "wrote",
+        "is_error": false,
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:00:30Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 31,
+      "type": "message",
+      "node_id": "engineer",
+      "payload": {
+        "type": "message",
+        "text": "Changed form.py.",
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:00:31Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 32,
+      "type": "usage",
+      "node_id": "engineer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:00:32Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 33,
+      "type": "completed",
+      "node_id": "engineer",
+      "payload": {
+        "type": "completed",
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:00:33Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 34,
+      "type": "node_completed",
+      "node_id": "engineer",
+      "payload": {
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:00:34Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 35,
+      "type": "task_completed",
+      "node_id": "implement",
+      "payload": {
+        "index": 0,
+        "task_id": "form",
+        "title": "Do form",
+        "iteration": 1,
+        "status": "completed"
+      },
+      "created_at": "2026-11-10T12:00:35Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 36,
+      "type": "tool_call",
+      "node_id": "engineer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_1",
+        "name": "repo.write_file",
+        "arguments": {
+          "path": "api.py",
+          "content": "x"
+        },
+        "item": 1
+      },
+      "created_at": "2026-11-10T12:00:36Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 37,
+      "type": "tool_result",
+      "node_id": "engineer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_1",
+        "output": "wrote",
+        "is_error": false,
+        "item": 1
+      },
+      "created_at": "2026-11-10T12:00:37Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 38,
+      "type": "message",
+      "node_id": "engineer",
+      "payload": {
+        "type": "message",
+        "text": "Changed api.py.",
+        "item": 1
+      },
+      "created_at": "2026-11-10T12:00:38Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 39,
+      "type": "usage",
+      "node_id": "engineer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "item": 1
+      },
+      "created_at": "2026-11-10T12:00:39Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 40,
+      "type": "completed",
+      "node_id": "engineer",
+      "payload": {
+        "type": "completed",
+        "item": 1
+      },
+      "created_at": "2026-11-10T12:00:40Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 41,
+      "type": "node_completed",
+      "node_id": "engineer",
+      "payload": {
+        "item": 1
+      },
+      "created_at": "2026-11-10T12:00:41Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 42,
+      "type": "task_completed",
+      "node_id": "implement",
+      "payload": {
+        "index": 1,
+        "task_id": "api",
+        "title": "Do api",
+        "iteration": 1,
+        "status": "completed"
+      },
+      "created_at": "2026-11-10T12:00:42Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 43,
+      "type": "branch_integrated",
+      "node_id": "implement",
+      "payload": {
+        "round": 1,
+        "branch": "agent/run/implement",
+        "head": "0000000000000000000000000000000000000002",
+        "merged": [
+          "form",
+          "api"
+        ],
+        "empty": [],
+        "conflicts": [],
+        "iteration": 1
+      },
+      "created_at": "2026-11-10T12:00:43Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 44,
+      "type": "node_completed",
+      "node_id": "implement",
+      "payload": {
+        "tasks": 2,
+        "completed": 2,
+        "rounds": 1,
+        "branch": "agent/run/implement",
+        "merged": [
+          "form",
+          "api"
+        ]
+      },
+      "created_at": "2026-11-10T12:00:44Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 45,
+      "type": "node_started",
+      "node_id": "synthesizer",
+      "payload": {},
+      "created_at": "2026-11-10T12:00:45Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 46,
+      "type": "tool_call",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_0",
+        "name": "repo.read_file",
+        "arguments": {
+          "path": "form.py"
+        }
+      },
+      "created_at": "2026-11-10T12:00:46Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 47,
+      "type": "tool_result",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_0",
+        "output": "x = 1",
+        "is_error": false
+      },
+      "created_at": "2026-11-10T12:00:47Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 48,
+      "type": "message",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "message",
+        "text": "## Signup validation (pass 1)"
+      },
+      "created_at": "2026-11-10T12:00:48Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 49,
+      "type": "usage",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-10T12:00:49Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 50,
+      "type": "completed",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-10T12:00:50Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 51,
+      "type": "artifact_written",
+      "node_id": "synthesizer",
+      "payload": {
+        "name": "pr-description.md",
+        "version": 1,
+        "media_type": "text/markdown",
+        "size": 29,
+        "sha256": "e5acbf3321ea2f0dcea51a16f33bd9e60688c74d064d1c532d933f57c4332486"
+      },
+      "created_at": "2026-11-10T12:00:51Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 52,
+      "type": "node_completed",
+      "node_id": "synthesizer",
+      "payload": {},
+      "created_at": "2026-11-10T12:00:52Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 53,
+      "type": "node_started",
+      "node_id": "reviewer",
+      "payload": {},
+      "created_at": "2026-11-10T12:00:53Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 54,
+      "type": "tool_call",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_0",
+        "name": "repo.read_file",
+        "arguments": {
+          "path": "form.py"
+        }
+      },
+      "created_at": "2026-11-10T12:00:54Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 55,
+      "type": "tool_result",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_0",
+        "output": "x = 1",
+        "is_error": false
+      },
+      "created_at": "2026-11-10T12:00:55Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 56,
+      "type": "message",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "message",
+        "text": "{\"verdict\": \"changes\", \"feedback\": \"The email check has no test.\"}"
+      },
+      "created_at": "2026-11-10T12:00:56Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 57,
+      "type": "usage",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-10T12:00:57Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 58,
+      "type": "completed",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-10T12:00:58Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 59,
+      "type": "node_completed",
+      "node_id": "reviewer",
+      "payload": {},
+      "created_at": "2026-11-10T12:00:59Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 60,
+      "type": "loop_condition_evaluated",
+      "node_id": "review_loop",
+      "payload": {
+        "iteration": 1,
+        "result": false
+      },
+      "created_at": "2026-11-10T12:01:00Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 61,
+      "type": "loop_iteration_started",
+      "node_id": "review_loop",
+      "payload": {
+        "iteration": 2
+      },
+      "created_at": "2026-11-10T12:01:01Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 62,
+      "type": "node_started",
+      "node_id": "implement",
+      "payload": {
+        "max_workers": 2
+      },
+      "created_at": "2026-11-10T12:01:02Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 63,
+      "type": "message",
+      "node_id": "implement",
+      "payload": {
+        "type": "message",
+        "text": "{\"tasks\": [{\"id\": \"tests\", \"title\": \"Do tests\", \"instructions\": \"Change tests.py only.\"}], \"reason\": \"Add the test.\"}"
+      },
+      "created_at": "2026-11-10T12:01:03Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 64,
+      "type": "usage",
+      "node_id": "implement",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-10T12:01:04Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 65,
+      "type": "completed",
+      "node_id": "implement",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-10T12:01:05Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 66,
+      "type": "plan_made",
+      "node_id": "implement",
+      "payload": {
+        "tasks": [
+          {
+            "id": "tests",
+            "title": "Do tests"
+          }
+        ],
+        "reason": "Add the test.",
+        "round": 1,
+        "iteration": 2
+      },
+      "created_at": "2026-11-10T12:01:06Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 67,
+      "type": "task_started",
+      "node_id": "implement",
+      "payload": {
+        "index": 0,
+        "task_id": "tests",
+        "title": "Do tests",
+        "iteration": 2
+      },
+      "created_at": "2026-11-10T12:01:07Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 68,
+      "type": "node_started",
+      "node_id": "engineer",
+      "payload": {
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:01:08Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 69,
+      "type": "tool_call",
+      "node_id": "engineer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_1",
+        "name": "repo.write_file",
+        "arguments": {
+          "path": "tests.py",
+          "content": "x"
+        },
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:01:09Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 70,
+      "type": "tool_result",
+      "node_id": "engineer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_1",
+        "output": "wrote",
+        "is_error": false,
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:01:10Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 71,
+      "type": "message",
+      "node_id": "engineer",
+      "payload": {
+        "type": "message",
+        "text": "Changed tests.py.",
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:01:11Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 72,
+      "type": "usage",
+      "node_id": "engineer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001,
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:01:12Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 73,
+      "type": "completed",
+      "node_id": "engineer",
+      "payload": {
+        "type": "completed",
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:01:13Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 74,
+      "type": "node_completed",
+      "node_id": "engineer",
+      "payload": {
+        "item": 0
+      },
+      "created_at": "2026-11-10T12:01:14Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 75,
+      "type": "task_completed",
+      "node_id": "implement",
+      "payload": {
+        "index": 0,
+        "task_id": "tests",
+        "title": "Do tests",
+        "iteration": 2,
+        "status": "completed"
+      },
+      "created_at": "2026-11-10T12:01:15Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 76,
+      "type": "branch_integrated",
+      "node_id": "implement",
+      "payload": {
+        "round": 1,
+        "branch": "agent/run/implement",
+        "head": "0000000000000000000000000000000000000003",
+        "merged": [
+          "form",
+          "api",
+          "tests"
+        ],
+        "empty": [],
+        "conflicts": [],
+        "iteration": 2
+      },
+      "created_at": "2026-11-10T12:01:16Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 77,
+      "type": "node_completed",
+      "node_id": "implement",
+      "payload": {
+        "tasks": 1,
+        "completed": 1,
+        "rounds": 1,
+        "branch": "agent/run/implement",
+        "merged": [
+          "form",
+          "api",
+          "tests"
+        ]
+      },
+      "created_at": "2026-11-10T12:01:17Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 78,
+      "type": "node_started",
+      "node_id": "synthesizer",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:18Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 79,
+      "type": "tool_call",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_0",
+        "name": "repo.read_file",
+        "arguments": {
+          "path": "form.py"
+        }
+      },
+      "created_at": "2026-11-10T12:01:19Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 80,
+      "type": "tool_result",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_0",
+        "output": "x = 1",
+        "is_error": false
+      },
+      "created_at": "2026-11-10T12:01:20Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 81,
+      "type": "message",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "message",
+        "text": "## Signup validation (pass 2)"
+      },
+      "created_at": "2026-11-10T12:01:21Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 82,
+      "type": "usage",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-10T12:01:22Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 83,
+      "type": "completed",
+      "node_id": "synthesizer",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-10T12:01:23Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 84,
+      "type": "artifact_written",
+      "node_id": "synthesizer",
+      "payload": {
+        "name": "pr-description.md",
+        "version": 2,
+        "media_type": "text/markdown",
+        "size": 29,
+        "sha256": "a513fe3ea90651a8278f28fe0aae489141b0d935742945bec29f3a95ef35143c"
+      },
+      "created_at": "2026-11-10T12:01:24Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 85,
+      "type": "node_completed",
+      "node_id": "synthesizer",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:25Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 86,
+      "type": "node_started",
+      "node_id": "reviewer",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:26Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 87,
+      "type": "tool_call",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "fake_call_0",
+        "name": "repo.read_file",
+        "arguments": {
+          "path": "form.py"
+        }
+      },
+      "created_at": "2026-11-10T12:01:27Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 88,
+      "type": "tool_result",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "fake_call_0",
+        "output": "x = 1",
+        "is_error": false
+      },
+      "created_at": "2026-11-10T12:01:28Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 89,
+      "type": "message",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "message",
+        "text": "{\"verdict\": \"ok\", \"feedback\": \"Ready.\"}"
+      },
+      "created_at": "2026-11-10T12:01:29Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 90,
+      "type": "usage",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "usage",
+        "model": "fake",
+        "input_tokens": 10,
+        "output_tokens": 10,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "premium_requests": null,
+        "estimated_usd": 0.0001
+      },
+      "created_at": "2026-11-10T12:01:30Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 91,
+      "type": "completed",
+      "node_id": "reviewer",
+      "payload": {
+        "type": "completed"
+      },
+      "created_at": "2026-11-10T12:01:31Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 92,
+      "type": "node_completed",
+      "node_id": "reviewer",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:32Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 93,
+      "type": "loop_condition_evaluated",
+      "node_id": "review_loop",
+      "payload": {
+        "iteration": 2,
+        "result": true
+      },
+      "created_at": "2026-11-10T12:01:33Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 94,
+      "type": "node_completed",
+      "node_id": "review_loop",
+      "payload": {
+        "stop_reason": "condition",
+        "iterations": 2
+      },
+      "created_at": "2026-11-10T12:01:34Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 95,
+      "type": "node_started",
+      "node_id": "approve_pr",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:35Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 96,
+      "type": "gate_waiting",
+      "node_id": "approve_pr",
+      "payload": {
+        "title": "Open the pull request?",
+        "prompt": "Every pass's work is merged on one branch. Check the diff and the reviewer's last verdict: if it still asked for changes after the last pass, its feedback says what is missing. Approving pushes the branch to GitHub and opens a pull request.",
+        "artifact": "{\n  \"verdict\": \"ok\",\n  \"feedback\": \"Ready.\"\n}",
+        "ttl_s": 259200,
+        "changes": [
+          {
+            "node_id": "implement",
+            "path": "form.py",
+            "old_path": null,
+            "status": "modified",
+            "editable": true,
+            "reason": null,
+            "before": null,
+            "after": "x"
+          }
+        ],
+        "run_artifacts": [
+          {
+            "name": "pr-description.md",
+            "version": 2,
+            "node_id": "synthesizer",
+            "media_type": "text/markdown",
+            "size": 29
+          }
+        ],
+        "expires_at": "2026-11-13T12:01:36Z"
+      },
+      "created_at": "2026-11-10T12:01:36Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 97,
+      "type": "run_resumed",
+      "node_id": null,
+      "payload": {
+        "attempt": 2,
+        "completed_nodes": [
+          "explore",
+          "implement",
+          "synthesizer",
+          "reviewer",
+          "review_loop"
+        ]
+      },
+      "created_at": "2026-11-10T12:01:37Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 98,
+      "type": "gate_decided",
+      "node_id": "approve_pr",
+      "payload": {
+        "decision": "approve",
+        "comment": null,
+        "decided_by": null
+      },
+      "created_at": "2026-11-10T12:01:38Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 99,
+      "type": "node_completed",
+      "node_id": "approve_pr",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:39Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 100,
+      "type": "node_started",
+      "node_id": "publish",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:40Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 101,
+      "type": "tool_call",
+      "node_id": "publish",
+      "payload": {
+        "type": "tool_call",
+        "call_id": "publish_call",
+        "name": "github.openPR",
+        "arguments": {
+          "from_node": "implement",
+          "title": "Planned, built and reviewed change",
+          "body": "Agents planned, built and reviewed this change; the run was approved at a gate before this pull request was opened. Review it as you would any change: agents can be wrong.\n\n## Signup validation (pass 2)"
+        }
+      },
+      "created_at": "2026-11-10T12:01:41Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 102,
+      "type": "tool_result",
+      "node_id": "publish",
+      "payload": {
+        "type": "tool_result",
+        "call_id": "publish_call",
+        "output": "opened #12",
+        "is_error": false
+      },
+      "created_at": "2026-11-10T12:01:42Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 103,
+      "type": "pr_opened",
+      "node_id": "publish",
+      "payload": {
+        "url": "https://github.com/acme/shop/pull/12",
+        "number": 12,
+        "head": "agent/run/implement",
+        "base": "main",
+        "commit": "cccccccccccccccccccccccccccccccccccccccc"
+      },
+      "created_at": "2026-11-10T12:01:43Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 104,
+      "type": "node_completed",
+      "node_id": "publish",
+      "payload": {},
+      "created_at": "2026-11-10T12:01:44Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000068",
+      "seq": 105,
+      "type": "run_completed",
+      "node_id": null,
+      "payload": {},
+      "created_at": "2026-11-10T12:01:45Z"
+    }
+  ]
+}

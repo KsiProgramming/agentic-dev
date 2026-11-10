@@ -22,6 +22,10 @@ from agentic_engine.templates.new_repo import (
     NewRepo,
     wrap_with_create_repo,
 )
+from agentic_engine.templates.plan_build_review import (
+    PlanBuildReviewParams,
+    build_plan_build_review_spec,
+)
 
 type Requirement = Literal["claude", "github"]
 """A connection a workspace needs before it can run a template: `claude` for its agents,
@@ -66,6 +70,16 @@ TEMPLATES: tuple[Template[Any], ...] = (
         build=build_audit_spec,
         requires=("claude", "github"),
     ),
+    Template(
+        id="plan-build-review",
+        name="Plan, build and review",
+        description="Two analysts study the change you ask for, a lead splits it between two "
+        "engineers and a reviewer sends it back until it is right. Writes to the repository on "
+        "agent branches, then opens one pull request after you approve.",
+        params=PlanBuildReviewParams,
+        build=build_plan_build_review_spec,
+        requires=("claude", "github"),
+    ),
 )
 
 
@@ -82,10 +96,12 @@ __all__ = [
     "Gitignore",
     "License",
     "NewRepo",
+    "PlanBuildReviewParams",
     "Requirement",
     "Template",
     "build_audit_spec",
     "build_docs_spec",
+    "build_plan_build_review_spec",
     "get_template",
     "wrap_with_create_repo",
 ]

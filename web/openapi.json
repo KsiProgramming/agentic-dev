@@ -7163,6 +7163,17 @@
             "type": "array",
             "title": "Requires",
             "description": "Connections the workspace needs to run it: `claude` for its agents, `github` for a repo from the GitHub App's installation."
+          },
+          "input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowInput"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a run is given to work on, if the template asks for it (its spec's `input`, 6.8): `POST /runs` refuses an empty `input` when it is `required`."
           }
         },
         "type": "object",

@@ -68,7 +68,7 @@ interface Values {
   repo: string;
   newRepo: NewRepoValues;
   params: FormValues;
-  /** What the first step of a stored workflow is given; templates take their options instead. */
+  /** What the first step is given: a stored workflow's, or a template's that asks for it. */
   input: string;
   /** "" runs with the workspace's default budget. */
   budget: string;
@@ -143,7 +143,10 @@ function NewRunForm({
   const policy = usePolicy({ workspaceId, baseUrl });
   const defaultBudget = policy.data?.effective.budget_usd ?? null;
   const needsRepo = requiresOf(source).includes("github");
-  const declared = "workflow" in source ? (source.workflow.input ?? null) : null;
+  // A stored workflow always has the field; a template only when it asks for an input (6.8).
+  const declared =
+    "workflow" in source ? (source.workflow.input ?? null) : (source.template.input ?? null);
+  const showInput = "workflow" in source || declared !== null;
   const inputRequired = declared?.required === true;
   const schema = useMemo(
     () =>
@@ -350,7 +353,7 @@ function NewRunForm({
         prefix="params"
         disabled={isSubmitting}
       />
-      {"workflow" in source ? (
+      {showInput ? (
         <Controller
           name="input"
           control={form.control}

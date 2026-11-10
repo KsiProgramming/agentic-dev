@@ -3,10 +3,13 @@ its own. Tools it is asked to call run through the `ToolExecutor` it is given.""
 
 import asyncio
 import contextlib
+import json
 import re
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 
+from jsonschema import Draft202012Validator
 from pydantic import JsonValue
 
 from agentic_runtime.contract import check_events
@@ -112,6 +115,74 @@ def _call_id(index: int) -> str:
     return f"fake_call_{index}"
 
 
+_FAKE_STRINGS = ("fake", "fake-1", "fake_1", "a", "0")
+"""What a fitted string is: the first of these its `pattern` accepts."""
+
+
+def schema_instance(schema: Mapping[str, JsonValue]) -> JsonValue:
+    """A small value that matches `schema`, for a fake agent asked for structured output: its
+    first example, else built from its `const`, `enum`, `type` and bounds (an array has one item,
+    or its `minItems`; an object its required properties, or all of them if none is)."""
+    match schema:
+        case {"examples": [first, *_]}:
+            return first
+        case {"const": value}:
+            return value
+        case {"enum": [first, *_]}:
+            return first
+        case _:
+            pass
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), "null")
+    match kind:
+        case "object":
+            props = _sub(schema.get("properties"))
+            required = schema.get("required")
+            names = required if isinstance(required, list) and required else list(props)
+            return {n: schema_instance(_sub(props.get(n))) for n in names if isinstance(n, str)}
+        case "array":
+            low, high = schema.get("minItems"), schema.get("maxItems")
+            count = max(low if isinstance(low, int) else 0, 1)
+            if isinstance(high, int):
+                count = min(count, high)
+            return [schema_instance(_sub(schema.get("items"))) for _ in range(count)]
+        case "string":
+            pattern = schema.get("pattern")
+            text = next(
+                (c for c in _FAKE_STRINGS if not isinstance(pattern, str) or re.search(pattern, c)),
+                "fake",
+            )
+            low = schema.get("minLength")
+            return text.ljust(low, "x") if isinstance(low, int) else text
+        case "integer" | "number":
+            low = schema.get("minimum")
+            return low if isinstance(low, int | float) else 0
+        case "boolean":
+            return True
+        case "null":
+            return None
+        case _:
+            return "fake"
+
+
+def _sub(schema: JsonValue | None) -> Mapping[str, JsonValue]:
+    return schema if isinstance(schema, dict) else {}
+
+
+def fit_to_schema(text: str, schema: Mapping[str, JsonValue]) -> str:
+    """`text` if it is JSON that matches `schema`, else `schema_instance(schema)` as JSON."""
+    # The stubs leave `is_valid` partly untyped.
+    is_valid = cast(
+        Callable[[object], bool],
+        Draft202012Validator(dict(schema)).is_valid,  # pyright: ignore[reportUnknownMemberType]
+    )
+    with contextlib.suppress(ValueError):
+        if is_valid(json.loads(text)):
+            return text
+    return json.dumps(schema_instance(schema))
+
+
 class FakeRun:
     """Replays one script. Implements `AgentRun`."""
 
@@ -177,6 +248,10 @@ class FakeRuntime:
 
     Scripts are checked against the contract up front, so a bad script fails at construction.
     A script without a terminal event gets `completed` appended.
+
+    With `fit_schemas` (a stack or a demo with no provider, 6.8), a node without a script whose
+    request has an `output_schema` answers its input only if it matches, else a value built from
+    the schema (`fit_to_schema`), so an orchestrator's hub plans and a typed reviewer answers.
     """
 
     def __init__(
@@ -186,9 +261,11 @@ class FakeRuntime:
         default: Callable[[str], Script] = echo_script,
         tools: ToolExecutor | None = None,
         call_delay_s: float = 0,
+        fit_schemas: bool = False,
     ) -> None:
         self._scripts = {node_id: _prepare(node_id, s) for node_id, s in (scripts or {}).items()}
         self._default = default
+        self._fit = fit_schemas
         self._tools = tools
         self._call_delay = [Delay(call_delay_s)] if call_delay_s > 0 else []
         self.requests: list[AgentRequest] = []
@@ -206,5 +283,8 @@ class FakeRuntime:
                 for step in [*self._call_delay, CallTool(name, examples.get(name, {}))]
             ]
         reasoning: list[Step] = [FAKE_REASONING] if calls else []
-        script = [*reasoning, *calls, *self._default(request.input)]
+        text = request.input
+        if self._fit and request.output_schema is not None:
+            text = fit_to_schema(text, request.output_schema)
+        script = [*reasoning, *calls, *self._default(text)]
         return FakeRun(_prepare(request.node_id, script), self._tools, node_id=request.node_id)
