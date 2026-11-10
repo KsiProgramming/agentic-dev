@@ -2,7 +2,7 @@
 
 A parking lot for ideas that are not on the roadmap yet. Capture them here quickly, refine them later, and promote them to `roadmap.md` once they are clear enough to become a phase (then plan them with the `plan-feature` skill).
 
-Status: `💡 Raw` just captured · `🔍 Refining` being shaped · `📋 Ready` clear enough to become a phase · `➡️ Promoted (phase X.Y)` moved to the roadmap · `🗑️ Dropped` decided against (keep a one-line reason).
+Status: `💡 Raw` just captured · `🔍 Refining` being shaped · `📋 Ready` clear enough to become a phase · `➡️ Promoted (phase X.Y)` moved to the roadmap · `🗑️ Dropped` decided against (keep a one-line reason). `➡️ Promoted in part (phases X.Y)` names the phases that took part of an idea and says what stays here. An idea that needs a change to `mission.md` before it can become a phase keeps its status and gets a **Parked** line that says which principle or scope it goes against.
 
 ---
 
@@ -27,7 +27,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### User-authored tools, published for flows and agents
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 15.4)
 - **Added:** 2026-10-23
 - **Problem:** Agents can only call the platform's own MCP servers (`repo`, `github`, `jira`, …). A team that needs its own tool, such as an internal API, a custom linter or a deploy check, has no way to add it and reuse it.
 - **Idea:** A user creates a tool (name, description, input/output JSON Schema, plus an implementation: an HTTP endpoint, a container, or an MCP server they host). They test it, then publish a version to the workspace. Once published it can be used in two places: as a `tool` node in a flow, and in an `agent` node's tool grants so the agent can call it. A tool registry would list tools with their versions, owners and the permissions they declare.
@@ -37,7 +37,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Skills usable in flows and agents
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 15.3)
 - **Added:** 2026-10-23
 - **Problem:** Know-how such as "how we write ADRs", "our PR conventions" or "how to upgrade a .NET project" gets pasted into node instructions again and again. Nothing reuses it or versions it.
 - **Idea:** A skill is a published, versioned package: instructions, plus optional reference files, scripts and the tools it needs. It is attached to an `agent` node, which loads the skill when the task matches, or used as a flow step. Skills live in a workspace registry next to templates and tools. Agent Skills (`SKILL.md`) may be a fitting format.
@@ -47,7 +47,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Repo healer: continuous maintenance agent
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 18.1, 18.2, 18.4)
 - **Added:** 2026-10-23
 - **Problem:** Repos drift: dependencies get outdated, security advisories pile up, deprecated APIs and syntax remain, lint debt grows. The audit template (4.6) reports once, but nothing keeps a repo healthy over time.
 - **Idea:** A "Heal repo" template, or an agent run on a schedule. It scans for package updates, vulnerabilities (CVEs, secrets) and outdated or deprecated syntax. It groups and ranks the findings, then opens issues for things that need a human decision and fix PRs (behind a gate) for safe fixes, such as a dependency bump with passing tests or an automated syntax migration. It avoids duplicate issues and PRs across runs.
@@ -57,7 +57,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Upload a Markdown file instead of writing definitions by hand
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 7.7, 9.11, 15.5)
 - **Added:** 2026-10-23
 - **Problem:** Every definition is filled in by hand: a run's input or description, a workflow spec, and the manifests of tools, skills and plugin nodes (names, descriptions, JSON Schemas, parameters). Teams usually already have this written down in Markdown (a feature spec, a README, an ADR, a `SKILL.md`) and have to type it all again.
 - **Idea:** Anywhere a description or definition is asked for, the user can upload or paste a `.md` file:
@@ -71,7 +71,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Workflows that work on several repos
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 19.1, 19.2)
 - **Added:** 2026-11-02
 - **Problem:** A run works on exactly one repo: `POST /runs` takes `repo` or `new_repo`, the sandbox clones that one checkout, and every `repo.*`, `scan.*` and `github.*` call acts on it. A team cannot draw "agent A studies the API repo, agent B studies the web repo, a third agent combines their findings", which is common for cross-service changes, audits and migrations.
 - **Idea:** A run takes named repos (`repos: {api: …, web: …}`) and a node picks one (`repo: "api"`); a node with none uses the first. The sandbox clones each into its own folder; the repo tools act on the node's repo; each writer's branch and pull request target its own repo, and each still passes a gate. The fan-in already exists: a `parallel` of agents, then a `reduce` (`agent`, `dedupe` or `vote`). The run sheet asks for each repo, the side panel gets a repo picker per node, and the console shows which repo a step worked on.
@@ -81,7 +81,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Publish a stored workflow as a template
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 15.2)
 - **Added:** 2026-11-02
 - **Problem:** Saving a workflow in the builder makes a new version (5.1), listed under Workflows (5.8), but never a template: templates are Python code (`agentic_engine.templates`) served read-only by `GET /templates`. A tech lead who builds a good flow cannot offer it on the start screen to the rest of the team, although the mission names "publishing templates" as the tech lead's entry point.
 - **Idea:** "Publish as template" on a stored version: a name, description, icon, the connections it requires (worked out from the spec, as `workflowRequires` does), and which parameters a user fills in when starting it (for example an agent's instructions or a list of paths). The template is stored per workspace, versioned (draft → published, as 6.6 does for composites), and shown in the gallery beside the built-in ones; updating it publishes a new version.
@@ -91,7 +91,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Later agents can read what earlier writers changed
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 13.1)
 - **Added:** 2026-11-02
 - **Problem:** Each writer commits in its own worktree and branch (`agent/<run>/<node>`); a later agent has only the base checkout. A reviewer agent placed after a test writer and a refactoring writer cannot read either branch, and their replies are not kept unless the spec gives them `writes`. Only the gate's review sheet shows the diffs, to the human. Testing 5.8, a review agent guessed artifact names and reviewed nothing.
 - **Idea:** Give agents read access to the run's writer branches: `repo.diff {node}` (the files a writer changed and the diff against its base) and `repo.read_file {path, node}` to read a file as a writer left it. Optionally, a writer's final reply is kept as an artifact by default (`<node>-report.md`). The node's input says which writers ran before it.
@@ -101,7 +101,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Recover runs lost between the queue and the worker
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 12.1)
 - **Added:** 2026-11-02
 - **Problem:** A worker pops a run id from Redis, then claims the run in Postgres. If it crashes between the two, or while parsing the stored spec (seen on 2026-11-02: a worker older than 5.4 could not parse `budget_usd`), the id is gone from the queue and the run has no lease, so `reclaim_expired_run` never sees it. The run stays "Queued" for good, and the console shows "Waiting for the run to start…" with nothing to explain why.
 - **Idea:** Treat Postgres as the queue's source of truth: on startup and on a timer, the worker re-enqueues runs that have been `queued` with no lease for longer than a threshold. A run that fails to load (a spec this worker cannot parse) is failed with a clear `failure_reason` rather than crashing the worker. The console could show "Queued for N min" and a hint once that passes the threshold.
@@ -111,7 +111,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Keep agents' code when a run fails or its worker crashes
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 12.2, 12.3)
 - **Added:** 2026-11-10
 - **Problem:** A run's history is safe in Postgres (events, approvals, run artifacts, checkpoints after each node), but the code its agents write lives only in the run's sandbox volume: the clone and the writers' commits on `agent/<run>/<node>` and the integration branch, until the gated `github.openPR` pushes them. Today that code is lost in several cases:
   - **The run fails, is cancelled, or its approval expires:** the worker deletes the sandbox when the attempt ends (`_attempt` in `agentic_worker.main`); only a run paused at a gate keeps it (`sandboxes.keep`). The user sees what the agents did in the console but cannot get the code back, and a rerun starts from scratch.
@@ -127,7 +127,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Commit trailers that link a change back to its run
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 14.1)
 - **Added:** 2026-11-09
 - **Problem:** A commit the platform pushes says nothing about where it came from. Once a PR is merged, the link from the code to the run that wrote it (workflow, version, node, approver, cost) lives only in our database. Someone reading `git log` or `git blame`, or a team that stops running the platform, loses it.
 - **Idea:** Every commit the platform makes (a writer's commit, an approver's edits, the integration branch) carries git trailers: `Agentic-Run: <run_id>`, `Agentic-Workflow: <id>@v<version>`, `Agentic-Node: <node>` and, for edits made at a gate, `Agentic-Approved-By: <user>`. `git log --format='%(trailers)'` then gives the run of any line of code, and the console links back from a run id. Entire's Checkpoints CLI does the same with an `Entire-Checkpoint: <id>` trailer.
@@ -137,7 +137,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Show why each change was made beside the diff at the gate
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 14.2)
 - **Added:** 2026-11-09
 - **Problem:** The gate's review sheet shows the diff, but not why the agent wrote it. To check a hunk, the approver has to leave the review, find the right agent turn in the console and match it to the file by hand. Review is the slow, risky step once agents write the code.
 - **Idea:** Each diff hunk in the review links to the agent turn and tool call (`repo.write_file`, …) that last wrote it, with the agent's short note or reasoning for that turn shown inline or on hover. The events log already has every tool call with its node, turn and arguments; the work blocks (11.8) already render turns. Entire builds its product on this point: agent sessions reviewed as artifacts beside the code.
@@ -147,7 +147,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Rerun from a node, with the code as it was there
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 12.4)
 - **Added:** 2026-11-09
 - **Problem:** Rerun (2.6) starts a run over from the first node. When a long flow (an SDD run, an audit with fixes) goes wrong at its last step, the user pays again for every step before it. The checkpointer (1.3) resumes a run that stopped, but nothing lets a user go back to a node and try it again, for example with changed instructions.
 - **Idea:** After each node, the run keeps a snapshot of the state and of the code (the writer branches' commits are enough while writes go through git). The console offers "Rerun from here" on a node: a new run starts from that node's checkpoint, with the code restored, optionally with edited node parameters, and links to the run it came from. Entire's `rewind` restores code to an earlier checkpoint of an agent session in the same way.
@@ -157,7 +157,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Keep a run's record in the repo itself (opt-in)
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 14.5)
 - **Added:** 2026-11-09
 - **Problem:** The audit trail of a run (workflow version, prompts, tool calls, cost, approvals) lives only in the platform's Postgres. A team that moves deployments, loses its database or stops using the platform loses the story behind its code, and auditors must be given access to the platform to see it.
 - **Idea:** As an opt-in per workspace or workflow, the platform writes a short run record (JSON plus a readable summary) to an orphan branch of the repo, such as `agentic/runs/v1`, which shares no history with the code and holds only metadata. Commit trailers (idea above) point into it. Entire stores its checkpoints the same way, on an `entire/checkpoints/v1` orphan branch, so code branches stay clean.
@@ -167,7 +167,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Measure how much of a change people edited before approving
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 14.3)
 - **Added:** 2026-11-09
 - **Problem:** Approvers can edit a writer's diff at the gate, but nobody can see how often or how much. That number is the plainest signal of agent quality per workflow, node and provider, and 9.10 needs an "edit distance" metric for the Flow Architect.
 - **Idea:** When a gate is approved, record for each file the lines the agent wrote, the lines a person changed, and the lines kept as written. Show a share per run (a `StatTile` and `Percent` in the console) and per workflow over time. Entire attributes lines to agents or people per checkpoint for the same purpose.
@@ -187,7 +187,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Template library: overview and what it needs
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (Milestone 16)
 - **Added:** 2026-11-09
 - **Problem:** The template library entries below list about 150 templates. Built one by one with no order, they would sprawl, and many depend on capabilities the platform does not have yet.
 - **Idea:** Build them in waves, by what they need:
@@ -202,7 +202,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Template library: software engineering
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted in part (phases 16.1, 16.2); the rest of the catalogue stays here
 - **Added:** 2026-11-09
 - **Problem:** The start screen offers three templates (Generate docs, Audit, New repo), plus SDD planned in 7.5. The everyday tasks a developer would hand to agents have no ready-made flow, so every team draws them from scratch in the builder.
 - **Idea:** Built-in templates, each a flow made of existing primitives. 🟢 = needs only the repo (sandbox and a PR behind a gate); 🟡 = needs a new integration.
@@ -239,7 +239,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Template library: DevOps
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted in part (phase 16.5); the rest of the catalogue stays here
 - **Added:** 2026-11-09
 - **Problem:** Build, packaging and delivery setup is repetitive and well understood, yet no template covers it.
 - **Idea:** 🟢 = repo only; 🟡 = needs a new integration.
@@ -294,7 +294,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Template library: infrastructure
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted in part (phases 16.6, 16.7); the rest of the catalogue stays here
 - **Added:** 2026-11-09
 - **Problem:** Writing and maintaining IaC and deployment manifests is a large share of platform teams' work, and none of it has a template.
 - **Idea:** 🟢 = repo only; 🟡 = needs a new integration.
@@ -320,7 +320,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Template library: security
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted in part (phases 16.3, 16.4); the rest of the catalogue stays here
 - **Added:** 2026-11-09
 - **Problem:** The Audit template reports findings once, but common security work (secrets, vulnerable dependencies, IaC misconfigurations, threat models) has no flow that finishes the job.
 - **Idea:** 🟢 = repo only; 🟡 = needs a new integration.
@@ -350,7 +350,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Template library: frontend and UX
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted in part (phases 16.8, 16.9); the rest of the catalogue stays here
 - **Added:** 2026-11-09
 - **Problem:** Frontend work has many repetitive, checkable tasks (accessibility, translations, performance, tests) that no template covers.
 - **Idea:** 🟢 = repo only; 🟡 = needs a new integration.
@@ -470,7 +470,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Read-only cloud access per workspace
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 19.3, 19.4)
 - **Added:** 2026-11-09
 - **Problem:** The 🟡 cloud and infrastructure templates above need to read what is deployed (resources, costs, Terraform state), but a run can reach only the repo, GitHub and Jira.
 - **Idea:** A workspace connects a cloud account (Azure first: a service principal or workload identity; then AWS) with read-only rights, stored encrypted like the other connections. Agents get read tools (list resources, cost by resource, read state) through an MCP server and never see the credentials. Any change (delete, resize, apply) is a write behind a gate, and may stay out of v1.
@@ -482,6 +482,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 - **Status:** 💡 Raw
 - **Added:** 2026-11-09
+- **Parked:** with the AI software factory vision (2026-11-10). It needs a mission change before it can be a phase: it changes the mission's purpose and its scope beyond a reviewable PR. Its parts that fit the current mission are promoted on their own (Milestones 12–20).
 - **Problem:** The mission describes a workflow platform: flows of agents on repos, with gates. The industry in 2026 talks about a **software factory**: one place where work comes in (a ticket, an alert, a schedule), agents specify, build, verify, review, ship and watch it, and people set the intent and approve. Today the platform covers the middle of that line (repo → PR); intake, verification, release and operations live in other tools.
 - **Idea:** Make the product an AI software factory: **anything a software team does can be started, run, verified, governed and traced in one place.** The ideas below are its parts, each taken from what Google, Anthropic, OpenAI, GitHub, AWS and others published in 2025–2026:
   - **Intake:** triage and a tracker as the control plane (Symphony, Kiro).
@@ -502,6 +503,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 - **Status:** 💡 Raw
 - **Added:** 2026-11-09
+- **Parked:** with the AI software factory vision (2026-11-10). It needs a mission change before it can be a phase: its QA (a preview environment), release and watch stages reach deployed environments, beyond v1's reviewable PR. Its earlier stages are promoted on their own (7.7, 7.8, 18.3, Milestone 13, 18.6).
 - **Problem:** 7.5 SDD runs ticket → spec → plan → code → review → PR → Jira update. Nothing writes a PRD before the spec, requires tests, follows the PR through CI and QA, or takes the change to production and watches it. The end-to-end story a buyer asks for ("from a ticket to prod") cannot be shown.
 - **Idea:** A milestone after 7 that wraps 7.5 into the full chain, each stage a node with its own gate:
   1. **Intake and triage:** the ticket is labelled ready-to-spec, ready-to-implement, needs-info or wait (see "Triage agent").
@@ -520,6 +522,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 - **Status:** 💡 Raw
 - **Added:** 2026-11-09
+- **Parked:** with the AI software factory vision (2026-11-10). It needs a mission change before it can be a phase: auto-approving writes goes against principle 3 (every push and PR goes through a gate) and the v1 decision that autonomous mode never skips a write gate. 14.3's edit share and 20.5's metrics give it the signal it would need.
 - **Problem:** Today every write waits at a gate, whatever the risk. A docs typo and a payments change get the same human attention, so approvers either drown or rubber-stamp. Every company running agents at scale has hit this.
 - **Idea:** Autonomy is a level, earned per **change class** and lost on failure:
   - **Change classes** are declared per workspace from paths, labels and the workflow: for example `docs`, `tests-only`, `deps-patch`, `app-code`, `infra`, `security-sensitive`. A run's change is classified by rules first (paths touched, files added), then by an agent for what the rules cannot decide.
@@ -532,7 +535,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Verification gates: evidence before a person looks
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted in part (phases 13.2–13.4; the mutation score and pass^k stay here)
 - **Added:** 2026-11-09
 - **Problem:** A gate shows a diff and asks a person to judge it. Whether the tests pass, whether new code is tested, and whether the analyzers are clean is left to the approver to find out, or to CI after the PR is open. Google's paper puts it plainly: "verification is the line" between vibe coding and engineering.
 - **Idea:** A writer's work reaches a gate only with an **evidence pack**, produced by deterministic tool nodes, not by the agent's own claim:
@@ -548,7 +551,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Protect the grader: agents cannot change what judges them
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 13.5; sealed tests in 17.3)
 - **Added:** 2026-11-09
 - **Problem:** An agent told to make the tests pass can edit the tests, weaken an assertion, skip a test, or change the CI config. Anthropic's long-running agent work lists "marking features passing without end-to-end tests" as a main failure mode and tells the agent "it is unacceptable to remove or edit tests"; the FDE guide calls test tampering the first factory failure mode.
 - **Idea:** A **gate plane** the writer agent cannot write to:
@@ -562,7 +565,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Evals for workflows and templates (the factory tests itself)
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 17.1–17.5; the canary with 18.1)
 - **Added:** 2026-11-09
 - **Problem:** A change to a template's prompts, a new model version or a new tool can make results worse, and nobody would know until users complain. Templates have no quality bar (see the template library overview), and 9.10's Architect metrics cover drafts, not runs.
 - **Idea:** Evals as a first-class part of the platform:
@@ -578,7 +581,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Independent review through several lenses
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 13.6)
 - **Added:** 2026-11-09
 - **Problem:** A reviewer agent that shares the writer's context, model and assumptions repeats the writer's blind spots (the FDE guide calls this "monoculture"). Google SRE asks for the code-writing agent to be kept apart from the agent that tests or reviews it.
 - **Idea:** A `review` pattern (a composite, 6.6) with rules the engine enforces:
@@ -592,7 +595,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Circuit breakers and hard caps
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 13.7; the monitor → fix rate limits stay parked with production feedback loops)
 - **Added:** 2026-11-09
 - **Problem:** Budgets stop a run that spends too much, but not one that loops (the same failing call again and again), oscillates (a fixer and a monitor undoing each other), or writes outside its task. Google SRE names "Agentic Circuit Breakers" as a required control; the FDE guide lists runaway loops as a main failure mode.
 - **Idea:** The engine watches each run's events and trips a breaker that pauses the run, with the reason shown in the console banner:
@@ -608,7 +611,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Dry run for every write
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 13.8)
 - **Added:** 2026-11-09
 - **Problem:** A gate before a code write shows the diff. Other writes (a Jira transition, a comment, a branch protection rule, and later a cloud change or a deploy) are approved blind. Google SRE makes "Mandatory Dry-Run Support" a rule for every agent action.
 - **Idea:** Every write tool has a `plan` mode that returns what it would do, without doing it, in a shape the gate can show: "comment on PROJ-12 (text below)", "create 3 issues", "terraform plan: 2 to add, 1 to destroy", "deploy v1.4.2 to 10 % of production". The gate shows the plan; approving runs the same call for real, and the result is checked against the plan. A tool without a plan mode cannot be used behind a gate at L3 or above.
@@ -618,7 +621,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Mission control: every agent and run in one live view
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 20.2)
 - **Added:** 2026-11-09
 - **Problem:** The runs list shows runs one row at a time. When a team runs dozens of flows, each with orchestrated workers, nobody can see what all the agents are doing right now, steer one, or spot the one stuck. GitHub built Agent HQ around "a single command center to assign, steer, and track the work of multiple agents".
 - **Idea:** A Mission control page: every live run and its workers as a board (by stage: specifying, building, verifying, waiting, shipping), with what each agent is doing now, its cost so far and its time at the current step. From it a person can pause, cancel, send a message to an agent (see "Steer a running agent"), or reassign a task. It doubles as the wall screen of the factory.
@@ -628,7 +631,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Governance control plane
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 20.3, 20.4)
 - **Added:** 2026-11-09
 - **Problem:** Limits and budgets exist, but an admin cannot say, in one place, which models, providers, agents, tools, repos and autonomy levels a workspace may use. Enterprises buying a factory ask for this first. GitHub calls its version "your agent governance layer".
 - **Idea:** A Governance section in settings: allowed providers and models (and which classes may use which), allowed tools and MCP servers, repos in scope, the ceilings for earned autonomy, protected paths, data rules (no repo content to a given provider), and retention. Policies are versioned like workflows; every run records the policy version it ran under; a change to a policy is an audit event and can be required to pass a gate.
@@ -638,7 +641,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Any vendor's agent as a node (bring your own agent)
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 10.6)
 - **Added:** 2026-11-09
 - **Problem:** Teams already use Claude Code, Codex, Copilot's coding agent, Kiro or Devin. The platform's `agent` node drives a model through our own loop and tools, so those agents, and the skills and rules teams built for them, cannot be part of a flow. GitHub Agent HQ runs agents from Anthropic, OpenAI, Google, Cognition and xAI side by side.
 - **Idea:** An `external_agent` node (or a provider kind): the platform starts a vendor's agent headless in the sandbox (Claude Code with `-p` and an allowed-tools list, Codex CLI, Copilot CLI), gives it the node's task and the repo, collects its output, events and cost, and applies the same gates, protected paths, breakers and evidence pack. The flow decides which agent does which step; evals compare them on the same golden cases.
@@ -648,7 +651,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Spec and prototype together
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 7.8)
 - **Added:** 2026-11-09
 - **Problem:** Google's paper calls spec quality "the bottleneck": a vague spec makes every later step wrong. A spec read as text is hard to judge; a person sees what they wanted only when the feature exists.
 - **Idea:** The spec stage produces three things for one gate:
@@ -662,7 +665,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Triage agent: the tracker as the control plane
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 18.3)
 - **Added:** 2026-11-09
 - **Problem:** A factory needs a steady intake. Issues arrive vague, duplicated or not ready, and a person sorts them before any agent can start. OpenAI's Symphony makes "the tracker the control plane": work enters the factory by moving a ticket.
 - **Idea:** A read-only triage workflow on every new issue (Jira or GitHub): find duplicates, ask for missing details, estimate size and change class, and label it `ready-to-implement`, `ready-to-spec`, `needs-info` or `wait`. A label (7.3) starts the matching flow. The triage agent's precision (labels a person later changed) is measured and shown.
@@ -672,7 +675,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### PR shepherd: the agent follows its PR until it is merged
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 18.5, 18.6)
 - **Added:** 2026-11-09
 - **Problem:** A run ends when it opens a PR. Then CI fails, a reviewer comments, main moves on and the branch conflicts, and a person has to pick it up. At OpenAI the agent "babysits" a PR until it is green and addresses review comments.
 - **Idea:** After the PR is opened, the run stays alive in a light "shepherding" state: it watches CI, fixes failures (reading the job logs), answers or applies review comments (7.6), rebases when main moves, and reports when the PR is mergeable. Each push goes through the same evidence pack; the human merge stays human.
@@ -684,6 +687,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 - **Status:** 💡 Raw
 - **Added:** 2026-11-09
+- **Parked:** with the AI software factory vision (2026-11-10). It needs a mission change before it can be a phase: deploying to production is beyond v1's reviewable PR.
 - **Problem:** Nothing in the platform reaches production. OpenAI gives its deploy agent one instruction: "Handhold this change until it is safely and fully rolled out into production." Google SRE recommends adaptive progressive rollouts and fix-forward over binary rollbacks.
 - **Idea:** A deploy step, always behind a gate for production:
   - triggers the team's own pipeline (GitHub Actions, Azure DevOps, Argo CD), never deploys by itself;
@@ -699,6 +703,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 - **Status:** 💡 Raw
 - **Added:** 2026-11-09
+- **Parked:** with the AI software factory vision (2026-11-10). It needs a mission change before it can be a phase: it operates production services, beyond v1's reviewable PR.
 - **Problem:** Today work enters only from a person (a run started, a ticket moved). In a factory, production is also a source of work: regressions, errors, slow endpoints, incidents. OpenAI runs Perf Factory (finds latency regressions, root-causes them, proposes fixes) and Sevbot (gathers incident context and proposes mitigations but never executes them).
 - **Idea:** Watchers that turn signals into intake:
   - **Regression watcher:** reads alerts and metrics, deduplicates, finds the change that caused it (provenance trailers), and files a triaged ticket or starts a fix flow.
@@ -710,7 +715,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Long-running agents with progress artifacts
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 13.10)
 - **Added:** 2026-11-09
 - **Problem:** Large work (a migration, a whole feature) does not fit one agent context. Agents then declare victory early or leave half-done work undocumented. Anthropic's long-running agents work solved it with artifacts, not bigger contexts.
 - **Idea:** A long-running pattern (a template or a `loop` composite):
@@ -724,7 +729,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Repo rules and context as versioned code
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 15.1)
 - **Added:** 2026-11-09
 - **Problem:** Teams write rule files for their agents (AGENTS.md, CLAUDE.md, `.cursorrules`, Copilot instructions). Google's paper treats the boundary between static context (rules, docs) and dynamic context (what an agent fetches) as "an architecture decision", reviewed in a pull request and versioned like code. It is not clear the platform's agents read a repo's rule files at all.
 - **Idea:** Agents read the repo's rule files by default, as data (principle 5): the root file and, as an agent works in a folder, that folder's file (the hierarchy Anthropic recommends for large repos). The console shows which rule files a turn loaded. Workspace rules (from Governance) come first and cannot be overridden by a repo file. Combined with Skills, this is the static context; the evals measure whether a rule change helped.
@@ -734,7 +739,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Model routing and cost per accepted change
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 20.5)
 - **Added:** 2026-11-09
 - **Problem:** Each node names a provider and model by hand. Routine steps (formatting, triage, summaries) run on the same large model as hard ones. And the cost that matters is not cost per run but cost per change a person accepted.
 - **Idea:** `model: auto` on a node: a router picks a small, medium or large model from the step's kind and past results (evals), with a fallback to the larger model on failure. Cost is reported per run and **per accepted change** (runs that ended in a merged PR, including the failed attempts before it), per workflow and per change class.
@@ -744,7 +749,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Factory metrics: is the factory working?
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted in part (phase 20.6; WIP limits per reviewer wait for users and sign-in, and its earned-autonomy parts stay parked)
 - **Added:** 2026-11-09
 - **Problem:** At OpenAI, PR volume grew about 10× in some systems and human review became the bottleneck. Without numbers on flow, a team cannot tell whether the factory helps or just moves the queue.
 - **Idea:** A Factory page (the metrics a factory manager reads):
@@ -758,7 +763,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Lethal trifecta check on every workflow
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phases 13.9, 20.3)
 - **Added:** 2026-11-09
 - **Problem:** An agent that has access to private data, reads untrusted input (an issue, a web page, a dependency's README) and can communicate outward can be made to leak the data by a prompt injection. Simon Willison calls this the lethal trifecta. Principle 5 treats content as data, but nothing checks a workflow's combination of rights.
 - **Idea:** The validator (and the canvas, 5.6) flags any node or flow that holds all three legs: private data (secrets scope, private repos, internal APIs), untrusted input (web fetch, issues from outside, uploaded files) and an outward channel (web requests, comments, PRs to public repos, email). Such a flow is refused, or must remove one leg, or must put a gate on the outward step. The Governance plane can forbid the combination outright.
@@ -768,7 +773,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Ask a run why (chat about a run)
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 14.4)
 - **Added:** 2026-11-09
 - **Problem:** "Why did it write it this way?" is the first question after any agent change, and answering it means reading the whole console. Osmani calls the gap "comprehension debt": code a team owns but no one understands. Entire Sessions lets a person ask about past sessions in chat.
 - **Idea:** A chat panel in the run console: a read-only agent with tools over the run's record (list steps, read a turn, read an output or diff, search events) answers questions about the run and links each answer to the turns it used. Later, across runs: "haven't we solved this before?" searches past runs in the workspace, and a new run can start with what earlier runs decided.
@@ -778,7 +783,7 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Steer a running agent
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 20.1)
 - **Added:** 2026-11-09
 - **Problem:** A person watching a run sees it go the wrong way and can only cancel it or wait for the gate. GitHub's mission control is built to "assign, steer, and track" agents.
 - **Idea:** From the console or Mission control, a person sends a message to a running agent node. The agent loop checks a message queue between tool calls and adds the message as a user turn (as data, from a named person). Messages are events, kept in the record and the audit log. At a gate, "reply with feedback" sends the step back with the message instead of only approving or rejecting.
@@ -788,13 +793,23 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 
 ### Digital twins of external services for safe testing
 
-- **Status:** 💡 Raw
+- **Status:** ➡️ Promoted (phase 17.6)
 - **Added:** 2026-11-09
 - **Problem:** Flows that touch Jira, GitHub, Slack or a cloud API cannot be tested or evaluated without touching the real service. The FDE guide describes "Digital Twin Universe" clones of SaaS APIs for factory testing.
 - **Idea:** Recorded or simulated twins of the external services the platform talks to (GitHub, Jira, cloud read APIs), used by evals, e2e tests and dry runs. A run can be started against twins only ("rehearsal mode"), so a team sees what a new workflow would do to their tracker and repo before letting it.
 - **Already covered:** In part. The e2e suite's fakes (see the local e2e notes).
 - **Open questions:** Build our own fakes or record and replay real traffic? How do twins stay in step with the real APIs?
 - **Links:** "Evals for workflows", "Dry run for every write"; FDEInterviews (digital twins)
+
+### Users, sign-in and roles
+
+- **Status:** 💡 Raw
+- **Added:** 2026-11-10
+- **Problem:** The platform has no users. A deployment sits behind an authenticating proxy (mission, v1 decisions), the audit log's actor is "System" or "—" ("names come with sign-in"), and nobody can be told apart. Several roadmap phases name a person: an approver in commit trailers (14.1), who may publish a template (15.2), who sent a message to an agent (20.1), who may change a policy (20.3); and a limit on the gates waiting per approver (from "Factory metrics") needs one.
+- **Idea:** Sign-in through the team's identity provider (OIDC: Entra ID, GitHub, Google), workspace members with roles (admin, maintainer, approver, viewer), the actor of every audit event, and gates assigned to people or roles.
+- **Already covered:** Nothing. Found while promoting ideas to Milestones 12–20 on 2026-11-10: the phases above work with the workspace as the actor until this exists.
+- **Open questions:** Before or after the SaaS deployment (10.5), which needs it for tenants? Does the authenticating proxy's identity (a header) count as a first step? Roles fixed or configurable?
+- **Links:** mission v1 decisions; roadmap 3.7, 10.5, 14.1, 15.2, 20.1, 20.3; "Factory metrics"
 
 ### Host repos ourselves (a forge for agents)
 
