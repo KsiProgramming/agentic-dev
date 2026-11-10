@@ -40,7 +40,8 @@ Tech-stack choices it follows: graph ops in `agentic_engine.spec.ops` with the b
 - **Typed inputs and outputs.**
   - The workflow spec takes optional `input_schema` and `output_schema`, with the same rules as a node's (4.2).
   - A subflow's ports are its called workflow's schemas. `port_mismatch` checks through a subflow, so a subflow no longer breaks the edge when the called workflow is typed. At runtime the subflow's input and output are checked at its boundary.
-  - Both are set in the builder's Workflow panel ("Inputs and outputs", advanced).
+  - Both are set in the builder's Workflow panel ("Input schema", "Output schema", in its Advanced group); `setParam` on the document accepts them.
+  - *(Changed while building: the browser's port mirror does not know a called workflow's schemas, so a connection through a typed subflow is reported by the server's live check, not blocked in the menu.)*
 - **Palette: "Workspace nodes".**
   - `GET /node-types?workspace_id=` adds one manifest per composite after the primitives: `kind: subflow`, category `workspace`, the composite's name and description, icon `workflow`, a `composite: {workflow_id, version}` field, and a `default` subflow already pinned to the latest published version.
   - Without `workspace_id`, the answer is the primitives, as today.
@@ -50,7 +51,7 @@ Tech-stack choices it follows: graph ops in `agentic_engine.spec.ops` with the b
   - They become the root of a new workflow (a sequence when there are several, the node itself when there is one). In their place is a `subflow` with id `subflow_id`, calling that workflow's version 1.
   - It is refused (`invalid_extract`, naming the node) when a reference crosses the boundary in either direction: a reduce's `from`, a publisher's `from_node`, or a CEL `results.<id>` that names an extracted node from outside, or an outside node from inside.
   - It is also refused for the root, or when the selection is not contiguous.
-  - The workflow-level `input` and the port schemas of the new workflow are taken from the first and last extracted nodes when they are typed.
+  - The port schemas of the new workflow are taken from the first and last extracted nodes when they are typed. *(Changed while building: the workflow-level `input`, a label for the run sheet, cannot come from a node, so it is not set.)*
   - **Transaction:** `PATCH /workflows/{id}` with an `extract` creates the new workflow (version 1, a draft) and the caller's new version in one database transaction. `409 workflow_exists` refuses the whole batch.
   - The browser's `applyOps` mirrors the spec side. The new document is returned so the canvas can show it before Save.
   - At most one `extract` per batch.
@@ -59,17 +60,17 @@ Tech-stack choices it follows: graph ops in `agentic_engine.spec.ops` with the b
     - `sequence`: the steps.
     - `parallel`: each node is a branch, at least 2 nodes.
     - `loop` or `map`: the body is the one node, or a new sequence `sequence_id` when there are several.
-  - The container's other parameters come from `with`, else from its manifest's `default`. Its id must be new.
+  - The container's other parameters come from `with`; the builder fills them from the kind's manifest `default`. Its id must be new. *(Changed while building: the engine's ops do not read manifests, so a `with` that misses a parameter is a `schema` refusal, which only the server makes; that case is an engine test, not a shared fixture.)*
   - It is refused when the result breaks a container rule the ops already enforce (`invalid_placement`, `invalid_wrap`). Rules that validation catches (a gate in a loop) are left to validation, as with any edit.
 - **Update by version.**
   - A subflow card that calls a composite older than its latest published version reads "Calls Security review · version 2 · version 3 is published", and its menu has **Update to version 3**: one `setParam` on `workflow.version`, then one undo step. With Compare, the diff shows the call changing.
-  - The composite's builder page lists **Used by**: the workspace's workflows whose latest version calls it, with the version each one calls (`GET /workflows/{id}/callers`). Each is a link to that caller.
+  - The composite's builder page lists **Used by**: the workspace's workflows whose latest version calls it, with the version each one calls (`GET /workflows/{id}/callers`). Each is a link to that caller. It is "Used by N workflows" in the status line, a popover (a bottom sheet below 768 px).
   - Callers are never updated automatically.
 - **Builder.**
   - A card's "⋯" menu gains **Extract to composite…** and **Wrap in…** (sequence, parallel, loop, map). Both open a dialog that picks the range ("from this step through …", a select of the later steps in the same sequence) and, for extract, the name, id (slug as in 5.8) and description.
   - A blocked choice is disabled, with its reason, as in 5.6.
   - The header gets **Publish version N** on a valid latest version with no unsaved edits. It asks for confirmation in a dialog that names the callers it does not change.
-  - The status line reads "Draft" or "Published version N".
+  - The status line shows a "Published" badge on a published version, and "Draft · version N is published" on a composite's draft; a workflow never published shows neither.
   - History marks published versions with a neutral "Published" badge.
   - The Workflows list shows a "Composite" badge and the published version.
 - **Audit:** `workflow.published` (`workflow_id`, `version`). An extract writes `workflow.created` for the composite, with `extracted_from: {workflow_id, version}`, and `workflow.updated` for the caller, whose `ops` counts include `extract`.
@@ -108,6 +109,7 @@ Tech-stack choices it follows: graph ops in `agentic_engine.spec.ops` with the b
 
 ## Open questions
 
-- None blocking. To confirm while building:
-  - How the CEL boundary check for `extract` finds `results.<id>`: a parse of each expression's identifiers is preferred over a text scan.
-  - Whether "Used by" can come from `workflow_versions` with a JSONB path query, or needs a small `workflow_calls` index table written with each version.
+- None. Settled while building:
+  - The CEL boundary check for `extract` finds `results.<id>` and `results["<id>"]` by pattern in a loop's `until`, a map's `over`, a route's `when` and a subflow's `input`: those are every form an id takes in the expressions the spec holds, and a parser would only add a dependency (tech-stack decisions log).
+  - "Used by" reads the latest version of each workflow of the workspace and finds the calls with `subflow_refs`, with no index table: workspaces hold few workflows, and the list has no pagination yet.
+  - A palette entry for a composite shares the `subflow` kind, so the palette keys entries apart (`composite:<workflow id>`).

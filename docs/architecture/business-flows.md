@@ -152,8 +152,9 @@ stateDiagram-v2
 3. **Save** creates a new immutable **version** that records the graph operations that produced it.
 4. Browse the **history**, compare two versions as a visual diff, **restore** an old one (stored as a new version), or **run any version**.
 5. A run records the exact workflow version and keeps a copy of the spec, so it can always be explained later.
+6. **Composites (6.6):** pick a run of steps (a card's "Extract to composite…") to move them into a new workflow, called in their place; **publish** a version to offer it in every workflow's palette under "Workspace nodes". A caller keeps the version it calls until someone moves it with "Update to version N"; drafts are never called. "Wrap in…" puts steps in a new sequence, parallel, loop or map.
 
-*Planned:* composite nodes saved from a selection and reused by version (6.6); plugin nodes backed by a container or HTTP endpoint (10.1); the Flow Architect drafting a workflow from a goal and the repo's profile, and proposing edits as a reviewable diff (9.x).
+*Planned:* plugin nodes backed by a container or HTTP endpoint (10.1); the Flow Architect drafting a workflow from a goal and the repo's profile, and proposing edits as a reviewable diff (9.x).
 
 ---
 

@@ -33,7 +33,7 @@ Made checkable:
 
 ### Web (`cd web && pnpm lint && pnpm typecheck && pnpm test`)
 - [ ] `ops.test.ts` runs the shared wrap and extract cases.
-- [ ] `edits.test.ts`: range helpers, the disabled reasons for wrap and extract, and a blocked port connection through a typed subflow.
+- [ ] `edits.test.ts`: range helpers, the wrap and extract edits, update-to-version, and a composite added from its palette key. (A port mismatch through a typed subflow is the server's live check: the browser does not know the called workflow's schemas.)
 - [ ] Builder: the Extract and Wrap dialogs (range select, slug, field errors, focus after), Publish with confirmation, Update to version N as one undo step, and the Used by list's three states.
 - [ ] Palette "Workspace nodes" group with loading, empty and error rows. The workflow being edited is left out.
 - [ ] History "Published" badge. Workflows list "Composite" badge (table and cards).
