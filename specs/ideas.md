@@ -109,6 +109,22 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 - **Open questions:** Is a version check between API and worker (refusing to claim a spec from a newer schema) needed as well? What threshold avoids re-enqueuing a run another worker is about to claim? Should the API, not the worker, do the sweep?
 - **Links:** `agentic_worker.main._next_run`, `agentic_store.lease`; principle 9 (nothing is lost)
 
+### Keep agents' code when a run fails or its worker crashes
+
+- **Status:** 💡 Raw
+- **Added:** 2026-11-10
+- **Problem:** A run's history is safe in Postgres (events, approvals, run artifacts, checkpoints after each node), but the code its agents write lives only in the run's sandbox volume: the clone and the writers' commits on `agent/<run>/<node>` and the integration branch, until the gated `github.openPR` pushes them. Today that code is lost in several cases:
+  - **The run fails, is cancelled, or its approval expires:** the worker deletes the sandbox when the attempt ends (`_attempt` in `agentic_worker.main`); only a run paused at a gate keeps it (`sandboxes.keep`). The user sees what the agents did in the console but cannot get the code back, and a rerun starts from scratch.
+  - **The worker crashes mid-run (to confirm with a test):** the checkpointer (1.3) skips the steps that completed, but the sandbox is reopened with `reuse` only after a gate decision (`reuse=decision is not None`), so the resumed run seems to start from a fresh clone, without the commits of the steps it skips. AC-8 holds for the graph, not for the code.
+  - **The sandbox is deleted from outside:** a second stack's worker on the same Docker host (`sweep_orphans` keeps only its own database's runs), `test_docker_sandbox.py`, `docker compose down -v` or a volume prune. Seen on 2026-10-22, when a run waiting at a gate lost its sandbox.
+- **Idea:** cheapest first, 1 and 2 together as one phase:
+  1. **Keep a failed or cancelled run's sandbox** for a time to live (like the 72 h approval expiry), swept after; the console says until when, so it can be inspected or reused by a rerun.
+  2. **Save each writer's commits outside the container** when its step completes: a `git bundle` of its branch in Postgres (or object storage in production), restored into the sandbox when an attempt resumes, a run is rerun, or a sandbox is found missing. This closes the crash gap and the sweep gap.
+  3. **Push agent branches to GitHub as they are committed** (the most robust): pushing is irreversible (principle 3), so only behind a gate or a workspace opt-in, to a namespace no one reviews (`agentic/wip/<run>/…`), never a PR.
+- **Already covered:** In part. 1.3 resumes the graph after the last completed node; 4.3 keeps run artifacts in Postgres and copies them into a fresh sandbox; 2.6 reruns a whole run from scratch. "Rerun from a node, with the code as it was there" below needs the same saved commits.
+- **Open questions:** First, a test that kills a worker after a writer's commit and checks what the resumed run's branch holds. How big may a bundle get, and is it kept per node or only the latest per branch? How long are failed sandboxes and bundles kept, and does a budget or a disk limit cap them? Can a rerun start from a failed run's code, or only from the repo's head (a new run, same history)? In production (10.2), where do bundles live?
+- **Links:** `agentic_worker.main._attempt`, `agentic_sandbox.docker_backend.sweep_orphans`; roadmap 1.1, 1.3, 1.6, 2.6, 4.3, 6.3, 10.2; AC-8; principle 9 (nothing is lost)
+
 ### Commit trailers that link a change back to its run
 
 - **Status:** 💡 Raw
