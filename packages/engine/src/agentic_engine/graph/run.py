@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 from pydantic import JsonValue
 
-from agentic_engine.agent import AgentNodeResult, sum_usage
+from agentic_engine.agent import AgentNodeResult, RunContext, sum_usage
 from agentic_engine.artifacts import ArtifactStore, GateArtifact
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
@@ -64,6 +64,7 @@ async def run_workflow(
     review: GateReview | None = None,
     artifacts: ArtifactStore | None = None,
     integrator: BranchIntegrator | None = None,
+    context: RunContext | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -81,6 +82,8 @@ async def run_workflow(
     ran before the gate changed, from `review` (none without one), and an approval's edits are
     committed through it. The gate expires `ttl_s` after it paused (`expires_at`). An
     orchestrator whose body writes merges its tasks' branches through `integrator` (6.3).
+    Every agent is told `context` about the run, after its instructions (the repository it
+    works on: `RunContext`).
     A run that created its repo ends the attempt `suspended`, with no event: `resume_workflow`
     continues it, in an attempt that has the repo cloned.
 
@@ -112,6 +115,7 @@ async def run_workflow(
             review,
             artifacts,
             integrator=integrator,
+            context=context,
         ),
         initial_state(input),
         _config(spec, log.run_id),
@@ -137,6 +141,7 @@ async def resume_workflow(
     review: GateReview | None = None,
     artifacts: ArtifactStore | None = None,
     integrator: BranchIntegrator | None = None,
+    context: RunContext | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -166,6 +171,7 @@ async def resume_workflow(
         review,
         artifacts,
         integrator=integrator,
+        context=context,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
@@ -176,7 +182,10 @@ async def resume_workflow(
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
     if not saved:
         return await _finish(log, lambda: graph, initial_state(input), config, budget, review)
-    if not snapshot.next:
+    # A step cut off once its tasks had all saved their results has no `next`, but its tasks are
+    # still in the checkpoint: the graph has not applied them, so it goes on. Only a graph that
+    # ended has neither.
+    if not snapshot.next and not snapshot.tasks:
         return await _report(log, RunState(**saved))
     asks = [i.value for task in snapshot.tasks for i in task.interrupts]
     resume: JsonValue = None

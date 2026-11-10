@@ -74,12 +74,23 @@ interface Values {
   budget: string;
 }
 
-/** A version of a stored workflow to run (5.7), and the connections it needs. */
+/** What a workflow says about its input (its spec's `input`): a label, help, an example, and
+ * whether a run needs one. */
+export interface RunInputSpec {
+  required: boolean;
+  label: string;
+  description?: string | null;
+  example?: string | null;
+}
+
+/** A version of a stored workflow to run (5.7), the connections it needs and what it says about
+ * its input, if anything. */
 export interface StoredWorkflowSource {
   id: string;
   version: number;
   name: string;
   requires: Requirement[];
+  input?: RunInputSpec | null;
 }
 
 /** What a run is started from: a template with its options, or a stored workflow's version. */
@@ -132,6 +143,8 @@ function NewRunForm({
   const policy = usePolicy({ workspaceId, baseUrl });
   const defaultBudget = policy.data?.effective.budget_usd ?? null;
   const needsRepo = requiresOf(source).includes("github");
+  const declared = "workflow" in source ? (source.workflow.input ?? null) : null;
+  const inputRequired = declared?.required === true;
   const schema = useMemo(
     () =>
       z
@@ -150,6 +163,13 @@ function NewRunForm({
           budget: budgetSchema(),
         })
         .superRefine((values, ctx) => {
+          if (inputRequired && values.input.trim() === "") {
+            ctx.addIssue({
+              code: "custom",
+              path: ["input"],
+              message: "This workflow needs it to know what to do.",
+            });
+          }
           if (!needsRepo) return;
           if (values.repoMode === "existing" && values.repo === "") {
             ctx.addIssue({ code: "custom", path: ["repo"], message: "Pick a repository." });
@@ -159,7 +179,7 @@ function NewRunForm({
             ctx.addIssue({ code: "custom", path: ["newRepo", "name"], message: nameError });
           }
         }),
-    [fields, needsRepo],
+    [fields, needsRepo, inputRequired],
   );
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -336,10 +356,12 @@ function NewRunForm({
           control={form.control}
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.error ? true : undefined}>
-              <FieldLabel htmlFor={inputId}>Input</FieldLabel>
+              <FieldLabel htmlFor={inputId}>{declared?.label ?? "Input"}</FieldLabel>
               <Textarea
                 id={inputId}
                 rows={4}
+                placeholder={declared?.example ? `e.g. ${declared.example}` : undefined}
+                aria-required={inputRequired ? true : undefined}
                 aria-invalid={fieldState.error ? true : undefined}
                 aria-describedby={fieldState.error ? `${inputId}-error` : `${inputId}-help`}
                 disabled={isSubmitting}
@@ -349,7 +371,11 @@ function NewRunForm({
                 <FieldMessage id={`${inputId}-error`}>{fieldState.error.message}</FieldMessage>
               ) : (
                 <FieldDescription id={`${inputId}-help`}>
-                  Optional. What the first step is given to work on.
+                  {inputRequired
+                    ? (declared?.description ??
+                      "What this run should do: the first step works on it.")
+                    : (declared?.description ??
+                      "Optional. What the first step is given to work on.")}
                 </FieldDescription>
               )}
             </Field>

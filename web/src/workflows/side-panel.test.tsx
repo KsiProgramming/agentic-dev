@@ -214,6 +214,21 @@ test("the workflow's budget is set and cleared", () => {
   expect(lastOps(onEdit)).toEqual([{ op: "setParam", path: "budget_usd", value: null }]);
 });
 
+test("the workflow panel sets the run input it asks for", () => {
+  const spec = { spec_version: "0", id: "w", name: "W", root: AGENT } as unknown as WorkflowSpec;
+  const onEdit = vi.fn();
+  const { rerender } = render(<WorkflowPanel spec={spec} onEdit={onEdit} />);
+  fireEvent.change(screen.getByLabelText(/^Label/), { target: { value: "What should change?" } });
+  expect(lastOps(onEdit)).toEqual([
+    { op: "setParam", path: "input", value: { label: "What should change?" } },
+  ]);
+
+  const asked = { ...spec, input: { label: "What should change?" } } as WorkflowSpec;
+  rerender(<WorkflowPanel spec={asked} onEdit={onEdit} />);
+  fireEvent.click(screen.getByLabelText(/^Required/));
+  expect(lastOps(onEdit)).toEqual([{ op: "setParam", path: "input.required", value: true }]);
+});
+
 describe("a subflow's workflow (6.5)", () => {
   const LOCAL = "http://localhost:8000";
   const WS = "ws-1";

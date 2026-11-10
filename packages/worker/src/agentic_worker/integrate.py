@@ -1,12 +1,19 @@
 """The `BranchIntegrator` of a run with a repo (6.3): an orchestrator's completed task branches
-merged into its integration branch, `agent/<run>/<orchestrator>`, in the run's sandbox."""
+merged into its integration branch, `agent/<run>/<orchestrator>`, in the run's sandbox, and (6.9)
+a later loop iteration's task branches started from it."""
 
 import logging
 from collections.abc import Sequence
 from uuid import UUID
 
 from agentic_engine.integrate import Integration, IntegrationError, MergeRequest
-from agentic_sandbox import MergeSource, Sandbox, SandboxError, integrate_branches
+from agentic_sandbox import (
+    MergeSource,
+    Sandbox,
+    SandboxError,
+    integrate_branches,
+    start_branches,
+)
 
 log = logging.getLogger("agentic_worker")
 
@@ -39,3 +46,16 @@ class SandboxIntegrator:
             empty=outcome.empty,
             conflicts=outcome.conflicts,
         )
+
+    async def start_tasks(self, orchestrator_id: str, keys: Sequence[str]) -> None:
+        try:
+            started = await start_branches(self._sandbox, self._run_id, orchestrator_id, keys)
+        except SandboxError as e:
+            raise IntegrationError(str(e)) from e
+        if started:
+            log.info(
+                "run %s: %d tasks of %s start from its integration branch",
+                self._run_id,
+                len(keys),
+                orchestrator_id,
+            )

@@ -27,7 +27,9 @@ Mission principles: **Open, but safe by construction (2)** (each iteration's age
 - **Events and API:** `plan_made`, `task_*`, `replan_started` and `branch_integrated` carry `iteration` when inside a loop; nothing else changes shape.
 - **Console:** the step list already nests loop iterations; each iteration's orchestrator shows its own tasks and rounds; the orchestrator's Output lists iterations, each with its plan and what the review said. The run map's back edge comes from 5.9.
 - **`team-review-pr` v2:** a loop around `implement`, `synthesizer` and `reviewer` (`until: results.reviewer.data.verdict == "ok"`, `max_iterations: 3`), then the gate and `open_pr` after the loop; the per-task `verdict` trick removed. Stored as a new version of the dev stack's workflow, and its spec kept as a test fixture.
-- **Specs:** tech-stack ("Orchestrator (API contract)", loop rules, decisions), roadmap `[Plan]` link, changelog.
+- **Agents know the run (found while building it):** every agent is told the repository the run works on (`RunContext`, after its instructions), and an empty input is said as such; a workflow may declare its input (`input: {label, required, description, example}`), required by `POST /runs` and the run sheet when `required`. A team run started with no request, or with only the repo's name, had nothing to plan.
+- **Resume fix:** a run cut off after a step's tasks all saved their results resumes from that step instead of reporting the run ended.
+- **Specs:** tech-stack ("Orchestrator (API contract)", loop rules, agent runtime, run input, decisions), roadmap `[Plan]` link, changelog.
 
 ### Out of scope
 - An orchestrator in a map, a parallel branch or another orchestrator.

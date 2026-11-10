@@ -122,8 +122,17 @@ function TaskLine({
   );
 }
 
-function IntegrationLine({ integration }: { integration: Integration }) {
-  const { branch, merged, empty, conflicts } = integration;
+function IntegrationLine({
+  integration,
+  taskIds,
+}: {
+  integration: Integration;
+  /** This orchestrator's tasks: in a loop (6.9), `merged` also lists earlier iterations'. */
+  taskIds: Set<string>;
+}) {
+  const { branch, empty, conflicts } = integration;
+  const merged = integration.merged.filter((id) => taskIds.has(id));
+  const before = integration.merged.filter((id) => !taskIds.has(id));
   return (
     <div data-testid="orchestrator-integration" className="flex min-w-0 flex-col gap-1 text-meta">
       <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-foreground-secondary">
@@ -136,6 +145,11 @@ function IntegrationLine({ integration }: { integration: Integration }) {
           "Nothing merged into"
         )}{" "}
         <span className="font-mono break-all text-foreground">{branch}</span>
+        {before.length > 0 ? (
+          <>
+            , on top of <span className="font-mono text-foreground">{before.join(", ")}</span>
+          </>
+        ) : null}
       </p>
       {empty.length > 0 ? (
         <p className="pl-5.5 text-caption text-muted-foreground">
@@ -166,6 +180,7 @@ function IntegrationLine({ integration }: { integration: Integration }) {
 function Round({
   round,
   tasks,
+  taskIds,
   heading,
   keys,
   now,
@@ -173,6 +188,7 @@ function Round({
 }: {
   round: PlanRound;
   tasks: OrchestratorTask[];
+  taskIds: Set<string>;
   heading: boolean;
   keys: Map<OrchestratorTask, string>;
   now: number;
@@ -224,16 +240,48 @@ function Round({
       ) : round.taskIds.length === 0 && round.reason !== null ? (
         <p className="text-meta text-muted-foreground">The hub planned no task.</p>
       ) : null}
-      {round.integration ? <IntegrationLine integration={round.integration} /> : null}
+      {round.integration ? (
+        <IntegrationLine integration={round.integration} taskIds={taskIds} />
+      ) : null}
+    </section>
+  );
+}
+
+/** In a later iteration of its loop (6.9): which iteration, and what the hub planned again from. */
+function IterationLine({ iteration, feedback }: { iteration: number; feedback: string | null }) {
+  return (
+    <section
+      aria-label={`Iteration ${iteration}`}
+      data-testid="orchestrator-iteration"
+      className="flex min-w-0 flex-col gap-1 text-meta"
+    >
+      <h3 className="font-medium">Iteration {iteration}</h3>
+      {feedback ? (
+        <>
+          <p className="text-foreground-secondary">
+            Planned again after the last iteration ended with:
+          </p>
+          {/* Model output (a review): text only (mission principle 5). */}
+          <p
+            data-testid="orchestrator-feedback"
+            className="rounded-md border border-border bg-surface-subtle px-3 py-2 break-words whitespace-pre-wrap text-foreground-secondary"
+          >
+            {feedback}
+          </p>
+        </>
+      ) : (
+        <p className="text-foreground-secondary">Planned again on top of the work merged so far.</p>
+      )}
     </section>
   );
 }
 
 /**
- * An orchestrator's Output (6.4): what it did in all, then each round: why a replan was made,
- * the hub's reason, its tasks (each selecting its worker's step, with its duration and cost) and
- * the integration branch after it. Titles, reasons and errors are model or repo output, shown as
- * text, never Markdown or HTML.
+ * An orchestrator's Output (6.4): what it did in all, then (in a later iteration of its loop,
+ * 6.9) what the last iteration ended with, then each round: why a replan was made, the hub's
+ * reason, its tasks (each selecting its worker's step, with its duration and cost) and the
+ * integration branch after it. Titles, reasons, reviews and errors are model or repo output,
+ * shown as text, never Markdown or HTML.
  */
 export function OrchestratorPlan({
   step,
@@ -257,14 +305,19 @@ export function OrchestratorPlan({
   }
   const keys = firstStepKeys(entries);
   const byRound = info.rounds.length > 1;
+  const taskIds = new Set(info.tasks.map((t) => t.id));
   return (
     <div data-testid="orchestrator-plan" className="flex min-w-0 flex-col gap-4">
       <Totals step={step} info={info} now={now} />
+      {info.iteration !== null && info.iteration > 1 ? (
+        <IterationLine iteration={info.iteration} feedback={info.feedback} />
+      ) : null}
       {info.rounds.map((round) => (
         <Round
           key={round.round}
           round={round}
           tasks={info.tasks.filter((t) => t.round === round.round)}
+          taskIds={taskIds}
           heading={byRound}
           keys={keys}
           now={now}

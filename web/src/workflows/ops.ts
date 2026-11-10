@@ -34,7 +34,7 @@ type Json = Record<string, unknown>;
 const SINGLE_SLOTS = ["body", "default"] as const;
 const LIST_SLOTS: Record<string, string> = { sequence: "steps", parallel: "branches" };
 const NODE_SLOTS = new Set(["steps", "branches", "body", "default"]);
-const DOCUMENT_PARAMS = new Set(["name", "description", "budget_usd"]);
+const DOCUMENT_PARAMS = new Set(["name", "description", "budget_usd", "input"]);
 const DEFAULT_ROUTE = "default";
 
 /** Where a node is: `holder[key]` is it, under `parent`'s field `slot`. */

@@ -96,13 +96,15 @@ class RunState(TypedDict):
     `plans` holds the tasks each orchestrator's hub planned (6.1), by orchestrator id, so a
     resumed run runs the same tasks and never asks the hub again. Its workers' results are in
     `map_results`, under the orchestrator's id, by task index. Checkpoints saved before phase 6.1
-    have none.
+    have none. An orchestrator in a loop's body (6.9) keeps its plan, rounds and task results
+    under `<orchestrator>#<iteration>` instead (`plan_key`), one entry per iteration.
 
     `rounds` counts the plans each orchestrator's hub made (6.2: one more per replan), by
     orchestrator id; a replan that planned no task still counts. Checkpoints saved before phase
     6.2 have none, which counts as one plan.
 
-    `integrated` holds each orchestrator's latest integration (6.3), by orchestrator id: its
+    `integrated` holds each orchestrator's latest integration (6.3), by orchestrator id (one for
+    every iteration of a loop it is in, 6.9, whose `merged` lists every iteration's tasks): its
     integration branch (`branch`, `head`) and the task ids `merged` into it and `empty`. A
     conflicting task's result in `map_results` is replaced by a failure. Checkpoints saved before
     phase 6.3 have none.
@@ -165,12 +167,16 @@ class ParallelBranch(TypedDict):
 class OrchestratorTask(TypedDict):
     """What an orchestrator sends the worker that runs its body for one planned task: the task's
     index in the plan, the task (`id`, `title`, `instructions`), the body's input (`{"task",
-    "input"}` as JSON) and the run's artifacts when the orchestrator started."""
+    "input"}` as JSON) and the run's artifacts when the orchestrator started. Inside a loop
+    (6.9), also where its plan is kept (`plan_key`, `<orchestrator>#<iteration>`) and the
+    loop's `iteration`."""
 
     index: int
     task: JsonValue
     task_input: str
     task_artifacts: dict[str, ArtifactRef]
+    plan_key: NotRequired[str]
+    iteration: NotRequired[int]
 
 
 def initial_state(input: str) -> RunState:

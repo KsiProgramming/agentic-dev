@@ -34,7 +34,8 @@ BRANCH = f"agent/run/{HUB}"
 
 class Merger:
     """A fake `BranchIntegrator`: a source merges unless its task is in `conflicts` (with those
-    paths) or `empty`; it records each call's keys and messages, and what it merged."""
+    paths) or `empty`; it records each call's keys and messages, what it merged, and the tasks it
+    was asked to start from the integration branch (6.9)."""
 
     def __init__(
         self,
@@ -47,6 +48,7 @@ class Merger:
         self._error = error
         self.calls: list[list[MergeRequest]] = []
         self.merged: list[str] = []
+        self.started: list[list[str]] = []
 
     async def integrate(self, orchestrator_id: str, sources: Sequence[MergeRequest]) -> Integration:
         self.calls.append(list(sources))
@@ -72,6 +74,9 @@ class Merger:
             empty=empty,
             conflicts=conflicts,
         )
+
+    async def start_tasks(self, orchestrator_id: str, keys: Sequence[str]) -> None:
+        self.started.append(list(keys))
 
     @property
     def keys(self) -> list[list[str]]:
@@ -220,6 +225,8 @@ async def test_a_conflict_fails_its_task_and_a_replan_retries_it() -> None:
     ]
     # Round 2 merges on top; the conflicting task is not offered again.
     assert merger.keys[1] == ["fix.a", "fix.c", "fix.b2"]
+    # The retry starts from the integration branch, so it builds on what merged (6.9).
+    assert merger.started == [["fix.b2"]]
     assert second["round"] == 2 and second["merged"] == ["a", "c", "b2"]
     data = result.results[HUB].data
     assert data is not None and data["merged"] == ["a", "c", "b2"]

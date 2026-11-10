@@ -11,6 +11,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import JsonValue
 
+from agentic_engine.agent import RunContext
 from agentic_engine.artifacts import InMemoryArtifactStore
 from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.gate import FileChange, FileEdit, GateDecision
@@ -547,6 +548,43 @@ async def test_resume_runs_only_unfinished_tasks_and_never_asks_the_hub_again() 
     assert [e.seq for e in sink.events] == list(range(1, len(sink.events) + 1))
 
 
+async def test_a_run_cut_off_once_every_task_ended_goes_on_after_the_orchestrator() -> None:
+    """AC-8: cut off after the last task saved its result but before the step was applied, the
+    checkpoint has no `next` yet still holds the tasks; a resumed run applies them, never runs a
+    task again and goes on to the next node, instead of reporting the run as ended."""
+    flow, checkpointer, run_id = (
+        spec(orchestrator(agent("worker")), agent("after")),
+        saver(),
+        uuid4(),
+    )
+    first = Team(plan("a", "b"))
+    sink = TaskDoneSink(1)
+    task = asyncio.create_task(
+        run_workflow(flow, first, "go", run_id=run_id, sink=sink, checkpointer=checkpointer)
+    )
+    await asyncio.wait_for(sink.done.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    second = Team(plan("x"))
+    result = await resume_workflow(
+        flow,
+        second,
+        "go",
+        run_id=run_id,
+        sink=sink,
+        checkpointer=checkpointer,
+        next_seq=sink.events[-1].seq + 1,
+        attempt=2,
+    )
+
+    assert result.status == "completed"
+    assert [r.node_id for r in second.requests] == ["after"]
+    assert result.order == [HUB, "after"]
+    assert result.results[HUB].text == "worker:a\n\nworker:b"
+
+
 def test_an_orchestrator_takes_three_steps() -> None:
     flow = spec(orchestrator(agent("worker")))
     assert recursion_limit(flow) == 3 + 10
@@ -592,3 +630,28 @@ async def test_a_dedupe_reduce_merges_the_tasks_reports_by_task_id() -> None:
     assert data is not None
     [merged] = cast(list[dict[str, JsonValue]], data["findings"])
     assert merged["sources"] == ["api", "web"]
+
+
+async def test_every_agent_is_told_the_repo_the_run_works_on() -> None:
+    team = Team(plan("a", "b"))
+    context = RunContext(repo="acme/shop", repo_url="https://github.com/acme/shop")
+
+    await run_workflow(
+        spec(orchestrator(agent("worker")), agent("after")),
+        team,
+        "",
+        checkpointer=saver(),
+        artifacts=InMemoryArtifactStore(),
+        context=context,
+    )
+
+    assert [r.node_id for r in team.requests] == [HUB, "worker", "worker", "after"]
+    assert {r.context for r in team.requests} == {context.text()}
+    assert "`acme/shop` (https://github.com/acme/shop)" in context.text()
+    assert RunContext().text() == ""
+
+
+async def test_without_a_context_agents_get_none() -> None:
+    team = Team(plan("a"))
+    await run(spec(orchestrator(agent("worker"))), team)
+    assert {r.context for r in team.requests} == {""}

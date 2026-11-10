@@ -80,3 +80,49 @@ test("starting runs the stored version with its input, then opens the run", asyn
     budget_usd: null,
   });
 });
+
+test("a workflow that needs an input names it, shows its example and will not start without it", async () => {
+  const fetch = stubApi({
+    [`GET ${CONNECTIONS_PATH}`]: () => json(200, [CLAUDE, GITHUB]),
+    [`GET ${REPOS_PATH}`]: () => json(200, REPOS),
+    "POST /runs": () => json(202, { run_id: RUN_ID }),
+  });
+  const navigate = vi.fn();
+  renderWithQueries(
+    <WorkflowRunSheet
+      open
+      onOpenChange={() => {}}
+      workflow={{
+        id: "team-review-pr",
+        version: 2,
+        name: "Team change",
+        requires: ["claude", "github"],
+        input: {
+          required: true,
+          label: "What should the team change?",
+          description: "The change to make, in a few sentences.",
+          example: "Add rate limiting to the login endpoint.",
+        },
+      }}
+      workspaceId={DEFAULT_WORKSPACE_ID}
+      baseUrl="http://api.test"
+      navigate={navigate}
+    />,
+  );
+  const sheet = within(screen.getByTestId("workflow-run-sheet"));
+  fireEvent.click(await sheet.findByRole("combobox", { name: "Repository" }));
+  fireEvent.click(await screen.findByRole("option", { name: /acme\/web/ }));
+
+  const field = sheet.getByLabelText("What should the team change?");
+  expect(field.getAttribute("placeholder")).toBe("e.g. Add rate limiting to the login endpoint.");
+  expect(field.getAttribute("aria-required")).toBe("true");
+  expect(sheet.getByText("The change to make, in a few sentences.")).toBeDefined();
+
+  fireEvent.click(sheet.getByRole("button", { name: "Start run" }));
+  expect(await sheet.findByText("This workflow needs it to know what to do.")).toBeDefined();
+  expect(fetch.mock.calls.some(([r]) => r.method === "POST")).toBe(false);
+
+  fireEvent.change(field, { target: { value: "Add rate limiting." } });
+  fireEvent.click(sheet.getByRole("button", { name: "Start run" }));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith(`/runs/${RUN_ID}`));
+});

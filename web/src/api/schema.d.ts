@@ -78,7 +78,8 @@ export interface paths {
          *
          *     A workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read
          *     from the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not
-         *     allowed where it is called) is refused with `422` and the issues.
+         *     allowed where it is called) is refused with `422` and the issues. A workflow whose `input` is
+         *     `required` is refused with `422` when `input` is empty: "This workflow needs an input: …".
          */
         post: operations["createRun"];
         delete?: never;
@@ -1307,7 +1308,8 @@ export interface components {
          *     output), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,
          *     data}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop
          *     normally. The body cannot contain gates, writers, publishers or loops: each is keyed by node
-         *     id, which repeats in every iteration.
+         *     id, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept
+         *     per iteration and whose writers all land on its one integration branch.
          */
         LoopNode: {
             /**
@@ -1537,7 +1539,9 @@ export interface components {
          *     branch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward
          *     the run's `agents_spawned` limit once the plan is made; one worker that does not complete
          *     cancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the
-         *     remaining work again.
+         *     remaining work again. In a loop's body (6.9) it plans afresh each iteration, from the loop
+         *     body's input and every earlier iteration's tasks, and every iteration's tasks build on its one
+         *     integration branch.
          */
         OrchestratorNode: {
             /**
@@ -2428,8 +2432,8 @@ export interface components {
         /**
          * SetParam
          * @description Set one parameter of a node, or of the document without `node_id` (`name`,
-         *     `description`, `budget_usd`). `null` unsets it. Ids, types and the slots that hold nodes
-         *     change through the other ops.
+         *     `description`, `budget_usd`, `input`). `null` unsets it. Ids, types and the slots that hold
+         *     nodes change through the other ops.
          */
         SetParam: {
             /**
@@ -2731,6 +2735,35 @@ export interface components {
             issues?: components["schemas"]["ValidationIssue"][];
         };
         /**
+         * WorkflowInput
+         * @description What a run of the workflow is given to work on: the first step's input. A workflow that
+         *     needs it (a change to make, a question to answer) says so with `required`, and `label`,
+         *     `description` and `example` tell the person starting a run what to write.
+         */
+        WorkflowInput: {
+            /**
+             * Required
+             * @description A run cannot start with an empty input.
+             * @default false
+             */
+            required: boolean;
+            /**
+             * Label
+             * @description What the input is, as a field label, e.g. "What should the team change?".
+             */
+            label: string;
+            /**
+             * Description
+             * @description One more sentence of help under the field.
+             */
+            description?: string | null;
+            /**
+             * Example
+             * @description An example input, shown in the empty field.
+             */
+            example?: string | null;
+        };
+        /**
          * WorkflowRef
          * @description A stored workflow of the run's workspace, by id and version (6.5).
          */
@@ -2767,6 +2800,8 @@ export interface components {
              * @description USD a run of this workflow may spend, a hard stop once reached. A run's own budget replaces it; unset, the workspace's default applies (or none).
              */
             budget_usd?: number | null;
+            /** @description What a run is given to work on, and whether it must be given; unset, the input is optional. */
+            input?: components["schemas"]["WorkflowInput"] | null;
             /** Root */
             root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
         };
@@ -3123,7 +3158,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Invalid request, or the workflow is above the workspace's limits */
+            /** @description Invalid request, the workflow is above the workspace's limits, or it requires an input (`input.required`) and none was given */
             422: {
                 headers: {
                     [name: string]: unknown;

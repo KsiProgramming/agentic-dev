@@ -343,7 +343,10 @@ def _calls(spec: dict[str, Any] | None, subflows: dict[str, Any] | None) -> dict
             "`installation_gone`, `personal_account` (repos are created in organisations only) "
             "or `repo_exists`."
         },
-        422: {"description": "Invalid request, or the workflow is above the workspace's limits"},
+        422: {
+            "description": "Invalid request, the workflow is above the workspace's limits, or it "
+            "requires an input (`input.required`) and none was given"
+        },
         502: {"description": "With `new_repo`: GitHub could not be asked about the repo"},
         503: {"description": "With `new_repo`: the GitHub App is not configured on the API"},
     },
@@ -366,7 +369,8 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
 
     A workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read
     from the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not
-    allowed where it is called) is refused with `422` and the issues."""
+    allowed where it is called) is refused with `422` and the issues. A workflow whose `input` is
+    `required` is refused with `422` when `input` is empty: "This workflow needs an input: …"."""
     redis: Redis = request.app.state.redis
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
@@ -376,6 +380,11 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     if body.stored_workflow is not None:
         body, stored = await _with_stored_spec(sessions, workspace_id, body)
     spec, repo = body.spec(), body.repo
+    if spec.input is not None and spec.input.required and not body.input.strip():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"This workflow needs an input: {spec.input.label}",
+        )
     if body.new_repo is not None:
         spec, repo = await _on_new_repo(request, workspace_id, body)
     resolved = await resolve_workflow(sessions, workspace_id, spec)

@@ -218,7 +218,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored\nworkflow (`stored_workflow`, which the run records), with `input` for its first node,\nworking on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.\n\nA workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read\nfrom the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not\nallowed where it is called) is refused with `422` and the issues.",
+        "description": "Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored\nworkflow (`stored_workflow`, which the run records), with `input` for its first node,\nworking on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.\n\nA workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read\nfrom the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not\nallowed where it is called) is refused with `422` and the issues. A workflow whose `input` is\n`required` is refused with `422` when `input` is empty: \"This workflow needs an input: \u2026\".",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -248,7 +248,7 @@
             "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`."
           },
           "422": {
-            "description": "Invalid request, or the workflow is above the workspace's limits"
+            "description": "Invalid request, the workflow is above the workspace's limits, or it requires an input (`input.required`) and none was given"
           },
           "502": {
             "description": "With `new_repo`: GitHub could not be asked about the repo"
@@ -3874,7 +3874,7 @@
           "max_iterations"
         ],
         "title": "LoopNode",
-        "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id \u2192 `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration."
+        "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id \u2192 `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept\nper iteration and whose writers all land on its one integration branch."
       },
       "MapNode": {
         "properties": {
@@ -4506,7 +4506,7 @@
           "max_concurrency"
         ],
         "title": "OrchestratorNode",
-        "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": \u2026, \"input\": \u2026}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again."
+        "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": \u2026, \"input\": \u2026}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again. In a loop's body (6.9) it plans afresh each iteration, from the loop\nbody's input and every earlier iteration's tasks, and every iteration's tasks build on its one\nintegration branch."
       },
       "OrchestratorReplan": {
         "properties": {
@@ -6492,7 +6492,7 @@
           "value"
         ],
         "title": "SetParam",
-        "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`). `null` unsets it. Ids, types and the slots that hold nodes\nchange through the other ops."
+        "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`). `null` unsets it. Ids, types and the slots that hold\nnodes change through the other ops."
       },
       "StartInstall": {
         "properties": {
@@ -7104,6 +7104,56 @@
         "title": "WorkflowErrorDetail",
         "description": "The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`\n(`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does\nnot match the schema, with its `issues`), `already_latest` (a restore of the latest\nversion)."
       },
+      "WorkflowInput": {
+        "properties": {
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "description": "A run cannot start with an empty input.",
+            "default": false
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "description": "What the input is, as a field label, e.g. \"What should the team change?\"."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "One more sentence of help under the field."
+          },
+          "example": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Example",
+            "description": "An example input, shown in the empty field."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "WorkflowInput",
+        "description": "What a run of the workflow is given to work on: the first step's input. A workflow that\nneeds it (a change to make, a question to answer) says so with `required`, and `label`,\n`description` and `example` tell the person starting a run what to write."
+      },
       "WorkflowRef-Input": {
         "properties": {
           "id": {
@@ -7169,6 +7219,17 @@
             ],
             "title": "Budget Usd",
             "description": "USD a run of this workflow may spend, a hard stop once reached. A run's own budget replaces it; unset, the workspace's default applies (or none)."
+          },
+          "input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowInput"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a run is given to work on, and whether it must be given; unset, the input is optional."
           },
           "root": {
             "oneOf": [

@@ -215,7 +215,7 @@
     "JsonValue": {},
     "LoopNode": {
       "additionalProperties": false,
-      "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration.",
+      "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept\nper iteration and whose writers all land on its one integration branch.",
       "properties": {
         "body": {
           "discriminator": {
@@ -452,7 +452,7 @@
     },
     "OrchestratorNode": {
       "additionalProperties": false,
-      "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": …, \"input\": …}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again.",
+      "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": …, \"input\": …}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again. In a loop's body (6.9) it plans afresh each iteration, from the loop\nbody's input and every earlier iteration's tasks, and every iteration's tasks build on its one\nintegration branch.",
       "properties": {
         "body": {
           "description": "The worker: what runs once per task.",
@@ -1355,6 +1355,58 @@
       "title": "ToolNode",
       "type": "object"
     },
+    "WorkflowInput": {
+      "additionalProperties": false,
+      "description": "What a run of the workflow is given to work on: the first step's input. A workflow that\nneeds it (a change to make, a question to answer) says so with `required`, and `label`,\n`description` and `example` tell the person starting a run what to write.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One more sentence of help under the field.",
+          "title": "Description"
+        },
+        "example": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An example input, shown in the empty field.",
+          "title": "Example"
+        },
+        "label": {
+          "description": "What the input is, as a field label, e.g. \"What should the team change?\".",
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "description": "A run cannot start with an empty input.",
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "title": "WorkflowInput",
+      "type": "object"
+    },
     "WorkflowRef": {
       "additionalProperties": false,
       "description": "A stored workflow of the run's workspace, by id and version (6.5).",
@@ -1416,6 +1468,18 @@
       "pattern": "^[a-z][a-z0-9_-]{0,62}$",
       "title": "Id",
       "type": "string"
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowInput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "What a run is given to work on, and whether it must be given; unset, the input is optional."
     },
     "name": {
       "minLength": 1,

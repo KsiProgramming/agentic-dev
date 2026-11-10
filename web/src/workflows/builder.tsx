@@ -762,6 +762,7 @@ function Editor({
           version: version.version,
           name: spec.name,
           requires: workflowRequires(version.spec as unknown as WorkflowSpec),
+          input: (version.spec as unknown as WorkflowSpec).input ?? null,
         }}
         workspaceId={workspaceId}
       />
