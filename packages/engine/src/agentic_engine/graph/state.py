@@ -146,22 +146,26 @@ class RunUpdate(TypedDict, total=False):
 
 class MapItem(TypedDict):
     """What a map sends the worker that runs its body for one item, with the run's artifacts when
-    the map started (`item_artifacts`; sends from before 4.3 have none)."""
+    the map started (`item_artifacts`; sends from before 4.3 have none) and the orchestrator
+    whose integration branch its readers read (`item_reads`, 6.9)."""
 
     index: int
     item: JsonValue
     item_input: str
     item_artifacts: NotRequired[dict[str, ArtifactRef]]
+    item_reads: NotRequired[str | None]
 
 
 class ParallelBranch(TypedDict):
     """What a parallel sends the worker that runs one of its branches: the branch's index, the
     parallel's input (`input` would clash with `RunState.input`) and the run's artifacts when the
-    parallel started (sends from before 4.3 have none)."""
+    parallel started (sends from before 4.3 have none) and the orchestrator whose integration
+    branch its readers read (`branch_reads`, 6.9)."""
 
     index: int
     branch_input: str
     branch_artifacts: NotRequired[dict[str, ArtifactRef]]
+    branch_reads: NotRequired[str | None]
 
 
 class OrchestratorTask(TypedDict):

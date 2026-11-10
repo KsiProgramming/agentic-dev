@@ -57,6 +57,15 @@ OUTPUT_SCHEMA_INSTRUCTION = (
 """Added, with the schema after it, to the instructions of an agent with an `output_schema`
 (4.2). The engine parses the answer and checks it (`agentic_engine.ports`)."""
 
+NO_TOOLS_INSTRUCTION = (
+    "You have no tools in this step: you cannot read files or run anything. Answer from your "
+    "input alone, and never write a tool call out as text: your answer is what the next step "
+    "receives."
+)
+"""Added to the instructions of an agent with no tools. One that wanted to check something would
+otherwise write a pretend tool call as its answer, which the next step then receives as the work
+(6.9)."""
+
 
 class RunContext(BaseModel):
     """What the platform tells every agent of a run about it, after its instructions: the
@@ -79,7 +88,8 @@ class RunContext(BaseModel):
             "`repo.*` tools you are given read it, and change it if you may write. Your input is "
             "the work the step before you produced (for the first step, what the person who "
             "started the run asked for), never the repository itself: read the repository with "
-            "your tools."
+            "your tools, if you have any. After a team of workers merged their work, your tools "
+            "read the code with that work in it."
         )
 
 
@@ -92,6 +102,8 @@ def to_request(
     instructions = node.instructions
     if node.tools:
         instructions = f"{instructions}\n\n{TOOL_INTENT_INSTRUCTION}"
+    else:
+        instructions = f"{instructions}\n\n{NO_TOOLS_INSTRUCTION}"
     if node.output_schema is not None:
         schema = json.dumps(node.output_schema, ensure_ascii=False)
         instructions = f"{instructions}\n\n{OUTPUT_SCHEMA_INSTRUCTION}\n\n{schema}"

@@ -58,13 +58,18 @@
               "type": "agent",
               "id": "synthesizer",
               "role": "Release writer",
-              "instructions": "Your input is the engineers' reports for this pass, one per task. Write one pull request description for the change: a short summary, then what changed per file and why, then how to check it. Plain Markdown, no greeting."
+              "instructions": "Your input is the engineers' reports, one per task, for all the work done so far (every pass). Your tools read the code with that work in it: read the files the reports name to check what actually changed. Then write one pull request description for the whole change: a short summary, then what changed per file and why, then how to check it. Plain Markdown, no greeting; your answer is the description itself, never a tool call written out as text.",
+              "tools": [
+                "repo.list_files",
+                "repo.read_file",
+                "repo.search"
+              ]
             },
             {
               "type": "agent",
               "id": "reviewer",
               "role": "Senior reviewer",
-              "instructions": "Review the change described in your input as one pull request: does it do what was asked, do the parts fit together, is anything missing or risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` say exactly what to change in a few sentences.",
+              "instructions": "Your input is the pull request description of the change. Your tools read the code with the change in it: read the files it names and check them against what was asked and what the description says. Review it as one pull request: does it do what was asked, do the parts fit together, is anything missing or risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` say exactly what to change in a few sentences.",
               "tools": [
                 "repo.read_file",
                 "repo.search"

@@ -11,7 +11,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import JsonValue
 
-from agentic_engine.agent import RunContext
+from agentic_engine.agent import NO_TOOLS_INSTRUCTION, RunContext
 from agentic_engine.artifacts import InMemoryArtifactStore
 from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.gate import FileChange, FileEdit, GateDecision
@@ -259,7 +259,7 @@ async def test_the_task_reaches_its_worker_as_input_never_as_instructions() -> N
     await run(spec(orchestrator(agent("worker", instructions="Fix what your task says."))), team)
 
     [worker] = team.workers
-    assert worker.instructions == "Fix what your task says."
+    assert worker.instructions == f"Fix what your task says.\n\n{NO_TOOLS_INSTRUCTION}"
     assert json.loads(worker.input) == {
         "task": {"id": "api", "title": "Fix api", "instructions": "Fix module api."},
         "input": "the repo",

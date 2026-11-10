@@ -22,8 +22,8 @@ from agentic_engine.integrate import (
     conflict_error,
 )
 from agentic_engine.spec import WorkflowSpec
-from agentic_runtime import Message
-from agentic_runtime.fake import CallTool, Delay, Script
+from agentic_runtime import AgentRequest, AgentRun, Message
+from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script
 
 from .test_orchestrator import HUB, Desk, TaskDoneSink, Team, agent, orchestrator, plan, saver, spec
 from .test_orchestrator_replan import Replanner, ends, replanning
@@ -375,3 +375,40 @@ def test_a_writing_body_takes_one_more_step_per_round() -> None:
     assert recursion_limit(spec(orchestrator(WRITER))) == 4 + 10
     assert recursion_limit(spec(replanning(WRITER, max_rounds=2))) == 12 + 10
     assert recursion_limit(spec(orchestrator(agent("worker")))) == 3 + 10
+
+
+class ReadingTeam(Team):
+    """A `Team` whose `Reviewer`, whatever id it calls as, reads one file and says OK."""
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        if request.role != "Reviewer":
+            return super().start(request)
+        self.requests.append(request)
+        script = [CallTool("repo.read_file", {"path": "a.py"}), Message(text="OK"), ECHO_USAGE]
+        return FakeRuntime({request.node_id: script}, tools=self._tools).start(request)
+
+
+async def test_a_reader_after_the_orchestrator_reads_its_integration_branch() -> None:
+    """6.9: once the orchestrator merged a task, a node that only reads the repo calls its tools
+    as the orchestrator, so they read the integration branch (the work merged), not the run's
+    checkout; one before it calls as itself."""
+    desk, merger = Desk(), Merger()
+    before = agent("survey", role="Reviewer", tools=["repo.read_file"])
+    after = agent("reviewer", role="Reviewer", tools=["repo.read_file"])
+    team = ReadingTeam(plan("a"), scripts=writing("a"), tools=desk)
+
+    result = await run(spec(before, orchestrator(WRITER), after), team, merger, desk=desk)
+
+    assert result.status == "completed", result.results[HUB].error
+    reads = [node for name, node in desk.calls if name == "repo.read_file"]
+    assert reads == ["survey", HUB]
+
+
+async def test_a_reader_after_an_orchestrator_that_merged_nothing_reads_the_checkout() -> None:
+    desk, merger = Desk(), Merger(empty=["a"])
+    after = agent("reviewer", role="Reviewer", tools=["repo.read_file"])
+    team = ReadingTeam(plan("a"), scripts=writing("a"), tools=desk)
+
+    await run(spec(orchestrator(WRITER), after), team, merger, desk=desk)
+
+    assert [node for name, node in desk.calls if name == "repo.read_file"] == ["reviewer"]

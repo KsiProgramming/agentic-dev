@@ -11,7 +11,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import JsonValue
 
-from agentic_engine.agent import sum_usage
+from agentic_engine.agent import NO_TOOLS_INSTRUCTION, sum_usage
 from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.graph import (
     WorkflowRunResult,
@@ -417,7 +417,10 @@ async def test_reduce_agent_gets_items_and_outputs_as_json() -> None:
     result = await run(mapping(agent("writer"), reduce=reduce), runtime, sink)
 
     [request] = [r for r in runtime.requests if r.node_id == "join"]
-    assert (request.role, request.instructions) == ("Architect", "Overview.")
+    assert (request.role, request.instructions) == (
+        "Architect",
+        f"Overview.\n\n{NO_TOOLS_INSTRUCTION}",
+    )
     assert json.loads(request.input) == [{"item": m, "output": f"writer({m})"} for m in MODULES]
     assert result.results["join"].text == f"join({request.input})"
     assert ("node_completed", "join", None) in lifecycle(sink.events)

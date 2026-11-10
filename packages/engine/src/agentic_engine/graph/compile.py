@@ -161,6 +161,7 @@ from agentic_engine.spec import (
     DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
     PUBLISH_TOOLS,
+    READ_TOOLS,
     WRITE_TOOLS,
     AgentNode,
     GateNode,
@@ -564,13 +565,35 @@ def _step(
     async def step(state: RunState) -> RunUpdate:
         def run() -> Awaitable[AgentNodeResult]:
             refs = state.get("artifacts", {})
-            return _run_step(node, runtime, tools, log, limits, state["last_text"], refs)
+            reads = _reads_as(node, _integrated_reader(state))
+            return _run_step(
+                node, runtime, tools, log, limits, state["last_text"], refs, route_as=reads
+            )
 
         if isinstance(node, AgentNode):
             return await _spawn(node.id, state, limits, log, run)
         return _update(node.id, await run())
 
     return step
+
+
+def _integrated_reader(state: RunState) -> str | None:
+    """The orchestrator whose integration branch the run's readers read (6.9): the latest one,
+    in run order, that merged a task; `None` before any did, when they read the run's checkout."""
+    integrated = state.get("integrated", {})
+    return next(
+        (o for o in reversed(state["order"]) if (integrated.get(o) or {}).get("merged")), None
+    )
+
+
+def _reads_as(node: Node, reads: str | None) -> str | None:
+    """What a node that only reads the repo calls its tools as: the orchestrator `reads`, so its
+    `repo.*` reads go to that orchestrator's integration branch, the work merged so far (6.9); a
+    node that writes, publishes or reads nothing calls as itself (`None`)."""
+    tools = set(node_tools(node))
+    if reads is None or not tools & READ_TOOLS or tools & (WRITE_TOOLS | PUBLISH_TOOLS):
+        return None
+    return reads
 
 
 async def _spawn(
@@ -904,7 +927,11 @@ def _fan_out(
             Send(
                 item_node_id(map),
                 MapItem(
-                    index=i, item=item, item_input=_item_input(item), item_artifacts=dict(refs)
+                    index=i,
+                    item=item,
+                    item_input=_item_input(item),
+                    item_artifacts=dict(refs),
+                    item_reads=_integrated_reader(state),
                 ),
             )
             for i, item in enumerate(items)
@@ -936,7 +963,9 @@ def _map_item(
                 MAP_ITEM_STARTED, node_id=map.id, payload={"index": index, "item": task["item"]}
             )
             refs = dict(task.get("item_artifacts", {}))
-            scope = _Scope(runtime, tools, log, limits, item=index, refs=refs)
+            scope = _Scope(
+                runtime, tools, log, limits, item=index, refs=refs, reads=task.get("item_reads")
+            )
             ended, result = await _run_inline(map.body, task["item_input"], scope)
             error = _stop_error(ended, result)
             usage = scope.usage()
@@ -1085,7 +1114,10 @@ def _fan_out_branches(parallel: ParallelNode) -> Callable[[RunState], Sequence[S
             Send(
                 worker,
                 ParallelBranch(
-                    index=i, branch_input=state["last_text"], branch_artifacts=dict(refs)
+                    index=i,
+                    branch_input=state["last_text"],
+                    branch_artifacts=dict(refs),
+                    branch_reads=_integrated_reader(state),
                 ),
             )
             for i in range(len(parallel.branches))
@@ -1114,7 +1146,8 @@ def _parallel_branch(
         marker: dict[str, JsonValue] = {"index": index, "branch_id": branch_id}
         await log.emit(PARALLEL_BRANCH_STARTED, node_id=parallel.id, payload=marker)
         refs = dict(task.get("branch_artifacts", {}))
-        scope = _Scope(runtime, tools, log, limits, branch=index, refs=refs)
+        reads = task.get("branch_reads")
+        scope = _Scope(runtime, tools, log, limits, branch=index, refs=refs, reads=reads)
         result, error = await _run_branch(join, index, parallel.branches[index], text, scope)
         end: dict[str, JsonValue] = {**marker, "status": result.status}
         if error:
@@ -1368,7 +1401,8 @@ class _Scope:
     """Where nodes run in-process (`_run_inline`): a map item or an orchestrator's task
     (`item`; a task also `task`: the orchestrator's id and the task's) or a parallel branch
     (`branch`, the innermost), with the run artifacts it sees (`refs`), every node it ran (`ran`,
-    shared with the parallels inside it) and the artifacts it wrote (`wrote`)."""
+    shared with the parallels inside it), the artifacts it wrote (`wrote`) and the orchestrator
+    whose integration branch its readers read (`reads`, 6.9)."""
 
     runtime: AgentRuntime
     tools: ToolExecutor | None
@@ -1380,13 +1414,17 @@ class _Scope:
     ran: dict[str, AgentNodeResult] = field(default_factory=dict[str, AgentNodeResult])
     wrote: dict[str, ArtifactRef] = field(default_factory=dict[str, ArtifactRef])
     task: tuple[str, str] | None = None
+    reads: str | None = None
 
     def route_as(self, node: Node) -> str | None:
         """What `node` is known by to the tools: inside an orchestrator's task, a writer works as
-        the task (`task_writer_key`), on the task's own branch; else as itself."""
-        if self.task is None or not WRITE_TOOLS.intersection(node_tools(node)):
-            return None
-        return task_writer_key(*self.task)
+        the task (`task_writer_key`), on the task's own branch; a node that only reads, as the
+        orchestrator whose integration branch the scope reads (`reads`, 6.9); else as itself."""
+        if self.task is not None and WRITE_TOOLS.intersection(node_tools(node)):
+            return task_writer_key(*self.task)
+        if self.task is None:
+            return _reads_as(node, self.reads)
+        return None
 
     def tag(self) -> _Tag:
         """The `item` and `branch` its events carry."""

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agentic_engine.agent import NO_TOOLS_INSTRUCTION
 from agentic_engine.graph import run_workflow
 from agentic_engine.spec import AgentNode, SequenceNode, WorkflowSpec, parse_spec
 from agentic_runtime import AgentEvent, AgentRequest, Cancelled, Failed, Message, Usage
@@ -40,7 +41,7 @@ async def test_two_step_sequence_runs_on_fake_runtime() -> None:
     assert isinstance(spec.root, SequenceNode)
     reviewer_node = spec.root.steps[1]
     assert isinstance(reviewer_node, AgentNode)
-    assert reviewer.instructions == reviewer_node.instructions
+    assert reviewer.instructions == f"{reviewer_node.instructions}\n\n{NO_TOOLS_INSTRUCTION}"
     assert result.usage == Usage(input_tokens=10, output_tokens=6)
     assert {n: r.status for n, r in result.results.items()} == {
         "writer": "completed",
