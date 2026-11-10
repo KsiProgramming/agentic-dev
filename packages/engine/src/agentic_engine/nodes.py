@@ -29,9 +29,10 @@ from agentic_engine.spec import (
     WorkflowSpec,
 )
 
-type Category = Literal["step", "flow", "combine"]
+type Category = Literal["step", "flow", "combine", "workspace"]
 """Where the palette lists a kind: `step` does one thing, `flow` holds other nodes and decides
-how they run, `combine` joins what ran before it."""
+how they run, `combine` joins what ran before it, `workspace` is one of the workspace's
+composites (6.6)."""
 
 type Fill = Literal["previous_step"]
 """What the palette sets a parameter to when it adds a node: `previous_step` is the id of the
@@ -57,6 +58,16 @@ where they are structure, like a router's routes."""
 
 _TITLES = {"ttl_s": "Time to live (seconds)", "from": "From step"}
 """Field titles that a field name in sentence case would not make readable."""
+
+
+class CompositeRef(BaseModel):
+    """The composite a workspace manifest adds (6.6): a stored workflow and its latest published
+    version."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    workflow_id: str
+    version: int = Field(ge=1, description="Its latest published version.")
 
 
 class NodeManifest(BaseModel):
@@ -90,6 +101,11 @@ class NodeManifest(BaseModel):
         "field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`, "
         "`workflow_ref`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, "
         "`addable`, `removable`, `orderable`).",
+    )
+    composite: CompositeRef | None = Field(
+        default=None,
+        description="Set on a workspace composite's entry (category `workspace`): the workflow "
+        "its `default` subflow calls, at its latest published version.",
     )
 
     @field_serializer("default")
@@ -436,7 +452,33 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
 
 
 def manifest_for(kind: str) -> NodeManifest | None:
+    """The primitive `kind`'s manifest (a composite's entries share the `subflow` kind and are
+    not returned)."""
     return next((m for m in NODE_MANIFESTS if m.kind == kind), None)
+
+
+def composite_manifest(
+    workflow_id: str, version: int, name: str, description: str | None = None
+) -> NodeManifest:
+    """A palette entry for the workspace's composite `workflow_id` (6.6): a `subflow` that calls
+    its latest published `version`, listed under its `name` with the subflow's parameters and
+    side panel."""
+    subflow = manifest_for("subflow")
+    assert subflow is not None
+    default = {
+        "type": "subflow",
+        "id": "subflow",
+        "workflow": {"id": workflow_id, "version": version},
+    }
+    return subflow.model_copy(
+        update={
+            "label": name,
+            "description": description or f"Runs the composite {name}, version {version}.",
+            "category": "workspace",
+            "default": _NODE.validate_python(default),
+            "composite": CompositeRef(workflow_id=workflow_id, version=version),
+        }
+    )
 
 
 def node_kinds() -> list[str]:

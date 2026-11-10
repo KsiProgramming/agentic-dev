@@ -4,7 +4,8 @@ A `subflow` node names a stored workflow by id and version. Before a run (or a c
 subflow is resolved through a `Resolve` callable, the called workflow's root attached to the node
 (`SubflowNode.call`), and the subflows inside it resolved in turn: the expanded tree is what
 validation checks and the engine runs. A workflow may not call itself, directly or through
-others (`subflow_cycle`), and an unknown workflow or version is `subflow_unknown`. An issue found
+others (`subflow_cycle`), an unknown workflow or version is `subflow_unknown`, and a version of a
+composite that was never published (a draft, 6.6) is `subflow_unpublished`. An issue found
 inside a called workflow is reported on the outermost subflow that calls it, as the parent's
 author can only change the call.
 
@@ -19,6 +20,7 @@ from typing import cast
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from agentic_engine.policy import PLATFORM_POLICY
+from agentic_engine.ports import schema_problem
 from agentic_engine.spec.models import (
     PLATFORM_TOOLS,
     IssueCode,
@@ -95,15 +97,19 @@ class ExpandedWorkflow:
 
 
 def expand_workflow(
-    spec: WorkflowSpec, resolve: Resolve, known_tools: Collection[str] = PLATFORM_TOOLS
+    spec: WorkflowSpec,
+    resolve: Resolve,
+    known_tools: Collection[str] = PLATFORM_TOOLS,
+    drafts: Collection[str] = (),
 ) -> ExpandedWorkflow:
     """`spec` with every subflow resolved through `resolve`, the documents called, and why it
     cannot run: unknown and cyclic calls, then the structure and tool issues of the expanded tree
     (`structure_issues`, `tool_issues` against `known_tools`), each inside a called workflow moved
-    onto its subflow (`on_subflows`). A spec with no subflow is returned as it is, with no
-    issues: parsing it checked its structure already. Policy limits are the caller's to check, on
-    the expanded spec."""
-    root, called, issues = expand_root(spec.root, resolve, spec.id)
+    onto its subflow (`on_subflows`). A call to a version in `drafts` (`subflow_key`s of
+    composites' unpublished versions, 6.6) is `subflow_unpublished`. A spec with no subflow is
+    returned as it is, with no issues: parsing it checked its structure already. Policy limits
+    are the caller's to check, on the expanded spec."""
+    root, called, issues = expand_root(spec.root, resolve, spec.id, drafts)
     if root is spec.root:
         return ExpandedWorkflow(spec)
     issues += structure_issues(root) + tool_issues(root, known_tools)
@@ -112,7 +118,10 @@ def expand_workflow(
 
 
 def expand_root(
-    root: Node, resolve: Resolve, workflow_id: str | None = None
+    root: Node,
+    resolve: Resolve,
+    workflow_id: str | None = None,
+    drafts: Collection[str] = (),
 ) -> tuple[Node, dict[str, JsonValue], list[ValidationIssue]]:
     """As `expand_workflow`, for the root of workflow `workflow_id` (which it may not call): the
     expanded root (`root` itself when it has no subflow), the documents called and the issues."""
@@ -167,11 +176,16 @@ def expand_root(
         if parsed is None:
             issues.append(_issue("subflow_unknown", node, path, f"{name} is not a workflow spec"))
             return node
-        child_root, child_name = parsed
+        if subflow_key(ref.id, ref.version) in drafts:
+            why = (
+                f"{name} is a draft; {ref.id!r} is a composite, so call one of its published "
+                "versions, or publish this one"
+            )
+            issues.append(_issue("subflow_unpublished", node, path, why))
         called[subflow_key(ref.id, ref.version)] = raw
-        ids = _run_ids(child_root, node.id, used)
-        inner = expand(_renamed(child_root, ids), f"{path}.call", (*calling, ref.id))
-        return node.resolved(inner, child_name, ids)
+        ids = _run_ids(parsed.root, node.id, used)
+        inner = expand(_renamed(parsed.root, ids), f"{path}.call", (*calling, ref.id))
+        return node.resolved(inner, parsed.name, ids, parsed.input_schema, parsed.output_schema)
 
     if not any(isinstance(node, SubflowNode) for _, node in iter_nodes(root)):
         return root, called, issues
@@ -270,18 +284,41 @@ def call_documents(root: Node) -> dict[str, JsonValue]:
     return found
 
 
-def _parse(raw: JsonValue) -> tuple[Node, str] | None:
-    """The root and name of the workflow document `raw`, or `None` when it is not one. A stored
-    version matches the schema but may not run: its root is still returned, and what is wrong
-    with it is found on the expanded tree."""
+@dataclass(frozen=True)
+class _Called:
+    """What a called workflow document gives its subflow: its root, name and port schemas (a
+    schema a port cannot take is left out; the called workflow's own check reports it)."""
+
+    root: Node
+    name: str
+    input_schema: dict[str, JsonValue] | None
+    output_schema: dict[str, JsonValue] | None
+
+
+def _port(schema: object) -> dict[str, JsonValue] | None:
+    if not isinstance(schema, dict):
+        return None
+    typed = cast(dict[str, JsonValue], schema)
+    return typed if schema_problem(typed) is None else None
+
+
+def _parse(raw: JsonValue) -> _Called | None:
+    """The root, name and port schemas of the workflow document `raw`, or `None` when it is not
+    one. A stored version matches the schema but may not run: its root is still returned, and
+    what is wrong with it is found on the expanded tree."""
     try:
         spec = WorkflowSpec.model_validate(raw)
     except ValidationError as e:
         if not all(err["type"] == "value_error" and not err["loc"] for err in e.errors()):
             return None
         document = cast(Mapping[str, object], raw)
-        return _NODE.validate_python(document["root"]), str(document.get("name") or "")
-    return spec.root, spec.name
+        return _Called(
+            _NODE.validate_python(document["root"]),
+            str(document.get("name") or ""),
+            _port(document.get("input_schema")),
+            _port(document.get("output_schema")),
+        )
+    return _Called(spec.root, spec.name, _port(spec.input_schema), _port(spec.output_schema))
 
 
 def on_subflows(root: Node, issues: list[ValidationIssue]) -> list[ValidationIssue]:

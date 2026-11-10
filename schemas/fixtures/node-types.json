@@ -175,7 +175,8 @@
           "advanced": true
         }
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "tool",
@@ -322,7 +323,8 @@
           "advanced": true
         }
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "gate",
@@ -374,7 +376,8 @@
           "advanced": true
         }
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "sequence",
@@ -408,7 +411,8 @@
       ]
     },
     "fill": {},
-    "ui": {}
+    "ui": {},
+    "composite": null
   },
   {
     "kind": "parallel",
@@ -473,7 +477,8 @@
       "quorum": {
         "ui:placeholder": "With the quorum join only"
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "router",
@@ -627,7 +632,8 @@
           "ui:placeholder": "The workspace's default"
         }
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "loop",
@@ -684,7 +690,8 @@
       "until": {
         "ui:placeholder": "A CEL condition, e.g. iteration >= 3"
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "map",
@@ -741,7 +748,8 @@
       "over": {
         "ui:placeholder": "A CEL list, e.g. results.modules.data.modules"
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "orchestrator",
@@ -923,7 +931,8 @@
           "advanced": true
         }
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "subflow",
@@ -1003,7 +1012,8 @@
           "advanced": true
         }
       }
-    }
+    },
+    "composite": null
   },
   {
     "kind": "reduce",
@@ -1130,6 +1140,7 @@
           "advanced": true
         }
       }
-    }
+    },
+    "composite": null
   }
 ]

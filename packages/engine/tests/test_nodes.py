@@ -12,6 +12,7 @@ from agentic_engine.nodes import (
     UI_OPTIONS,
     UI_WIDGETS,
     NodeManifest,
+    composite_manifest,
     manifest_for,
     node_kinds,
     parameters_schema,
@@ -238,3 +239,26 @@ def test_web_fixture_is_the_registry() -> None:
     `scripts/export_workflow_schema.py` when a manifest changes."""
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert fixture == [m.model_dump(mode="json") for m in NODE_MANIFESTS]
+
+
+def test_a_composite_entry_adds_a_subflow_pinned_to_its_published_version() -> None:
+    """A workspace's composite (6.6) is listed as a `subflow` under its own name: the palette
+    adds a call to its latest published version, edited with the subflow's side panel."""
+    entry = composite_manifest("security-review", 3, "Security review", "Checks for leaks.")
+    subflow = manifest_for("subflow")
+    assert subflow is not None
+
+    assert (entry.kind, entry.label, entry.category) == ("subflow", "Security review", "workspace")
+    assert entry.description == "Checks for leaks."
+    assert entry.composite is not None
+    assert (entry.composite.workflow_id, entry.composite.version) == ("security-review", 3)
+    dumped = entry.model_dump(mode="json")
+    assert dumped["default"] == {
+        "type": "subflow",
+        "id": "subflow",
+        "workflow": {"id": "security-review", "version": 3},
+    }
+    assert (entry.parameters, entry.ui, entry.slots) == (subflow.parameters, subflow.ui, [])
+    # The primitives' lookup never returns a composite's entry.
+    assert manifest_for("subflow") is subflow
+    assert composite_manifest("w", 1, "W").description == "Runs the composite W, version 1."

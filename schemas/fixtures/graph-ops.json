@@ -1,5 +1,5 @@
 {
-  "$comment": "Graph operations and what they make of `spec`, applied by both agentic_engine.spec.apply_ops (packages/engine/tests/test_graph_ops_fixtures.py) and the web's applyOps (web/src/workflows/ops.test.ts), so the two stay alike. Each case has `result` or `error`, and runs on `spec` unless it brings its own `spec`. Regenerate the outcomes from the engine when a case is added.",
+  "$comment": "Graph operations and what they make of `spec`, applied by both agentic_engine.spec.apply_ops (packages/engine/tests/test_graph_ops_fixtures.py) and the web's applyOps (web/src/workflows/ops.test.ts), so the two stay alike. Each case has `result` (and, for an extract, `extracted`: the workflow it makes) or `error`, and runs on `spec` unless it brings its own `spec`. Regenerate the outcomes from the engine when a case is added.",
   "spec": {
     "spec_version": "0",
     "id": "flow",
@@ -3069,6 +3069,2186 @@
             }
           ]
         }
+      }
+    },
+    {
+      "name": "wrap steps in a sequence",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "a",
+            "l"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "first"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "sequence",
+              "id": "first",
+              "steps": [
+                {
+                  "type": "agent",
+                  "id": "a",
+                  "role": "a",
+                  "instructions": "Do a."
+                },
+                {
+                  "type": "loop",
+                  "id": "l",
+                  "body": {
+                    "type": "sequence",
+                    "id": "body",
+                    "steps": [
+                      {
+                        "type": "agent",
+                        "id": "x",
+                        "role": "x",
+                        "instructions": "Do x."
+                      },
+                      {
+                        "type": "agent",
+                        "id": "y",
+                        "role": "y",
+                        "instructions": "Do y."
+                      }
+                    ]
+                  },
+                  "until": "true",
+                  "max_iterations": 2
+                }
+              ]
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "parallel",
+              "id": "p",
+              "branches": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1."
+                },
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2."
+                }
+              ],
+              "join": "all"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrap steps in a parallel",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "r",
+            "p"
+          ],
+          "with": {
+            "type": "parallel",
+            "id": "both",
+            "join": "all"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "x",
+                    "role": "x",
+                    "instructions": "Do x."
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "parallel",
+              "id": "both",
+              "join": "all",
+              "branches": [
+                {
+                  "type": "router",
+                  "id": "r",
+                  "routes": [
+                    {
+                      "id": "one",
+                      "when": "true",
+                      "then": {
+                        "type": "agent",
+                        "id": "r1",
+                        "role": "r1",
+                        "instructions": "Do r1."
+                      }
+                    }
+                  ],
+                  "default": {
+                    "type": "agent",
+                    "id": "r2",
+                    "role": "r2",
+                    "instructions": "Do r2."
+                  }
+                },
+                {
+                  "type": "parallel",
+                  "id": "p",
+                  "branches": [
+                    {
+                      "type": "agent",
+                      "id": "p1",
+                      "role": "p1",
+                      "instructions": "Do p1."
+                    },
+                    {
+                      "type": "agent",
+                      "id": "p2",
+                      "role": "p2",
+                      "instructions": "Do p2."
+                    }
+                  ],
+                  "join": "all"
+                }
+              ]
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrap one node in a loop",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "c"
+          ],
+          "with": {
+            "type": "loop",
+            "id": "redo",
+            "until": "true",
+            "max_iterations": 3
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "x",
+                    "role": "x",
+                    "instructions": "Do x."
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "parallel",
+              "id": "p",
+              "branches": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1."
+                },
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2."
+                }
+              ],
+              "join": "all"
+            },
+            {
+              "type": "loop",
+              "id": "redo",
+              "until": "true",
+              "max_iterations": 3,
+              "body": {
+                "type": "agent",
+                "id": "c",
+                "role": "c",
+                "instructions": "Do c."
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrap steps in a loop with a sequence",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "p",
+            "c"
+          ],
+          "with": {
+            "type": "loop",
+            "id": "redo",
+            "until": "true",
+            "max_iterations": 3
+          },
+          "sequence_id": "redo_body"
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "x",
+                    "role": "x",
+                    "instructions": "Do x."
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "loop",
+              "id": "redo",
+              "until": "true",
+              "max_iterations": 3,
+              "body": {
+                "type": "sequence",
+                "id": "redo_body",
+                "steps": [
+                  {
+                    "type": "parallel",
+                    "id": "p",
+                    "branches": [
+                      {
+                        "type": "agent",
+                        "id": "p1",
+                        "role": "p1",
+                        "instructions": "Do p1."
+                      },
+                      {
+                        "type": "agent",
+                        "id": "p2",
+                        "role": "p2",
+                        "instructions": "Do p2."
+                      }
+                    ],
+                    "join": "all"
+                  },
+                  {
+                    "type": "agent",
+                    "id": "c",
+                    "role": "c",
+                    "instructions": "Do c."
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrap a body node in a map",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "x"
+          ],
+          "with": {
+            "type": "map",
+            "id": "each",
+            "over": "['a']",
+            "max_concurrency": 2
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "map",
+                    "id": "each",
+                    "over": "['a']",
+                    "max_concurrency": 2,
+                    "body": {
+                      "type": "agent",
+                      "id": "x",
+                      "role": "x",
+                      "instructions": "Do x."
+                    }
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "parallel",
+              "id": "p",
+              "branches": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1."
+                },
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2."
+                }
+              ],
+              "join": "all"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrap steps given out of order",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "c",
+            "p"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "tail"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "x",
+                    "role": "x",
+                    "instructions": "Do x."
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "sequence",
+              "id": "tail",
+              "steps": [
+                {
+                  "type": "parallel",
+                  "id": "p",
+                  "branches": [
+                    {
+                      "type": "agent",
+                      "id": "p1",
+                      "role": "p1",
+                      "instructions": "Do p1."
+                    },
+                    {
+                      "type": "agent",
+                      "id": "p2",
+                      "role": "p2",
+                      "instructions": "Do p2."
+                    }
+                  ],
+                  "join": "all"
+                },
+                {
+                  "type": "agent",
+                  "id": "c",
+                  "role": "c",
+                  "instructions": "Do c."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wrap needs consecutive steps",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "a",
+            "r"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "s"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_wrap",
+        "op_index": 0,
+        "node_id": "l"
+      }
+    },
+    {
+      "name": "wrap needs steps of one sequence",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "a",
+            "x"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "s"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_wrap",
+        "op_index": 0,
+        "node_id": "x"
+      }
+    },
+    {
+      "name": "wrap a parallel needs two nodes",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "c"
+          ],
+          "with": {
+            "type": "parallel",
+            "id": "s",
+            "join": "all"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_wrap",
+        "op_index": 0,
+        "node_id": "c"
+      }
+    },
+    {
+      "name": "wrap into a router is refused",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "c"
+          ],
+          "with": {
+            "type": "router",
+            "id": "s"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_wrap",
+        "op_index": 0,
+        "node_id": "c"
+      }
+    },
+    {
+      "name": "wrap with nodes in with is refused",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "c"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "s",
+            "steps": []
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_wrap",
+        "op_index": 0,
+        "node_id": "c"
+      }
+    },
+    {
+      "name": "wrap needs a new id",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "c"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "a"
+          }
+        }
+      ],
+      "error": {
+        "code": "duplicate_node_id",
+        "op_index": 0,
+        "node_id": "a"
+      }
+    },
+    {
+      "name": "wrap a loop of steps needs a sequence id",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "p",
+            "c"
+          ],
+          "with": {
+            "type": "loop",
+            "id": "redo",
+            "until": "true",
+            "max_iterations": 3
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_wrap",
+        "op_index": 0,
+        "node_id": "p"
+      }
+    },
+    {
+      "name": "wrap a loop without its parameters",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "c"
+          ],
+          "with": {
+            "type": "loop",
+            "id": "redo"
+          }
+        }
+      ],
+      "error": {
+        "code": "schema",
+        "op_index": null,
+        "node_id": "redo"
+      }
+    },
+    {
+      "name": "wrap an unknown node",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "nope"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "s"
+          }
+        }
+      ],
+      "error": {
+        "code": "unknown_node",
+        "op_index": 0,
+        "node_id": "nope"
+      }
+    },
+    {
+      "name": "wrap the root",
+      "ops": [
+        {
+          "op": "wrap",
+          "node_ids": [
+            "main"
+          ],
+          "with": {
+            "type": "sequence",
+            "id": "outer"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "outer",
+          "steps": [
+            {
+              "type": "sequence",
+              "id": "main",
+              "steps": [
+                {
+                  "type": "agent",
+                  "id": "a",
+                  "role": "a",
+                  "instructions": "Do a."
+                },
+                {
+                  "type": "loop",
+                  "id": "l",
+                  "body": {
+                    "type": "sequence",
+                    "id": "body",
+                    "steps": [
+                      {
+                        "type": "agent",
+                        "id": "x",
+                        "role": "x",
+                        "instructions": "Do x."
+                      },
+                      {
+                        "type": "agent",
+                        "id": "y",
+                        "role": "y",
+                        "instructions": "Do y."
+                      }
+                    ]
+                  },
+                  "until": "true",
+                  "max_iterations": 2
+                },
+                {
+                  "type": "router",
+                  "id": "r",
+                  "routes": [
+                    {
+                      "id": "one",
+                      "when": "true",
+                      "then": {
+                        "type": "agent",
+                        "id": "r1",
+                        "role": "r1",
+                        "instructions": "Do r1."
+                      }
+                    }
+                  ],
+                  "default": {
+                    "type": "agent",
+                    "id": "r2",
+                    "role": "r2",
+                    "instructions": "Do r2."
+                  }
+                },
+                {
+                  "type": "parallel",
+                  "id": "p",
+                  "branches": [
+                    {
+                      "type": "agent",
+                      "id": "p1",
+                      "role": "p1",
+                      "instructions": "Do p1."
+                    },
+                    {
+                      "type": "agent",
+                      "id": "p2",
+                      "role": "p2",
+                      "instructions": "Do p2."
+                    }
+                  ],
+                  "join": "all"
+                },
+                {
+                  "type": "agent",
+                  "id": "c",
+                  "role": "c",
+                  "instructions": "Do c."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "extract steps",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "l",
+            "r"
+          ],
+          "subflow_id": "review",
+          "workflow": {
+            "id": "review-flow",
+            "name": "Review",
+            "description": "Loop, then route."
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "review",
+              "workflow": {
+                "id": "review-flow",
+                "version": 1
+              }
+            },
+            {
+              "type": "parallel",
+              "id": "p",
+              "branches": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1."
+                },
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2."
+                }
+              ],
+              "join": "all"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c."
+            }
+          ]
+        }
+      },
+      "extracted": {
+        "spec_version": "0",
+        "id": "review-flow",
+        "name": "Review",
+        "description": "Loop, then route.",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "x",
+                    "role": "x",
+                    "instructions": "Do x."
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "extract one node",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "x"
+          ],
+          "subflow_id": "call_x",
+          "workflow": {
+            "id": "only-x",
+            "name": "Only x"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "subflow",
+                    "id": "call_x",
+                    "workflow": {
+                      "id": "only-x",
+                      "version": 1
+                    }
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "parallel",
+              "id": "p",
+              "branches": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1."
+                },
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2."
+                }
+              ],
+              "join": "all"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c."
+            }
+          ]
+        }
+      },
+      "extracted": {
+        "spec_version": "0",
+        "id": "only-x",
+        "name": "Only x",
+        "root": {
+          "type": "agent",
+          "id": "x",
+          "role": "x",
+          "instructions": "Do x."
+        }
+      }
+    },
+    {
+      "name": "extract may reuse an extracted id",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "c"
+          ],
+          "subflow_id": "c",
+          "workflow": {
+            "id": "only-c",
+            "name": "Only c"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "x",
+                    "role": "x",
+                    "instructions": "Do x."
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "parallel",
+              "id": "p",
+              "branches": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1."
+                },
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2."
+                }
+              ],
+              "join": "all"
+            },
+            {
+              "type": "subflow",
+              "id": "c",
+              "workflow": {
+                "id": "only-c",
+                "version": 1
+              }
+            }
+          ]
+        }
+      },
+      "extracted": {
+        "spec_version": "0",
+        "id": "only-c",
+        "name": "Only c",
+        "root": {
+          "type": "agent",
+          "id": "c",
+          "role": "c",
+          "instructions": "Do c."
+        }
+      }
+    },
+    {
+      "name": "extract a step named main",
+      "spec": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "outer",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "main",
+              "role": "m",
+              "instructions": "Do m."
+            },
+            {
+              "type": "agent",
+              "id": "b",
+              "role": "b",
+              "instructions": "Do b."
+            },
+            {
+              "type": "agent",
+              "id": "keep",
+              "role": "k",
+              "instructions": "Keep."
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "main",
+            "b"
+          ],
+          "subflow_id": "call",
+          "workflow": {
+            "id": "two",
+            "name": "Two"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "outer",
+          "steps": [
+            {
+              "type": "subflow",
+              "id": "call",
+              "workflow": {
+                "id": "two",
+                "version": 1
+              }
+            },
+            {
+              "type": "agent",
+              "id": "keep",
+              "role": "k",
+              "instructions": "Keep."
+            }
+          ]
+        }
+      },
+      "extracted": {
+        "spec_version": "0",
+        "id": "two",
+        "name": "Two",
+        "root": {
+          "type": "sequence",
+          "id": "main_2",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "main",
+              "role": "m",
+              "instructions": "Do m."
+            },
+            {
+              "type": "agent",
+              "id": "b",
+              "role": "b",
+              "instructions": "Do b."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "extract takes the ports of its ends",
+      "spec": {
+        "spec_version": "0",
+        "id": "typed",
+        "name": "Typed",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "triage",
+              "role": "t",
+              "instructions": "Triage.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "gate",
+              "id": "ok",
+              "title": "OK?"
+            },
+            {
+              "type": "agent",
+              "id": "report",
+              "role": "r",
+              "instructions": "Report.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "md": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "agent",
+              "id": "after",
+              "role": "x",
+              "instructions": "After."
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "triage",
+            "ok",
+            "report"
+          ],
+          "subflow_id": "triage_flow",
+          "workflow": {
+            "id": "triage-flow",
+            "name": "Triage"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "typed",
+        "name": "Typed",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "subflow",
+              "id": "triage_flow",
+              "workflow": {
+                "id": "triage-flow",
+                "version": 1
+              }
+            },
+            {
+              "type": "agent",
+              "id": "after",
+              "role": "x",
+              "instructions": "After."
+            }
+          ]
+        }
+      },
+      "extracted": {
+        "spec_version": "0",
+        "id": "triage-flow",
+        "name": "Triage",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "q": {
+              "type": "string"
+            }
+          }
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "md": {
+              "type": "string"
+            }
+          }
+        },
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "triage",
+              "role": "t",
+              "instructions": "Triage.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "gate",
+              "id": "ok",
+              "title": "OK?"
+            },
+            {
+              "type": "agent",
+              "id": "report",
+              "role": "r",
+              "instructions": "Report.",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "md": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "extract with its reduce's source",
+      "spec": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "map",
+              "id": "m",
+              "over": "['x']",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "w",
+                "role": "w",
+                "instructions": "Do w."
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "concat"
+            },
+            {
+              "type": "loop",
+              "id": "again",
+              "body": {
+                "type": "agent",
+                "id": "check",
+                "role": "c",
+                "instructions": "Check."
+              },
+              "until": "results.a.text != ''",
+              "max_iterations": 2
+            },
+            {
+              "type": "agent",
+              "id": "z",
+              "role": "z",
+              "instructions": "Do z."
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "m",
+            "merge"
+          ],
+          "subflow_id": "fan",
+          "workflow": {
+            "id": "fan-out",
+            "name": "Fan out"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "subflow",
+              "id": "fan",
+              "workflow": {
+                "id": "fan-out",
+                "version": 1
+              }
+            },
+            {
+              "type": "loop",
+              "id": "again",
+              "body": {
+                "type": "agent",
+                "id": "check",
+                "role": "c",
+                "instructions": "Check."
+              },
+              "until": "results.a.text != ''",
+              "max_iterations": 2
+            },
+            {
+              "type": "agent",
+              "id": "z",
+              "role": "z",
+              "instructions": "Do z."
+            }
+          ]
+        }
+      },
+      "extracted": {
+        "spec_version": "0",
+        "id": "fan-out",
+        "name": "Fan out",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "map",
+              "id": "m",
+              "over": "['x']",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "w",
+                "role": "w",
+                "instructions": "Do w."
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "concat"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "extract a reduce without its source",
+      "spec": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "map",
+              "id": "m",
+              "over": "['x']",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "w",
+                "role": "w",
+                "instructions": "Do w."
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "concat"
+            },
+            {
+              "type": "loop",
+              "id": "again",
+              "body": {
+                "type": "agent",
+                "id": "check",
+                "role": "c",
+                "instructions": "Check."
+              },
+              "until": "results.a.text != ''",
+              "max_iterations": 2
+            },
+            {
+              "type": "agent",
+              "id": "z",
+              "role": "z",
+              "instructions": "Do z."
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "merge"
+          ],
+          "subflow_id": "fan",
+          "workflow": {
+            "id": "fan-out",
+            "name": "Fan out"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 0,
+        "node_id": "merge"
+      }
+    },
+    {
+      "name": "extract a source its reduce still reads",
+      "spec": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "map",
+              "id": "m",
+              "over": "['x']",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "w",
+                "role": "w",
+                "instructions": "Do w."
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "concat"
+            },
+            {
+              "type": "loop",
+              "id": "again",
+              "body": {
+                "type": "agent",
+                "id": "check",
+                "role": "c",
+                "instructions": "Check."
+              },
+              "until": "results.a.text != ''",
+              "max_iterations": 2
+            },
+            {
+              "type": "agent",
+              "id": "z",
+              "role": "z",
+              "instructions": "Do z."
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "a",
+            "m"
+          ],
+          "subflow_id": "fan",
+          "workflow": {
+            "id": "fan-out",
+            "name": "Fan out"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 0,
+        "node_id": "merge"
+      }
+    },
+    {
+      "name": "extract a node an expression reads",
+      "spec": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "map",
+              "id": "m",
+              "over": "['x']",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "w",
+                "role": "w",
+                "instructions": "Do w."
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "concat"
+            },
+            {
+              "type": "loop",
+              "id": "again",
+              "body": {
+                "type": "agent",
+                "id": "check",
+                "role": "c",
+                "instructions": "Check."
+              },
+              "until": "results.a.text != ''",
+              "max_iterations": 2
+            },
+            {
+              "type": "agent",
+              "id": "z",
+              "role": "z",
+              "instructions": "Do z."
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "a"
+          ],
+          "subflow_id": "first",
+          "workflow": {
+            "id": "first",
+            "name": "First"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 0,
+        "node_id": "again"
+      }
+    },
+    {
+      "name": "extract an expression that reads outside",
+      "spec": {
+        "spec_version": "0",
+        "id": "refs",
+        "name": "Refs",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "map",
+              "id": "m",
+              "over": "['x']",
+              "max_concurrency": 2,
+              "body": {
+                "type": "agent",
+                "id": "w",
+                "role": "w",
+                "instructions": "Do w."
+              }
+            },
+            {
+              "type": "reduce",
+              "id": "merge",
+              "from": "m",
+              "strategy": "concat"
+            },
+            {
+              "type": "loop",
+              "id": "again",
+              "body": {
+                "type": "agent",
+                "id": "check",
+                "role": "c",
+                "instructions": "Check."
+              },
+              "until": "results.a.text != ''",
+              "max_iterations": 2
+            },
+            {
+              "type": "agent",
+              "id": "z",
+              "role": "z",
+              "instructions": "Do z."
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "again"
+          ],
+          "subflow_id": "again_flow",
+          "workflow": {
+            "id": "again",
+            "name": "Again"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 0,
+        "node_id": "again"
+      }
+    },
+    {
+      "name": "extract the root",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "main"
+          ],
+          "subflow_id": "s",
+          "workflow": {
+            "id": "w",
+            "name": "W"
+          }
+        }
+      ],
+      "error": {
+        "code": "root_node",
+        "op_index": 0,
+        "node_id": "main"
+      }
+    },
+    {
+      "name": "extract needs a workflow id of its own",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "c"
+          ],
+          "subflow_id": "s",
+          "workflow": {
+            "id": "flow",
+            "name": "W"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 0,
+        "node_id": "c"
+      }
+    },
+    {
+      "name": "extract needs a new subflow id",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "c"
+          ],
+          "subflow_id": "a",
+          "workflow": {
+            "id": "w",
+            "name": "W"
+          }
+        }
+      ],
+      "error": {
+        "code": "duplicate_node_id",
+        "op_index": 0,
+        "node_id": "a"
+      }
+    },
+    {
+      "name": "extract needs consecutive steps",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "a",
+            "r"
+          ],
+          "subflow_id": "s",
+          "workflow": {
+            "id": "w",
+            "name": "W"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 0,
+        "node_id": "l"
+      }
+    },
+    {
+      "name": "extract once per batch",
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "a"
+          ],
+          "subflow_id": "s1",
+          "workflow": {
+            "id": "w1",
+            "name": "W"
+          }
+        },
+        {
+          "op": "extract",
+          "node_ids": [
+            "c"
+          ],
+          "subflow_id": "s2",
+          "workflow": {
+            "id": "w2",
+            "name": "W"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 1,
+        "node_id": "c"
+      }
+    },
+    {
+      "name": "extract from a worker is refused",
+      "spec": {
+        "spec_version": "0",
+        "id": "orch",
+        "name": "Orch",
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "fix",
+              "hub": {
+                "role": "lead",
+                "instructions": "Plan."
+              },
+              "max_workers": 2,
+              "max_concurrency": 1,
+              "body": {
+                "type": "agent",
+                "id": "worker",
+                "role": "w",
+                "instructions": "Work."
+              }
+            }
+          ]
+        }
+      },
+      "ops": [
+        {
+          "op": "extract",
+          "node_ids": [
+            "worker"
+          ],
+          "subflow_id": "s",
+          "workflow": {
+            "id": "w",
+            "name": "W"
+          }
+        }
+      ],
+      "error": {
+        "code": "invalid_extract",
+        "op_index": 0,
+        "node_id": "worker"
       }
     }
   ]
