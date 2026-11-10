@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 6.6 composites (AC-3):
+- Phase 6.6 composites (AC-3) ([#167](https://github.com/KsiProgramming/agentic-dev/pull/167)):
   - **`wrap` and `extract` graph operations.** `wrap` puts one node or consecutive steps in a new sequence, parallel, loop or map; `extract` moves them into a new workflow and calls its version 1 in their place, refusing references across the boundary (`invalid_wrap`, `invalid_extract`). The browser's `applyOps` mirrors both; `schemas/fixtures/graph-ops.json` has their cases.
   - **Draft → published.** `POST /workflows/{id}/publish` publishes a version that can run (`workflow_publications`, Alembic `0027_workflow_publications`, append only); a workflow with one is a composite, and a call to one of its drafts is `subflow_unpublished`. `PATCH` with an `extract` stores the new workflow with the caller's version, both or neither. `GET /workflows/{id}/callers` lists who calls it; answers carry `published_version` and `published_at`; `workflow.published` is audited.
   - **Typed composites.** A workflow may declare `input_schema` / `output_schema`; a subflow takes them as its ports, checked by `port_mismatch` and at its boundary at runtime.
