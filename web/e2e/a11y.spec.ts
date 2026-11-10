@@ -102,6 +102,27 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoSeriousIssues(page);
     });
 
+    test("the builder's extract and publish dialogs have no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const id = await workflowFromTemplate(request, "audit-codebase");
+      await open(page, `/workflows/${id}`);
+      const first = page.getByTestId("builder-node").filter({ visible: true }).nth(1);
+      await first.getByRole("button", { name: /^Edit step / }).click();
+      await page.getByRole("menuitem", { name: "Extract to composite…" }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+      const publish = page.getByRole("button", { name: /^Publish version/ });
+      if (await publish.isEnabled()) {
+        await publish.click();
+        await expect(page.getByRole("alertdialog")).toBeVisible();
+        await expectNoSeriousIssues(page);
+        await page.keyboard.press("Escape");
+      }
+    });
+
     test("audit log has no serious a11y issues", async ({ page, request }) => {
       await startRun(request, [WRITER], "E2E audit a11y");
       await open(page, "/audit");
