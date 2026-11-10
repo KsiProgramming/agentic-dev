@@ -7,10 +7,11 @@ Architect use it too, so they never disagree with what `POST /runs` accepts.
 from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import cast
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
 
 from agentic_engine.policy import Policy
+from agentic_engine.ports import schema_problem
 from agentic_engine.spec.models import (
     PLATFORM_TOOLS,
     Node,
@@ -35,6 +36,7 @@ def validate_workflow(
     default_model: str,
     known_tools: Collection[str] = PLATFORM_TOOLS,
     resolve: Resolve = no_subflows,
+    drafts: Collection[str] = (),
 ) -> list[ValidationIssue]:
     """Why the decoded JSON document `raw` cannot run under `policy`; empty if it can. Never
     raises for a bad document.
@@ -46,18 +48,41 @@ def validate_workflow(
 
     Its subflows (6.5) are resolved through `resolve`, which knows none by default, and the
     checks run on the expanded tree: a call that is unknown or cyclic is an issue on its
-    subflow, and so is anything wrong inside the workflow it calls (`on_subflows`)."""
+    subflow, and so is anything wrong inside the workflow it calls (`on_subflows`); a call to a
+    version in `drafts` (a composite's unpublished version, 6.6) is `subflow_unpublished`. The
+    document's own `input_schema` and `output_schema` must be port schemas (`invalid_schema`)."""
     root = _parse_root(raw)
     if isinstance(root, list):
         return root
-    workflow_id = cast(Mapping[str, object], raw).get("id")
+    document = cast(Mapping[str, object], raw)
+    workflow_id = document.get("id")
     root, _, issues = expand_root(
-        root, resolve, workflow_id if isinstance(workflow_id, str) else None
+        root, resolve, workflow_id if isinstance(workflow_id, str) else None, drafts
     )
+    issues = document_port_issues(document) + issues
     issues += structure_issues(root) + tool_issues(root, known_tools)
     issues += policy_issues(root, policy)
     issues += budget_issues(root, policy, priced, default_model)
     return on_subflows(root, in_run_order(root, issues))
+
+
+def document_port_issues(document: Mapping[str, object]) -> list[ValidationIssue]:
+    """`invalid_schema` for the workflow's own `input_schema` or `output_schema` (6.6) when a port
+    cannot take it, on no node."""
+    issues: list[ValidationIssue] = []
+    for side in ("input", "output"):
+        schema = document.get(f"{side}_schema")
+        if not isinstance(schema, dict):
+            continue
+        if (problem := schema_problem(cast(dict[str, JsonValue], schema))) is not None:
+            issues.append(
+                ValidationIssue(
+                    code="invalid_schema",
+                    path=f"{side}_schema",
+                    message=f"the workflow's {side}_schema: {problem}",
+                )
+            )
+    return issues
 
 
 def schema_issues(raw: object) -> list[ValidationIssue]:

@@ -96,8 +96,8 @@ class Disconnect(_Op):
 
 class SetParam(_Op):
     """Set one parameter of a node, or of the document without `node_id` (`name`,
-    `description`, `budget_usd`, `input`). `null` unsets it. Ids, types and the slots that hold
-    nodes change through the other ops."""
+    `description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets
+    it. Ids, types and the slots that hold nodes change through the other ops."""
 
     op: Literal["setParam"]
     node_id: NodeId | None = Field(default=None, description="Unset: the document.")
@@ -109,8 +109,56 @@ class SetParam(_Op):
     value: JsonValue
 
 
+WRAP_KINDS = ("sequence", "parallel", "loop", "map")
+"""The containers `wrap` may put nodes in."""
+
+
+class Wrap(_Op):
+    """Put nodes in a new container, in their place (6.6): one node anywhere, or consecutive steps
+    of one sequence. A `sequence` runs them in order, a `parallel` runs each as a branch (two or
+    more), a `loop` or `map` runs them as its body (in a new sequence `sequence_id` when there are
+    several). `with` is the container without the nodes: its `type`, a new `id` and its other
+    parameters (a loop's `until` and `max_iterations`, a map's `over`)."""
+
+    op: Literal["wrap"]
+    node_ids: list[NodeId] = Field(min_length=1, max_length=MAX_OPS)
+    with_: dict[str, JsonValue] = Field(
+        alias="with",
+        description="The new container without its nodes: `type` (sequence, parallel, loop or "
+        "map), `id` and its other parameters.",
+    )
+    sequence_id: NodeId | None = Field(
+        default=None,
+        description="Loop and map only: the id of the sequence that holds the nodes, when there "
+        "are several.",
+    )
+
+
+class ExtractedWorkflow(_Op):
+    """The workflow `extract` makes."""
+
+    id: NodeId = Field(description="Its id, new in the workspace.")
+    name: str = Field(min_length=1, description="Its name.")
+    description: str | None = None
+
+
+class Extract(_Op):
+    """Move nodes into a new stored workflow, and call it in their place (6.6): one node anywhere
+    a step goes, or consecutive steps of one sequence, become the new workflow's root (in a
+    sequence when there are several), and a `subflow` `subflow_id` that calls its version 1 takes
+    their place. No reference may cross the boundary: a reduce's `from`, a publisher's
+    `from_node` or a `results.<id>` in an expression. The API stores the new workflow with the
+    caller's new version, both or neither. At most one per batch."""
+
+    op: Literal["extract"]
+    node_ids: list[NodeId] = Field(min_length=1, max_length=MAX_OPS)
+    subflow_id: NodeId = Field(description="The id of the subflow that takes their place.")
+    workflow: ExtractedWorkflow
+
+
 GraphOp = Annotated[
-    AddNode | RemoveNode | Connect | Disconnect | SetParam, Field(discriminator="op")
+    AddNode | RemoveNode | Connect | Disconnect | SetParam | Wrap | Extract,
+    Field(discriminator="op"),
 ]
 
 
@@ -133,6 +181,8 @@ type OpErrorCode = Literal[
     "invalid_path",
     "detached_nodes",
     "missing_child",
+    "invalid_wrap",
+    "invalid_extract",
     "schema",
 ]
 
@@ -159,7 +209,9 @@ _BODY_KINDS = ("loop", "map", "orchestrator")
 _SINGLE_SLOTS = ("body", "default")
 _LIST_SLOTS = {"sequence": "steps", "parallel": "branches"}
 _NODE_SLOTS = frozenset({"steps", "branches", "body", "default"})
-_DOCUMENT_PARAMS = frozenset({"name", "description", "budget_usd", "input"})
+_DOCUMENT_PARAMS = frozenset(
+    {"name", "description", "budget_usd", "input", "input_schema", "output_schema"}
+)
 
 
 @dataclass
@@ -221,13 +273,28 @@ def _walk(node: _Json, place: _Place) -> Iterator[tuple[_Json, _Place]]:
                 )
 
 
+@dataclass(frozen=True)
+class AppliedOps:
+    """What a batch makes: the spec, and the workflow an `extract` moved nodes into (`None`
+    without one), which the API stores as that workflow's version 1."""
+
+    spec: dict[str, object]
+    extracted: dict[str, object] | None = None
+
+
 def apply_ops(spec: Mapping[str, object], ops: Sequence[GraphOp]) -> dict[str, object]:
     """`spec` (a decoded workflow document) with `ops` applied in order. `spec` is not changed.
 
     Raises `OpError` for the first op that cannot apply, or when the result leaves a node
     detached, a required slot empty, or is not a workflow spec (`schema`). Other issues (the
     structure, the policy) are for `validate_workflow` to report."""
+    return apply_graph_ops(spec, ops).spec
+
+
+def apply_graph_ops(spec: Mapping[str, object], ops: Sequence[GraphOp]) -> AppliedOps:
+    """As `apply_ops`, with the workflow an `extract` made, checked as a spec too."""
     tree = _Tree(spec)
+    extracted: _Json | None = None
     for index, op in enumerate(ops):
         match op:
             case AddNode():
@@ -240,8 +307,249 @@ def apply_ops(spec: Mapping[str, object], ops: Sequence[GraphOp]) -> dict[str, o
                 _disconnect(tree, op, index)
             case SetParam():
                 _set_param(tree, op, index)
+            case Wrap():
+                _wrap(tree, op, index)
+            case Extract():
+                if extracted is not None:
+                    raise OpError(
+                        "invalid_extract",
+                        "a batch may hold one extract; save, then extract again",
+                        op_index=index,
+                        node_id=op.node_ids[0],
+                    )
+                extracted = _extract(tree, op, index)
     _check_result(tree)
-    return tree.doc
+    if extracted is not None and (issues := schema_issues(extracted)):
+        issue = issues[0]
+        raise OpError(
+            "schema",
+            f"the extracted workflow: {issue.message}",
+            op_index=None,
+            node_id=issue.node_id,
+        )
+    return AppliedOps(tree.doc, extracted)
+
+
+def _selection(
+    tree: _Tree, node_ids: Sequence[str], index: int, code: OpErrorCode
+) -> tuple[_Place, list[_Json]]:
+    """The nodes `node_ids` name, in run order, with the place of the first: one node anywhere
+    (but detached), or consecutive steps of one sequence."""
+
+    def refuse(message: str, node_id: str) -> OpError:
+        return OpError(code, message, op_index=index, node_id=node_id)
+
+    if len(set(node_ids)) != len(node_ids):
+        repeated = next(n for n in node_ids if node_ids.count(n) > 1)
+        raise refuse(f"{repeated!r} is named twice", repeated)
+    found = [_require(tree, node_id, index) for node_id in node_ids]
+    for (_, place), node_id in zip(found, node_ids, strict=True):
+        if place.detached:
+            raise refuse(f"{node_id!r} is not placed in the workflow", node_id)
+    if len(found) == 1:
+        node, place = found[0]
+        return place, [node]
+    holder = found[0][1].holder
+    for (_, place), node_id in zip(found, node_ids, strict=True):
+        if place.slot != "steps" or place.holder is not holder:
+            raise refuse(
+                f"{node_id!r} is not a step of the same sequence as {node_ids[0]!r}; pick one "
+                "node, or consecutive steps of one sequence",
+                node_id,
+            )
+    ordered = sorted(found, key=lambda f: cast(int, f[1].key))
+    keys = [cast(int, place.key) for _, place in ordered]
+    if keys != list(range(keys[0], keys[0] + len(keys))):
+        gap = cast(list[_Json], holder)[next(k + 1 for k, n in pairwise(keys) if n != k + 1)]
+        raise refuse(
+            f"the steps are not consecutive: {gap.get('id')!r} is between them", str(gap.get("id"))
+        )
+    return ordered[0][1], [node for node, _ in ordered]
+
+
+def _replace(place: _Place, count: int, value: _Json) -> None:
+    """Put `value` where the `count` nodes from `place` on are."""
+    if count == 1:
+        _set_at(place, value)
+        return
+    steps = cast(list[object], place.holder)
+    start = cast(int, place.key)
+    steps[start : start + count] = [value]
+
+
+def _new_id(tree: _Tree, node_id: str, index: int) -> None:
+    if node_id in tree.ids():
+        raise OpError(
+            "duplicate_node_id",
+            f"node id {node_id!r} is already used; node ids must be unique",
+            op_index=index,
+            node_id=node_id,
+        )
+
+
+def _wrap(tree: _Tree, op: Wrap, index: int) -> None:
+    place, nodes = _selection(tree, op.node_ids, index, "invalid_wrap")
+    first = op.node_ids[0]
+
+    def refuse(message: str) -> OpError:
+        return OpError("invalid_wrap", message, op_index=index, node_id=first)
+
+    container = cast(_Json, copy.deepcopy(op.with_))
+    kind = container.get("type")
+    container_id = container.get("id")
+    if kind not in WRAP_KINDS:
+        raise refuse(f"wrap puts nodes in a {', '.join(WRAP_KINDS[:-1])} or {WRAP_KINDS[-1]}")
+    if not isinstance(container_id, str):
+        raise refuse(f"give the new {kind} an `id`")
+    if held := _NODE_SLOTS & container.keys():
+        raise refuse(
+            f"`with` holds no nodes ({', '.join(sorted(held))}); they are the wrapped ones"
+        )
+    _new_id(tree, container_id, index)
+    if kind == "sequence":
+        container["steps"] = nodes
+    elif kind == "parallel":
+        if len(nodes) < 2:
+            raise refuse("a parallel needs two or more branches; wrap two or more steps")
+        container["branches"] = nodes
+    elif len(nodes) == 1:
+        container["body"] = nodes[0]
+    else:
+        if op.sequence_id is None:
+            raise refuse(f"give `sequence_id`: the {kind}'s body holds the steps in a sequence")
+        if op.sequence_id == container_id:
+            raise refuse(f"`sequence_id` and the {kind}'s id must differ")
+        _new_id(tree, op.sequence_id, index)
+        container["body"] = {"type": "sequence", "id": op.sequence_id, "steps": nodes}
+    _replace(place, len(nodes), container)
+
+
+_RESULTS = re.compile(
+    r"""\bresults\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([^"']+)["']\s*\])"""
+)
+"""A node's result named in a CEL expression: `results.fix` or `results["fix-2"]`."""
+
+
+def _expressions(node: _Json) -> Iterator[str]:
+    """The CEL expressions of `node` itself (not of the nodes under it)."""
+    for key in ("until", "over"):
+        if isinstance(value := node.get(key), str):
+            yield value
+    if node.get("type") == "subflow" and isinstance(value := node.get("input"), str):
+        yield value
+    if node.get("type") == "router":
+        for route in cast(list[object], node.get("routes") or []):
+            if isinstance(route, dict) and isinstance(when := cast(_Json, route).get("when"), str):
+                yield when
+
+
+def _references(node: _Json) -> set[str]:
+    """The node ids `node` itself refers to: a reduce's `from`, a publisher's `from_node` and the
+    results its expressions read."""
+    found: set[str] = set()
+    if node.get("type") == "reduce" and isinstance(source := node.get("from"), str):
+        found.add(source)
+    args = node.get("args")
+    if isinstance(args, dict) and isinstance(source := cast(_Json, args).get("from_node"), str):
+        found.add(source)
+    for expression in _expressions(node):
+        for match in _RESULTS.finditer(expression):
+            found.add(match.group(1) or match.group(2))
+    return found
+
+
+def _in_worker(tree: _Tree, node_id: str) -> str | None:
+    """The orchestrator whose worker holds the node `node_id`, if one does."""
+    for node, _ in tree.places():
+        body = node.get("body")
+        is_worker = node.get("type") == "orchestrator" and isinstance(body, dict)
+        if is_worker and node_id in _subtree_ids(cast(_Json, body)):
+            return cast(str, node.get("id"))
+    return None
+
+
+def _extract(tree: _Tree, op: Extract, index: int) -> _Json:
+    place, nodes = _selection(tree, op.node_ids, index, "invalid_extract")
+    first = op.node_ids[0]
+
+    def refuse(message: str, node_id: str = first) -> OpError:
+        return OpError("invalid_extract", message, op_index=index, node_id=node_id)
+
+    if place.holder is tree.doc:
+        raise OpError(
+            "root_node",
+            f"{first!r} is the workflow's root; extract steps of it instead",
+            op_index=index,
+            node_id=first,
+        )
+    if op.workflow.id == tree.doc.get("id"):
+        raise refuse(f"the new workflow needs an id of its own, not {op.workflow.id!r}")
+    if (hub := _in_worker(tree, first)) is not None:
+        raise refuse(f"{first!r} is in the worker of orchestrator {hub!r}, which runs no subflow")
+    inside = {node_id for node in nodes for node_id in _subtree_ids(node)}
+    for node in nodes:
+        for inner, _ in _walk(node, _Place({}, "", None, None, True)):
+            for ref in _references(inner) - inside:
+                raise refuse(
+                    f"{inner.get('id')!r} refers to {ref!r}, which stays outside; extract them "
+                    "together, or change the reference first",
+                    cast(str, inner.get("id")),
+                )
+    for outer, _ in tree.places():
+        if outer.get("id") in inside:
+            continue
+        for ref in _references(outer) & inside:
+            raise refuse(
+                f"{outer.get('id')!r} refers to {ref!r}, which would move into the new workflow; "
+                "extract them together, or change the reference first",
+                cast(str, outer.get("id")),
+            )
+    if op.subflow_id in tree.ids() - inside:
+        raise OpError(
+            "duplicate_node_id",
+            f"node id {op.subflow_id!r} is already used; node ids must be unique",
+            op_index=index,
+            node_id=op.subflow_id,
+        )
+    if len(nodes) == 1:
+        root: _Json = nodes[0]
+    else:
+        root_id, n = "main", 2
+        while root_id in inside:
+            root_id, n = f"main_{n}", n + 1
+        root = {"type": "sequence", "id": root_id, "steps": nodes}
+    document: _Json = {"spec_version": "0", "id": op.workflow.id, "name": op.workflow.name}
+    if op.workflow.description:
+        document["description"] = op.workflow.description
+    if (schema := _port_of(nodes[0], "input")) is not None:
+        document["input_schema"] = schema
+    if (schema := _port_of(nodes[-1], "output")) is not None:
+        document["output_schema"] = schema
+    document["root"] = root
+    subflow: _Json = {
+        "type": "subflow",
+        "id": op.subflow_id,
+        "workflow": {"id": op.workflow.id, "version": 1},
+    }
+    _replace(place, len(nodes), subflow)
+    return copy.deepcopy(document)
+
+
+def _port_of(node: _Json, side: str) -> object:
+    """The `side` schema of the agent or tool node whose port is `node`'s: itself, or a
+    sequence's first (input) or last (output) step, gates looked through."""
+    match node.get("type"):
+        case "agent" | "tool":
+            return node.get(f"{side}_schema")
+        case "sequence":
+            steps = [
+                s for s in cast(list[_Json], node.get("steps") or []) if s.get("type") != "gate"
+            ]
+            if not steps:
+                return None
+            return _port_of(steps[0] if side == "input" else steps[-1], side)
+        case _:
+            return None
 
 
 def _node_json(node: Node) -> _Json:

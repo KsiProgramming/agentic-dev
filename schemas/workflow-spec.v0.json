@@ -1489,10 +1489,66 @@
       "default": null,
       "description": "What a run is given to work on, and whether it must be given; unset, the input is optional."
     },
+    "input_schema": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+          "examples": [
+            {
+              "properties": {
+                "findings": {}
+              },
+              "required": [
+                "findings"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The workflow's typed input (6.6): a subflow that calls it checks its input against this, and the step before it must declare what it requires.",
+      "title": "Input Schema"
+    },
     "name": {
       "minLength": 1,
       "title": "Name",
       "type": "string"
+    },
+    "output_schema": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+          "examples": [
+            {
+              "properties": {
+                "findings": {}
+              },
+              "required": [
+                "findings"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The workflow's typed output (6.6): a subflow that calls it checks the called workflow's output against this, and the step after it reads it as typed.",
+      "title": "Output Schema"
     },
     "root": {
       "discriminator": {

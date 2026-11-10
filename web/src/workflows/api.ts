@@ -7,6 +7,7 @@ import { ApiError, detailOf } from "@/api/errors";
 import type { components } from "@/api/schema";
 import { useDebounced } from "@/lib/use-debounced";
 
+import { nodeTypesKey } from "./node-types";
 import type { GraphOp } from "./ops";
 
 /** One stored version of a workflow (5.1), with why it could not run now. */
@@ -173,7 +174,63 @@ export function useSaveWorkflow(workspaceId: string, workflowId: string, baseUrl
     onSuccess: (version) => {
       queryClient.setQueryData(workflowKey(workspaceId, workflowId), version);
       void queryClient.invalidateQueries({ queryKey: versionsKey(workspaceId, workflowId) });
+      // An extract (6.6) stored a new workflow too, which the list and the cards name.
+      if (version.extracted)
+        void queryClient.invalidateQueries({ queryKey: workflowsKey(workspaceId) });
     },
+  });
+}
+
+/** `POST /workflows/{id}/publish` (6.6): `version` published, making the workflow a composite.
+ * A refusal is an `ApiError` whose body is `cannot_publish` (422, with the issues) or
+ * `already_published` (409). The palette, the list and the version's history are refreshed. */
+export function usePublishWorkflow(
+  workspaceId: string,
+  workflowId: string,
+  baseUrl = apiBaseUrl(),
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (version: number) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).POST("/workflows/{workflow_id}/publish", {
+          params: { path: { workflow_id: workflowId }, query: { workspace_id: workspaceId } },
+          body: { version },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not publish the version");
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: workflowKey(workspaceId, workflowId) });
+      void queryClient.invalidateQueries({ queryKey: workflowsKey(workspaceId) });
+      void queryClient.invalidateQueries({ queryKey: nodeTypesKey(workspaceId) });
+    },
+  });
+}
+
+/** A workflow whose latest version calls a composite (6.6), with the version it calls. */
+export type WorkflowCaller = components["schemas"]["WorkflowCallerItem"];
+
+/** `GET /workflows/{id}/callers` (6.6): who calls the workflow, by name. */
+export function useWorkflowCallers(
+  workspaceId: string,
+  workflowId: string,
+  enabled = true,
+  baseUrl = apiBaseUrl(),
+) {
+  return useQuery({
+    queryKey: [...workflowKey(workspaceId, workflowId), "callers"],
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workflows/{workflow_id}/callers", {
+          params: { path: { workflow_id: workflowId }, query: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load who calls it");
+      return data.items;
+    },
+    enabled,
   });
 }
 

@@ -35,6 +35,7 @@ from agentic_engine.spec.models import (
     OrchestratorNode,
     OrchestratorReplan,
     ParallelNode,
+    PortConsumer,
     PortNode,
     PortProducer,
     ReduceAgent,
@@ -86,10 +87,14 @@ from agentic_engine.spec.models import (
 )
 from agentic_engine.spec.ops import (
     MAX_OPS,
+    WRAP_KINDS,
     AddNode,
     After,
+    AppliedOps,
     Connect,
     Disconnect,
+    Extract,
+    ExtractedWorkflow,
     GraphOp,
     GraphOps,
     Into,
@@ -97,6 +102,8 @@ from agentic_engine.spec.ops import (
     OpErrorCode,
     RemoveNode,
     SetParam,
+    Wrap,
+    apply_graph_ops,
     apply_ops,
 )
 from agentic_engine.spec.subflows import (
@@ -111,7 +118,7 @@ from agentic_engine.spec.subflows import (
     subflow_key,
     subflow_refs,
 )
-from agentic_engine.spec.validate import schema_issues, validate_workflow
+from agentic_engine.spec.validate import document_port_issues, schema_issues, validate_workflow
 
 __all__ = [
     "ARTIFACT_TOOLS",
@@ -132,15 +139,19 @@ __all__ = [
     "REPO_TOOL_PREFIXES",
     "SCAN_TOOLS",
     "TASK_ID_PATTERN",
+    "WRAP_KINDS",
     "WRITE_TOOLS",
     "AddNode",
     "After",
     "AgentNode",
+    "AppliedOps",
     "ArtifactName",
     "ArtifactWriter",
     "Connect",
     "Disconnect",
     "ExpandedWorkflow",
+    "Extract",
+    "ExtractedWorkflow",
     "GateNode",
     "GraphOp",
     "GraphOps",
@@ -156,6 +167,7 @@ __all__ = [
     "OrchestratorNode",
     "OrchestratorReplan",
     "ParallelNode",
+    "PortConsumer",
     "PortNode",
     "PortProducer",
     "ReduceAgent",
@@ -173,7 +185,9 @@ __all__ = [
     "WorkflowInput",
     "WorkflowRef",
     "WorkflowSpec",
+    "Wrap",
     "agents_spawned",
+    "apply_graph_ops",
     "apply_ops",
     "artifact_issues",
     "artifact_writers",
@@ -183,6 +197,7 @@ __all__ = [
     "classifier_schema",
     "create_repo_issues",
     "creates_repo",
+    "document_port_issues",
     "expand_workflow",
     "expression_views",
     "iter_nodes",

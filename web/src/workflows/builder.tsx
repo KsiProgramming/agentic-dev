@@ -2,6 +2,8 @@
 
 import {
   ArrowLeftIcon,
+  BadgeCheckIcon,
+  BoxesIcon,
   CircleAlertIcon,
   EllipsisIcon,
   HistoryIcon,
@@ -71,16 +73,26 @@ import { workflowRequires } from "@/runs/new-run/readiness";
 import { useWorkspaceId } from "@/workspace";
 
 import {
+  usePublishWorkflow,
   useRestoreWorkflow,
   useSaveWorkflow,
   useValidation,
   useWorkflow,
+  useWorkflowCallers,
   useWorkflowVersion,
   useWorkflows,
   useWorkflowVersions,
   type ValidationIssue,
   type WorkflowVersion,
 } from "./api";
+import {
+  CallersStatus,
+  PublishDialog,
+  PublishedBadge,
+  RangeDialog,
+  wrapReason,
+  type RangeRequest,
+} from "./composites";
 import { diffSpecs } from "./diff";
 import {
   addBranch,
@@ -90,16 +102,27 @@ import {
   moveTargets,
   moveTo,
   newMismatches,
+  pendingExtracts,
   placeOf,
   removeStep,
   replaceNode,
   stayReason,
   subtreeSize,
+  updateCall,
+  WRAP_CHOICES,
   type Edit,
   type MoveTarget,
+  type WrapKind,
 } from "./edits";
 import { ChangesStatus, DiffBadge, HistorySheet, versionHref } from "./history";
-import { ManifestIcon, paletteGroups, useNodeTypes, type NodeManifest } from "./node-types";
+import {
+  manifestByKey,
+  ManifestIcon,
+  paletteGroups,
+  paletteKey,
+  useNodeTypes,
+  type NodeManifest,
+} from "./node-types";
 import { applyOps, OpError } from "./ops";
 import { NodePanel, WorkflowPanel } from "./side-panel";
 
@@ -220,6 +243,10 @@ function Editor({
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [runOpen, setRunOpen] = useState(false);
+  // Extract to a composite, or wrap in a container, from a card's menu (6.6).
+  const [range, setRange] = useState<RangeRequest | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
   // The node whose parameters the panel shows; none: the workflow's own fields. A node that is
   // gone (removed, undone) is no longer selected. Below 1024 px the panel is a sheet. `?node=`
   // selects one on arrival (a new blank workflow's starter agent, 5.8).
@@ -231,19 +258,28 @@ function Editor({
   const restore = useRestoreWorkflow(workspaceId, version.workflow_id);
   const versions = useWorkflowVersions(workspaceId, version.workflow_id);
   const compared = useWorkflowVersion(workspaceId, version.workflow_id, compare);
-  const nodeTypes = useNodeTypes();
+  const nodeTypes = useNodeTypes(undefined, workspaceId);
   // The workspace's workflows, to name what each subflow calls (6.5).
   const stored = useWorkflows(workspaceId);
-  const manifests = useMemo(() => nodeTypes.data ?? [], [nodeTypes.data]);
+  const publish = usePublishWorkflow(workspaceId, version.workflow_id);
+  const composite = version.published_version != null;
+  const callers = useWorkflowCallers(workspaceId, version.workflow_id, composite);
+  // The workspace's composites (6.6) are palette entries too, but not the one being edited.
+  const manifests = useMemo(
+    () => (nodeTypes.data ?? []).filter((m) => m.composite?.workflow_id !== version.workflow_id),
+    [nodeTypes.data, version.workflow_id],
+  );
   const palette: Palette = {
     groups: paletteGroups(manifests),
     pending: nodeTypes.isPending,
     error: nodeTypes.isError ? nodeTypes.error.message : null,
     retry: () => void nodeTypes.refetch(),
   };
-  const manifestOf = (kind: string) => manifests.find((m) => m.kind === kind);
+  const manifestOf = (kind: string) => manifests.find((m) => m.kind === kind && !m.composite);
 
   const ops = useMemo(() => edits.flatMap((e) => e.ops), [edits]);
+  // Workflows unsaved extracts make: stored with the next Save, so not "unknown" meanwhile.
+  const pending = useMemo(() => pendingExtracts(edits), [edits]);
   const base = version.spec as unknown as WorkflowSpec;
   // Each edit was checked before it was kept. On a newer base (after a conflict) they may no
   // longer apply until `rebase` drops them: the base is drawn meanwhile.
@@ -256,7 +292,17 @@ function Editor({
   }, [base, ops]);
   const dirty = edits.length > 0;
   // What keeps the workflow as edited from running, on the node to fix (5.6).
-  const validation = useValidation(workspaceId, version, spec, dirty);
+  const checked = useValidation(workspaceId, version, spec, dirty);
+  const validation = useMemo(() => {
+    const callsPending = (nodeId: string | null | undefined) => {
+      const node = nodeId ? allSpecNodes(spec).find((n) => n.id === nodeId) : undefined;
+      return node?.type === "subflow" && pending.has(node.workflow.id);
+    };
+    const issues = checked.issues.filter(
+      (i) => !(i.code === "subflow_unknown" && callsPending(i.node_id)),
+    );
+    return { ...checked, issues };
+  }, [checked, pending, spec]);
   const issuesOf = useMemo(() => {
     const byNode = new Map<string, string[]>();
     for (const issue of validation.issues) {
@@ -383,10 +429,20 @@ function Editor({
       const saved = await save.mutateAsync({ baseVersion: version.version, ops });
       setEdits([]);
       setRefusal(null);
-      toast.success(`Saved version ${saved.version}`);
+      toast.success(
+        saved.extracted
+          ? `Saved version ${saved.version}, and ${saved.extracted.workflow_id} as its version 1, a draft.`
+          : `Saved version ${saved.version}`,
+      );
     } catch (err) {
       if (err instanceof ApiError && err.code === "version_conflict") {
         await rebase();
+        return;
+      }
+      if (err instanceof ApiError && err.code === "workflow_exists") {
+        const message = `${err.message} Undo the extract and choose another id.`;
+        setRefusal({ nodeId: null, message });
+        toast.error(message);
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
@@ -413,16 +469,46 @@ function Editor({
   }
 
   /** A subflow's card line (6.5): the workflow it calls by name and version, and the latest
-   * version when the call names an older one. */
+   * version when the call names an older one; for a composite (6.6), its latest published
+   * version instead, as a draft cannot be called. */
   function callLine(nodeId: string): string | null {
     const node = allSpecNodes(spec).find((n) => n.id === nodeId);
     if (node?.type !== "subflow") return null;
     const { id, version: called } = node.workflow;
+    if (pending.has(id)) return `Calls ${id} · version 1 · stored when you save`;
     const found = stored.data?.find((w) => w.workflow_id === id);
     if (!found) return null;
+    const published = found.published_version ?? null;
     const newer =
-      found.latest_version > called ? ` · version ${found.latest_version} is the latest` : "";
+      published !== null
+        ? published > called
+          ? ` · version ${published} is published`
+          : ""
+        : found.latest_version > called
+          ? ` · version ${found.latest_version} is the latest`
+          : "";
     return `Calls ${found.name} · version ${called}${newer}`;
+  }
+
+  /** The newer published version a subflow could move to (6.6), and the edit that moves it. */
+  function updateOf(node: SpecNode): { version: number; edit: Edit } | null {
+    if (node.type !== "subflow" || pending.has(node.workflow.id)) return null;
+    const published = stored.data?.find(
+      (w) => w.workflow_id === node.workflow.id,
+    )?.published_version;
+    if (published == null || published <= node.workflow.version) return null;
+    return { version: published, edit: updateCall(node.id, published) };
+  }
+
+  async function onPublish() {
+    setPublishError(null);
+    try {
+      await publish.mutateAsync(version.version);
+      setPublishOpen(false);
+      toast.success(`Published version ${version.version}.`);
+    } catch (err) {
+      setPublishError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   function renderCard(node: MapNode): ReactNode {
@@ -490,6 +576,11 @@ function Editor({
               onApply={apply}
               onReplace={(k) => setRemoving({ node: place.node, replaceWith: k })}
               onRemove={(n) => setRemoving({ node: n })}
+              update={updateOf(place.node)}
+              canExtract={place.parent !== null}
+              wrapReason={(k) => wrapReason(spec, node.id, k)}
+              onExtract={() => setRange({ mode: "extract", nodeId: node.id })}
+              onWrap={(k) => setRange({ mode: "wrap", kind: k, nodeId: node.id })}
             />
           ) : null}
         </span>
@@ -638,6 +729,16 @@ function Editor({
               >
                 {save.isPending ? "Saving…" : "Save"}
               </Button>
+              {version.published_at == null ? (
+                <PublishButton
+                  version={version.version}
+                  reason={runReason}
+                  onPublish={() => {
+                    setPublishError(null);
+                    setPublishOpen(true);
+                  }}
+                />
+              ) : null}
               <RunButton
                 label="Run"
                 reason={runReason}
@@ -658,6 +759,22 @@ function Editor({
             ? `Version ${version.version} of ${latestVersion} · read-only`
             : `Version ${version.version}`}
         </span>
+        {version.published_at != null ? (
+          <PublishedBadge />
+        ) : composite ? (
+          <span data-testid="draft-status">
+            Draft · version {version.published_version} is published
+          </span>
+        ) : null}
+        {composite ? (
+          <CallersStatus
+            callers={{
+              data: callers.data,
+              error: callers.isError ? callers.error.message : null,
+              retry: () => void callers.refetch(),
+            }}
+          />
+        ) : null}
         <IssuesStatus
           issues={validation.issues}
           checking={validation.checking}
@@ -825,8 +942,37 @@ function Editor({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <RangeDialog
+        request={range}
+        spec={spec}
+        manifests={manifests}
+        takenIds={new Set([...(stored.data ?? []).map((w) => w.workflow_id), ...pending])}
+        onCancel={() => setRange(null)}
+        onApply={(edit) => {
+          setRange(null);
+          apply(edit);
+        }}
+      />
+      <PublishDialog
+        open={publishOpen}
+        version={version.version}
+        callers={{
+          data: callers.data ?? (composite ? undefined : []),
+          error: callers.isError ? callers.error.message : null,
+          retry: () => void callers.refetch(),
+        }}
+        error={publishError}
+        pending={publish.isPending}
+        onOpenChange={setPublishOpen}
+        onPublish={() => void onPublish()}
+      />
       <RemoveDialog
         removal={removing}
+        labelOf={(key) =>
+          manifestByKey(manifests, key)?.composite
+            ? (manifestByKey(manifests, key)?.label ?? key)
+            : key
+        }
         onCancel={() => setRemoving(null)}
         onConfirm={({ node, replaceWith }) => {
           setRemoving(null);
@@ -857,6 +1003,41 @@ function Editor({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+/** Publish the latest version (6.6), or why not (unsaved edits, issues), as the Run button
+ * says it. */
+function PublishButton({
+  version,
+  reason,
+  onPublish,
+}: {
+  version: number;
+  reason: string | null;
+  onPublish: () => void;
+}) {
+  const reasonId = useId();
+  return (
+    <>
+      <span title={reason ?? undefined}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={reason !== null}
+          aria-describedby={reason ? reasonId : undefined}
+          onClick={onPublish}
+        >
+          <BadgeCheckIcon aria-hidden="true" data-icon="inline-start" />
+          Publish version {version}
+        </Button>
+      </span>
+      {reason ? (
+        <span id={reasonId} className="sr-only">
+          {reason}
+        </span>
+      ) : null}
     </>
   );
 }
@@ -1060,6 +1241,9 @@ function opErrorNode(err: unknown): string | null {
   return null;
 }
 
+/** A palette's menu: it scrolls once the workspace's composites (6.6) make it long. */
+const PALETTE_MENU = "max-h-80 overflow-y-auto";
+
 /** The palette: the node types from `GET /node-types`, by category. */
 interface Palette {
   groups: { label: string; items: NodeManifest[] }[];
@@ -1105,14 +1289,17 @@ function AddItems({
         {group.label}
       </DropdownMenuLabel>
       {group.items.map((m) => {
-        const reason = blocked?.(m.kind) ?? null;
+        // A composite (6.6) shares the `subflow` kind: the palette names each entry by its key.
+        const key = paletteKey(m);
+        const reason = blocked?.(key) ?? null;
         return (
           <DropdownMenuItem
-            key={m.kind}
+            key={key}
             data-kind={m.kind}
+            data-composite={m.composite?.workflow_id}
             title={reason ?? m.description}
             disabled={reason !== null}
-            onSelect={() => onAdd(m.kind)}
+            onSelect={() => onAdd(key)}
           >
             <ManifestIcon name={m.icon} className="size-4" />
             <span className="flex min-w-0 flex-col">
@@ -1152,7 +1339,7 @@ function AddMenu({
           {label}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className={PALETTE_MENU}>
         <AddItems palette={palette} blocked={blocked} onAdd={onAdd} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -1202,6 +1389,14 @@ interface StepMenuProps {
   onApply: (edit: Edit | null) => void;
   onReplace: (kind: string) => void;
   onRemove: (node: SpecNode) => void;
+  /** A subflow's move to its composite's newer published version (6.6), if there is one. */
+  update: { version: number; edit: Edit } | null;
+  /** Whether the node may be extracted to a composite (not the root). */
+  canExtract: boolean;
+  /** Why wrapping in `kind` is not offered from this node; `null` when it is. */
+  wrapReason: (kind: WrapKind) => string | null;
+  onExtract: () => void;
+  onWrap: (kind: WrapKind) => void;
 }
 
 function StepMenu(props: StepMenuProps) {
@@ -1260,6 +1455,11 @@ function StepMenuItems({
   onApply,
   onReplace,
   onRemove,
+  update,
+  canExtract,
+  wrapReason,
+  onExtract,
+  onWrap,
 }: StepMenuProps) {
   // A branch that is a sequence has no card of its own: its parallel's menu removes it.
   const removableBranches =
@@ -1274,12 +1474,23 @@ function StepMenuItems({
         <SlidersHorizontalIcon aria-hidden="true" />
         Edit parameters
       </DropdownMenuItem>
+      {update ? (
+        <EditItem
+          label={`Update to version ${update.version}`}
+          edit={update.edit}
+          blocked={blocked}
+          onApply={onApply}
+        >
+          <RotateCwIcon aria-hidden="true" />
+          Update to version {update.version}
+        </EditItem>
+      ) : null}
       <DropdownMenuSub>
         <DropdownMenuSubTrigger>
           <PlusIcon aria-hidden="true" />
           Add a step after
         </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
+        <DropdownMenuSubContent className={PALETTE_MENU}>
           <AddItems
             palette={palette}
             blocked={(k) => blocked(edits.add(k))}
@@ -1293,7 +1504,7 @@ function StepMenuItems({
             <PlusIcon aria-hidden="true" />
             Add a branch
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
+          <DropdownMenuSubContent className={PALETTE_MENU}>
             <AddItems
               palette={palette}
               blocked={(k) => blocked(edits.addBranch(k))}
@@ -1332,13 +1543,35 @@ function StepMenuItems({
         </DropdownMenuSub>
       )}
       <DropdownMenuSeparator />
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>Wrap in…</DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          {WRAP_CHOICES.map(({ kind, label }) => {
+            const reason = wrapReason(kind);
+            return reason ? (
+              <Unavailable key={kind} label={label} reason={reason} />
+            ) : (
+              <DropdownMenuItem key={kind} onSelect={() => onWrap(kind)}>
+                {label}…
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      {canExtract ? (
+        <DropdownMenuItem onSelect={onExtract}>
+          <BoxesIcon aria-hidden="true" />
+          Extract to composite…
+        </DropdownMenuItem>
+      ) : null}
+      <DropdownMenuSeparator />
       {canReplace ? (
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <ReplaceIcon aria-hidden="true" />
             Replace with…
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
+          <DropdownMenuSubContent className={PALETTE_MENU}>
             <AddItems
               palette={palette}
               blocked={(k) => blocked(edits.replace(k))}
@@ -1387,10 +1620,13 @@ interface Removal {
 
 function RemoveDialog({
   removal,
+  labelOf,
   onCancel,
   onConfirm,
 }: {
   removal: Removal | null;
+  /** The palette entry's name: a kind, or a composite's name (6.6). */
+  labelOf: (key: string) => string;
   onCancel: () => void;
   onConfirm: (removal: Removal) => void;
 }) {
@@ -1407,7 +1643,9 @@ function RemoveDialog({
             {verb} <span className="font-mono">{name}</span>?
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {removal?.replaceWith ? `A new ${removal.replaceWith} takes its place. ` : null}
+            {removal?.replaceWith
+              ? `A new ${labelOf(removal.replaceWith)} takes its place. `
+              : null}
             {under > 0 ? `The ${under} ${under === 1 ? "node" : "nodes"} under it go too. ` : null}
             Undo brings it back until you save.
           </AlertDialogDescription>

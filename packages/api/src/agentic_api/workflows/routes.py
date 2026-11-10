@@ -8,11 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_api.runs.routes import existing_workspace
 from agentic_api.workflows.models import (
     CreateWorkflowRequest,
+    ExtractedWorkflowRef,
     OpErrorDetail,
+    PublishWorkflowRequest,
     RestoreWorkflowRequest,
     UpdateWorkflowRequest,
     ValidateWorkflowRequest,
     ValidateWorkflowResponse,
+    WorkflowCallerItem,
+    WorkflowCallersResponse,
     WorkflowErrorDetail,
     WorkflowsResponse,
     WorkflowSummary,
@@ -25,6 +29,7 @@ from agentic_engine.spec import OpError, ValidationIssue, schema_issues
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     AlreadyLatestError,
+    AlreadyPublishedError,
     StoredWorkflowVersion,
     VersionConflictError,
     WorkflowExistsError,
@@ -33,8 +38,10 @@ from agentic_store import (
     check_workflow,
     create_workflow,
     get_workflow_version,
+    list_callers,
     list_workflow_versions,
     list_workflows,
+    publish_workflow,
     restore_workflow,
     update_workflow,
 )
@@ -135,10 +142,71 @@ async def versions(
                 created_at=row.created_at,
                 op_count=len(row.ops or []),
                 restored_from=row.restored_from,
+                published_at=row.published_at,
             )
             for row in rows
         ]
     )
+
+
+@router.get(
+    "/{workflow_id}/callers",
+    operation_id="listWorkflowCallers",
+    responses={404: {"description": "No such workspace or workflow"}},
+)
+async def callers(
+    workflow_id: str, request: Request, workspace_id: Workspace
+) -> WorkflowCallersResponse:
+    """The workspace's workflows whose latest version calls this one (6.6), by name, with the
+    version each calls. A caller moves to a newer version only by its own edit."""
+    try:
+        rows = await list_callers(_sessions(request), workspace_id, workflow_id)
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, None)) from e
+    return WorkflowCallersResponse(
+        items=[WorkflowCallerItem.model_validate(row.model_dump()) for row in rows]
+    )
+
+
+@router.post(
+    "/{workflow_id}/publish",
+    operation_id="publishWorkflow",
+    responses={
+        404: {"description": "No such workspace, workflow or version"},
+        409: {"model": WorkflowErrorDetail, "description": "`already_published`"},
+        422: {"model": WorkflowErrorDetail, "description": "`cannot_publish`, with its issues"},
+    },
+)
+async def publish(
+    workflow_id: str, body: PublishWorkflowRequest, request: Request, workspace_id: Workspace
+) -> WorkflowVersionResponse:
+    """Publish a version (6.6): the workflow becomes a composite, listed in the palette and
+    called by its published versions; its other versions are drafts, which no workflow may call.
+    A version that could not run now is refused with its issues. Publishing changes no caller."""
+    sessions = _sessions(request)
+    try:
+        stored = await get_workflow_version(sessions, workspace_id, workflow_id, body.version)
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, body.version)) from e
+    _, issues = await check_workflow(sessions, workspace_id, stored.spec)
+    if issues:
+        detail = WorkflowErrorDetail(
+            code="cannot_publish",
+            message=f"version {body.version} cannot run, so it cannot be published; fix its "
+            f"{len(issues)} issue{'s' if len(issues) != 1 else ''} first",
+            issues=issues,
+        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump())
+    try:
+        stored = await publish_workflow(sessions, workspace_id, workflow_id, body.version)
+    except WorkflowNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, body.version)) from e
+    except AlreadyPublishedError as e:
+        detail = WorkflowErrorDetail(
+            code="already_published", message=f"version {body.version} is published already"
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail.model_dump()) from e
+    return await _response(request, workspace_id, stored)
 
 
 @router.patch(
@@ -147,7 +215,10 @@ async def versions(
     status_code=status.HTTP_201_CREATED,
     responses={
         404: {"description": "No such workspace or workflow"},
-        409: {"model": WorkflowErrorDetail, "description": "`version_conflict`"},
+        409: {
+            "model": WorkflowErrorDetail,
+            "description": "`version_conflict`, or `workflow_exists` for an `extract`",
+        },
         422: {"model": OpErrorDetail, "description": "The ops cannot apply; nothing is stored"},
     },
 )
@@ -157,7 +228,9 @@ async def update(
     """Apply graph operations to version `base_version`, which must be the latest, and store the
     result as the next version. Versions never change. The ops apply all or nothing: one that
     cannot apply, or a result with a node left detached, an empty slot, or off the schema,
-    stores nothing. The result's other issues (structure, run limits) are returned with it."""
+    stores nothing. The result's other issues (structure, run limits) are returned with it. An
+    `extract` (6.6) also stores the workflow it makes as version 1, in the same transaction, and
+    names it in `extracted`; its id must be new in the workspace (`workflow_exists`)."""
     try:
         stored = await update_workflow(
             _sessions(request), workspace_id, workflow_id, body.base_version, body.ops
@@ -166,6 +239,13 @@ async def update(
         raise HTTPException(status.HTTP_404_NOT_FOUND, _not_found(workflow_id, None)) from e
     except VersionConflictError as e:
         raise _conflict(body.base_version, e, "apply the ops to the latest version") from e
+    except WorkflowExistsError as e:
+        detail = WorkflowErrorDetail(
+            code="workflow_exists",
+            message=f"workflow {e} already exists; extract into a workflow with a new id",
+            workflow_id=str(e),
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail.model_dump()) from e
     except OpError as e:
         detail = OpErrorDetail(
             code=e.code, message=e.message, op_index=e.op_index, node_id=e.node_id
@@ -235,6 +315,13 @@ async def _response(
         spec=stored.spec,
         ops=ops,
         restored_from=stored.restored_from,
+        published_at=stored.published_at,
+        published_version=stored.published_version,
+        extracted=(
+            ExtractedWorkflowRef(workflow_id=stored.extracted, version=1)
+            if stored.extracted is not None
+            else None
+        ),
         valid=not issues,
         issues=issues,
     )

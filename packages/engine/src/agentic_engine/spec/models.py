@@ -520,6 +520,8 @@ class SubflowNode(_Base):
     _call: "Node | None" = PrivateAttr(default=None)
     _name: str | None = PrivateAttr(default=None)
     _ids: dict[str, str] = PrivateAttr(default_factory=dict[str, str])
+    _input_schema: dict[str, JsonValue] | None = PrivateAttr(default=None)
+    _output_schema: dict[str, JsonValue] | None = PrivateAttr(default=None)
 
     @property
     def call(self) -> "Node | None":
@@ -538,12 +540,40 @@ class SubflowNode(_Base):
         node of the run has it (`expand_workflow`)."""
         return dict(self._ids)
 
-    def resolved(self, root: "Node", name: str, ids: Mapping[str, str]) -> "SubflowNode":
-        """This subflow with the called workflow's `root`, `name` and node `ids` attached."""
+    @property
+    def input_schema(self) -> dict[str, JsonValue] | None:
+        """Once resolved, the called workflow's `input_schema` (6.6): the subflow's input port.
+        A subflow with its own `input` expression has none, as its input is not the step before."""
+        return self._input_schema if self.input is None else None
+
+    @property
+    def output_schema(self) -> dict[str, JsonValue] | None:
+        """Once resolved, the called workflow's `output_schema` (6.6): the subflow's output
+        port."""
+        return self._output_schema
+
+    @property
+    def boundary_input_schema(self) -> dict[str, JsonValue] | None:
+        """The called workflow's `input_schema`, checked at runtime against what the called
+        workflow is given, whether it comes from the step before or from `input`."""
+        return self._input_schema
+
+    def resolved(
+        self,
+        root: "Node",
+        name: str,
+        ids: Mapping[str, str],
+        input_schema: dict[str, JsonValue] | None = None,
+        output_schema: dict[str, JsonValue] | None = None,
+    ) -> "SubflowNode":
+        """This subflow with the called workflow's `root`, `name`, node `ids` and port schemas
+        attached."""
         copy = self.model_copy()
         copy._call = root
         copy._name = name
         copy._ids = dict(ids)
+        copy._input_schema = input_schema
+        copy._output_schema = output_schema
         return copy
 
 
@@ -748,6 +778,7 @@ type IssueCode = Literal[
     "not_allowed_in_orchestrator",
     "subflow_unknown",
     "subflow_cycle",
+    "subflow_unpublished",
 ]
 
 
@@ -1465,15 +1496,20 @@ def budget_errors(
 type PortNode = AgentNode | ToolNode
 """A node that may declare typed ports."""
 
-type PortProducer = AgentNode | ToolNode | ReduceNode
-"""A node whose output may be typed: a port node, or a reduce that merges findings."""
+type PortConsumer = AgentNode | ToolNode | SubflowNode
+"""A node whose input may be typed: a port node, or a subflow whose called workflow declares an
+`input_schema` (6.6)."""
+
+type PortProducer = AgentNode | ToolNode | ReduceNode | SubflowNode
+"""A node whose output may be typed: a port node, a reduce that merges findings, or a subflow
+whose called workflow declares an `output_schema` (6.6)."""
 
 FINDINGS_SCHEMA: dict[str, JsonValue] = FindingsReport.model_json_schema()
 """The output schema of a `dedupe` or `vote` reduce: a findings report."""
 
 
 def output_schema(node: PortProducer) -> dict[str, JsonValue] | None:
-    """The schema `node`'s output is typed with, if any."""
+    """The schema `node`'s output is typed with, if any (a subflow's is its called workflow's)."""
     if isinstance(node, ReduceNode):
         return FINDINGS_SCHEMA if node.merges else None
     return node.output_schema
@@ -1626,15 +1662,18 @@ def artifact_writers(root: Node) -> dict[str, dict[str, ArtifactWriter]]:
     return _walk_artifacts(root).writers
 
 
-def port_edges(root: Node) -> list[tuple[PortProducer, PortNode, str]]:
+def port_edges(root: Node) -> list[tuple[PortProducer, PortConsumer, str]]:
     """Each place under `root` where one node's output is the next agent or tool node's input, as
     `(producer, consumer, consumer's path)` in run order: consecutive steps of a sequence (nested
     sequences flattened), looking through gates, which pass their input on unchanged. The producer
     is an agent or tool node, or a reduce that merges findings (its output is a findings report).
-    A loop, map, parallel, router or other reduce between two steps breaks the edge: its output is
-    not typed. A node that reads one run artifact takes it from the artifact's last writer instead
-    (if that is a producer), and one that reads several has no producer."""
-    edges: list[tuple[PortProducer, PortNode, str]] = []
+    A resolved subflow (6.6) is a consumer when its called workflow declares an `input_schema` (and
+    it has no `input` expression of its own) and a producer when it declares an `output_schema`;
+    an untyped one breaks the edge. A loop, map, parallel, router or other reduce between two
+    steps breaks the edge: its output is not typed. A node that reads one run artifact takes it
+    from the artifact's last writer instead (if that is a producer), and one that reads several
+    has no producer."""
+    edges: list[tuple[PortProducer, PortConsumer, str]] = []
     writers = artifact_writers(root)
 
     def steps(node: Node, path: str) -> Iterator[tuple[str, Node]]:
@@ -1675,7 +1714,9 @@ def port_edges(root: Node) -> list[tuple[PortProducer, PortNode, str]]:
                 case ReduceNode():
                     previous = step if step.merges else None
                 case SubflowNode():
-                    previous = None
+                    if previous is not None and step.input_schema is not None:
+                        edges.append((previous, step, step_path))
+                    previous = step if step.output_schema is not None else None
                     if step.call is not None:
                         visit(step.call, f"{step_path}.call")
                 case SequenceNode():
@@ -1918,6 +1959,16 @@ class WorkflowSpec(_Base):
         default=None,
         description="What a run is given to work on, and whether it must be given; unset, the "
         "input is optional.",
+    )
+    input_schema: PortSchema | None = Field(
+        default=None,
+        description="The workflow's typed input (6.6): a subflow that calls it checks its input "
+        "against this, and the step before it must declare what it requires.",
+    )
+    output_schema: PortSchema | None = Field(
+        default=None,
+        description="The workflow's typed output (6.6): a subflow that calls it checks the called "
+        "workflow's output against this, and the step after it reads it as typed.",
     )
     root: Node
 

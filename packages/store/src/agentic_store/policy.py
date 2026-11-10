@@ -32,7 +32,7 @@ from agentic_store.audit import audit
 from agentic_store.connections import WorkspaceNotFoundError
 from agentic_store.models import Run, RunEventRow, Workspace, WorkspacePolicy
 from agentic_store.pricing import price_table
-from agentic_store.subflows import load_subflows
+from agentic_store.subflows import load_drafts, load_subflows
 
 
 class PolicyViolationError(Exception):
@@ -123,6 +123,7 @@ async def check_workflow(
         overrides = await _overrides(session, workspace_id)
         prices = await price_table(session, workspace_id)
         called = await load_subflows(session, workspace_id, raw)
+        drafts = await load_drafts(session, workspace_id, called.keys())
     policy = with_budget(effective_policy(overrides), budget_usd, _document_budget(raw))
     issues = validate_workflow(
         raw,
@@ -130,6 +131,7 @@ async def check_workflow(
         priced=prices.__contains__,
         default_model=DEFAULT_MODEL,
         resolve=resolve_from(called),
+        drafts=drafts,
     )
     return policy, issues
 

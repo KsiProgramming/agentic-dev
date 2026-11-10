@@ -641,7 +641,9 @@ export interface paths {
          * @description Apply graph operations to version `base_version`, which must be the latest, and store the
          *     result as the next version. Versions never change. The ops apply all or nothing: one that
          *     cannot apply, or a result with a node left detached, an empty slot, or off the schema,
-         *     stores nothing. The result's other issues (structure, run limits) are returned with it.
+         *     stores nothing. The result's other issues (structure, run limits) are returned with it. An
+         *     `extract` (6.6) also stores the workflow it makes as version 1, in the same transaction, and
+         *     names it in `extracted`; its id must be new in the workspace (`workflow_exists`).
          */
         patch: operations["updateWorkflow"];
         trace?: never;
@@ -660,6 +662,49 @@ export interface paths {
         get: operations["listWorkflowVersions"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/callers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Callers
+         * @description The workspace's workflows whose latest version calls this one (6.6), by name, with the
+         *     version each calls. A caller moves to a newer version only by its own edit.
+         */
+        get: operations["listWorkflowCallers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{workflow_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish
+         * @description Publish a version (6.6): the workflow becomes a composite, listed in the palette and
+         *     called by its published versions; its other versions are drafts, which no workflow may call.
+         *     A version that could not run now is refused with its issues. Publishing changes no caller.
+         */
+        post: operations["publishWorkflow"];
         delete?: never;
         options?: never;
         head?: never;
@@ -723,7 +768,9 @@ export interface paths {
         /**
          * List Node Types
          * @description Every primitive's manifest, in palette order: the builder draws its palette and cards
-         *     from them, so a primitive the engine knows needs no web change.
+         *     from them, so a primitive the engine knows needs no web change. With `workspace_id`, each of
+         *     the workspace's composites follows, by name (category `workspace`): a `subflow` that calls
+         *     its latest published version.
          */
         get: operations["listNodeTypes"];
         put?: never;
@@ -898,7 +945,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -965,9 +1012,23 @@ export interface components {
             status: "cancelling";
         };
         /** @enum {string} */
-        Category: "step" | "flow" | "combine";
+        Category: "step" | "flow" | "combine" | "workspace";
         /** @enum {string} */
         ChangeStatus: "added" | "modified" | "deleted" | "renamed";
+        /**
+         * CompositeRef
+         * @description The composite a workspace manifest adds (6.6): a stored workflow and its latest published
+         *     version.
+         */
+        CompositeRef: {
+            /** Workflow Id */
+            workflow_id: string;
+            /**
+             * Version
+             * @description Its latest published version.
+             */
+            version: number;
+        };
         /**
          * Connect
          * @description Place `to` (detached, or moved from where it is, with everything under it) right after
@@ -1134,6 +1195,58 @@ export interface components {
             path?: string | null;
         };
         /**
+         * Extract
+         * @description Move nodes into a new stored workflow, and call it in their place (6.6): one node anywhere
+         *     a step goes, or consecutive steps of one sequence, become the new workflow's root (in a
+         *     sequence when there are several), and a `subflow` `subflow_id` that calls its version 1 takes
+         *     their place. No reference may cross the boundary: a reduce's `from`, a publisher's
+         *     `from_node` or a `results.<id>` in an expression. The API stores the new workflow with the
+         *     caller's new version, both or neither. At most one per batch.
+         */
+        Extract: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "extract";
+            /** Node Ids */
+            node_ids: string[];
+            /**
+             * Subflow Id
+             * @description The id of the subflow that takes their place.
+             */
+            subflow_id: string;
+            workflow: components["schemas"]["ExtractedWorkflow"];
+        };
+        /**
+         * ExtractedWorkflow
+         * @description The workflow `extract` makes.
+         */
+        ExtractedWorkflow: {
+            /**
+             * Id
+             * @description Its id, new in the workspace.
+             */
+            id: string;
+            /**
+             * Name
+             * @description Its name.
+             */
+            name: string;
+            /** Description */
+            description?: string | null;
+        };
+        /**
+         * ExtractedWorkflowRef
+         * @description The workflow an `extract` stored (6.6), as version 1.
+         */
+        ExtractedWorkflowRef: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Version */
+            version: number;
+        };
+        /**
          * FileChange
          * @description A file a writer node changed on its branch, as the approver sees it. Only an editable
          *     file has its contents: `before` (at the branch's base, `None` for an added file) and `after`
@@ -1288,7 +1401,7 @@ export interface components {
             route?: string | null;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1488,11 +1601,13 @@ export interface components {
             ui?: {
                 [key: string]: unknown;
             };
+            /** @description Set on a workspace composite's entry (category `workspace`): the workflow its `default` subflow calls, at its latest published version. */
+            composite?: components["schemas"]["CompositeRef"] | null;
         };
         /** @enum {string} */
         NotEditable: "binary" | "too_large" | "deleted" | "renamed" | "over_limit";
         /** @enum {string} */
-        OpErrorCode: "unknown_node" | "duplicate_node_id" | "root_node" | "invalid_placement" | "slot_taken" | "invalid_move" | "not_in_sequence" | "not_connected" | "not_a_param" | "invalid_path" | "detached_nodes" | "missing_child" | "schema";
+        OpErrorCode: "unknown_node" | "duplicate_node_id" | "root_node" | "invalid_placement" | "slot_taken" | "invalid_move" | "not_in_sequence" | "not_connected" | "not_a_param" | "invalid_path" | "detached_nodes" | "missing_child" | "invalid_wrap" | "invalid_extract" | "schema";
         /**
          * OpErrorDetail
          * @description The `detail` of a batch of graph operations that cannot apply: the op at `op_index` (unset
@@ -1670,6 +1785,14 @@ export interface components {
         };
         /** @constant */
         Provider: "claude";
+        /** PublishWorkflowRequest */
+        PublishWorkflowRequest: {
+            /**
+             * Version
+             * @description The version to publish; it must be able to run.
+             */
+            version: number;
+        };
         /** PutClaudeConnection */
         PutClaudeConnection: {
             /**
@@ -2439,8 +2562,8 @@ export interface components {
         /**
          * SetParam
          * @description Set one parameter of a node, or of the document without `node_id` (`name`,
-         *     `description`, `budget_usd`, `input`). `null` unsets it. Ids, types and the slots that hold
-         *     nodes change through the other ops.
+         *     `description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets
+         *     it. Ids, types and the slots that hold nodes change through the other ops.
          */
         SetParam: {
             /**
@@ -2614,7 +2737,7 @@ export interface components {
              * Ops
              * @description Graph operations, applied in order, all or nothing.
              */
-            ops: (components["schemas"]["AddNode"] | components["schemas"]["RemoveNode"] | components["schemas"]["Connect"] | components["schemas"]["Disconnect"] | components["schemas"]["SetParam"])[];
+            ops: (components["schemas"]["AddNode"] | components["schemas"]["RemoveNode"] | components["schemas"]["Connect"] | components["schemas"]["Disconnect"] | components["schemas"]["SetParam"] | components["schemas"]["Wrap"] | components["schemas"]["Extract"])[];
         };
         /** ValidateWorkflowRequest */
         ValidateWorkflowRequest: {
@@ -2717,18 +2840,44 @@ export interface components {
             expires_at?: string | null;
         };
         /**
+         * WorkflowCallerItem
+         * @description A workflow whose latest version calls the composite (6.6).
+         */
+        WorkflowCallerItem: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Name */
+            name: string;
+            /** Latest Version */
+            latest_version: number;
+            /**
+             * Calls Version
+             * @description The composite's version it calls.
+             */
+            calls_version: number;
+        };
+        /**
+         * WorkflowCallersResponse
+         * @description The workflows whose latest version calls this one, by name (6.6).
+         */
+        WorkflowCallersResponse: {
+            /** Items */
+            items: components["schemas"]["WorkflowCallerItem"][];
+        };
+        /**
          * WorkflowErrorDetail
-         * @description The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`
-         *     (`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does
-         *     not match the schema, with its `issues`), `already_latest` (a restore of the latest
-         *     version).
+         * @description The `detail` of a refused create or update: `workflow_exists` (create, or an `extract`
+         *     whose workflow id is taken), `version_conflict` (`base_version` is not the latest, which
+         *     `latest_version` names), `schema` (a spec that does not match the schema, with its
+         *     `issues`), `already_latest` (a restore of the latest version), `already_published` and
+         *     `cannot_publish` (a version that could not run, with its `issues`; 6.6).
          */
         WorkflowErrorDetail: {
             /**
              * Code
              * @enum {string}
              */
-            code: "workflow_exists" | "version_conflict" | "schema" | "already_latest";
+            code: "workflow_exists" | "version_conflict" | "schema" | "already_latest" | "already_published" | "cannot_publish";
             /** Message */
             message: string;
             /**
@@ -2809,6 +2958,20 @@ export interface components {
             budget_usd?: number | null;
             /** @description What a run is given to work on, and whether it must be given; unset, the input is optional. */
             input?: components["schemas"]["WorkflowInput"] | null;
+            /**
+             * Input Schema
+             * @description The workflow's typed input (6.6): a subflow that calls it checks its input against this, and the step before it must declare what it requires.
+             */
+            input_schema?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /**
+             * Output Schema
+             * @description The workflow's typed output (6.6): a subflow that calls it checks the called workflow's output against this, and the step after it reads it as typed.
+             */
+            output_schema?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
             /** Root */
             root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
         };
@@ -2839,6 +3002,11 @@ export interface components {
              * @description When the latest version was made.
              */
             updated_at: string;
+            /**
+             * Published Version
+             * @description Its latest published version (6.6); unset when it is not a composite.
+             */
+            published_version?: number | null;
         };
         /** WorkflowVersionItem */
         WorkflowVersionItem: {
@@ -2861,6 +3029,11 @@ export interface components {
              * @description The version a restore copied, if one did.
              */
             restored_from: number | null;
+            /**
+             * Published At
+             * @description When it was published (6.6); unset for a draft.
+             */
+            published_at?: string | null;
         };
         /**
          * WorkflowVersionResponse
@@ -2895,6 +3068,18 @@ export interface components {
              * @description The version a restore copied; unset unless a restore made it.
              */
             restored_from: number | null;
+            /**
+             * Published At
+             * @description When this version was published (6.6); unset for a draft.
+             */
+            published_at?: string | null;
+            /**
+             * Published Version
+             * @description The workflow's latest published version (6.6); unset when it was never published, i.e. it is not a composite.
+             */
+            published_version?: number | null;
+            /** @description With an `extract` op (6.6): the workflow it stored as version 1, which the new subflow calls. */
+            extracted?: components["schemas"]["ExtractedWorkflowRef"] | null;
             /**
              * Valid
              * @description Whether it could run in the workspace now.
@@ -2962,6 +3147,35 @@ export interface components {
             as_of: string;
             /** Models */
             models: components["schemas"]["ModelPricingOut"][];
+        };
+        /**
+         * Wrap
+         * @description Put nodes in a new container, in their place (6.6): one node anywhere, or consecutive steps
+         *     of one sequence. A `sequence` runs them in order, a `parallel` runs each as a branch (two or
+         *     more), a `loop` or `map` runs them as its body (in a new sequence `sequence_id` when there are
+         *     several). `with` is the container without the nodes: its `type`, a new `id` and its other
+         *     parameters (a loop's `until` and `max_iterations`, a map's `over`).
+         */
+        Wrap: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "wrap";
+            /** Node Ids */
+            node_ids: string[];
+            /**
+             * With
+             * @description The new container without its nodes: `type` (sequence, parallel, loop or map), `id` and its other parameters.
+             */
+            with: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Sequence Id
+             * @description Loop and map only: the id of the sequence that holds the nodes, when there are several.
+             */
+            sequence_id?: string | null;
         };
         /** WorkflowRef */
         agentic_api__runs__models__WorkflowRef: {
@@ -4008,7 +4222,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -4469,7 +4683,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description `version_conflict` */
+            /** @description `version_conflict`, or `workflow_exists` for an `extract` */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4526,6 +4740,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listWorkflowCallers: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowCallersResponse"];
+                };
+            };
+            /** @description No such workspace or workflow */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publishWorkflow: {
+        parameters: {
+            query?: {
+                /** @description Default: the default workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishWorkflowRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowVersionResponse"];
+                };
+            };
+            /** @description No such workspace, workflow or version */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `already_published` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowErrorDetail"];
+                };
+            };
+            /** @description `cannot_publish`, with its issues */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowErrorDetail"];
                 };
             };
         };
@@ -4626,7 +4935,10 @@ export interface operations {
     };
     listNodeTypes: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Add this workspace's composites after the primitives (6.6). */
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4640,6 +4952,22 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeManifest"][];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

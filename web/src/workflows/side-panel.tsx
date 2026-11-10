@@ -287,6 +287,20 @@ const DOCUMENT_SCHEMA: Schema = {
         example: { type: "string", maxLength: 300, title: "Example" },
       },
     },
+    input_schema: {
+      type: "object",
+      title: "Input schema",
+      description:
+        "A JSON Schema the input must match (6.6). A workflow that calls this one checks what it " +
+        "gives it, and the step before the call must declare what it requires.",
+    },
+    output_schema: {
+      type: "object",
+      title: "Output schema",
+      description:
+        "A JSON Schema the workflow's output must match (6.6). A workflow that calls this one " +
+        "reads the call's output as typed.",
+    },
   },
 };
 
@@ -298,9 +312,12 @@ const DOCUMENT_UI: UiSchema = {
     description: { "ui:widget": "textarea", "ui:options": { rows: 2 } },
     example: { "ui:widget": "textarea", "ui:options": { rows: 2 } },
   },
+  input_schema: { "ui:field": "json", "ui:options": { advanced: true } },
+  output_schema: { "ui:field": "json", "ui:options": { advanced: true } },
 };
 
-/** The workflow's own fields: name, description, budget and run input. */
+/** The workflow's own fields: name, description, budget, run input and, as a composite's
+ * typed ports (6.6), its input and output schemas. */
 export function WorkflowPanel({
   spec,
   changes = null,

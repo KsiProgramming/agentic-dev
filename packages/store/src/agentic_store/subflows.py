@@ -2,7 +2,8 @@
 kept with a run (`runs.subflows`) so it runs, resumes and reruns what it was created with.
 
 The engine's checks are synchronous, so every version a spec calls, and those they call in turn,
-is read first (`load_subflows`), and the engine resolves the spec from those copies.
+is read first (`load_subflows`), and the engine resolves the spec from those copies. Which of them
+are drafts of a composite (6.6) is read with them (`load_drafts`).
 """
 
 from collections.abc import Collection, Mapping
@@ -23,7 +24,7 @@ from agentic_engine.spec import (
     subflow_refs,
 )
 from agentic_engine.spec.subflows import MAX_CALL_NESTING
-from agentic_store.models import WorkflowVersion
+from agentic_store.models import WorkflowPublication, WorkflowVersion
 
 
 async def load_subflows(
@@ -52,6 +53,29 @@ async def load_subflows(
     return found
 
 
+async def load_drafts(
+    session: AsyncSession, workspace_id: UUID, keys: Collection[str]
+) -> frozenset[str]:
+    """Of the called versions `keys` (`subflow_key`s), those that are drafts of a composite (6.6):
+    unpublished versions of a workflow that has a published one. A version of a workflow never
+    published is not a draft: any of its versions may be called."""
+    refs = {key.rpartition("@") for key in keys}
+    workflow_ids = sorted({workflow_id for workflow_id, _, _ in refs})
+    if not workflow_ids:
+        return frozenset()
+    rows = await session.execute(
+        select(WorkflowPublication.workflow_id, WorkflowPublication.version).where(
+            WorkflowPublication.workspace_id == workspace_id,
+            WorkflowPublication.workflow_id.in_(workflow_ids),
+        )
+    )
+    published = {subflow_key(w, v) for w, v in rows.all()}
+    composites = {key.rpartition("@")[0] for key in published}
+    return frozenset(
+        key for key in keys if key.rpartition("@")[0] in composites and key not in published
+    )
+
+
 async def resolve_workflow(
     sessions: async_sessionmaker[AsyncSession],
     workspace_id: UUID,
@@ -59,14 +83,15 @@ async def resolve_workflow(
     known_tools: Collection[str] = PLATFORM_TOOLS,
 ) -> ExpandedWorkflow:
     """`spec` with the workflows it calls resolved from the workspace (`expand_workflow`): the
-    expanded spec, the copies a run keeps, and why it cannot run. A spec with no subflow reads
-    nothing."""
+    expanded spec, the copies a run keeps, and why it cannot run (a composite's draft among
+    them, 6.6). A spec with no subflow reads nothing."""
     raw = spec.model_dump(mode="json", by_alias=True)
     if next(subflow_refs(raw), None) is None:
         return ExpandedWorkflow(spec)
     async with sessions() as session:
         documents = await load_subflows(session, workspace_id, raw)
-    return expand_workflow(spec, resolve_from(documents), known_tools)
+        drafts = await load_drafts(session, workspace_id, documents.keys())
+    return expand_workflow(spec, resolve_from(documents), known_tools, drafts)
 
 
 def run_spec(

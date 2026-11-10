@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { applyOps, OpError, type GraphOp } from "./ops";
+import { applyGraphOps, OpError, type GraphOp } from "./ops";
 
 /** The cases the engine also runs (`test_graph_ops_fixtures.py`), so the builder's preview is
  * what the server will store. */
@@ -13,6 +13,8 @@ interface Case {
   /** The spec the case runs on, when not the fixture's. */
   spec?: unknown;
   result?: unknown;
+  /** With an extract (6.6): the workflow it makes. */
+  extracted?: unknown;
   error?: { code: string; op_index: number | null; node_id: string | null };
 }
 
@@ -25,11 +27,13 @@ describe("applyOps", () => {
     const spec = c.spec ?? doc.spec;
     const before = structuredClone(spec);
     if (c.result !== undefined) {
-      expect(applyOps(spec, c.ops)).toEqual(c.result);
+      const applied = applyGraphOps(spec, c.ops);
+      expect(applied.spec).toEqual(c.result);
+      expect(applied.extracted).toEqual(c.extracted ?? null);
     } else {
       let error: unknown;
       try {
-        applyOps(spec, c.ops);
+        applyGraphOps(spec, c.ops);
       } catch (e) {
         error = e;
       }

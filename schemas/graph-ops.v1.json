@@ -330,6 +330,80 @@
       "title": "Disconnect",
       "type": "object"
     },
+    "Extract": {
+      "additionalProperties": false,
+      "description": "Move nodes into a new stored workflow, and call it in their place (6.6): one node anywhere\na step goes, or consecutive steps of one sequence, become the new workflow's root (in a\nsequence when there are several), and a `subflow` `subflow_id` that calls its version 1 takes\ntheir place. No reference may cross the boundary: a reduce's `from`, a publisher's\n`from_node` or a `results.<id>` in an expression. The API stores the new workflow with the\ncaller's new version, both or neither. At most one per batch.",
+      "properties": {
+        "node_ids": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "type": "string"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "op": {
+          "const": "extract",
+          "title": "Op",
+          "type": "string"
+        },
+        "subflow_id": {
+          "description": "The id of the subflow that takes their place.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Subflow Id",
+          "type": "string"
+        },
+        "workflow": {
+          "$ref": "#/$defs/ExtractedWorkflow"
+        }
+      },
+      "required": [
+        "op",
+        "node_ids",
+        "subflow_id",
+        "workflow"
+      ],
+      "title": "Extract",
+      "type": "object"
+    },
+    "ExtractedWorkflow": {
+      "additionalProperties": false,
+      "description": "The workflow `extract` makes.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "id": {
+          "description": "Its id, new in the workspace.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "description": "Its name.",
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ExtractedWorkflow",
+      "type": "object"
+    },
     "GateNode": {
       "additionalProperties": false,
       "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged.",
@@ -1440,7 +1514,7 @@
     },
     "SetParam": {
       "additionalProperties": false,
-      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`). `null` unsets it. Ids, types and the slots that hold\nnodes change through the other ops.",
+      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets\nit. Ids, types and the slots that hold nodes change through the other ops.",
       "properties": {
         "node_id": {
           "anyOf": [
@@ -1671,6 +1745,56 @@
       ],
       "title": "WorkflowRef",
       "type": "object"
+    },
+    "Wrap": {
+      "additionalProperties": false,
+      "description": "Put nodes in a new container, in their place (6.6): one node anywhere, or consecutive steps\nof one sequence. A `sequence` runs them in order, a `parallel` runs each as a branch (two or\nmore), a `loop` or `map` runs them as its body (in a new sequence `sequence_id` when there are\nseveral). `with` is the container without the nodes: its `type`, a new `id` and its other\nparameters (a loop's `until` and `max_iterations`, a map's `over`).",
+      "properties": {
+        "node_ids": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "type": "string"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "op": {
+          "const": "wrap",
+          "title": "Op",
+          "type": "string"
+        },
+        "sequence_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Loop and map only: the id of the sequence that holds the nodes, when there are several.",
+          "title": "Sequence Id"
+        },
+        "with": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "description": "The new container without its nodes: `type` (sequence, parallel, loop or map), `id` and its other parameters.",
+          "title": "With",
+          "type": "object"
+        }
+      },
+      "required": [
+        "op",
+        "node_ids",
+        "with"
+      ],
+      "title": "Wrap",
+      "type": "object"
     }
   },
   "$id": "https://github.com/KsiProgramming/agentic-dev/schemas/graph-ops.v1.json",
@@ -1685,8 +1809,10 @@
             "addNode": "#/$defs/AddNode",
             "connect": "#/$defs/Connect",
             "disconnect": "#/$defs/Disconnect",
+            "extract": "#/$defs/Extract",
             "removeNode": "#/$defs/RemoveNode",
-            "setParam": "#/$defs/SetParam"
+            "setParam": "#/$defs/SetParam",
+            "wrap": "#/$defs/Wrap"
           },
           "propertyName": "op"
         },
@@ -1705,6 +1831,12 @@
           },
           {
             "$ref": "#/$defs/SetParam"
+          },
+          {
+            "$ref": "#/$defs/Wrap"
+          },
+          {
+            "$ref": "#/$defs/Extract"
           }
         ]
       },

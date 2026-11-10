@@ -7,7 +7,7 @@ import {
   type WorkflowSpec,
 } from "@/runs/graph/spec-graph";
 
-import type { NodeManifest } from "./node-types";
+import { manifestByKey, type NodeManifest } from "./node-types";
 import { applyOps, type GraphOp } from "./ops";
 import { portMismatches, type Mismatch } from "./ports";
 
@@ -47,10 +47,15 @@ function* nodesUnder(node: Json, manifests: Map<string, NodeManifest>): Generato
   }
 }
 
+/** The primitives' manifests by kind (a composite's entry shares the `subflow` kind). */
+function primitives(manifests: NodeManifest[]): Map<string, NodeManifest> {
+  return new Map(manifests.filter((m) => !m.composite).map((m) => [m.kind, m]));
+}
+
 /**
- * A new node from `kind`'s manifest: its `default` with a fresh id for every node in it (the
- * first free `<kind>_<n>` in `spec`: `agent_1`, `agent_2`, …) and its `fill` applied, added
- * after the step `afterId` (`null`: first).
+ * A new node from the palette entry `kind` (a kind, or a composite's `paletteKey`): its manifest's
+ * `default` with a fresh id for every node in it (the first free `<kind>_<n>` in `spec`:
+ * `agent_1`, `agent_2`, …) and its `fill` applied, added after the step `afterId` (`null`: first).
  */
 export function newNode(
   spec: WorkflowSpec,
@@ -58,8 +63,8 @@ export function newNode(
   manifests: NodeManifest[],
   afterId: string | null = null,
 ): AddNode["node"] {
-  const byKind = new Map(manifests.map((m) => [m.kind, m]));
-  const manifest = byKind.get(kind);
+  const byKind = primitives(manifests);
+  const manifest = manifestByKey(manifests, kind);
   if (!manifest) throw new Error(`There is no node type ${kind}.`);
   const taken = new Set(
     [...nodesUnder(spec.root as unknown as Json, byKind)].map((n) => String(n.id)),
@@ -320,6 +325,109 @@ export function replaceNode(
       { op: "addNode", node, at },
     ],
   };
+}
+
+/** The steps that may end a range starting at `nodeId` (6.6): the steps after it in its
+ * sequence, in order; none when it is not a sequence's step. */
+export function laterSteps(spec: WorkflowSpec, nodeId: string): string[] {
+  const place = placeOf(spec, nodeId);
+  return place?.slot === "steps" ? place.siblings.slice(place.index + 1) : [];
+}
+
+/** The node ids from `fromId` through `throughId`, steps of one sequence; just `fromId` when
+ * `throughId` is `null` or itself. */
+export function rangeOf(spec: WorkflowSpec, fromId: string, throughId: string | null): string[] {
+  const place = placeOf(spec, fromId);
+  if (!place || throughId === null || throughId === fromId || place.slot !== "steps") {
+    return [fromId];
+  }
+  const end = place.siblings.indexOf(throughId);
+  return end > place.index ? place.siblings.slice(place.index, end + 1) : [fromId];
+}
+
+/** The kinds `wrap` puts nodes in (6.6), with how the builder names them. */
+export const WRAP_CHOICES = [
+  { kind: "sequence", label: "Sequence" },
+  { kind: "parallel", label: "Parallel" },
+  { kind: "loop", label: "Loop" },
+  { kind: "map", label: "Map" },
+] as const;
+
+export type WrapKind = (typeof WRAP_CHOICES)[number]["kind"];
+
+/** Put `nodeIds` (one node, or consecutive steps of one sequence) in a new `kind` container
+ * (6.6): one `wrap`, its parameters from `kind`'s manifest default without the nodes it holds, a
+ * fresh `<kind>_<n>` id, and for a loop or map of several steps a new sequence for its body. */
+export function wrapNodes(
+  spec: WorkflowSpec,
+  nodeIds: string[],
+  kind: WrapKind,
+  manifests: NodeManifest[],
+): Edit {
+  const manifest = primitives(manifests).get(kind);
+  if (!manifest) throw new Error(`There is no node type ${kind}.`);
+  const taken = new Set(idsIn(spec.root));
+  const container = structuredClone(manifest.default) as Json;
+  for (const slot of manifest.slots) delete container[slot.split("[].")[0]];
+  container.id = freeId(taken, kind);
+  taken.add(String(container.id));
+  const op: components["schemas"]["Wrap"] = {
+    op: "wrap",
+    node_ids: nodeIds,
+    with: container as components["schemas"]["Wrap"]["with"],
+  };
+  if ((kind === "loop" || kind === "map") && nodeIds.length > 1) {
+    op.sequence_id = freeId(taken, "sequence");
+  }
+  const what = nodeIds.length === 1 ? nodeIds[0] : `${nodeIds.length} steps`;
+  return {
+    label: `Wrap ${what} in ${String(container.id)}`,
+    focus: String(container.id),
+    ops: [op],
+  };
+}
+
+/** The workflow an extract makes: its id (new in the workspace), name and description. */
+export interface ExtractTarget {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** Move `nodeIds` into a new workflow and call its version 1 in their place (6.6): one
+ * `extract`, with a fresh `subflow_<n>` id for the call. */
+export function extractNodes(spec: WorkflowSpec, nodeIds: string[], target: ExtractTarget): Edit {
+  const inside = new Set(nodeIds.flatMap((id) => idsIn(placeOf(spec, id)?.node ?? spec.root)));
+  const taken = new Set(idsIn(spec.root).filter((id) => !inside.has(id)));
+  const subflowId = freeId(taken, "subflow");
+  const workflow: components["schemas"]["ExtractedWorkflow"] = {
+    id: target.id,
+    name: target.name,
+  };
+  if (target.description) workflow.description = target.description;
+  return {
+    label: `Extract ${nodeIds.length === 1 ? nodeIds[0] : `${nodeIds.length} steps`} to ${target.id}`,
+    focus: subflowId,
+    ops: [{ op: "extract", node_ids: nodeIds, subflow_id: subflowId, workflow }],
+  };
+}
+
+/** Move the subflow `nodeId` to version `version` of the workflow it calls (6.6): one
+ * `setParam` on `workflow.version`. */
+export function updateCall(nodeId: string, version: number): Edit {
+  return {
+    label: `Update ${nodeId} to version ${version}`,
+    focus: nodeId,
+    ops: [{ op: "setParam", node_id: nodeId, path: "workflow.version", value: version }],
+  };
+}
+
+/** The workflows the unsaved `edits` extract, which the server stores only on Save: a call to
+ * one of them is not "unknown" meanwhile. */
+export function pendingExtracts(edits: Edit[]): Set<string> {
+  return new Set(
+    edits.flatMap((e) => e.ops.flatMap((op) => (op.op === "extract" ? [op.workflow.id] : []))),
+  );
 }
 
 export function removeStep(nodeId: string): Edit {

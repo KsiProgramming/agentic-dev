@@ -21,6 +21,7 @@ import { useNow } from "@/runs/use-now";
 import { useWorkspaceId } from "@/workspace";
 
 import { useWorkflows, type WorkflowSummary } from "./api";
+import { CompositeBadge } from "./composites";
 import { NewWorkflowSheet } from "./new-workflow";
 
 function href(workflow: WorkflowSummary): string {
@@ -30,13 +31,29 @@ function href(workflow: WorkflowSummary): string {
 function Name({ workflow }: { workflow: WorkflowSummary }) {
   return (
     <span className="flex min-w-0 flex-col">
-      <Link href={href(workflow)} className="truncate font-medium hover:underline">
-        {workflow.name}
-      </Link>
+      <span className="flex min-w-0 items-center gap-2">
+        <Link href={href(workflow)} className="truncate font-medium hover:underline">
+          {workflow.name}
+        </Link>
+        {workflow.published_version != null ? <CompositeBadge /> : null}
+      </span>
       {workflow.description ? (
         <span className="line-clamp-2 text-caption text-foreground-secondary">
           {workflow.description}
         </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** The latest version, and a composite's latest published one (6.6) when it is older. */
+function VersionText({ workflow }: { workflow: WorkflowSummary }) {
+  const published = workflow.published_version;
+  return (
+    <span className="flex flex-col">
+      <span>Version {workflow.latest_version}</span>
+      {published != null && published !== workflow.latest_version ? (
+        <span className="text-caption">Published {published}</span>
       ) : null}
     </span>
   );
@@ -49,7 +66,7 @@ function WorkflowsTable({ workflows, now }: { workflows: WorkflowSummary[]; now:
         <TableRow>
           <TableHead>Name</TableHead>
           <TableHead className="w-64">Id</TableHead>
-          <TableHead className="w-28">Version</TableHead>
+          <TableHead className="w-32">Version</TableHead>
           <TableHead className="w-32">Updated</TableHead>
         </TableRow>
       </TableHeader>
@@ -63,7 +80,7 @@ function WorkflowsTable({ workflows, now }: { workflows: WorkflowSummary[]; now:
               {workflow.workflow_id}
             </TableCell>
             <TableCell className="text-foreground-secondary">
-              Version {workflow.latest_version}
+              <VersionText workflow={workflow} />
             </TableCell>
             <TableCell className="text-foreground-secondary">
               <RelativeTime iso={workflow.updated_at} now={now} focusable={false} />
@@ -81,7 +98,7 @@ function WorkflowCard({ workflow, now }: { workflow: WorkflowSummary; now: numbe
       <Name workflow={workflow} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-foreground-secondary">
         <span className="max-w-full truncate font-mono">{workflow.workflow_id}</span>
-        <span>Version {workflow.latest_version}</span>
+        <VersionText workflow={workflow} />
         <RelativeTime iso={workflow.updated_at} now={now} focusable={false} />
       </div>
     </Card>

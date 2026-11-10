@@ -22,6 +22,7 @@ import { isKnownKind, kindLabel } from "@/runs/graph/node-kinds";
 
 import type { WorkflowVersionItem } from "./api";
 import { summarizeDiff, type NodeChange, type SpecDiff, type ValueChange } from "./diff";
+import { PublishedBadge } from "./composites";
 
 /**
  * Workflow versions (5.7): the history of a stored workflow, and what changed between two of its
@@ -96,6 +97,7 @@ export function HistorySheet({
                 <span className="flex items-center gap-2 text-body font-medium text-foreground">
                   Version {item.version}
                   {item.version === latest ? <Badge variant="secondary">Latest</Badge> : null}
+                  {item.published_at != null ? <PublishedBadge /> : null}
                   {current ? <span className="sr-only">(shown)</span> : null}
                 </span>
                 <span className="flex flex-wrap gap-x-1 text-meta text-foreground-secondary">

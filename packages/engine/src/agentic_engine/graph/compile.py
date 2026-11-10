@@ -1764,9 +1764,43 @@ def _subflow_entry(
                 status="failed", text=state["last_text"], usage=None, error=error
             )
             return {"results": {subflow.id: failed}, "order": [subflow.id]}
+        if (port := _subflow_input_port(subflow, text, limits)) is not None:
+            await log.emit(
+                NODE_FAILED,
+                node_id=subflow.id,
+                payload={"error": port.error, "port": port.payload()},
+            )
+            failed = AgentNodeResult(status="failed", text=text, usage=None, error=port.error)
+            return {"results": {subflow.id: failed}, "order": [subflow.id]}
         return {"last_text": text}
 
     return enter
+
+
+def _subflow_input_port(subflow: SubflowNode, text: str, limits: _Limits) -> PortFailure | None:
+    """Why what the workflow `subflow` calls is given does not match that workflow's
+    `input_schema` (6.6), or `None` when it matches or the workflow is untyped."""
+    schema = subflow.boundary_input_schema
+    if schema is None:
+        return None
+    checked = check_port("input", subflow.id, schema, text, limits.sources.get(subflow.id))
+    return checked if isinstance(checked, PortFailure) else None
+
+
+def _subflow_output(
+    subflow: SubflowNode, text: str, data: dict[str, JsonValue] | None
+) -> AgentNodeResult | PortFailure:
+    """The completed result of `subflow` from the called workflow's output: checked against that
+    workflow's `output_schema` (6.6) when it has one (its last node's `data` when there is some,
+    else the text), the matching object as its `data` and its pretty JSON as its text."""
+    schema = subflow.output_schema
+    if schema is None:
+        return AgentNodeResult(status="completed", text=text, usage=None, data=data)
+    checked = check_port("output", subflow.id, schema, data if data is not None else text)
+    if isinstance(checked, PortFailure):
+        return checked
+    pretty = json.dumps(checked, indent=2, ensure_ascii=False)
+    return AgentNodeResult(status="completed", text=pretty, usage=None, data=checked)
 
 
 def _subflow_done(
@@ -1779,9 +1813,16 @@ def _subflow_done(
 
     async def done(state: RunState) -> RunUpdate:
         source = state["results"].get(output)
-        await log.emit(NODE_COMPLETED, node_id=subflow.id)
         data = source.data if source is not None else None
-        result = AgentNodeResult(status="completed", text=state["last_text"], usage=None, data=data)
+        result = _subflow_output(subflow, state["last_text"], data)
+        if isinstance(result, PortFailure):
+            payload: dict[str, JsonValue] = {"error": result.error, "port": result.payload()}
+            await log.emit(NODE_FAILED, node_id=subflow.id, payload=payload)
+            failed = AgentNodeResult(
+                status="failed", text=state["last_text"], usage=None, error=result.error
+            )
+            return {"results": {subflow.id: failed}, "order": [subflow.id]}
+        await log.emit(NODE_COMPLETED, node_id=subflow.id)
         return _update(subflow.id, result)
 
     return done
@@ -1809,15 +1850,28 @@ async def _subflow_inline(
         failed = AgentNodeResult(status="failed", text=input, usage=None, error=error)
         scope.ran[subflow.id] = failed
         return subflow.id, failed
+    if (port := _subflow_input_port(subflow, input, scope.limits)) is not None:
+        refused: dict[str, JsonValue] = {"error": port.error, "port": port.payload()}
+        await log.emit(NODE_FAILED, node_id=subflow.id, payload=refused, **tag)
+        failed = AgentNodeResult(status="failed", text=input, usage=None, error=port.error)
+        scope.ran[subflow.id] = failed
+        return subflow.id, failed
     ended, result = await _run_inline(subflow.call, input, scope)
     end: dict[str, JsonValue] = {}
     if (error := _stop_error(ended, result)) is not None:
         end["error"] = error
-    await log.emit(NODE_END[result.status], node_id=subflow.id, payload=end, **tag)
     if result.status != "completed":
+        await log.emit(NODE_END[result.status], node_id=subflow.id, payload=end, **tag)
         scope.ran[subflow.id] = result.model_copy(update={"usage": None, "error": error})
         return ended, result
-    done = AgentNodeResult(status="completed", text=result.text, usage=None, data=result.data)
+    done = _subflow_output(subflow, result.text, result.data)
+    if isinstance(done, PortFailure):
+        wrong: dict[str, JsonValue] = {"error": done.error, "port": done.payload()}
+        await log.emit(NODE_FAILED, node_id=subflow.id, payload=wrong, **tag)
+        failed = AgentNodeResult(status="failed", text=result.text, usage=None, error=done.error)
+        scope.ran[subflow.id] = failed
+        return subflow.id, failed
+    await log.emit(NODE_COMPLETED, node_id=subflow.id, payload=end, **tag)
     scope.ran[subflow.id] = done
     return subflow.id, done
 
