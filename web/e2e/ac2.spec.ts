@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { endedRunEvents } from "./runs";
 import { getWorkflow } from "./workflows";
@@ -224,4 +224,91 @@ test("a flow drawn on the canvas with parallel, orchestrator, loop and gate runs
     );
   expect(statuses).toEqual(canvas.cards.map((card) => [card, "completed"]));
   await expect(map.getByTestId("map-task")).toHaveCount(1);
+});
+
+/** Presses `key` until `target` has the focus, at most `max` times. */
+async function keyTo(page: Page, target: Locator, key: string, max = 40) {
+  for (let i = 0; i < max; i++) {
+    if (await target.evaluate((el) => el === document.activeElement).catch(() => false)) return;
+    await page.keyboard.press(key);
+  }
+  throw new Error(`${key} never reached ${target.toString()}`);
+}
+
+/** Opens `nodeId`'s step menu from the keyboard: its "⋯" button takes the focus, Enter opens it. */
+async function menuByKeys(page: Page, nodeId: string) {
+  await page.getByRole("button", { name: `Edit step ${nodeId}` }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menu")).toBeVisible();
+}
+
+/** Adds a `kind` step after `nodeId` with the keyboard only: arrows to "Add a step after",
+ * ArrowRight into the palette, arrows to the kind, Enter. */
+function addAfterByKeys(page: Page, nodeId: string, kind: string): Promise<string[]> {
+  return added(page, async () => {
+    await menuByKeys(page, nodeId);
+    await keyTo(page, page.getByRole("menuitem", { name: "Add a step after" }), "ArrowDown");
+    await page.keyboard.press("ArrowRight");
+    const item = page.locator(`[role="menuitem"][data-kind="${kind}"]:not([data-composite])`);
+    await keyTo(page, item, "ArrowDown");
+    await page.keyboard.press("Enter");
+  });
+}
+
+/** Wraps `first` through `last` in a `kind` container with the keyboard only. */
+async function wrapByKeys(page: Page, first: string, last: string, kind: string): Promise<string> {
+  const [container] = await added(page, async () => {
+    await menuByKeys(page, first);
+    await keyTo(page, page.getByRole("menuitem", { name: "Wrap in…" }), "ArrowDown");
+    await page.keyboard.press("ArrowRight");
+    await keyTo(page, page.getByRole("menuitem", { name: `${kind}…` }), "ArrowDown");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog");
+    const steps = dialog.getByLabel("Steps");
+    await keyTo(page, steps, "Tab");
+    for (let i = 0; i < 10 && (await steps.inputValue()) !== last; i++) {
+      await page.keyboard.press("ArrowDown");
+    }
+    await expect(steps).toHaveValue(last);
+    await keyTo(page, dialog.getByRole("button", { name: "Wrap" }), "Tab");
+    await page.keyboard.press("Enter");
+  });
+  return container!;
+}
+
+test("the same flow's parallel, orchestrator, loop and gate are built with the keyboard only", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const name = `E2E AC-2 keys ${Date.now()}`;
+  const id = name.toLowerCase().replaceAll(" ", "-");
+  await page.goto("/templates");
+  await page
+    .getByTestId("blank-canvas-card")
+    .getByRole("button", { name: /blank workflow/ })
+    .click();
+  const sheet = page.getByTestId("new-workflow-sheet");
+  await sheet.getByLabel("Name").fill(name);
+  await sheet.getByRole("button", { name: "Create workflow" }).click();
+  await expect(page).toHaveURL(new RegExp(`/workflows/${id}\?node=agent_1$`));
+  await page.keyboard.press("Escape");
+  const [first] = await cardIds(page);
+
+  const [second] = await addAfterByKeys(page, first!, "agent");
+  const explore = await wrapByKeys(page, first!, second!, "Parallel");
+  const [implement] = await addAfterByKeys(page, explore, "orchestrator");
+  const [reviewer] = await addAfterByKeys(page, implement!, "agent");
+  const loop = await wrapByKeys(page, implement!, reviewer!, "Loop");
+  await addAfterByKeys(page, loop, "gate");
+
+  const save = page.getByRole("button", { name: "Save" });
+  await save.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("builder-status")).toContainText("Version 2");
+  const saved = (await getWorkflow(request, id)).spec as unknown as {
+    root: { steps: { type: string; id: string; body?: { steps: { type: string }[] } }[] };
+  };
+  expect(saved.root.steps.map((s) => s.type)).toEqual(["parallel", "loop", "gate"]);
+  expect(saved.root.steps[1]!.body!.steps.map((s) => s.type)).toEqual(["orchestrator", "agent"]);
 });

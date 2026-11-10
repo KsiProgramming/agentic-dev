@@ -25,8 +25,8 @@ Order chosen with the user: the engine check first, then the browser, then the t
   - Wrap in… Loop over `implement` through `reviewer`, `until` and `max_iterations` in the side panel;
   - Add a step after → Gate, then Tool `github.openPR`;
   - each agent's role, instructions and tools in the side panel. The status line reads "Ready to run"; Save makes version N.
-- [ ] Run this version (`WorkflowRunSheet`), using the e2e fake runtime's scripts for the hub's plans and the reviewer's verdicts (as `orchestrator-loop-run`). Approve `approve_pr` from the approval dock.
-- [ ] Compare the run map with the canvas of version N: the same node ids at the same places (`flow-layout`), the loop showing two iterations, the orchestrator its tasks per round, every card with the status its events give.
+- [ ] Run this version (`WorkflowRunSheet`) on the stack's fake agents (`fit_schemas`): the hub plans one task and the reviewer approves the first pass, so the browser run has one loop iteration; two passes, the second built on the first, are covered by the engine tests (`test_ac2.py`). Approve the gate from the approval dock.
+- [ ] Compare the run map with the canvas of version N: the same cards joined by the same edges (wraps aside), the orchestrator's one task, every card with the status its events give.
 - [ ] The same build once by keyboard only (Tab, Enter, arrow keys in menus), shortened to the parallel, orchestrator, loop and gate.
 - [ ] Each gap found (a menu item missing, an edit refused, a card drawn somewhere else in the run map than on the canvas) gets its own task here, a unit test and a fix, and a line in tech-stack → Builder canvas or Run console if it changes a rule.
 
