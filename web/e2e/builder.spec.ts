@@ -31,7 +31,7 @@ async function stepMenu(page: Page, nodeId: string, item: string) {
 async function addAfter(page: Page, nodeId: string, kind: string) {
   await page.getByRole("button", { name: `Edit step ${nodeId}` }).click();
   await page.getByRole("menuitem", { name: "Add a step after" }).click();
-  await page.locator(`[role="menuitem"][data-kind="${kind}"]`).click();
+  await page.locator(`[role="menuitem"][data-kind="${kind}"]:not([data-composite])`).click();
 }
 
 test("edits on the canvas are saved as a new version and read back", async ({ page, request }) => {
@@ -96,12 +96,15 @@ test("the palette lists the engine's node types and adds containers whole", asyn
 
   await page.getByRole("button", { name: "Edit step start" }).click();
   await page.getByRole("menuitem", { name: "Add a step after" }).click();
+  // The primitives' groups; the E2E workspace's composites (6.6) may follow as Workspace nodes.
   const groups = page.getByRole("group");
-  await expect(groups).toHaveCount(3);
   await expect(groups.nth(0)).toContainText("Steps");
   await expect(groups.nth(1)).toContainText("Flow");
   await expect(groups.nth(2)).toContainText("Combine");
-  await expect(page.locator('[role="menuitem"][data-kind]')).toHaveCount(NODE_TYPES);
+  await expect(groups.filter({ hasNotText: "Workspace nodes" })).toHaveCount(3);
+  await expect(page.locator('[role="menuitem"][data-kind]:not([data-composite])')).toHaveCount(
+    NODE_TYPES,
+  );
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 

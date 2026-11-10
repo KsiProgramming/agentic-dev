@@ -1241,6 +1241,9 @@ function opErrorNode(err: unknown): string | null {
   return null;
 }
 
+/** A palette's menu: it scrolls once the workspace's composites (6.6) make it long. */
+const PALETTE_MENU = "max-h-80 overflow-y-auto";
+
 /** The palette: the node types from `GET /node-types`, by category. */
 interface Palette {
   groups: { label: string; items: NodeManifest[] }[];
@@ -1336,7 +1339,7 @@ function AddMenu({
           {label}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className={PALETTE_MENU}>
         <AddItems palette={palette} blocked={blocked} onAdd={onAdd} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -1487,7 +1490,7 @@ function StepMenuItems({
           <PlusIcon aria-hidden="true" />
           Add a step after
         </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
+        <DropdownMenuSubContent className={PALETTE_MENU}>
           <AddItems
             palette={palette}
             blocked={(k) => blocked(edits.add(k))}
@@ -1501,7 +1504,7 @@ function StepMenuItems({
             <PlusIcon aria-hidden="true" />
             Add a branch
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
+          <DropdownMenuSubContent className={PALETTE_MENU}>
             <AddItems
               palette={palette}
               blocked={(k) => blocked(edits.addBranch(k))}
@@ -1568,7 +1571,7 @@ function StepMenuItems({
             <ReplaceIcon aria-hidden="true" />
             Replace with…
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
+          <DropdownMenuSubContent className={PALETTE_MENU}>
             <AddItems
               palette={palette}
               blocked={(k) => blocked(edits.replace(k))}

@@ -19,7 +19,7 @@ const workflow = (id: string, name: string, ...steps: object[]) => ({
 async function addAfter(page: Page, nodeId: string, kind: string) {
   await page.getByRole("button", { name: `Edit step ${nodeId}` }).click();
   await page.getByRole("menuitem", { name: "Add a step after" }).click();
-  await page.locator(`[role="menuitem"][data-kind="${kind}"]`).click();
+  await page.locator(`[role="menuitem"][data-kind="${kind}"]:not([data-composite])`).click();
 }
 
 test("a workflow calls another, picked on the canvas, and its run nests the call", async ({
