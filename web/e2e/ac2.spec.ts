@@ -122,6 +122,7 @@ test("a flow drawn on the canvas with parallel, orchestrator, loop and gate runs
   await sheet.getByRole("button", { name: "Create workflow" }).click();
   await expect(page).toHaveURL(new RegExp(`/workflows/${id}\\?node=agent_1$`));
   await page.keyboard.press("Escape");
+  await expect(builderCards(page)).toHaveCount(1);
   const [first] = await cardIds(page);
 
   // 2. Two analysts in a parallel.
@@ -291,8 +292,9 @@ test("the same flow's parallel, orchestrator, loop and gate are built with the k
   const sheet = page.getByTestId("new-workflow-sheet");
   await sheet.getByLabel("Name").fill(name);
   await sheet.getByRole("button", { name: "Create workflow" }).click();
-  await expect(page).toHaveURL(new RegExp(`/workflows/${id}\?node=agent_1$`));
+  await expect(page).toHaveURL(new RegExp(`/workflows/${id}\\?node=agent_1$`));
   await page.keyboard.press("Escape");
+  await expect(builderCards(page)).toHaveCount(1);
   const [first] = await cardIds(page);
 
   const [second] = await addAfterByKeys(page, first!, "agent");
