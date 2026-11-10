@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 6.7 "fix selected findings":
+- Phase 6.7 "fix selected findings" ([#170](https://github.com/KsiProgramming/agentic-dev/pull/170)):
   - **Selection gates.** A `gate` takes `select` (`artifact`, `items`, `key`, `preselect`, `min`): it shows a JSON run artifact's items, its approval names the ones chosen (`selection` on `POST /runs/{id}/approvals`, refused with `selection_required`, `selection_not_allowed`, `unknown_selection`, `duplicate_selection` or `selection_too_small`), and its output, and `writes` artifact, is the artifact with only those items (a findings report's counts recomputed). `gate_waiting` and `GET /runs/{id}/gate` carry `select`; the approval keeps it (Alembic `0028_approval_selection`); `gate.approved` audits how many were chosen.
   - **Ending a run at a gate.** `on_reject: "end"` on a step of the root sequence completes the run when the gate is rejected, skipping the steps after it (`invalid_gate` elsewhere).
   - **`github.openPR` `body_from`.** A run artifact whose text goes under the pull request's static body.
