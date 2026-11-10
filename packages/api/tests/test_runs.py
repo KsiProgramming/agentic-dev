@@ -551,6 +551,158 @@ async def test_edits_that_do_not_fit_the_gate_are_refused(
     assert approved.status_code == 202
 
 
+SELECTION_REPORT: dict[str, Any] = {
+    "scanner": "merged",
+    "checks": [{"path": ".", "kind": "repo", "tool": "agent", "status": "ran"}],
+    "findings": [
+        {
+            "fingerprint": key,
+            "tool": "agent",
+            "rule": f"rule-{key}",
+            "severity": severity,
+            "category": "security",
+            "path": "app.py",
+            "line": 3,
+            "message": f"Issue {key}.",
+        }
+        for key, severity in (("a", "high"), ("b", "low"))
+    ],
+    "counts": {"critical": 0, "high": 1, "medium": 0, "low": 1, "info": 0},
+    "truncated": False,
+}
+
+
+def selecting_spec() -> dict[str, Any]:
+    """`scan` writes its input (a findings report) as findings.json, the selection gate `pick`
+    shows its findings (high ones checked) and ends the run when rejected, and `fix` echoes what
+    was chosen (6.7)."""
+    return {
+        "spec_version": "0",
+        "id": "selecting",
+        "name": "Selecting",
+        "root": {
+            "type": "sequence",
+            "id": "main",
+            "steps": [
+                {
+                    "type": "agent",
+                    "id": "scan",
+                    "role": "S",
+                    "instructions": "Go.",
+                    "writes": "findings.json",
+                },
+                {
+                    "type": "gate",
+                    "id": "pick",
+                    "title": "Pick findings",
+                    "select": {"artifact": "findings.json", "preselect": 'item.severity == "high"'},
+                    "on_reject": "end",
+                },
+                {"type": "agent", "id": "fix", "role": "F", "instructions": "Fix."},
+            ],
+        },
+    }
+
+
+async def post_selecting_run(client: httpx.AsyncClient) -> UUID:
+    response = await client.post(
+        "/runs", json={"workflow": selecting_spec(), "input": json.dumps(SELECTION_REPORT)}
+    )
+    assert response.status_code == 202, response.text
+    return UUID(response.json()["run_id"])
+
+
+async def test_a_selection_gate_is_approved_with_the_items_chosen(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Phase 6.7: the gate's review names the items to choose from, an approval that does not
+    fit them is refused with its code, and the run goes on with the items chosen."""
+
+    def approval(**fields: Any) -> dict[str, Any]:
+        return {"node_id": "pick", "decision": "approve", **fields}
+
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_selecting_run(client)
+        paused = await until_waiting(client, run_id)
+        review = await client.get(f"/runs/{run_id}/gate")
+        refused = {
+            code: await client.post(f"/runs/{run_id}/approvals", json=body)
+            for code, body in [
+                ("selection_required", approval()),
+                ("unknown_selection", approval(selection=["zz"])),
+                ("duplicate_selection", approval(selection=["a", "a"])),
+                ("selection_too_small", approval(selection=[])),
+                ("selection_not_allowed", {**approval(selection=["a"]), "decision": "reject"}),
+            ]
+        }
+        approved = await client.post(f"/runs/{run_id}/approvals", json=approval(selection=["b"]))
+        rest = await collect(client, run_id, headers={"Last-Event-ID": str(paused[-1].id)})
+        audit = await client.get(
+            f"/workspaces/{DEFAULT_WORKSPACE_ID}/audit",
+            params={"action": "gate.approved", "run_id": str(run_id)},
+        )
+
+    assert review.status_code == 200, review.text
+    select = review.json()["select"]
+    assert (select["artifact"], select["keys"], select["preselected"]) == (
+        "findings.json",
+        ["a", "b"],
+        ["a"],
+    )
+    assert review.json()["on_reject"] == "end"
+    for code, response in refused.items():
+        assert response.status_code == 422, (code, response.text)
+        assert response.json()["detail"]["code"] == code
+    assert approved.status_code == 202, approved.text
+    decided = next(f for f in rest if f.event == "gate_decided")
+    assert decided.data["payload"]["selection"] == ["b"]
+    assert rest[-1].event == "run_completed"
+    fix_message = next(f for f in rest if f.event == "message" and f.data["node_id"] == "fix")
+    chosen = json.loads(fix_message.data["payload"]["text"])
+    assert [f["fingerprint"] for f in chosen["findings"]] == ["b"]
+    (row,) = audit.json()["items"]
+    assert row["details"]["selected"] == 1
+
+
+async def test_a_gate_that_does_not_select_refuses_a_selection(
+    postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_gated_run(client)
+        await until_waiting(client, run_id)
+        review = await client.get(f"/runs/{run_id}/gate")
+        refused = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={"node_id": "gate", "decision": "approve", "selection": ["a"]},
+        )
+        await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "gate", "decision": "approve"}
+        )
+        await collect(client, run_id)
+
+    assert (review.json()["select"], review.json()["on_reject"]) == (None, "cancel")
+    assert refused.status_code == 422
+    assert refused.json()["detail"]["code"] == "selection_not_allowed"
+
+
+async def test_rejecting_a_gate_that_ends_the_run_completes_it(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_selecting_run(client)
+        paused = await until_waiting(client, run_id)
+        response = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "pick", "decision": "reject"}
+        )
+        assert response.status_code == 202, response.text
+        rest = await collect(client, run_id, headers={"Last-Event-ID": str(paused[-1].id)})
+
+    assert rest[-1].event == "run_completed"
+    assert "fix" not in {f.data["node_id"] for f in rest}
+    run = await get_run(sessions, run_id)
+    assert run is not None and run.status == "completed"
+
+
 async def test_approvals_that_do_not_fit_are_refused(postgres_url: str, redis_url: str) -> None:
     async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
         unknown = await client.post(

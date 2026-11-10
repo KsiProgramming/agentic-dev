@@ -4,7 +4,8 @@ A run paused at a gate is `waiting` and no worker holds it. Recording the decisi
 to `queued` with no lease, so `claim_run` takes it like a new run once it is enqueued again; the
 worker then continues it with `pending_decision`. Its `attempt` count starts again, so the time
 a run spends at gates never uses up its retries. The gate a run waits at is the node of its last
-`gate_waiting` event, whose `changes` are the files an approval may edit. A gate past its
+`gate_waiting` event, whose `changes` are the files an approval may edit and whose `select` the
+items a selection gate's approval may choose (6.7). A gate past its
 `gate_expires_at` takes no decision: the run is being cancelled (`agentic_store.expiry`).
 """
 
@@ -19,7 +20,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.artifacts import GateArtifact
 from agentic_engine.events import GATE_WAITING
-from agentic_engine.gate import EditError, EditErrorCode, FileChange, GateDecision, check_edits
+from agentic_engine.gate import (
+    EditError,
+    EditErrorCode,
+    FileChange,
+    GateDecision,
+    SelectionError,
+    SelectionErrorCode,
+    SelectionShown,
+    check_edits,
+    check_selection,
+)
 from agentic_store.audit import audit
 from agentic_store.models import Approval, Run, RunEventRow
 
@@ -58,6 +69,14 @@ class InvalidEditsError(ApprovalError):
         self.path = path
 
 
+class InvalidSelectionError(ApprovalError):
+    """The decision's selection does not fit the items the gate showed (6.7)."""
+
+    def __init__(self, code: SelectionErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code: SelectionErrorCode = code
+
+
 _CHANGES = TypeAdapter(list[FileChange])
 
 
@@ -70,7 +89,8 @@ async def record_approval(
     """Record `decision` for the gate `node_id` the run is waiting at, and queue the run again;
     return it as recorded, without the edits that leave a file as it was. The caller enqueues
     it. Raises an `ApprovalError` if the run is not waiting at that gate, the gate was already
-    decided, or the edits do not fit the files the gate showed (`InvalidEditsError`)."""
+    decided, the edits do not fit the files the gate showed (`InvalidEditsError`), or the
+    selection does not fit its items (`InvalidSelectionError`)."""
     try:
         async with sessions.begin() as session:
             # Locks the run, so two decisions for it are recorded one after the other.
@@ -81,7 +101,9 @@ async def record_approval(
                 raise RunNotWaitingError(f"run {run_id} is {run.status}, not waiting at a gate")
             if run.gate_expires_at is not None and run.gate_expires_at <= await _now(session):
                 raise GateExpiredError(f"the approval of run {run_id} expired")
-            gate, changes = await _waiting_gate_changes(session, run_id)
+            row = await _last_gate_waiting(session, run_id)
+            gate, payload = row if row is not None else (None, {})
+            changes = _shown_changes(payload)
             if gate != node_id:
                 raise WrongGateError(f"run {run_id} is waiting at gate {gate!r}, not {node_id!r}")
             if await _approval(session, run_id, node_id) is not None:
@@ -90,6 +112,10 @@ async def record_approval(
                 edits = check_edits(changes, decision.decision, decision.edits)
             except EditError as e:
                 raise InvalidEditsError(e.code, str(e), e.path) from e
+            try:
+                check_selection(_shown_selection(payload), decision.decision, decision.selection)
+            except SelectionError as e:
+                raise InvalidSelectionError(e.code, str(e)) from e
             decision = decision.model_copy(update={"edits": edits})
             workspace_id = run.workspace_id
             session.add(
@@ -100,6 +126,7 @@ async def record_approval(
                     comment=decision.comment,
                     decided_by=decision.decided_by,
                     edits=[e.model_dump(mode="json") for e in edits] or None,
+                    selection=decision.selection,
                 )
             )
             await session.execute(
@@ -114,15 +141,24 @@ async def record_approval(
                 run_id=run_id,
                 node_id=node_id,
                 # Paths only: the edited contents stay in the approval and the run's events.
-                details={
-                    "comment": decision.comment,
-                    "edited_files": len(edits),
-                    "edited_paths": [e.path for e in edits],
-                },
+                details=_audit_details(decision, [e.path for e in edits]),
             )
     except IntegrityError as e:
         raise AlreadyDecidedError(f"gate {node_id!r} of run {run_id} was already decided") from e
     return decision
+
+
+def _audit_details(decision: GateDecision, edited: list[str]) -> dict[str, JsonValue]:
+    """A decision's audit details: paths only, as the edited contents stay in the approval and
+    the run's events, and how many items a selection chose (6.7), never the items."""
+    details: dict[str, JsonValue] = {
+        "comment": decision.comment,
+        "edited_files": len(edited),
+        "edited_paths": list[JsonValue](edited),
+    }
+    if decision.selection is not None:
+        details["selected"] = len(decision.selection)
+    return details
 
 
 @dataclass(frozen=True)
@@ -140,6 +176,9 @@ class PendingGate:
     expires_at: datetime | None
     # The run's artifacts at the pause (none before phase 4.3).
     run_artifacts: list[GateArtifact] = field(default_factory=list[GateArtifact])
+    # What a selection gate shows (6.7), and what a rejection does.
+    select: SelectionShown | None = None
+    on_reject: str = "cancel"
 
 
 async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> PendingGate:
@@ -167,7 +206,17 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         changes_error=_text(payload.get("changes_error")),
         expires_at=run.gate_expires_at,
         run_artifacts=_shown_artifacts(payload),
+        select=_shown_selection(payload),
+        on_reject=_text(payload.get("on_reject")) or "cancel",
     )
+
+
+def _shown_selection(payload: dict[str, JsonValue]) -> SelectionShown | None:
+    shown = payload.get("select")
+    try:
+        return SelectionShown.model_validate(shown) if shown is not None else None
+    except ValidationError:
+        return None
 
 
 def _shown_artifacts(payload: dict[str, JsonValue]) -> list[GateArtifact]:
@@ -191,20 +240,9 @@ async def pending_decision(
             "comment": approval.comment,
             "decided_by": approval.decided_by,
             "edits": approval.edits or [],
+            "selection": approval.selection,
         }
     )
-
-
-async def _waiting_gate_changes(
-    session: AsyncSession, run_id: UUID
-) -> tuple[str | None, list[FileChange]]:
-    """The gate the run last paused at, and the files its pause showed (none if its payload has
-    none, as before phase 3.6, or they cannot be read)."""
-    row = await _last_gate_waiting(session, run_id)
-    if row is None:
-        return None, []
-    node_id, payload = row
-    return node_id, _shown_changes(payload)
 
 
 async def _last_gate_waiting(

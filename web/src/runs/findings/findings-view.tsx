@@ -100,7 +100,7 @@ function Rule({ finding }: { finding: Finding }) {
 
 /** The scanner's message, for a dependency what version fixes it, and in a merged report
  * which of its `sources` found it. Text, never HTML. */
-function Message({ finding, sources }: { finding: Finding; sources?: number }) {
+export function Message({ finding, sources }: { finding: Finding; sources?: number }) {
   const fixed = finding.fixed_versions ?? [];
   return (
     <span className="flex min-w-0 flex-col gap-0.5">

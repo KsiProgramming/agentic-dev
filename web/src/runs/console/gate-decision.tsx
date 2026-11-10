@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { fileKey, type FileChange } from "../gates";
 import type { GateInfo } from "../timeline";
 import type { GateFile } from "./gate-files";
+import { selectedLine } from "./step-entries";
 import { GateReviewSheet } from "./gate-review-sheet";
 
 function plural(count: number, word: string): string {
@@ -47,10 +48,12 @@ export function GateDecision({ gate }: { gate: GateInfo }) {
         <span className="text-muted-foreground" data-testid="gate-decision">
           ·{" "}
           {gate.decision !== "approve"
-            ? `Rejected${gate.comment ? `: ${gate.comment}` : ""}`
-            : `Approved${edited ? ` with edits to ${plural(edited, "file")}` : ""}${
+            ? `${gate.onReject === "end" ? "Ended the run here" : "Rejected"}${
                 gate.comment ? `: ${gate.comment}` : ""
-              }`}
+              }`
+            : `${selectedLine(gate) ?? "Approved"}${
+                edited ? ` with edits to ${plural(edited, "file")}` : ""
+              }${gate.comment ? `: ${gate.comment}` : ""}`}
         </span>
       ) : null}
       {edited > 0 ? (

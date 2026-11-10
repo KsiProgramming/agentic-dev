@@ -797,7 +797,7 @@
           "runs"
         ],
         "summary": "Approve",
-        "description": "Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it\n`cancelled`. An approval may edit the files the gate showed as editable; the gate commits\nthe edits on the writers' branches before the run goes on. The run is queued again; its\nstream carries on with `gate_decided`. A gate past its `expires_at` takes no decision.",
+        "description": "Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it\n`cancelled`. An approval may edit the files the gate showed as editable; the gate commits\nthe edits on the writers' branches before the run goes on. The run is queued again; its\nstream carries on with `gate_decided`. A gate past its `expires_at` takes no decision. A\nselection gate's approval names the items chosen (`selection`, 6.7); with `on_reject: end`\na rejection completes the run instead of cancelling it.",
         "operationId": "approveRun",
         "parameters": [
           {
@@ -839,7 +839,7 @@
             "description": "The run is not waiting at this gate, the gate was already decided, or its approval expired"
           },
           "422": {
-            "description": "The edits do not fit the files the gate showed",
+            "description": "The edits do not fit the files the gate showed, or the selection the items it showed",
             "content": {
               "application/json": {
                 "schema": {
@@ -2912,6 +2912,22 @@
             "maxItems": 50,
             "title": "Edits",
             "description": "An approval's new text for files of the gate's `changes` (editable ones only); the gate commits them on the writers' branches before the run goes on."
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection",
+            "description": "A selection gate's approval (6.7): the keys of the items chosen, from its `select.keys`; required to approve one, refused anywhere else."
           }
         },
         "additionalProperties": false,
@@ -3602,7 +3618,15 @@
       "EditErrorDetail": {
         "properties": {
           "code": {
-            "$ref": "#/components/schemas/EditErrorCode"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditErrorCode"
+              },
+              {
+                "$ref": "#/components/schemas/SelectionErrorCode"
+              }
+            ],
+            "title": "Code"
           },
           "message": {
             "type": "string",
@@ -3626,7 +3650,7 @@
           "message"
         ],
         "title": "EditErrorDetail",
-        "description": "The `detail` of an approval refused because its edits do not fit the files the gate\nshowed: `code` says how, `path` names the file at fault, if one is."
+        "description": "The `detail` of an approval refused because its edits do not fit the files the gate\nshowed, or its selection the items it showed (6.7): `code` says how, `path` names the file at\nfault, if one is."
       },
       "Extract": {
         "properties": {
@@ -3921,6 +3945,50 @@
             ],
             "title": "Ttl S",
             "description": "Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateSelect"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items."
+          },
+          "on_reject": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cancel",
+                  "end"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Reject",
+            "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only)."
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes",
+            "description": "With `select`, store the chosen items as this run artifact."
           }
         },
         "additionalProperties": false,
@@ -3931,7 +3999,64 @@
           "title"
         ],
         "title": "GateNode",
-        "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged."
+        "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged, unless\nit selects (6.7): then its output is the artifact's items the approver chose."
+      },
+      "GateSelect": {
+        "properties": {
+          "artifact": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "title": "Artifact",
+            "description": "A `.json` run artifact written before the gate, whose items are shown.",
+            "examples": [
+              "findings.json"
+            ]
+          },
+          "items": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Items",
+            "description": "The top-level array field of the artifact that holds the items.",
+            "default": "findings"
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Key",
+            "description": "The field of each item that names it; items without one cannot be chosen.",
+            "default": "fingerprint"
+          },
+          "preselect": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preselect",
+            "description": "A CEL condition over `item`: the items checked when the gate opens."
+          },
+          "min": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Min",
+            "description": "The fewest items an approval selects.",
+            "default": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "artifact"
+        ],
+        "title": "GateSelect",
+        "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key."
       },
       "GithubErrorDetail": {
         "properties": {
@@ -4062,7 +4187,8 @@
           "not_allowed_in_orchestrator",
           "subflow_unknown",
           "subflow_cycle",
-          "subflow_unpublished"
+          "subflow_unpublished",
+          "invalid_gate"
         ]
       },
       "JsonValue": {},
@@ -6219,6 +6345,27 @@
             "type": "array",
             "title": "Branches",
             "description": "The branches of the writers whose changes the gate shows, in order."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SelectionShown"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A selection gate's items (6.7): the artifact version to read them from, the keys that can be chosen, those checked when it opened and the fewest to choose."
+          },
+          "on_reject": {
+            "type": "string",
+            "enum": [
+              "cancel",
+              "end"
+            ],
+            "title": "On Reject",
+            "description": "What rejecting does: cancel the run, or end it here as completed.",
+            "default": "cancel"
           }
         },
         "type": "object",
@@ -6708,6 +6855,72 @@
         ],
         "title": "RunUsage",
         "description": "Totals of the run's usage events, priced when each was logged."
+      },
+      "SelectionErrorCode": {
+        "type": "string",
+        "enum": [
+          "selection_required",
+          "selection_not_allowed",
+          "unknown_selection",
+          "duplicate_selection",
+          "selection_too_small"
+        ]
+      },
+      "SelectionShown": {
+        "properties": {
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "items": {
+            "type": "string",
+            "title": "Items"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keys"
+          },
+          "preselected": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preselected"
+          },
+          "min": {
+            "type": "integer",
+            "title": "Min"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "artifact",
+          "version",
+          "items",
+          "key",
+          "count",
+          "keys",
+          "preselected",
+          "min"
+        ],
+        "title": "SelectionShown",
+        "description": "What a selection gate showed (`gate_waiting`'s `select`): the artifact version, where the\nitems are, how many there are, the keys that can be chosen (in item order), those checked\nwhen it opened, and the fewest an approval selects."
       },
       "SequenceNode": {
         "properties": {

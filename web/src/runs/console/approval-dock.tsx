@@ -116,7 +116,7 @@ export function ApprovalDock({
                 Review details
               </Button>
               <RejectButton decision={decision} shortcut />
-              <ApproveButton decision={decision} shortcut />
+              <ApproveButton decision={decision} shortcut review />
             </div>
           )}
         </div>

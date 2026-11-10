@@ -8,18 +8,27 @@ A gate after writer nodes shows the approver the files those writers changed (`F
 a `GateReview` the worker gives the engine), and an approval may edit them (`FileEdit`). The gate
 commits the edits to the writers' branches before it completes, so the nodes after it (e.g.
 `github.openPR`) publish them.
+
+A selection gate (6.7) shows the items of a JSON run artifact (`select`), and an approval names
+the ones chosen (`selection`, by each item's key): the gate's output is the artifact with only
+those items. A gate with `on_reject: end` ends the run as completed when it is rejected.
 """
 
-from collections.abc import Sequence
-from typing import Literal, Protocol
+import json
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from typing import Literal, Protocol, cast
 
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agentic_engine.agent import AgentNodeResult
-from agentic_engine.events import GATE_DECIDED, RunEventLog
+from agentic_engine.artifacts import ArtifactRef, ArtifactStore
+from agentic_engine.events import GATE_DECIDED, NODE_STARTED, RunEventLog
+from agentic_engine.expr import ExpressionError, compile_item_condition
 from agentic_engine.policy import APPROVAL_TTL_S
-from agentic_engine.spec import GateNode
+from agentic_engine.spec import MAX_SELECT_ITEMS, GateNode, GateSelect
+from agentic_runtime.findings import SEVERITIES, FindingsReport
 
 MAX_REVIEW_FILES = 50
 """Changed files shown at a gate with their contents; later ones are listed as `over_limit`."""
@@ -33,6 +42,13 @@ type ChangeStatus = Literal["added", "modified", "deleted", "renamed"]
 type NotEditable = Literal["binary", "too_large", "deleted", "renamed", "over_limit"]
 type EditErrorCode = Literal[
     "edit_not_allowed", "edits_with_reject", "edit_too_large", "duplicate_edit"
+]
+type SelectionErrorCode = Literal[
+    "selection_required",
+    "selection_not_allowed",
+    "unknown_selection",
+    "duplicate_selection",
+    "selection_too_small",
 ]
 
 
@@ -67,7 +83,7 @@ class FileEdit(BaseModel):
 
 class GateDecision(BaseModel):
     """What a human decided at a gate; the value a paused run continues with. Only an approval
-    has `edits`."""
+    has `edits`, and only a selection gate's approval a `selection`."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -75,6 +91,11 @@ class GateDecision(BaseModel):
     comment: str | None = None
     decided_by: str | None = None
     edits: list[FileEdit] = Field(default_factory=list[FileEdit])
+    selection: list[str] | None = Field(
+        default=None,
+        max_length=MAX_SELECT_ITEMS,
+        description="A selection gate's approval: the keys of the items chosen (6.7).",
+    )
 
 
 class GateReview(Protocol):
@@ -149,23 +170,183 @@ def check_edits(
     return kept
 
 
-def gate_request(node: GateNode, input: str, ttl_s: int) -> dict[str, JsonValue]:
+class SelectionError(ValueError):
+    """An approval's selection does not fit what the gate showed (6.7)."""
+
+    def __init__(self, code: SelectionErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code: SelectionErrorCode = code
+
+
+class GateSelectError(Exception):
+    """A selection gate cannot show its items: the artifact is missing, not a JSON object, or
+    has no list of items under `select.items`."""
+
+
+class SelectionShown(BaseModel):
+    """What a selection gate showed (`gate_waiting`'s `select`): the artifact version, where the
+    items are, how many there are, the keys that can be chosen (in item order), those checked
+    when it opened, and the fewest an approval selects."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    artifact: str
+    version: int
+    items: str
+    key: str
+    count: int
+    keys: list[str]
+    preselected: list[str]
+    min: int
+
+
+def selection_items(select: GateSelect, document: JsonValue) -> list[JsonValue]:
+    """The items `select` shows from `document`. Raises `GateSelectError` when there are none to
+    show: `document` is not an object, or `select.items` is not a list in it."""
+    if not isinstance(document, dict):
+        raise GateSelectError(f"{select.artifact} is not a JSON object")
+    items = document.get(select.items)
+    if not isinstance(items, list):
+        raise GateSelectError(f"{select.artifact} has no list {select.items!r}")
+    return items[:MAX_SELECT_ITEMS]
+
+
+def item_key(item: JsonValue, key: str) -> str | None:
+    """The key of `item`: a non-empty string or an integer under `key`, as text."""
+    value = item.get(key) if isinstance(item, dict) else None
+    if isinstance(value, bool) or not isinstance(value, str | int):
+        return None
+    return str(value) or None
+
+
+def selection_shown(select: GateSelect, ref: ArtifactRef, document: JsonValue) -> SelectionShown:
+    """What a selection gate on `document` (the artifact version `ref`) shows. An item with no
+    key, or with a key an earlier item has, cannot be chosen; a `preselect` that fails on an item
+    leaves it unchecked. Raises `GateSelectError` as `selection_items`."""
+    items = selection_items(select, document)
+    condition = compile_item_condition(select.preselect) if select.preselect else None
+    keys: dict[str, None] = {}
+    preselected: list[str] = []
+    for item in items:
+        key = item_key(item, select.key)
+        if key is None or key in keys:
+            continue
+        keys[key] = None
+        try:
+            if condition is not None and condition.evaluate(item):
+                preselected.append(key)
+        except ExpressionError:
+            pass
+    return SelectionShown(
+        artifact=ref.name,
+        version=ref.version,
+        items=select.items,
+        key=select.key,
+        count=len(items),
+        keys=list(keys),
+        preselected=preselected,
+        min=select.min,
+    )
+
+
+def check_selection(
+    shown: SelectionShown | None,
+    decision: Literal["approve", "reject"],
+    selection: Sequence[str] | None,
+) -> list[str]:
+    """The selection of a decision at a gate that showed `shown` (`None` for a gate that does not
+    select). Raises `SelectionError` for a selection on a gate that does not select or with a
+    reject, no selection on a selection gate's approval, a key it did not show, a key twice, or
+    fewer keys than its `min`."""
+    if shown is None or decision == "reject":
+        if selection is not None:
+            why = "a rejection" if shown is not None else "a gate that does not select"
+            raise SelectionError("selection_not_allowed", f"{why} cannot carry a selection")
+        return []
+    if selection is None:
+        raise SelectionError("selection_required", "approving this gate needs a selection")
+    known = set(shown.keys)
+    seen: set[str] = set()
+    for key in selection:
+        if key in seen:
+            raise SelectionError("duplicate_selection", f"{key!r} is selected twice")
+        seen.add(key)
+        if key not in known:
+            raise SelectionError("unknown_selection", f"{key!r} is not an item this gate showed")
+    if len(selection) < shown.min:
+        plural = "s" if shown.min != 1 else ""
+        raise SelectionError("selection_too_small", f"select at least {shown.min} item{plural}")
+    return list(selection)
+
+
+def selected_document(
+    select: GateSelect, document: JsonValue, chosen: Sequence[str]
+) -> dict[str, JsonValue]:
+    """`document` with only the `chosen` items under `select.items`, in their order (each key
+    once). A findings report gets its `counts` and `truncated` again, so it stays a valid
+    report."""
+    items = selection_items(select, document)
+    wanted = set(chosen)
+    kept: list[JsonValue] = []
+    for item in items:
+        key = item_key(item, select.key)
+        if key is not None and key in wanted:
+            kept.append(item)
+            wanted.discard(key)
+    out: dict[str, JsonValue] = {**cast(dict[str, JsonValue], document), select.items: kept}
+    try:
+        report = FindingsReport.model_validate(out)
+    except ValueError:
+        return out
+    severities = Counter(f.severity for f in report.findings)
+    out["counts"] = {s: severities.get(s, 0) for s in SEVERITIES}
+    out["truncated"] = False
+    return out
+
+
+async def _selection(
+    select: GateSelect, artifacts: ArtifactStore | None, refs: Mapping[str, ArtifactRef]
+) -> tuple[SelectionShown, JsonValue]:
+    """What a selection gate shows, from the version of its artifact the run has, and that
+    version's document. Raises `GateSelectError` when it cannot be shown."""
+    ref = refs.get(select.artifact)
+    stored = await artifacts.get(ref.name, ref.version) if ref and artifacts else None
+    if ref is None or stored is None:
+        raise GateSelectError(f"artifact {select.artifact!r} was not written")
+    try:
+        document: JsonValue = json.loads(stored.content)
+    except ValueError as e:
+        raise GateSelectError(f"{select.artifact} is not JSON: {e}") from e
+    return selection_shown(select, ref, document), document
+
+
+def gate_request(
+    node: GateNode, input: str, ttl_s: int, shown: SelectionShown | None = None
+) -> dict[str, JsonValue]:
     """What the approver is shown: the `gate_waiting` payload, before the runner adds the
     `changes` and `expires_at`. `artifact` is the gate's input, the previous node's output (data,
     never instructions). `ttl_s` is how long the gate waits: its own time to live, else the run
-    policy's `ttl_s`."""
-    return {
+    policy's `ttl_s`. A selection gate adds what it shows (`select`), and a gate that ends the
+    run on a rejection says so (`on_reject`)."""
+    request: dict[str, JsonValue] = {
         "title": node.title,
         "prompt": node.prompt,
         "artifact": input,
         "ttl_s": node.ttl_s if node.ttl_s is not None else ttl_s,
     }
+    if shown is not None:
+        request["select"] = shown.model_dump(mode="json")
+    if node.on_reject == "end":
+        request["on_reject"] = "end"
+    return request
 
 
 def decided_payload(decision: GateDecision, commits: dict[str, str]) -> dict[str, JsonValue]:
-    """The `gate_decided` payload: the decision, plus its edits and the commits they made, if
-    it has edits."""
-    payload: dict[str, JsonValue] = decision.model_dump(mode="json", exclude={"edits"})
+    """The `gate_decided` payload: the decision, plus its selection if it has one, and its edits
+    and the commits they made if it has edits."""
+    payload: dict[str, JsonValue] = decision.model_dump(mode="json", exclude={"edits", "selection"})
+    if decision.selection is not None:
+        payload["selection"] = list[JsonValue](decision.selection)
     if decision.edits:
         payload["edits"] = [e.model_dump(mode="json") for e in decision.edits]
         payload["commits"] = dict(commits)
@@ -178,13 +359,35 @@ async def run_gate_node(
     log: RunEventLog,
     review: GateReview | None = None,
     ttl_s: int = APPROVAL_TTL_S,
+    artifacts: ArtifactStore | None = None,
+    refs: Mapping[str, ArtifactRef] | None = None,
 ) -> AgentNodeResult:
     """Pause until the run is continued with a `GateDecision`, then log it. Approve completes the
     node and passes `input` on unchanged, once its edits are committed through `review`; edits
-    that cannot be committed fail the node. Reject cancels it, which stops the run. The gate
+    that cannot be committed fail the node. Reject cancels it, which stops the run; with
+    `on_reject: end` it completes with `ends_run`, which ends the run as completed. The gate
     waits `ttl_s` (the run's `approval_ttl_s`) unless it sets its own; the worker cancels the run
-    once that has passed (`agentic_store.expiry`)."""
-    decision = GateDecision.model_validate(interrupt(gate_request(node, input, ttl_s)))
+    once that has passed (`agentic_store.expiry`).
+
+    A selection gate (6.7) shows the items of its artifact (the version in `refs`, read from
+    `artifacts`), and its approval's output is that artifact with only the chosen items (`data`,
+    and pretty JSON as its text). One that cannot show its items, or gets a selection that does
+    not fit them, fails."""
+    shown: SelectionShown | None = None
+    document: JsonValue = None
+    if node.select is not None:
+        try:
+            shown, document = await _selection(node.select, artifacts, refs or {})
+        except GateSelectError as e:
+            # It fails before it pauses, so the runner never announced its start.
+            await log.emit(NODE_STARTED, node_id=node.id)
+            return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
+    decision = GateDecision.model_validate(interrupt(gate_request(node, input, ttl_s, shown)))
+    try:
+        chosen = check_selection(shown, decision.decision, decision.selection)
+    except SelectionError as e:
+        error = f"the gate's selection does not fit what it showed: {e}"
+        return AgentNodeResult(status="failed", text=input, usage=None, error=error)
     commits: dict[str, str] = {}
     if decision.decision == "approve" and decision.edits:
         try:
@@ -196,6 +399,12 @@ async def run_gate_node(
             return AgentNodeResult(status="failed", text=input, usage=None, error=error)
     await log.emit(GATE_DECIDED, node_id=node.id, payload=decided_payload(decision, commits))
     if decision.decision == "approve":
-        return AgentNodeResult(status="completed", text=input, usage=None)
+        if node.select is None:
+            return AgentNodeResult(status="completed", text=input, usage=None)
+        data = selected_document(node.select, document, chosen)
+        text = json.dumps(data, indent=2, ensure_ascii=False)
+        return AgentNodeResult(status="completed", text=text, usage=None, data=data)
+    if node.on_reject == "end":
+        return AgentNodeResult(status="completed", text=input, usage=None, ends_run=True)
     reason = f"rejected at gate: {decision.comment}" if decision.comment else "rejected at gate"
     return AgentNodeResult(status="cancelled", text=input, usage=None, error=reason)

@@ -65,7 +65,8 @@ def test_the_audit_template_is_registered() -> None:
     assert template.requires == ("claude", "github")
     schema = template.parameters_schema()
     assert list(schema["properties"]) == [
-        "checks", "path", "min_severity", "reviewers", "reviewer_model", "report_model",
+        "checks", "path", "min_severity", "reviewers", "reviewer_model", "report_model", "fix",
+        "fixer_model",
     ]  # fmt: skip
     assert schema["properties"]["checks"]["items"] == {"enum": CHECKS, "type": "string"}
     assert "$defs" not in schema

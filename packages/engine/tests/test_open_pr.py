@@ -9,6 +9,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import JsonValue, TypeAdapter
 
+from agentic_engine.artifacts import InMemoryArtifactStore
 from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
@@ -205,3 +206,44 @@ def test_a_nested_gate_counts_in_run_order() -> None:
     )
 
     assert publish_gate_errors(nested.root) == []
+
+
+def publishing(**args: JsonValue) -> dict[str, JsonValue]:
+    """`PUBLISH` with more arguments."""
+    return {**PUBLISH, "args": {"from_node": "writer", "title": "Add notes", **args}}
+
+
+async def test_body_from_puts_an_artifact_under_the_static_body() -> None:
+    """Phase 6.7: `body_from` names a run artifact whose text goes under `body`; the tool never
+    sees `body_from`."""
+    tools = FakePublisher()
+    writer = {**WRITER, "writes": "fixes.md"}
+    publish = publishing(body="Fixes.", body_from="fixes.md")
+    sink = InMemoryEventSink()
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
+    artifacts = InMemoryArtifactStore()
+    run_id = uuid4()
+    workflow = spec(writer, GATE, publish)
+    runtime = FakeRuntime({"writer": [Message(text="- fixed `a`"), ECHO_USAGE]})
+    common = {"run_id": run_id, "sink": sink, "checkpointer": checkpointer, "tools": tools}
+    await run_workflow(workflow, runtime, "go", artifacts=artifacts, **common)  # type: ignore[arg-type]
+    result = await resume_workflow(
+        workflow,
+        runtime,
+        "go",
+        next_seq=sink.events[-1].seq + 1,
+        attempt=2,
+        decision=GateDecision(decision="approve"),
+        artifacts=artifacts,
+        **common,  # type: ignore[arg-type]
+    )
+
+    assert result.status == "completed"
+    (call,) = tools.calls
+    assert call[1] == {"from_node": "writer", "title": "Add notes", "body": "Fixes.\n\n- fixed `a`"}
+
+
+def test_body_from_must_name_an_artifact_written_before() -> None:
+    publish = publishing(body_from="fixes.md")
+    with pytest.raises(ValueError, match=r"takes its body from 'fixes\.md'"):
+        spec(WRITER, GATE, publish)

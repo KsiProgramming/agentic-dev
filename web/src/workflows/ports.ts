@@ -219,6 +219,8 @@ function portEdges(root: SpecNode): [Producer, PortNode][] {
           break;
         }
         case "gate":
+          // A selection gate passes on the chosen items, not its input (6.7).
+          if (step.select) previous = null;
           break;
         case "loop":
         case "map":

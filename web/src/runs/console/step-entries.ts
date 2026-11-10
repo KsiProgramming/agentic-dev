@@ -1,5 +1,6 @@
 import type {
   Branch,
+  GateInfo,
   Iteration,
   MapItem,
   MessageTurn,
@@ -383,16 +384,28 @@ export function orchestratorOutline(step: Step): string | null {
   return parts.join(" · ");
 }
 
+/** A selection gate's approval in one line (6.7): "Selected 2 of 3 findings"; null for a gate
+ * that does not select. */
+export function selectedLine(gate: GateInfo): string | null {
+  if (!gate.select || gate.selection === null) return null;
+  const what = gate.select.items === "findings" ? "findings" : "items";
+  return `Selected ${gate.selection.length} of ${gate.select.keys.length} ${what}`;
+}
+
 /** One line on what a step did, for its row: the agent's answer, the tool's call, the gate's
  * decision, or how far a container got. Plain text: it comes from agent and repo content. */
 export function stepOutline(step: Step): string | null {
   if (step.error && step.status === "failed") return firstLine(step.error);
   if (step.gate) {
     if (step.gate.decision === "approve") {
+      const chosen = selectedLine(step.gate);
+      if (chosen) return chosen;
       const edits = step.gate.edits.length;
       return edits > 0 ? `Approved with edits to ${count(edits, "file")}` : "Approved";
     }
-    if (step.gate.decision === "reject") return "Rejected";
+    if (step.gate.decision === "reject") {
+      return step.gate.onReject === "end" ? "Ended the run here" : "Rejected";
+    }
     return step.status === "waiting" ? "Waiting for approval" : step.gate.title;
   }
   if (step.items) {

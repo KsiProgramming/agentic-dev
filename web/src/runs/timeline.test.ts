@@ -129,6 +129,9 @@ describe("buildTimeline on a recorded docs run", () => {
       comment: null,
       changes: [],
       edits: [],
+      select: null,
+      selection: null,
+      onReject: "cancel",
     });
   });
 

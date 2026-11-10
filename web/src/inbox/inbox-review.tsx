@@ -34,6 +34,7 @@ import {
   RejectButton,
 } from "@/runs/console/decision-controls";
 import { StatusLabel } from "@/runs/console/gate-files";
+import { SelectionChecklist } from "@/runs/console/selection-checklist";
 import { useGateDecision, type Decision } from "@/runs/console/use-gate-decision";
 import { fileKey } from "@/runs/gates";
 import { repoLabel, runTimes, type RunSummary } from "@/runs/summaries";
@@ -159,7 +160,9 @@ function GateReview({
         />
       </StatStrip>
 
-      {gate.changes.length > 0 ? (
+      {decision.choice ? (
+        <SelectionChecklist runId={run.id} choice={decision.choice} baseUrl={baseUrl} />
+      ) : gate.changes.length > 0 ? (
         <ChangedFiles gate={gate} onReview={() => decision.setDetails(true)} />
       ) : (
         <div className="max-h-96 overflow-y-auto rounded-lg border p-3">
@@ -177,7 +180,11 @@ function GateReview({
 
       {decision.sent ? (
         <p role="status" className="font-medium">
-          {decision.sent === "approve" ? "Approved" : "Rejected"}. The run carries on shortly.
+          {decision.sent === "approve"
+            ? "Approved. The run carries on shortly."
+            : gate.onReject === "end"
+              ? "Ended. The run completes here."
+              : "Rejected. The run carries on shortly."}
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">

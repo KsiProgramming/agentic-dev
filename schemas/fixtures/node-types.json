@@ -333,8 +333,60 @@
     "category": "step",
     "icon": "shield-check",
     "parameters": {
+      "$defs": {
+        "GateSelect": {
+          "additionalProperties": false,
+          "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key.",
+          "properties": {
+            "artifact": {
+              "description": "A `.json` run artifact written before the gate, whose items are shown.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "title": "Artifact",
+              "type": "string"
+            },
+            "items": {
+              "default": "findings",
+              "description": "The top-level array field of the artifact that holds the items.",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Items",
+              "type": "string"
+            },
+            "key": {
+              "default": "fingerprint",
+              "description": "The field of each item that names it; items without one cannot be chosen.",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Key",
+              "type": "string"
+            },
+            "preselect": {
+              "minLength": 1,
+              "type": "string",
+              "description": "A CEL condition over `item`: the items checked when the gate opens.",
+              "title": "Preselect"
+            },
+            "min": {
+              "default": 1,
+              "description": "The fewest items an approval selects.",
+              "maximum": 1000,
+              "minimum": 0,
+              "title": "Min",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "artifact"
+          ],
+          "title": "GateSelect",
+          "type": "object"
+        }
+      },
       "additionalProperties": false,
-      "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged.",
+      "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged, unless\nit selects (6.7): then its output is the artifact's items the approver chose.",
       "properties": {
         "title": {
           "description": "What the approver is asked to decide.",
@@ -352,6 +404,29 @@
           "type": "integer",
           "description": "Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset.",
           "title": "Time to live (seconds)"
+        },
+        "select": {
+          "$ref": "#/$defs/GateSelect",
+          "description": "Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items.",
+          "title": "Select"
+        },
+        "on_reject": {
+          "enum": [
+            "cancel",
+            "end"
+          ],
+          "type": "string",
+          "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).",
+          "title": "On reject"
+        },
+        "writes": {
+          "description": "With `select`, store the chosen items as this run artifact.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "type": "string",
+          "title": "Writes"
         }
       },
       "required": [
@@ -372,6 +447,21 @@
         "ui:widget": "textarea"
       },
       "ttl_s": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "select": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "on_reject": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "writes": {
         "ui:options": {
           "advanced": true
         }

@@ -663,10 +663,20 @@ async def _run_step(
     async def run() -> AgentNodeResult:
         match node:
             case ToolNode():
-                return await run_tool_node(node, tools, on_event, route_as)
+                try:
+                    called = await _with_body_from(node, limits.artifacts, refs)
+                except ArtifactError as e:
+                    return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
+                return await run_tool_node(called, tools, on_event, route_as)
             case GateNode():
                 return await run_gate_node(
-                    node, input, log, limits.review, limits.policy.approval_ttl_s
+                    node,
+                    input,
+                    log,
+                    limits.review,
+                    limits.policy.approval_ttl_s,
+                    limits.artifacts,
+                    refs,
                 )
             case AgentNode():
                 async with limits.alive:
@@ -709,8 +719,9 @@ async def _run_step(
     port: PortFailure | None = None
     if not isinstance(node, GateNode) and node.output_schema is not None:
         result, port = _check_output(node, result)
-    if not isinstance(node, GateNode) and node.writes and result.status == "completed":
-        result = await _write(node.id, node.writes, node.output_schema, result, limits, log, branch)
+    if node.writes and result.status == "completed" and not result.ends_run:
+        schema = None if isinstance(node, GateNode) else node.output_schema
+        result = await _write(node.id, node.writes, schema, result, limits, log, branch)
     if (pull := _pull_request(node, result)) is not None:
         await log.emit(PR_OPENED, node_id=node.id, payload=pull, item=item, branch=branch)
     if (repo := _created_repo(node, result)) is not None:
@@ -722,6 +733,31 @@ async def _run_step(
         NODE_END[result.status], node_id=node.id, payload=payload, item=item, branch=branch
     )
     return result
+
+
+MAX_BODY_FROM_CHARS = 60_000
+"""The most of a `body_from` artifact a pull request's body takes (GitHub allows 65,536)."""
+
+
+async def _with_body_from(
+    node: ToolNode, artifacts: ArtifactStore, refs: Mapping[str, ArtifactRef]
+) -> ToolNode:
+    """`node` with its `body_from` (6.7, a `github.openPR` argument naming a run artifact) put in
+    place: that artifact's text, as the run has it, under the static `body`, cut at
+    `MAX_BODY_FROM_CHARS`. The tool never sees `body_from`. Raises `ArtifactError` when the run
+    has not written the artifact."""
+    name = node.args.get("body_from")
+    if node.tool != "github.openPR" or not isinstance(name, str):
+        return node
+    ref = refs.get(name)
+    stored = await artifacts.get(name, ref.version) if ref is not None else None
+    if stored is None:
+        raise ArtifactError(f"artifact {name!r} was not written")
+    text = stored.content[:MAX_BODY_FROM_CHARS]
+    static = node.args.get("body")
+    body = f"{static}\n\n{text}" if isinstance(static, str) and static else text
+    args = {k: v for k, v in node.args.items() if k != "body_from"} | {"body": body}
+    return node.model_copy(update={"args": args})
 
 
 def _check_output(
@@ -2757,6 +2793,8 @@ def _continue_unless_failed(node_id: str, next_id: str) -> Callable[[RunState], 
 
 def _continue_if_completed(node_id: str, next_id: str) -> Callable[[RunState], str]:
     def route(state: RunState) -> str:
-        return next_id if state["results"][node_id].status == "completed" else END
+        result = state["results"][node_id]
+        # A gate rejected with `on_reject: end` (6.7) completes and ends the run there.
+        return next_id if result.status == "completed" and not result.ends_run else END
 
     return route

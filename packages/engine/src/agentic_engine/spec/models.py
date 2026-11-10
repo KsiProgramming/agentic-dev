@@ -22,6 +22,7 @@ from agentic_engine.expr import (
     ROUTE_VARIABLES,
     ExpressionError,
     compile_condition,
+    compile_item_condition,
     compile_list,
     compile_value,
 )
@@ -139,9 +140,46 @@ def _check_unique_reads[N: AgentNode | ToolNode](node: N) -> N:
     return node
 
 
+MAX_SELECT_ITEMS = 1000
+"""The most items a selection gate shows (6.7): a findings report keeps at most 1,000."""
+
+
+class GateSelect(_Base):
+    """What a selection gate asks the approver to choose from (6.7): the items of a JSON run
+    artifact. Approving names the chosen items by their key."""
+
+    artifact: ArtifactName = Field(
+        description="A `.json` run artifact written before the gate, whose items are shown."
+    )
+    items: NonEmptyStr = Field(
+        default="findings",
+        max_length=64,
+        description="The top-level array field of the artifact that holds the items.",
+    )
+    key: NonEmptyStr = Field(
+        default="fingerprint",
+        max_length=64,
+        description="The field of each item that names it; items without one cannot be chosen.",
+    )
+    preselect: NonEmptyStr | None = Field(
+        default=None,
+        description="A CEL condition over `item`: the items checked when the gate opens.",
+    )
+    min: int = Field(
+        default=1, ge=0, le=MAX_SELECT_ITEMS, description="The fewest items an approval selects."
+    )
+
+    @model_validator(mode="after")
+    def _json_artifact(self) -> Self:
+        if not self.artifact.endswith(".json"):
+            raise ValueError(f"select.artifact {self.artifact!r} must be a .json artifact")
+        return self
+
+
 class GateNode(_Base):
     """A human decision point: the run pauses here until someone approves or rejects. Its input
-    (the previous node's output) is shown to the approver and passes through unchanged."""
+    (the previous node's output) is shown to the approver and passes through unchanged, unless
+    it selects (6.7): then its output is the artifact's items the approver chose."""
 
     type: Literal["gate"]
     id: NodeId
@@ -155,6 +193,28 @@ class GateNode(_Base):
         description="Seconds the gate waits for a decision before the run is cancelled; at most "
         "the run's `approval_ttl_s`, which applies when this is unset.",
     )
+    select: GateSelect | None = Field(
+        default=None,
+        description="Ask the approver to choose items of a JSON run artifact; the gate's output "
+        "is that artifact with only the chosen items.",
+    )
+    on_reject: Literal["cancel", "end"] | None = Field(
+        default=None,
+        description="What a rejection does: cancel the run (unset), or end it here as completed, "
+        "skipping the steps after the gate (a step of the root sequence only).",
+    )
+    writes: ArtifactName | None = Field(
+        default=None,
+        description="With `select`, store the chosen items as this run artifact.",
+    )
+
+    @model_validator(mode="after")
+    def _writes_selection(self) -> Self:
+        if self.writes is not None and self.select is None:
+            raise ValueError(f"gate {self.id!r}: `writes` needs `select`")
+        if self.writes is not None and not self.writes.endswith(".json"):
+            raise ValueError(f"gate {self.id!r}: `writes` must be a .json artifact")
+        return self
 
 
 class SequenceNode(_Base):
@@ -779,6 +839,7 @@ type IssueCode = Literal[
     "subflow_unknown",
     "subflow_cycle",
     "subflow_unpublished",
+    "invalid_gate",
 ]
 
 
@@ -1551,6 +1612,15 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
             ValidationIssue(code="artifact_conflict", path=path, node_id=node.id, message=message)
         )
 
+    def unknown(node: Node, path: str, name: str, verb: str) -> None:
+        message = (
+            f"{node.type} {node.id!r} at {path}: {verb} {name!r}, which no node writes before "
+            "it; write it in an earlier step"
+        )
+        flow.issues.append(
+            ValidationIssue(code="artifact_unknown", path=path, node_id=node.id, message=message)
+        )
+
     def visit(node: Node, path: str, seen: dict[str, ArtifactWriter]) -> dict[str, ArtifactWriter]:
         match node:
             case AgentNode() | ToolNode():
@@ -1573,6 +1643,13 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                     )
                 if node.reads:
                     flow.writers[node.id] = found
+                body_from = (
+                    node.args.get("body_from")
+                    if isinstance(node, ToolNode) and node.tool == "github.openPR"
+                    else None
+                )
+                if isinstance(body_from, str) and body_from not in seen:
+                    unknown(node, f"{path}.args.body_from", body_from, "takes its body from")
                 return {**seen, node.writes: node} if node.writes else seen
             case ReduceNode():
                 return {**seen, node.writes: node} if node.writes else seen
@@ -1588,7 +1665,14 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                 visit(node.body, f"{path}.body", seen)
                 return {**seen, node.writes: _UNTYPED} if node.writes else seen
             case GateNode():
-                return seen
+                if node.select is None:
+                    return seen
+                name = node.select.artifact
+                if name not in seen:
+                    unknown(node, f"{path}.select.artifact", name, "selects from")
+                    return seen
+                # The chosen items keep the artifact's shape, so its writer types them.
+                return {**seen, node.writes: seen[name]} if node.writes else seen
             case SequenceNode():
                 for i, step in enumerate(node.steps):
                     seen = visit(step, f"{path}.steps[{i}]", seen)
@@ -1699,7 +1783,8 @@ def port_edges(root: Node) -> list[tuple[PortProducer, PortConsumer, str]]:
                         edges.append((previous, step, step_path))
                     previous = step
                 case GateNode():
-                    pass
+                    if step.select is not None:
+                        previous = None  # it passes on the chosen items, not its input (6.7)
                 case LoopNode() | MapNode() | OrchestratorNode():
                     previous = None
                     visit(step.body, f"{step_path}.body")
@@ -1860,7 +1945,43 @@ def structure_issues(root: Node) -> list[ValidationIssue]:
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root)
     issues += port_issues(root) + artifact_issues(root) + subflow_issues(root)
+    issues += gate_issues(root)
     return in_run_order(root, issues)
+
+
+def gate_issues(root: Node) -> list[ValidationIssue]:
+    """Why the gates under `root` cannot run (6.7): a `select.preselect` that is not a valid
+    condition over `item` (`invalid_expression`), and `on_reject: end` on a gate that is not a
+    step of the root sequence (`invalid_gate`): only there does ending skip to the run's end."""
+    top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else {id(root)}
+    issues: list[ValidationIssue] = []
+    for path, node in iter_nodes(root):
+        if not isinstance(node, GateNode):
+            continue
+        if node.select is not None and node.select.preselect is not None:
+            try:
+                compile_item_condition(node.select.preselect)
+            except ExpressionError as e:
+                message = f"gate {node.id!r} at {path}: invalid select.preselect: {e}"
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_expression",
+                        path=f"{path}.select.preselect",
+                        node_id=node.id,
+                        message=message,
+                    )
+                )
+        if node.on_reject == "end" and id(node) not in top:
+            message = (
+                f'gate {node.id!r} at {path}: on_reject "end" needs the gate to be a step of '
+                'the root sequence; use "cancel" here'
+            )
+            issues.append(
+                ValidationIssue(
+                    code="invalid_gate", path=f"{path}.on_reject", node_id=node.id, message=message
+                )
+            )
+    return issues
 
 
 def subflow_issues(root: Node) -> list[ValidationIssue]:

@@ -304,7 +304,13 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
         category="step",
         icon="shield-check",
         default={"type": "gate", "id": "gate", "title": "Approve"},
-        ui={"prompt": _TEXTAREA, "ttl_s": _ADVANCED},
+        ui={
+            "prompt": _TEXTAREA,
+            "ttl_s": _ADVANCED,
+            "select": _ADVANCED,
+            "on_reject": _ADVANCED,
+            "writes": _ADVANCED,
+        },
     ),
     _manifest(
         SequenceNode,
