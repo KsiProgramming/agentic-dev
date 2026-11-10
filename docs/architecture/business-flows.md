@@ -93,7 +93,7 @@ Outcome: a PR with documentation, the cost of the run, and a full trace of every
 
 ## 5. Flow: audit a codebase
 
-**Actors:** developer, agents. **Status:** available (template `audit-codebase`, read-only, report only).
+**Actors:** developer, approver, agents. **Status:** available (template `audit-codebase`; read-only by default, fixes with the `fix` option).
 
 ```mermaid
 flowchart LR
@@ -109,16 +109,22 @@ flowchart LR
     RT -- "high / critical found" --> F["report with 'Fix first'"]
     RT -- "otherwise" --> W["standard report"]
     C & F & W --> O["report.md"]
+    O -. "fix on" .-> G{{"gate: select findings"}}
+    G -- "approve with a selection" --> OR["orchestrator: lead groups by file,<br/>fixers fix on task branches"]
+    G -- "end run here" --> E["completed, no change"]
+    OR --> IB["integration branch + fixes.md"]
+    IB --> G2{{"gate: review the diff"}}
+    G2 --> PR["github.openPR → one PR"]
 ```
 
 Business rules:
 
-- The audit is **read-only**: its agents get only read tools, it has no writer, gate or `github.*` tool, and it opens no pull request.
+- Without `fix`, the audit is **read-only**: its agents get only read tools, it has no writer, gate or `github.*` tool, and it opens no pull request.
 - **The workflow's author chooses the checks.** A scanner runs only if the spec names it. `auto` lints each module with the linter the repo itself configured; a linter that cannot run offline is reported as *skipped*, never silently replaced.
 - **Secrets never leave the sandbox:** the secret scanner reports rule, file and line, never the value.
 - Findings from different scanners and reviewers are merged by fingerprint; the merged severity is the **highest** any source reported, and confidence is explainable ("2 of 3 reviewers").
 - The audit reports what it could check and lists what it could not (a failed branch is a failed check, not a failed audit).
-- *Planned (6.7):* "Fix selected findings" turns chosen findings into fix PRs through the orchestrator.
+- **Fix selected findings (6.7):** with `fix`, the approver picks findings at a selection gate (critical and high checked); only those reach the lead, as data. Fixers change only their task's files, and nothing is pushed until a second gate approves the merged diff; the PR says what was fixed and what was not. Ending the run at the selection gate leaves the repo untouched and the audit completed.
 
 ---
 

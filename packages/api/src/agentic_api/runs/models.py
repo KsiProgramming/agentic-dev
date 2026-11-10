@@ -14,8 +14,16 @@ from pydantic import (
 
 from agentic_api.workspaces.models import budget_field
 from agentic_engine.artifacts import GateArtifact
-from agentic_engine.gate import MAX_REVIEW_FILES, EditErrorCode, FileChange, FileEdit
+from agentic_engine.gate import (
+    MAX_REVIEW_FILES,
+    EditErrorCode,
+    FileChange,
+    FileEdit,
+    SelectionErrorCode,
+    SelectionShown,
+)
 from agentic_engine.spec import (
+    MAX_SELECT_ITEMS,
     REPO_TOOL_PREFIXES,
     ValidationIssue,
     WorkflowSpec,
@@ -211,6 +219,12 @@ class ApprovalRequest(BaseModel):
         description="An approval's new text for files of the gate's `changes` (editable ones "
         "only); the gate commits them on the writers' branches before the run goes on.",
     )
+    selection: list[str] | None = Field(
+        default=None,
+        max_length=MAX_SELECT_ITEMS,
+        description="A selection gate's approval (6.7): the keys of the items chosen, from its "
+        "`select.keys`; required to approve one, refused anywhere else.",
+    )
 
 
 class ApprovalResponse(BaseModel):
@@ -225,9 +239,10 @@ class ApprovalResponse(BaseModel):
 
 class EditErrorDetail(BaseModel):
     """The `detail` of an approval refused because its edits do not fit the files the gate
-    showed: `code` says how, `path` names the file at fault, if one is."""
+    showed, or its selection the items it showed (6.7): `code` says how, `path` names the file at
+    fault, if one is."""
 
-    code: EditErrorCode
+    code: EditErrorCode | SelectionErrorCode
     message: str
     path: str | None = None
 
@@ -296,6 +311,15 @@ class RunGate(BaseModel):
     )
     branches: list[GateBranch] = Field(
         description="The branches of the writers whose changes the gate shows, in order."
+    )
+    select: SelectionShown | None = Field(
+        default=None,
+        description="A selection gate's items (6.7): the artifact version to read them from, "
+        "the keys that can be chosen, those checked when it opened and the fewest to choose.",
+    )
+    on_reject: Literal["cancel", "end"] = Field(
+        default="cancel",
+        description="What rejecting does: cancel the run, or end it here as completed.",
     )
 
 

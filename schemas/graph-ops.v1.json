@@ -406,12 +406,29 @@
     },
     "GateNode": {
       "additionalProperties": false,
-      "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged.",
+      "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged, unless\nit selects (6.7): then its output is the artifact's items the approver chose.",
       "properties": {
         "id": {
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "title": "Id",
           "type": "string"
+        },
+        "on_reject": {
+          "anyOf": [
+            {
+              "enum": [
+                "cancel",
+                "end"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).",
+          "title": "On Reject"
         },
         "prompt": {
           "anyOf": [
@@ -425,6 +442,18 @@
           "default": null,
           "description": "More guidance for the approver, shown with the input.",
           "title": "Prompt"
+        },
+        "select": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateSelect"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items."
         },
         "title": {
           "description": "What the approver is asked to decide.",
@@ -450,6 +479,24 @@
           "const": "gate",
           "title": "Type",
           "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With `select`, store the chosen items as this run artifact.",
+          "title": "Writes"
         }
       },
       "required": [
@@ -458,6 +505,64 @@
         "title"
       ],
       "title": "GateNode",
+      "type": "object"
+    },
+    "GateSelect": {
+      "additionalProperties": false,
+      "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key.",
+      "properties": {
+        "artifact": {
+          "description": "A `.json` run artifact written before the gate, whose items are shown.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "title": "Artifact",
+          "type": "string"
+        },
+        "items": {
+          "default": "findings",
+          "description": "The top-level array field of the artifact that holds the items.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Items",
+          "type": "string"
+        },
+        "key": {
+          "default": "fingerprint",
+          "description": "The field of each item that names it; items without one cannot be chosen.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "min": {
+          "default": 1,
+          "description": "The fewest items an approval selects.",
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Min",
+          "type": "integer"
+        },
+        "preselect": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A CEL condition over `item`: the items checked when the gate opens.",
+          "title": "Preselect"
+        }
+      },
+      "required": [
+        "artifact"
+      ],
+      "title": "GateSelect",
       "type": "object"
     },
     "Into": {

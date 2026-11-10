@@ -336,6 +336,8 @@ class Approval(Base):
     decided_by: Mapped[str | None] = mapped_column(String(255))
     # An approval's edits (`FileEdit`s as JSON), which the gate commits; NULL is none.
     edits: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
+    # A selection gate's approval: the keys of the items chosen (6.7); NULL for other gates.
+    selection: Mapped[list[str] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -1,6 +1,13 @@
 import { parseArtifact, parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
-import { parseChanges, parseEdits, type FileChange, type FileEdit } from "./gates";
+import {
+  parseChanges,
+  parseEdits,
+  parseSelection,
+  type FileChange,
+  type FileEdit,
+  type GateSelection,
+} from "./gates";
 import type { SpecParent } from "./spec-parents";
 import type { RunEvent } from "./types";
 
@@ -60,6 +67,12 @@ export interface GateInfo {
   changes: FileChange[];
   /** The approver's edits to them, once decided. */
   edits: FileEdit[];
+  /** What a selection gate showed (6.7); null for a gate that does not select. */
+  select: GateSelection | null;
+  /** The keys its approval chose, once decided. */
+  selection: string[] | null;
+  /** What rejecting does: cancel the run, or end it here as completed. */
+  onReject: "cancel" | "end";
 }
 
 export interface Step {
@@ -682,18 +695,28 @@ class Builder {
           comment: null,
           changes: parseChanges(payload.changes),
           edits: [],
+          select: parseSelection(payload.select),
+          selection: null,
+          onReject: payload.on_reject === "end" ? "end" : "cancel",
         };
         return;
-      case "gate_decided":
+      case "gate_decided": {
         step.status = "running";
+        const selection = payload.selection;
         step.gate = {
           title: step.gate?.title ?? "Approve?",
           decision: str(payload.decision),
           comment: str(payload.comment),
           changes: step.gate?.changes ?? [],
           edits: parseEdits(payload.edits),
+          select: step.gate?.select ?? null,
+          selection: Array.isArray(selection)
+            ? selection.filter((k): k is string => typeof k === "string")
+            : null,
+          onReject: step.gate?.onReject ?? "cancel",
         };
         return;
+      }
       case "pr_opened":
         step.prUrl = safePullRequestUrl(payload.url);
         return;

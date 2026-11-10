@@ -45,6 +45,10 @@ VALUE_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
 """What a subflow's `input` can read (6.5): `last` (string, the subflow's input), `results` and
 `artifacts` (as for a condition)."""
 
+ITEM_VARIABLES: Final = frozenset({"item"})
+"""What a selection gate's `preselect` can read (6.7): `item`, one item of the artifact it
+selects from (a map, e.g. a finding with its `severity`)."""
+
 _MACROS: Final = frozenset({"has", "all", "exists", "exists_one", "map", "filter"})
 _FUNCTIONS: Final = frozenset(n for n in base_functions if not n.startswith("_") and n != "!_")
 _BINDING_MACROS: Final = frozenset({"all", "exists", "exists_one", "map", "filter"})
@@ -101,6 +105,20 @@ class CompiledCondition(CompiledExpression):
                 "artifacts": json_to_cel(dict(artifacts or {})),
             }
         )
+        if not isinstance(value, celtypes.BoolType):
+            raise ExpressionError(
+                self.source, f"condition must be a bool, got {type(value).__name__}"
+            )
+        return bool(value)
+
+
+class CompiledItemCondition(CompiledExpression):
+    """A condition over one item (a selection gate's `preselect`, 6.7)."""
+
+    def evaluate(self, item: JsonValue) -> bool:
+        """Evaluate for `item`. Raises `ExpressionError` if evaluation fails or the result is not
+        a bool."""
+        value = self._evaluate({"item": json_to_cel(item)})
         if not isinstance(value, celtypes.BoolType):
             raise ExpressionError(
                 self.source, f"condition must be a bool, got {type(value).__name__}"
@@ -176,6 +194,11 @@ def compile_condition(
     """Parse `source` and check it only names `variables` and CEL's standard functions. Raises
     `ExpressionError` with the column of the problem, if known."""
     return CompiledCondition(source, _compile(source, variables, "condition"))
+
+
+def compile_item_condition(source: str) -> CompiledItemCondition:
+    """As `compile_condition`, for a condition over `item` (a selection gate's `preselect`)."""
+    return CompiledItemCondition(source, _compile(source, ITEM_VARIABLES, "condition"))
 
 
 def compile_list(source: str, variables: frozenset[str] = LIST_VARIABLES) -> CompiledList:

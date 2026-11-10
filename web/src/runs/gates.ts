@@ -25,6 +25,45 @@ export interface FileEdit {
   content: string;
 }
 
+/** What a selection gate shows (6.7): the items of a JSON run artifact (its `items` array, read
+ * from that version of `artifact`), the keys that can be chosen in item order, those checked when
+ * it opened, and the fewest an approval chooses. */
+export interface GateSelection {
+  artifact: string;
+  version: number;
+  items: string;
+  key: string;
+  count: number;
+  keys: string[];
+  preselected: string[];
+  min: number;
+}
+
+/** The `select` of a `gate_waiting` payload or of `GET /runs/{id}/gate`; null when the gate does
+ * not select, or the value does not have the expected shape. */
+export function parseSelection(value: unknown): GateSelection | null {
+  const entry = record(value);
+  if (!entry) return null;
+  const strings = (v: unknown) =>
+    Array.isArray(v) && v.every((k) => typeof k === "string") ? (v as string[]) : null;
+  const keys = strings(entry.keys);
+  const preselected = strings(entry.preselected);
+  const { artifact, version, items, key, count, min } = entry;
+  if (
+    typeof artifact !== "string" ||
+    typeof version !== "number" ||
+    typeof items !== "string" ||
+    typeof key !== "string" ||
+    typeof count !== "number" ||
+    typeof min !== "number" ||
+    !keys ||
+    !preselected
+  ) {
+    return null;
+  }
+  return { artifact, version, items, key, count, keys, preselected, min };
+}
+
 /** A gate the run is waiting at, from its `gate_waiting` event. */
 export interface PendingGate {
   nodeId: string;
@@ -40,6 +79,10 @@ export interface PendingGate {
   expiresAt: string | null;
   /** The run's artifacts at the pause (4.3), the latest version of each. */
   runArtifacts: ArtifactVersion[];
+  /** A selection gate's items (6.7); null for a gate that does not select. */
+  select: GateSelection | null;
+  /** What rejecting does: cancel the run, or end it here as completed (6.7). */
+  onReject: "cancel" | "end";
 }
 
 const STATUSES: readonly FileChangeStatus[] = ["added", "modified", "deleted", "renamed"];
@@ -112,8 +155,17 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
     if (!event || event.node_id == null) continue;
     if (event.type === "gate_decided") return null;
     if (event.type === "gate_waiting") {
-      const { title, prompt, artifact, changes, changes_error, expires_at, run_artifacts } =
-        event.payload ?? {};
+      const {
+        title,
+        prompt,
+        artifact,
+        changes,
+        changes_error,
+        expires_at,
+        run_artifacts,
+        select,
+        on_reject,
+      } = event.payload ?? {};
       return {
         nodeId: event.node_id,
         title: typeof title === "string" ? title : "Approve?",
@@ -126,6 +178,8 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
             ? expires_at
             : null,
         runArtifacts: parseArtifacts(run_artifacts),
+        select: parseSelection(select),
+        onReject: on_reject === "end" ? "end" : "cancel",
       };
     }
   }

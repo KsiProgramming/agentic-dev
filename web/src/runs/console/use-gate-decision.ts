@@ -6,17 +6,60 @@ import { toast } from "sonner";
 import { createApiClient } from "@/api/client";
 import { ApiError, failure } from "@/api/errors";
 
-import type { PendingGate } from "../gates";
+import type { GateSelection, PendingGate } from "../gates";
 import { useGateEdits, type GateEdits } from "./use-gate-edits";
 import { useGateShortcuts } from "./use-gate-shortcuts";
 
 export type Decision = "approve" | "reject";
+
+/** The items chosen at a selection gate (6.7): the preselected ones until the approver changes
+ * them. `keys` keeps the gate's item order. */
+export interface GateChoice {
+  select: GateSelection;
+  chosen: ReadonlySet<string>;
+  /** The chosen keys, in the gate's item order: what the approval sends. */
+  keys: string[];
+  count: number;
+  /** Why the approval cannot be sent yet (fewer than `select.min` chosen), else null. */
+  blocked: string | null;
+  toggle: (key: string, on: boolean) => void;
+  all: () => void;
+  clear: () => void;
+}
+
+function useGateChoice(select: GateSelection | null): GateChoice | null {
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(
+    () => new Set(select?.preselected ?? []),
+  );
+  if (!select) return null;
+  const keys = select.keys.filter((k) => chosen.has(k));
+  const short = select.min - keys.length;
+  return {
+    select,
+    chosen,
+    keys,
+    count: keys.length,
+    blocked:
+      short > 0 ? `Select at least ${select.min} ${select.min === 1 ? "item" : "items"}.` : null,
+    toggle: (key, on) =>
+      setChosen((previous) => {
+        const next = new Set(previous);
+        if (on) next.add(key);
+        else next.delete(key);
+        return next;
+      }),
+    all: () => setChosen(new Set(select.keys)),
+    clear: () => setChosen(new Set()),
+  };
+}
 
 export interface GateDecision {
   runId: string;
   baseUrl: string | undefined;
   gate: PendingGate;
   edits: GateEdits;
+  /** A selection gate's chosen items (6.7); null for a gate that does not select. */
+  choice: GateChoice | null;
   /** The decision being sent. */
   pending: Decision | null;
   /** The decision the API accepted. */
@@ -36,9 +79,10 @@ export interface GateDecision {
 
 /**
  * A decision at the gate `runId` waits at, as the approval dock and the Inbox both make it: the
- * approver's edits to its files, Approve (with the edits) and Reject (with a comment), a toast
- * once the API took it, and `A` / `R` while `shortcuts` is on. Key the caller by the gate, so a
- * new gate starts with no edits.
+ * approver's edits to its files, a selection gate's chosen items, Approve (with the edits or the
+ * selection) and Reject (with a comment), a toast once the API took it, and `A` / `R` while
+ * `shortcuts` is on. On a selection gate `A` opens the review, so nothing is approved without
+ * its list being seen. Key the caller by the gate, so a new gate starts with no edits.
  */
 export function useGateDecision({
   runId,
@@ -60,9 +104,14 @@ export function useGateDecision({
   const [rejecting, setRejecting] = useState(false);
   const busy = pending !== null || sent !== null;
   const edits = useGateEdits(gate.changes);
+  const choice = useGateChoice(gate.select);
 
   async function decide(decision: Decision, comment?: string) {
     if (busy) return;
+    if (decision === "approve" && choice?.blocked) {
+      setError(choice.blocked);
+      return;
+    }
     setPending(decision);
     setError(null);
     try {
@@ -85,6 +134,7 @@ export function useGateDecision({
                 })),
               }
             : {}),
+          ...(decision === "approve" && choice ? { selection: choice.keys } : {}),
         },
       });
       if (!data) throw new ApiError(response.status, body, "The decision was not accepted");
@@ -92,7 +142,9 @@ export function useGateDecision({
       setRejecting(false);
       setDetails(false);
       // The gate goes away once the run moves on; the toast keeps the outcome visible.
-      toast.success(`${decision === "approve" ? "Approved" : "Rejected"}: ${gate.title}`);
+      const done =
+        decision === "approve" ? "Approved" : gate.onReject === "end" ? "Ended" : "Rejected";
+      toast.success(`${done}: ${gate.title}`);
       onDecided?.(decision);
     } catch (err) {
       setError(failure(err));
@@ -103,7 +155,7 @@ export function useGateDecision({
 
   useGateShortcuts({
     enabled: shortcuts && !busy,
-    onApprove: () => void decide("approve"),
+    onApprove: () => (choice ? setDetails(true) : void decide("approve")),
     onReject: () => setRejecting(true),
   });
 
@@ -112,6 +164,7 @@ export function useGateDecision({
     baseUrl,
     gate,
     edits,
+    choice,
     pending,
     sent,
     busy,

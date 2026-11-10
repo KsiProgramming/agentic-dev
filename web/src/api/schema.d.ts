@@ -277,7 +277,9 @@ export interface paths {
          * @description Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
          *     `cancelled`. An approval may edit the files the gate showed as editable; the gate commits
          *     the edits on the writers' branches before the run goes on. The run is queued again; its
-         *     stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision.
+         *     stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision. A
+         *     selection gate's approval names the items chosen (`selection`, 6.7); with `on_reject: end`
+         *     a rejection completes the run instead of cancelling it.
          */
         post: operations["approveRun"];
         delete?: never;
@@ -887,6 +889,11 @@ export interface components {
              * @description An approval's new text for files of the gate's `changes` (editable ones only); the gate commits them on the writers' branches before the run goes on.
              */
             edits?: components["schemas"]["FileEdit"][];
+            /**
+             * Selection
+             * @description A selection gate's approval (6.7): the keys of the items chosen, from its `select.keys`; required to approve one, refused anywhere else.
+             */
+            selection?: string[] | null;
         };
         /** ApprovalResponse */
         ApprovalResponse: {
@@ -1185,10 +1192,12 @@ export interface components {
         /**
          * EditErrorDetail
          * @description The `detail` of an approval refused because its edits do not fit the files the gate
-         *     showed: `code` says how, `path` names the file at fault, if one is.
+         *     showed, or its selection the items it showed (6.7): `code` says how, `path` names the file at
+         *     fault, if one is.
          */
         EditErrorDetail: {
-            code: components["schemas"]["EditErrorCode"];
+            /** Code */
+            code: components["schemas"]["EditErrorCode"] | components["schemas"]["SelectionErrorCode"];
             /** Message */
             message: string;
             /** Path */
@@ -1317,7 +1326,8 @@ export interface components {
         /**
          * GateNode
          * @description A human decision point: the run pauses here until someone approves or rejects. Its input
-         *     (the previous node's output) is shown to the approver and passes through unchanged.
+         *     (the previous node's output) is shown to the approver and passes through unchanged, unless
+         *     it selects (6.7): then its output is the artifact's items the approver chose.
          */
         GateNode: {
             /**
@@ -1342,6 +1352,54 @@ export interface components {
              * @description Seconds the gate waits for a decision before the run is cancelled; at most the run's `approval_ttl_s`, which applies when this is unset.
              */
             ttl_s?: number | null;
+            /** @description Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items. */
+            select?: components["schemas"]["GateSelect"] | null;
+            /**
+             * On Reject
+             * @description What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).
+             */
+            on_reject?: ("cancel" | "end") | null;
+            /**
+             * Writes
+             * @description With `select`, store the chosen items as this run artifact.
+             */
+            writes?: string | null;
+        };
+        /**
+         * GateSelect
+         * @description What a selection gate asks the approver to choose from (6.7): the items of a JSON run
+         *     artifact. Approving names the chosen items by their key.
+         */
+        GateSelect: {
+            /**
+             * Artifact
+             * @description A `.json` run artifact written before the gate, whose items are shown.
+             * @example findings.json
+             */
+            artifact: string;
+            /**
+             * Items
+             * @description The top-level array field of the artifact that holds the items.
+             * @default findings
+             */
+            items: string;
+            /**
+             * Key
+             * @description The field of each item that names it; items without one cannot be chosen.
+             * @default fingerprint
+             */
+            key: string;
+            /**
+             * Preselect
+             * @description A CEL condition over `item`: the items checked when the gate opens.
+             */
+            preselect?: string | null;
+            /**
+             * Min
+             * @description The fewest items an approval selects.
+             * @default 1
+             */
+            min: number;
         };
         /**
          * GithubErrorDetail
@@ -1401,7 +1459,7 @@ export interface components {
             route?: string | null;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate";
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -2328,6 +2386,15 @@ export interface components {
              * @description The branches of the writers whose changes the gate shows, in order.
              */
             branches: components["schemas"]["GateBranch"][];
+            /** @description A selection gate's items (6.7): the artifact version to read them from, the keys that can be chosen, those checked when it opened and the fewest to choose. */
+            select?: components["schemas"]["SelectionShown"] | null;
+            /**
+             * On Reject
+             * @description What rejecting does: cancel the run, or end it here as completed.
+             * @default cancel
+             * @enum {string}
+             */
+            on_reject: "cancel" | "end";
         };
         /**
          * RunLimitOverrides
@@ -2543,6 +2610,32 @@ export interface components {
              * @description The run's budget: it stops once `estimated_usd` reaches it. Unset: no cap.
              */
             budget_usd?: number | null;
+        };
+        /** @enum {string} */
+        SelectionErrorCode: "selection_required" | "selection_not_allowed" | "unknown_selection" | "duplicate_selection" | "selection_too_small";
+        /**
+         * SelectionShown
+         * @description What a selection gate showed (`gate_waiting`'s `select`): the artifact version, where the
+         *     items are, how many there are, the keys that can be chosen (in item order), those checked
+         *     when it opened, and the fewest an approval selects.
+         */
+        SelectionShown: {
+            /** Artifact */
+            artifact: string;
+            /** Version */
+            version: number;
+            /** Items */
+            items: string;
+            /** Key */
+            key: string;
+            /** Count */
+            count: number;
+            /** Keys */
+            keys: string[];
+            /** Preselected */
+            preselected: string[];
+            /** Min */
+            min: number;
         };
         /**
          * SequenceNode
@@ -3778,7 +3871,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The edits do not fit the files the gate showed */
+            /** @description The edits do not fit the files the gate showed, or the selection the items it showed */
             422: {
                 headers: {
                     [name: string]: unknown;

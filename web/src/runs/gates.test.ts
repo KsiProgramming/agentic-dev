@@ -27,6 +27,8 @@ test("a gate waits until it is decided", () => {
     changesError: null,
     expiresAt: null,
     runArtifacts: [],
+    select: null,
+    onReject: "cancel",
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
@@ -73,6 +75,8 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     changesError: null,
     expiresAt: null,
     runArtifacts: [],
+    select: null,
+    onReject: "cancel",
     ...overrides,
   };
 }

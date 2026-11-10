@@ -58,6 +58,7 @@ from agentic_store import (
     ApprovalError,
     InvalidCursorError,
     InvalidEditsError,
+    InvalidSelectionError,
     PolicyViolationError,
     RunEndedError,
     RunNotEndedError,
@@ -589,6 +590,8 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
         repo=row.repo,
         base=row.branch,
         branches=[GateBranch(node_id=w, branch=branch_name(run_id, w)) for w in writers],
+        select=pending.select,
+        on_reject="end" if pending.on_reject == "end" else "cancel",
     )
 
 
@@ -683,7 +686,8 @@ def _no_artifact(name: str, version: int | None) -> str:
             "or its approval expired"
         },
         422: {
-            "description": "The edits do not fit the files the gate showed",
+            "description": "The edits do not fit the files the gate showed, or the selection "
+            "the items it showed",
             "model": EditErrorDetail,
         },
     },
@@ -692,14 +696,21 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
     """Decide the gate the run is waiting at: `approve` continues the run, `reject` ends it
     `cancelled`. An approval may edit the files the gate showed as editable; the gate commits
     the edits on the writers' branches before the run goes on. The run is queued again; its
-    stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision."""
-    decision = GateDecision(decision=body.decision, comment=body.comment, edits=body.edits)
+    stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision. A
+    selection gate's approval names the items chosen (`selection`, 6.7); with `on_reject: end`
+    a rejection completes the run instead of cancelling it."""
+    decision = GateDecision(
+        decision=body.decision, comment=body.comment, edits=body.edits, selection=body.selection
+    )
     try:
         recorded = await record_approval(_sessions(request), run_id, body.node_id, decision)
     except RunNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except InvalidEditsError as e:
         detail = EditErrorDetail(code=e.code, message=str(e), path=e.path)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
+    except InvalidSelectionError as e:
+        detail = EditErrorDetail(code=e.code, message=str(e))
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
     except ApprovalError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e

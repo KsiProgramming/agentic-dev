@@ -243,6 +243,61 @@
       ]
     },
     {
+      "name": "a selection gate breaks the edge: it passes on the chosen items",
+      "spec": {
+        "spec_version": "0",
+        "id": "ports",
+        "name": "Ports",
+        "root": {
+          "type": "sequence",
+          "id": "s",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "p",
+              "role": "p",
+              "instructions": "Do p.",
+              "writes": "findings.json",
+              "output_schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "type": "gate",
+              "id": "g",
+              "title": "Approve g",
+              "select": {
+                "artifact": "findings.json"
+              }
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "b": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "b"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "mismatches": []
+    },
+    {
       "name": "nested sequences are flattened",
       "spec": {
         "spec_version": "0",

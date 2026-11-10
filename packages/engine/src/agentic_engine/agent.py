@@ -41,6 +41,8 @@ class AgentNodeResult(BaseModel):
     data: dict[str, JsonValue] | None = None
     # The run artifact the node wrote, if it has `writes` and completed (4.3).
     artifact: ArtifactRef | None = None
+    # A gate rejected with `on_reject: end` (6.7): the run ends here, completed.
+    ends_run: bool = False
 
 
 TOOL_INTENT_INSTRUCTION = (

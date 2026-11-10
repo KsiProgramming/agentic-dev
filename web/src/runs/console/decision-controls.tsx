@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, LoaderCircleIcon, XIcon } from "lucide-react";
+import { CheckIcon, CircleStopIcon, ListChecksIcon, LoaderCircleIcon, XIcon } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,6 +30,7 @@ import type { PendingGate } from "../gates";
 import { AgentMessage } from "./agent-message";
 import type { GateFile } from "./gate-files";
 import { GateReviewSheet } from "./gate-review-sheet";
+import { SelectionChecklist } from "./selection-checklist";
 import type { GateDecision } from "./use-gate-decision";
 
 /** Longest reject comment, as the API accepts. */
@@ -48,38 +49,75 @@ export function Kbd({ children, onPrimary = false }: { children: ReactNode; onPr
   );
 }
 
-/** Approve, or "Approve with N edits" once the approver edited files. */
+/** Approve, "Approve with N edits" once the approver edited files, or "Approve with N
+ * selected" at a selection gate (disabled, with the reason, under its minimum). With `review`,
+ * a selection gate's button opens the review instead ("Choose findings"), so nothing is approved
+ * without its list being seen. */
 export function ApproveButton({
   decision,
   shortcut,
+  review = false,
 }: {
   decision: GateDecision;
   shortcut: boolean;
+  review?: boolean;
 }) {
+  const reasonId = useId();
   const edits = decision.edits.count;
+  const { choice } = decision;
+  if (choice && review) {
+    return (
+      <Button
+        type="button"
+        onClick={() => decision.setDetails(true)}
+        disabled={decision.busy}
+        aria-keyshortcuts={shortcut ? "A" : undefined}
+      >
+        <ListChecksIcon aria-hidden="true" data-icon="inline-start" />
+        {choice.select.items === "findings" ? "Choose findings" : "Choose items"}
+        {shortcut ? <Kbd onPrimary>A</Kbd> : null}
+      </Button>
+    );
+  }
+  const blocked = choice?.blocked ?? null;
+  const label = choice
+    ? `Approve with ${choice.count} selected`
+    : edits > 0
+      ? `Approve with ${plural(edits, "edit")}`
+      : "Approve";
   return (
-    <Button
-      type="button"
-      onClick={() => void decision.decide("approve")}
-      disabled={decision.busy}
-      aria-keyshortcuts={shortcut ? "A" : undefined}
-    >
-      {decision.pending === "approve" ? (
-        <LoaderCircleIcon
-          aria-hidden="true"
-          data-icon="inline-start"
-          className="motion-safe:animate-spin"
-        />
-      ) : (
-        <CheckIcon aria-hidden="true" data-icon="inline-start" />
-      )}
-      {edits > 0 ? `Approve with ${plural(edits, "edit")}` : "Approve"}
-      {shortcut ? <Kbd onPrimary>A</Kbd> : null}
-    </Button>
+    <>
+      <Button
+        type="button"
+        onClick={() => void decision.decide("approve")}
+        disabled={decision.busy || blocked !== null}
+        aria-keyshortcuts={shortcut ? "A" : undefined}
+        aria-describedby={blocked ? reasonId : undefined}
+        title={blocked ?? undefined}
+      >
+        {decision.pending === "approve" ? (
+          <LoaderCircleIcon
+            aria-hidden="true"
+            data-icon="inline-start"
+            className="motion-safe:animate-spin"
+          />
+        ) : (
+          <CheckIcon aria-hidden="true" data-icon="inline-start" />
+        )}
+        {label}
+        {shortcut ? <Kbd onPrimary>A</Kbd> : null}
+      </Button>
+      {blocked ? (
+        <span id={reasonId} className="sr-only">
+          {blocked}
+        </span>
+      ) : null}
+    </>
   );
 }
 
-/** Reject: opens the dialog that asks for a comment. */
+/** Reject: opens the dialog that asks for a comment. A gate that ends the run when rejected
+ * (`on_reject: end`, 6.7) reads "End run here". */
 export function RejectButton({
   decision,
   shortcut,
@@ -95,8 +133,12 @@ export function RejectButton({
       disabled={decision.busy}
       aria-keyshortcuts={shortcut ? "R" : undefined}
     >
-      <XIcon aria-hidden="true" data-icon="inline-start" />
-      Reject
+      {decision.gate.onReject === "end" ? (
+        <CircleStopIcon aria-hidden="true" data-icon="inline-start" />
+      ) : (
+        <XIcon aria-hidden="true" data-icon="inline-start" />
+      )}
+      {decision.gate.onReject === "end" ? "End run here" : "Reject"}
       {shortcut ? <Kbd>R</Kbd> : null}
     </Button>
   );
@@ -161,7 +203,9 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
 
   return (
     <>
-      {gate.changes.length > 0 ? (
+      {decision.choice ? (
+        <SelectionSheet decision={decision} />
+      ) : gate.changes.length > 0 ? (
         <GateReviewSheet
           open={decision.details}
           onOpenChange={decision.setDetails}
@@ -222,6 +266,44 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
   );
 }
 
+/** A selection gate's review (6.7): its checklist in a sheet (side from 768 px, bottom below),
+ * with Reject and Approve in its footer. */
+function SelectionSheet({ decision }: { decision: GateDecision }) {
+  const { gate, choice, error, rejecting } = decision;
+  const wide = useMediaQuery(MD_UP);
+  if (!choice) return null;
+  return (
+    <Sheet open={decision.details} onOpenChange={decision.setDetails}>
+      <SheetContent
+        side={wide ? "right" : "bottom"}
+        className="data-[side=bottom]:max-h-[90svh]"
+        size="lg"
+        data-testid="gate-selection"
+      >
+        <SheetHeader>
+          <SheetTitle>{gate.title}</SheetTitle>
+          <SheetDescription>
+            {gate.prompt ?? "Choose the items the run goes on with."}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
+          <SelectionChecklist runId={decision.runId} choice={choice} baseUrl={decision.baseUrl} />
+          <GateRunArtifacts runId={decision.runId} gate={gate} baseUrl={decision.baseUrl} />
+        </div>
+        <div className="flex flex-col gap-2 border-t px-4 py-3 md:flex-row md:items-center md:justify-end">
+          {error && !rejecting ? (
+            <Alert variant="destructive" className="md:mr-auto">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+          <RejectButton decision={decision} shortcut={false} />
+          <ApproveButton decision={decision} shortcut={false} />
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 function RejectDialog({ decision }: { decision: GateDecision }) {
   const { gate, edits, error, rejecting, setRejecting } = decision;
   const [comment, setComment] = useState("");
@@ -237,9 +319,15 @@ function RejectDialog({ decision }: { decision: GateDecision }) {
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Reject “{gate.title}”?</DialogTitle>
+          <DialogTitle>
+            {gate.onReject === "end"
+              ? `End the run at “${gate.title}”?`
+              : `Reject “${gate.title}”?`}
+          </DialogTitle>
           <DialogDescription>
-            The run stops here and nothing after the gate happens.
+            {gate.onReject === "end"
+              ? "The run completes here, without the steps after the gate."
+              : "The run stops here and nothing after the gate happens."}
             {edits.count > 0 ? ` Your edits to ${plural(edits.count, "file")} are dropped.` : ""}
           </DialogDescription>
         </DialogHeader>
@@ -287,7 +375,7 @@ function RejectDialog({ decision }: { decision: GateDecision }) {
                 className="motion-safe:animate-spin"
               />
             ) : null}
-            Reject
+            {gate.onReject === "end" ? "End run here" : "Reject"}
           </Button>
         </DialogFooter>
       </DialogContent>

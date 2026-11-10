@@ -6,7 +6,7 @@ import { createApiClient } from "@/api/client";
 import { ApiError } from "@/api/errors";
 import type { components } from "@/api/schema";
 import { parseArtifacts } from "@/runs/artifacts/artifacts";
-import { parseChanges, type PendingGate } from "@/runs/gates";
+import { parseChanges, parseSelection, type PendingGate } from "@/runs/gates";
 
 type RunGate = components["schemas"]["RunGate"];
 
@@ -35,6 +35,8 @@ export function toInboxGate(body: RunGate): InboxGate {
     changesError: body.changes_error ?? null,
     expiresAt: body.expires_at ?? null,
     runArtifacts: parseArtifacts(body.run_artifacts),
+    select: parseSelection(body.select),
+    onReject: body.on_reject === "end" ? "end" : "cancel",
     repoUrl: body.repo?.url ?? null,
     base: body.base ?? null,
     branches: body.branches.map((b) => ({ nodeId: b.node_id, branch: b.branch })),
