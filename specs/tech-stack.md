@@ -519,6 +519,7 @@ A rule an agent can break without noticing will be broken. So each one is either
 ## Testing & quality
 
 - Backend: `pytest` + `pytest-asyncio`. A fake `AgentRuntime` provides deterministic engine tests. Testcontainers runs Postgres.
+- **What agents receive (6.9):** fake agents answer whatever their script says, so engine tests also assert what an agent is *given*: its request's input, tools, run context and the node id its tool calls go out as (which code they read). A phase that changes what agents receive is done only after a real run with Claude on a real repo has been read step by step in the console. `specs/lessons.md` records the mistakes that reached real runs and the rule each left; an entry is added with the fix.
 - Frontend: Vitest + Testing Library; Playwright for end-to-end tests.
 - Lint/format: `ruff` (Python), ESLint + Prettier (TS).
 - Flow Architect evaluation set: goal and repo pairs, run in CI on a schedule.
