@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { expect, test, type Page } from "@playwright/test";
 
 import { createWorkflow, getWorkflow, workflowFromTemplate } from "./workflows";
@@ -6,6 +9,14 @@ import { createWorkflow, getWorkflow, workflowFromTemplate } from "./workflows";
  * from the engine's node manifests (`GET /node-types`). */
 
 const agent = (id: string) => ({ type: "agent", id, role: id, instructions: `Do ${id}.` });
+
+/** How many node types the engine registers, as `GET /node-types` answers them
+ * (`schemas/fixtures/node-types.json`, written by `scripts/export_workflow_schema.py`). */
+const NODE_TYPES = (
+  JSON.parse(
+    readFileSync(resolve(__dirname, "../../schemas/fixtures/node-types.json"), "utf8"),
+  ) as unknown[]
+).length;
 
 function cards(page: Page) {
   return page.getByTestId("builder-node");
@@ -90,7 +101,7 @@ test("the palette lists the engine's node types and adds containers whole", asyn
   await expect(groups.nth(0)).toContainText("Steps");
   await expect(groups.nth(1)).toContainText("Flow");
   await expect(groups.nth(2)).toContainText("Combine");
-  await expect(page.locator('[role="menuitem"][data-kind]')).toHaveCount(9);
+  await expect(page.locator('[role="menuitem"][data-kind]')).toHaveCount(NODE_TYPES);
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 

@@ -10,7 +10,7 @@ from pydantic import JsonValue
 
 from agentic_runtime import AgentRequest, ClaudeRuntime, ToolResult
 from agentic_runtime.testing import MockClaude, collect_and_check, text_reply, tool_use_reply
-from agentic_sandbox import Sandbox
+from agentic_sandbox import MergeSource, Sandbox, integrate_branches
 from agentic_tools.repo import READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
 
 READS = sorted(READ_TOOL_NAMES)
@@ -190,6 +190,30 @@ async def test_each_task_of_an_orchestrator_writes_on_its_own_branch(
         f"agent/{run_id}/fix.t1",
         f"agent/{run_id}/fix.t2",
     ]
+
+
+async def test_a_hub_reads_its_integration_branch_once_it_exists(
+    sandbox: Sandbox, run_id: UUID
+) -> None:
+    """6.9: the hub of `fix` reads as `fix`: the run's checkout before its integration branch
+    exists, then that branch (a later iteration or a replan plans from the merged work). It
+    never writes."""
+    async with open_repo_tools(sandbox, run_id=run_id, task_writers={"fix"}) as tools:
+        await tools.call("repo.write_file", write("merged.txt"), node_id="fix.t1")
+        await tools.call("repo.commit", {"message": "t1"}, node_id="fix.t1")
+        before = await tools.call("repo.list_files", {}, node_id="fix")
+        integrated = await integrate_branches(
+            sandbox, run_id, "fix", [MergeSource("fix.t1", "Merge task 't1'")]
+        )
+        after = await tools.call("repo.list_files", {}, node_id="fix")
+        wrote = await tools.call("repo.write_file", write("hub.txt"), node_id="fix")
+
+    assert integrated.merged == ["fix.t1"]
+    assert "merged.txt" not in before.text.splitlines()
+    assert "merged.txt" in after.text.splitlines()
+    assert wrote.is_error
+    code, _ = await sh(sandbox, f"test -e '{sandbox.worktrees_dir}/fix/hub.txt'")
+    assert code != 0
 
 
 async def test_task_writers_open_once_when_called_at_the_same_time(

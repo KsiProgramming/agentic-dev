@@ -3,7 +3,9 @@
 After each round of an orchestrator whose body writes, the engine asks a `BranchIntegrator` to
 merge the branches of the tasks that completed, in plan order, into `agent/<run>/<orchestrator>`.
 That branch is what a gate after the orchestrator shows and edits and what `github.openPR`
-publishes. The worker implements it over the run's sandbox, so the engine never runs git.
+publishes. An orchestrator in a loop (6.9) keeps the one branch across iterations: from the
+second, its tasks start from that branch (`start_tasks`), so they build on the work merged so
+far. The worker implements it over the run's sandbox, so the engine never runs git.
 """
 
 from collections.abc import Sequence
@@ -46,6 +48,12 @@ class BranchIntegrator(Protocol):
         run's base if it does not exist). A source already merged counts as merged and is not
         merged again. A conflicting source is left out and the ones after it are still merged.
         Raises `IntegrationError` if the branch cannot be built for another reason."""
+        ...
+
+    async def start_tasks(self, orchestrator_id: str, keys: Sequence[str]) -> None:
+        """Start the branches of the task writers `keys` from `orchestrator_id`'s integration
+        branch instead of the run's base (6.9), leaving a branch that exists as it is; nothing
+        if the integration branch does not exist yet. Raises `IntegrationError` if git fails."""
         ...
 
 

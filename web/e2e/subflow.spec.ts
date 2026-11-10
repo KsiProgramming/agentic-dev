@@ -37,13 +37,14 @@ test("a workflow calls another, picked on the canvas, and its run nests the call
   await addAfter(page, "draft", "subflow");
   await page.getByRole("button", { name: "Edit step subflow_1" }).click();
   await page.getByRole("menuitem", { name: "Edit parameters" }).click();
-  await page.getByLabel("Workflow").selectOption(child);
+  // Exact: the canvas is a section labelled "Workflow canvas".
+  await page.getByLabel("Workflow", { exact: true }).selectOption(child);
   await expect(page.getByLabel("Version")).toHaveValue("1");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("builder-status")).toContainText("Ready to run");
-  await expect(page.locator('[data-node="subflow_1"]')).toContainText(
-    "Calls E2E child · version 1",
-  );
+  await expect(
+    page.locator('[data-testid="builder-node"][data-node="subflow_1"]').filter({ visible: true }),
+  ).toContainText("Calls E2E child · version 1");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByTestId("builder-status")).toContainText("Version 2");
 
@@ -77,7 +78,7 @@ test("a workflow calls another, picked on the canvas, and its run nests the call
   );
 
   await page.goto(`/runs/${runId}?view=graph`);
-  const nodes = page.getByTestId("map-node");
+  const nodes = page.getByTestId("map-node").filter({ visible: true });
   await expect(nodes).toHaveCount(4);
   expect(await nodes.evaluateAll((els) => els.map((e) => e.getAttribute("data-node")))).toEqual([
     "draft",

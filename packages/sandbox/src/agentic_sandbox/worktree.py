@@ -67,15 +67,24 @@ refused: exit `WRITE_OUTSIDE` for a path that leaves the worktree, `WRITE_NOT_A_
 directory or file in the way."""
 
 # `$1` branch, `$2` worktree path, `$3` the checkout (trusted by git although root owns it), `$4`
-# and `$5` the identity. A worktree that already exists on the branch is reused. The options hold
-# no shell syntax.
+# and `$5` the identity. A worktree that already exists on the branch is reused, and a branch that
+# exists already (a task started from its orchestrator's integration branch, 6.9) is checked out
+# as it is. The options hold no shell syntax.
 _ADD_SCRIPT = f"""
 if [ -e "$2" ]; then
   [ "$(git -C "$2" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$1" ] && exit 0
   exit {_WRONG_BRANCH}
 fi
-git -c safe.directory="$3" -c user.name="$4" -c user.email="$5" {" ".join(GIT_SAFETY)} \\
-  worktree add -q -b "$1" "$2" HEAD
+branch=$1 tree=$2 checkout=$3 name=$4 email=$5
+g() {{
+  git -c safe.directory="$checkout" -c user.name="$name" -c user.email="$email" \\
+    {" ".join(GIT_SAFETY)} "$@"
+}}
+if g rev-parse --verify -q "refs/heads/$branch" >/dev/null; then
+  g worktree add -q "$tree" "$branch"
+else
+  g worktree add -q -b "$branch" "$tree" HEAD
+fi
 """
 
 
@@ -154,7 +163,8 @@ class Worktree:
 
 async def add_worktree(sandbox: Sandbox, run_id: UUID, node_id: str) -> Worktree:
     """The worktree of `node_id` on `agent/<run-id>/<node-id>`, created from the clone's `HEAD`
-    unless it already exists. Raises `SandboxError` if git cannot create it."""
+    unless it already exists; a branch that exists already (`start_branches`) is checked out as
+    it is. Raises `SandboxError` if git cannot create it."""
     tree = Worktree.of(sandbox, run_id, node_id)
     argv = [
         "sh", "-c", _ADD_SCRIPT, "add_worktree",

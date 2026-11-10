@@ -1,0 +1,141 @@
+{
+  "spec_version": "0",
+  "id": "team-review-pr",
+  "name": "Team change with review and PR",
+  "description": "A lead splits the requested change between two engineers, a synthesizer writes the PR description and a reviewer checks the whole; while the reviewer asks for changes, the lead plans them on top of the work done so far (at most three passes). An approved change is opened as one PR, after a human approves it.",
+  "input": {
+    "required": true,
+    "label": "What should the team change?",
+    "description": "The change to make in the repository, in a few sentences: the lead splits it between two engineers.",
+    "example": "Add rate limiting to the login endpoint, with tests."
+  },
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "loop",
+        "id": "review_loop",
+        "until": "results.reviewer.data.verdict == \"ok\"",
+        "max_iterations": 3,
+        "body": {
+          "type": "sequence",
+          "id": "pass",
+          "steps": [
+            {
+              "type": "orchestrator",
+              "id": "implement",
+              "hub": {
+                "role": "Tech lead",
+                "instructions": "First read the repository with your tools: find the code the change touches (list the files, search for the names in the request, read the relevant files and their tests). Then split the change requested in your input into at most two independent tasks, one per engineer, each touching different files so their work merges cleanly. Each task's instructions must name exactly which files to change and what done looks like, following the patterns the code already uses.\n\nIn a later pass, your input is the reviewer's answer (`input`: its `verdict` and `feedback`) and the tasks of the earlier passes (`previous`). Their work is already in the code you read: plan only what the feedback asks to change, with the feedback written into each task's instructions so the engineer fixes exactly what was asked.",
+                "tools": [
+                  "repo.list_files",
+                  "repo.read_file",
+                  "repo.search"
+                ]
+              },
+              "body": {
+                "type": "agent",
+                "id": "engineer",
+                "role": "Software engineer",
+                "instructions": "Do the task in your input (`task.instructions`) in the repository: read the code you need, change only the files the task names, and commit your work with a clear message. End your answer with a short report: every file you changed and what you changed in it.",
+                "tools": [
+                  "repo.list_files",
+                  "repo.read_file",
+                  "repo.search",
+                  "repo.write_file",
+                  "repo.commit"
+                ]
+              },
+              "max_workers": 2,
+              "max_concurrency": 2,
+              "replan": {
+                "on": "failure",
+                "max_rounds": 1
+              }
+            },
+            {
+              "type": "agent",
+              "id": "synthesizer",
+              "role": "Release writer",
+              "instructions": "Your input is the engineers' reports, one per task, for all the work done so far (every pass). Your tools read the code with that work in it: read the files the reports name to check what actually changed. Then write one pull request description for the whole change: a short summary, then what changed per file and why, then how to check it. Plain Markdown, no greeting; your answer is the description itself, never a tool call written out as text.",
+              "tools": [
+                "repo.list_files",
+                "repo.read_file",
+                "repo.search"
+              ]
+            },
+            {
+              "type": "agent",
+              "id": "reviewer",
+              "role": "Senior reviewer",
+              "instructions": "Your input is the pull request description of the change. Your tools read the code with the change in it: read the files it names and check them against what was asked and what the description says. Review it as one pull request: does it do what was asked, do the parts fit together, is anything missing or risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` say exactly what to change in a few sentences.",
+              "tools": [
+                "repo.read_file",
+                "repo.search"
+              ],
+              "output_schema": {
+                "type": "object",
+                "required": [
+                  "verdict",
+                  "feedback"
+                ],
+                "properties": {
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "changes"
+                    ]
+                  },
+                  "feedback": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "router",
+        "id": "decision",
+        "routes": [
+          {
+            "id": "ok",
+            "when": "results.reviewer.data.verdict == \"ok\"",
+            "description": "The reviewer approved the whole change.",
+            "then": {
+              "type": "sequence",
+              "id": "publish",
+              "steps": [
+                {
+                  "type": "gate",
+                  "id": "approve_pr",
+                  "title": "Open the pull request?",
+                  "prompt": "The reviewer approved the change. Check the diff, every pass's work on one branch, then approve to open the pull request."
+                },
+                {
+                  "type": "tool",
+                  "id": "open_pr",
+                  "tool": "github.openPR",
+                  "args": {
+                    "from_node": "implement",
+                    "title": "Team change, reviewed",
+                    "body": "Planned by a lead, implemented by two engineers, and reworked until a reviewer approved the whole. See the run for the full report."
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "default": {
+          "type": "agent",
+          "id": "report_changes",
+          "role": "Reviewer",
+          "instructions": "The reviewer still asked for changes after the last pass, so no pull request is opened. Your input is the review. Write a short report for the person who started the run: what the reviewer found and what to change before running again."
+        }
+      }
+    ]
+  }
+}

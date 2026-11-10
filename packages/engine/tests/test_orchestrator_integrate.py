@@ -22,8 +22,8 @@ from agentic_engine.integrate import (
     conflict_error,
 )
 from agentic_engine.spec import WorkflowSpec
-from agentic_runtime import Message
-from agentic_runtime.fake import CallTool, Delay, Script
+from agentic_runtime import AgentRequest, AgentRun, Message
+from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script
 
 from .test_orchestrator import HUB, Desk, TaskDoneSink, Team, agent, orchestrator, plan, saver, spec
 from .test_orchestrator_replan import Replanner, ends, replanning
@@ -34,7 +34,8 @@ BRANCH = f"agent/run/{HUB}"
 
 class Merger:
     """A fake `BranchIntegrator`: a source merges unless its task is in `conflicts` (with those
-    paths) or `empty`; it records each call's keys and messages, and what it merged."""
+    paths) or `empty`; it records each call's keys and messages, what it merged, and the tasks it
+    was asked to start from the integration branch (6.9)."""
 
     def __init__(
         self,
@@ -47,6 +48,7 @@ class Merger:
         self._error = error
         self.calls: list[list[MergeRequest]] = []
         self.merged: list[str] = []
+        self.started: list[list[str]] = []
 
     async def integrate(self, orchestrator_id: str, sources: Sequence[MergeRequest]) -> Integration:
         self.calls.append(list(sources))
@@ -72,6 +74,9 @@ class Merger:
             empty=empty,
             conflicts=conflicts,
         )
+
+    async def start_tasks(self, orchestrator_id: str, keys: Sequence[str]) -> None:
+        self.started.append(list(keys))
 
     @property
     def keys(self) -> list[list[str]]:
@@ -220,6 +225,8 @@ async def test_a_conflict_fails_its_task_and_a_replan_retries_it() -> None:
     ]
     # Round 2 merges on top; the conflicting task is not offered again.
     assert merger.keys[1] == ["fix.a", "fix.c", "fix.b2"]
+    # The retry starts from the integration branch, so it builds on what merged (6.9).
+    assert merger.started == [["fix.b2"]]
     assert second["round"] == 2 and second["merged"] == ["a", "c", "b2"]
     data = result.results[HUB].data
     assert data is not None and data["merged"] == ["a", "c", "b2"]
@@ -368,3 +375,40 @@ def test_a_writing_body_takes_one_more_step_per_round() -> None:
     assert recursion_limit(spec(orchestrator(WRITER))) == 4 + 10
     assert recursion_limit(spec(replanning(WRITER, max_rounds=2))) == 12 + 10
     assert recursion_limit(spec(orchestrator(agent("worker")))) == 3 + 10
+
+
+class ReadingTeam(Team):
+    """A `Team` whose `Reviewer`, whatever id it calls as, reads one file and says OK."""
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        if request.role != "Reviewer":
+            return super().start(request)
+        self.requests.append(request)
+        script = [CallTool("repo.read_file", {"path": "a.py"}), Message(text="OK"), ECHO_USAGE]
+        return FakeRuntime({request.node_id: script}, tools=self._tools).start(request)
+
+
+async def test_a_reader_after_the_orchestrator_reads_its_integration_branch() -> None:
+    """6.9: once the orchestrator merged a task, a node that only reads the repo calls its tools
+    as the orchestrator, so they read the integration branch (the work merged), not the run's
+    checkout; one before it calls as itself."""
+    desk, merger = Desk(), Merger()
+    before = agent("survey", role="Reviewer", tools=["repo.read_file"])
+    after = agent("reviewer", role="Reviewer", tools=["repo.read_file"])
+    team = ReadingTeam(plan("a"), scripts=writing("a"), tools=desk)
+
+    result = await run(spec(before, orchestrator(WRITER), after), team, merger, desk=desk)
+
+    assert result.status == "completed", result.results[HUB].error
+    reads = [node for name, node in desk.calls if name == "repo.read_file"]
+    assert reads == ["survey", HUB]
+
+
+async def test_a_reader_after_an_orchestrator_that_merged_nothing_reads_the_checkout() -> None:
+    desk, merger = Desk(), Merger(empty=["a"])
+    after = agent("reviewer", role="Reviewer", tools=["repo.read_file"])
+    team = ReadingTeam(plan("a"), scripts=writing("a"), tools=desk)
+
+    await run(spec(orchestrator(WRITER), after), team, merger, desk=desk)
+
+    assert [node for name, node in desk.calls if name == "repo.read_file"] == ["reviewer"]

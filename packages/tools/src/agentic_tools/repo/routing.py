@@ -10,6 +10,10 @@ call can never reach another node's worktree.
 An orchestrator's workers (6.1) write per task: a writer working on task `t1` of orchestrator
 `fix` calls as `fix.t1`, and gets the worktree and branch of that task (`agent/<run>/fix.t1`).
 Those writers are only known once the hub has planned, so their servers are opened on first use.
+The hub itself (6.9) reads as the orchestrator: once the orchestrator's integration branch has a
+worktree (`agent/<run>/<orchestrator>`, made when it first merged), its reads go to a read-only
+server bound to it, so a replan or a loop's later iteration plans from the work merged so far;
+before that, to the run's checkout.
 
 The MCP clients of the writers known up front are opened before the first call, in the task that
 will close them (anyio requires it): tool calls may come from other tasks. A task's writer is
@@ -48,6 +52,7 @@ _TASK_WRITER = re.compile(r"^([a-z][a-z0-9_-]{0,62})\.(?!lock$)[a-z][a-z0-9_-]{0
 """A task's writer (6.1): `<orchestrator>.<task>`."""
 
 type _Open = Callable[[Sandbox], Awaitable[McpToolExecutor]]
+type _Connect = Callable[[contextlib.AsyncExitStack, bool], _Open]
 
 
 class _Opener:
@@ -55,15 +60,15 @@ class _Opener:
     closes them when the run's tools close: an MCP client must be closed by the task that opened
     it."""
 
-    def __init__(self, connect: Callable[[contextlib.AsyncExitStack], _Open]) -> None:
+    def __init__(self, connect: _Connect) -> None:
         self._connect = connect
-        self._queue: asyncio.Queue[tuple[Worktree, asyncio.Future[McpToolExecutor]] | None] = (
-            asyncio.Queue()
-        )
+        self._queue: asyncio.Queue[
+            tuple[Worktree, bool, asyncio.Future[McpToolExecutor]] | None
+        ] = asyncio.Queue()
 
-    async def open(self, worktree: Worktree) -> McpToolExecutor:
+    async def open(self, worktree: Worktree, writable: bool = True) -> McpToolExecutor:
         done: asyncio.Future[McpToolExecutor] = asyncio.get_running_loop().create_future()
-        await self._queue.put((worktree, done))
+        await self._queue.put((worktree, writable, done))
         return await done
 
     def stop(self) -> None:
@@ -72,9 +77,9 @@ class _Opener:
     async def serve(self) -> None:
         async with contextlib.AsyncExitStack() as stack:
             while (asked := await self._queue.get()) is not None:
-                worktree, done = asked
+                worktree, writable, done = asked
                 try:
-                    tools = await self._connect(stack)(worktree)
+                    tools = await self._connect(stack, writable)(worktree)
                 except Exception as e:  # reported to the caller
                     done.set_exception(e)
                 else:
@@ -101,6 +106,7 @@ class RepoTools:
         self._task_writers = frozenset(task_writers)
         self._opener = opener
         self._opening = asyncio.Lock()
+        self._readers: dict[str, McpToolExecutor] = {}
         self._definitions = list(write_definitions or base.definitions())
 
     def definitions(self) -> Sequence[ToolDefinition]:
@@ -116,6 +122,10 @@ class RepoTools:
                 writer = await self._task_writer(node_id)
             except (SandboxError, ValueError) as e:
                 return ToolOutput(text=str(e), is_error=True)
+        if writer is None and node_id is not None and node_id in self._task_writers:
+            reader = await self._hub_reader(node_id)
+            if reader is not None:
+                return await reader.call(name, arguments)
         if writer is None:
             return await self._base.call(name, arguments)
         try:
@@ -138,6 +148,22 @@ class RepoTools:
                 writer = _Writer(key, worktree, await self._opener.open(worktree))
                 self._writers[key] = writer
             return writer
+
+    async def _hub_reader(self, orchestrator: str) -> McpToolExecutor | None:
+        """A read-only server on `orchestrator`'s integration worktree, once it exists, for its
+        hub's reads (6.9); `None` before, when the hub reads the run's checkout."""
+        async with self._opening:
+            if (reader := self._readers.get(orchestrator)) is not None:
+                return reader
+            assert self._run_id is not None and self._opener is not None
+            worktree = Worktree.of(self._sandbox, self._run_id, orchestrator)
+            found = await self._sandbox.exec(["test", "-d", worktree.path])
+            if found.exit_code != 0:
+                return None
+            reader = await self._opener.open(worktree, writable=False)
+            self._readers[orchestrator] = reader
+            log.info("the hub of %s reads %s", orchestrator, worktree.branch)
+            return reader
 
     async def _ready(self, writer: _Writer) -> None:
         """Create the writer's worktree, once."""
@@ -191,7 +217,7 @@ async def open_repo_tools(
         assert run_id is not None
         unused = Worktree.of(sandbox, run_id, "definitions")
         definitions = (await connector(stack, True)(unused)).definitions()
-        opener = _Opener(lambda opened: connector(opened, True))
+        opener = _Opener(connector)
         serving = asyncio.create_task(opener.serve())
         try:
             yield RepoTools(sandbox, run_id, base, routed, definitions, task_writers, opener)

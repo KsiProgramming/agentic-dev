@@ -163,6 +163,11 @@ export interface OrchestratorInfo {
   rounds: PlanRound[];
   /** Every task planned, in index order. */
   tasks: OrchestratorTask[];
+  /** In a loop's body (6.9): the iteration it ran in, from its events' `iteration`; else `null`. */
+  iteration: number | null;
+  /** In a later iteration of its loop: what the iteration before ended with, which its hub
+   * planned again from (the last step's answer, a review say). Model output, shown as text. */
+  feedback: string | null;
 }
 
 export interface RouterInfo {
@@ -500,6 +505,12 @@ class Builder {
       }
       case "plan_made": {
         const info = this.orchestrator(nodeId, at, item, branch);
+        const iteration = num(payload.iteration);
+        if (iteration !== null) {
+          // An orchestrator in a loop (6.9): a later iteration plans again from the last one's end.
+          info.iteration = iteration;
+          if (iteration > 1) info.feedback ??= this.iterationAnswer(iteration - 1);
+        }
         const round = roundOf(info, num(payload.round) ?? info.rounds.length + 1);
         round.taskIds = [];
         round.reason = str(payload.reason);
@@ -610,7 +621,7 @@ class Builder {
       if (payload.branches !== undefined) step.branches ??= [];
       if (payload.max_workers !== undefined) {
         // An orchestrator: its tasks run inside it. Resumed, it keeps the plans it made.
-        step.orchestrator ??= { maxWorkers: null, rounds: [], tasks: [] };
+        step.orchestrator ??= newOrchestrator();
         step.orchestrator.maxWorkers = num(payload.max_workers);
         if (!this.open.includes(step)) this.open.push(step);
       }
@@ -781,8 +792,16 @@ class Builder {
     branch: number | null,
   ): OrchestratorInfo {
     const step = this.container(nodeId, at, item, branch);
-    step.orchestrator ??= { maxWorkers: null, rounds: [], tasks: [] };
+    step.orchestrator ??= newOrchestrator();
     return step.orchestrator;
+  }
+
+  /** What iteration `n` of the innermost open loop ended with: its last step's answer. */
+  private iterationAnswer(n: number): string | null {
+    const loop = this.open.findLast((s) => s.iterations !== null);
+    const last = loop?.iterations?.find((i) => i.index === n)?.steps.at(-1);
+    const message = last?.turns.findLast((t) => t.kind === "message");
+    return message?.kind === "message" && message.text.trim() ? message.text : null;
   }
 
   /** The innermost open container `nodeId` whose events carry `item` (any, without one). */
@@ -919,6 +938,10 @@ function records(value: unknown): Record<string, unknown>[] {
   return value.filter(
     (v): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v),
   );
+}
+
+function newOrchestrator(): OrchestratorInfo {
+  return { maxWorkers: null, rounds: [], tasks: [], iteration: null, feedback: null };
 }
 
 /** Round `n` of an orchestrator's plans, added (with any rounds before it) if it is new. */

@@ -434,7 +434,7 @@
     "JsonValue": {},
     "LoopNode": {
       "additionalProperties": false,
-      "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration.",
+      "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept\nper iteration and whose writers all land on its one integration branch.",
       "properties": {
         "body": {
           "discriminator": {
@@ -622,7 +622,7 @@
     },
     "OrchestratorHub": {
       "additionalProperties": false,
-      "description": "The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the\ntasks through a typed output the engine makes (`orchestrator_plan_schema`).",
+      "description": "The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the\ntasks through a typed output the engine makes (`orchestrator_plan_schema`). With `tools`, it\nmay read the repo first, to plan from the code (6.9): read tools only, as it never writes;\nin a loop's later iteration, or a replan, it reads the integration branch once there is one.",
       "properties": {
         "instructions": {
           "minLength": 1,
@@ -660,6 +660,14 @@
           "minLength": 1,
           "title": "Role",
           "type": "string"
+        },
+        "tools": {
+          "description": "The repo tools the hub may call while it plans: `repo.list_files`, `repo.read_file`, `repo.search` and `repo.list_modules` only.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
         }
       },
       "required": [
@@ -671,7 +679,7 @@
     },
     "OrchestratorNode": {
       "additionalProperties": false,
-      "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": …, \"input\": …}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again.",
+      "description": "A hub agent plans subtasks at runtime, and the engine runs its body (the worker) once per\ntask, at most `max_concurrency` at a time (6.1).\n\nThe hub gets the orchestrator's input and answers with at most `max_workers` tasks, each an\n`id`, a `title` and `instructions`. Each worker's input is `{\"task\": …, \"input\": …}` as JSON\n(the task is data, never the worker's instructions). The output is the workers' outputs in\ntask order, and a `reduce` may combine them (its sources are the task ids). The body is one\n`agent` or a `sequence` of agent and tool nodes; a writer in it commits on its task's own\nbranch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward\nthe run's `agents_spawned` limit once the plan is made; one worker that does not complete\ncancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the\nremaining work again. In a loop's body (6.9) it plans afresh each iteration, from the loop\nbody's input and every earlier iteration's tasks, and every iteration's tasks build on its one\nintegration branch.",
       "properties": {
         "body": {
           "description": "The worker: what runs once per task.",
@@ -1432,7 +1440,7 @@
     },
     "SetParam": {
       "additionalProperties": false,
-      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`). `null` unsets it. Ids, types and the slots that hold nodes\nchange through the other ops.",
+      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`). `null` unsets it. Ids, types and the slots that hold\nnodes change through the other ops.",
       "properties": {
         "node_id": {
           "anyOf": [

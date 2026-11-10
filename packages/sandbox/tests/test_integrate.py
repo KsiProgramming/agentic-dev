@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 
 from agentic_sandbox import Sandbox, SandboxError, add_worktree
-from agentic_sandbox.integrate import MergeSource, integrate_branches
+from agentic_sandbox.integrate import MergeSource, integrate_branches, start_branches
 
 RUN_ID = UUID("00000000-0000-4000-8000-000000000001")
 # The clone is root's in the Docker sandbox: git needs it marked safe.
@@ -98,3 +98,40 @@ async def test_a_worktree_on_another_branch_is_refused(sandbox: Sandbox) -> None
 
     with pytest.raises(SandboxError):
         await integrate_branches(sandbox, RUN_ID, "fix", sources("fix.a"))
+
+
+async def test_no_task_starts_from_an_integration_branch_not_made_yet(sandbox: Sandbox) -> None:
+    assert await start_branches(sandbox, RUN_ID, "fix", ["fix.a"]) is False
+    assert await sh(sandbox, f"{_SAFE} branch --list 'agent/*'") == ""
+
+
+async def test_a_later_iteration_builds_on_the_integration_branch(sandbox: Sandbox) -> None:
+    # Iteration 1: a writes a.txt and is merged.
+    await task(sandbox, "fix.a", "printf 'a\n' > a.txt")
+    first = await integrate_branches(sandbox, RUN_ID, "fix", sources("fix.a"))
+
+    # Iteration 2 (6.9): b and c start from the integration branch; b edits a's file, c does
+    # nothing.
+    assert await start_branches(sandbox, RUN_ID, "fix", ["fix.b", "fix.c"]) is True
+    await task(sandbox, "fix.b", "printf 'a, reviewed\n' > a.txt")
+    await add_worktree(sandbox, RUN_ID, "fix.c")
+    again = await integrate_branches(sandbox, RUN_ID, "fix", sources("fix.a", "fix.b", "fix.c"))
+
+    tree = f"{sandbox.worktrees_dir}/fix"
+    assert await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/fix.c") == first.head
+    assert again.merged == ["fix.a", "fix.b"]
+    assert again.empty == ["fix.c"] and again.conflicts == {}
+    assert await sh(sandbox, "cat a.txt", cwd=tree) == "a, reviewed"
+    assert await sh(sandbox, "git rev-list --merges --count HEAD", cwd=tree) == "2"
+
+
+async def test_a_started_branch_that_exists_is_left_as_it_is(sandbox: Sandbox) -> None:
+    await task(sandbox, "fix.a", "printf 'a\n' > a.txt")
+    await integrate_branches(sandbox, RUN_ID, "fix", sources("fix.a"))
+    await start_branches(sandbox, RUN_ID, "fix", ["fix.b"])
+    await task(sandbox, "fix.b", "printf 'b\n' > b.txt")
+    tip = await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/fix.b")
+
+    await start_branches(sandbox, RUN_ID, "fix", ["fix.b"])  # a resumed run asks again
+
+    assert await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/fix.b") == tip

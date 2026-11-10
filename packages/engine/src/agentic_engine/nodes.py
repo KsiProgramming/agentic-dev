@@ -13,6 +13,7 @@ from agentic_engine.spec import (
     CREATE_TOOLS,
     PLATFORM_TOOLS,
     PUBLISH_TOOLS,
+    READ_TOOLS,
     AgentNode,
     GateNode,
     LoopNode,
@@ -160,10 +161,17 @@ def _for_forms(value: object, name: str | None = None) -> object:
 
 def _with_choices(parameters: dict[str, Any], choices: dict[str, tuple[str, ...]]) -> None:
     """Give each named field (a string, or a list of strings) of `parameters` its choices as an
-    `enum`. Only the form gets them: the spec still takes any name, and validation explains a
-    wrong one (`unknown_tool`)."""
+    `enum`; a dotted name (`hub.tools`) is a field of an object field, through its `$ref`. Only
+    the form gets them: the spec still takes any name, and validation explains a wrong one
+    (`unknown_tool`)."""
     for field, values in choices.items():
-        prop = parameters["properties"][field]
+        schema = parameters
+        *path, name = field.split(".")
+        for part in path:
+            schema = schema["properties"][part]
+            if ref := schema.get("$ref"):
+                schema = parameters["$defs"][ref.removeprefix("#/$defs/")]
+        prop = schema["properties"][name]
         if prop.get("type") == "array":
             prop["items"] = {**prop["items"], "enum": list(values)}
             prop["uniqueItems"] = True
@@ -381,9 +389,14 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
             "max_workers": 4,
             "max_concurrency": 4,
         },
+        choices={"hub.tools": tuple(sorted(READ_TOOLS))},
         ui={
             "ui:order": ["hub", "max_workers", "max_concurrency", "*"],
-            "hub": {"instructions": _TEXTAREA, "model": _MODEL},
+            "hub": {
+                "instructions": _TEXTAREA,
+                "model": _MODEL,
+                "tools": {"ui:widget": "checkboxes"},
+            },
             "replan": _ADVANCED,
             "writes": _ADVANCED,
         },

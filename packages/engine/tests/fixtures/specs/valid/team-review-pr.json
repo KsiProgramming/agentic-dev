@@ -3,6 +3,12 @@
   "id": "team-review-pr",
   "name": "Team change with review and PR",
   "description": "A lead splits the requested change between two engineers; each task is reviewed and redone with the feedback until it passes; a synthesizer writes the PR description, a reviewer checks the whole, and an approved change is opened as a PR.",
+  "input": {
+    "required": true,
+    "label": "What should the team change?",
+    "description": "The change to make in the repository, in a few sentences: the lead splits it between two engineers.",
+    "example": "Add rate limiting to the login endpoint, with tests."
+  },
   "root": {
     "type": "sequence",
     "id": "main",

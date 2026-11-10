@@ -153,17 +153,6 @@ def test_an_orchestrator_cannot_nest_in_another() -> None:
     [
         (
             {
-                "type": "loop",
-                "id": "again",
-                "body": orchestrator(agent("w")),
-                "until": "true",
-                "max_iterations": 2,
-            },
-            "not_allowed_in_loop",
-            "root.body",
-        ),
-        (
-            {
                 "type": "map",
                 "id": "each",
                 "over": "[last]",
@@ -184,12 +173,96 @@ def test_an_orchestrator_cannot_nest_in_another() -> None:
             "root.branches[0]",
         ),
     ],
-    ids=["loop", "map", "parallel"],
+    ids=["map", "parallel"],
 )
-def test_an_orchestrator_cannot_run_per_item_branch_or_iteration(
+def test_an_orchestrator_cannot_run_per_item_or_branch(
     root: dict[str, Any], code: str, path: str
 ) -> None:
     assert (code, path, "fix") in where(validate(root))
+
+
+LOOP_WRITER = agent("w", tools=["repo.write_file"])
+OPEN_PR = {"type": "tool", "id": "open_pr", "tool": "github.openPR", "args": {"from_node": "fix"}}
+
+
+def review_loop(*more: dict[str, Any]) -> dict[str, Any]:
+    """A loop around a writing orchestrator and a reviewer (6.9)."""
+    return {
+        "type": "loop",
+        "id": "again",
+        "body": {
+            "type": "sequence",
+            "id": "round",
+            "steps": [orchestrator(LOOP_WRITER), agent("reviewer"), *more],
+        },
+        "until": 'last.contains("OK")',
+        "max_iterations": 3,
+    }
+
+
+def test_an_orchestrator_whose_worker_writes_may_be_in_a_loop() -> None:
+    assert validate(review_loop()) == []
+
+
+def test_a_gate_and_a_publish_after_the_loop_see_its_orchestrator() -> None:
+    root = {
+        "type": "sequence",
+        "id": "main",
+        "steps": [
+            review_loop(),
+            {"type": "gate", "id": "approve", "title": "Approve"},
+            OPEN_PR,
+        ],
+    }
+    assert validate(root) == []
+
+
+def test_a_publish_after_the_loop_still_needs_a_gate() -> None:
+    root = {
+        "type": "sequence",
+        "id": "main",
+        "steps": [
+            review_loop(),
+            OPEN_PR,
+        ],
+    }
+    assert ("publish_without_gate", "root.steps[1]", "open_pr") in where(validate(root))
+
+
+@pytest.mark.parametrize(
+    ("node", "path"),
+    [
+        (agent("plain", tools=["repo.write_file"]), "root.body.steps[2]"),
+        ({"type": "gate", "id": "plain", "title": "Check"}, "root.body.steps[2]"),
+        (
+            {"type": "tool", "id": "plain", "tool": "github.openPR", "args": {"from_node": "fix"}},
+            "root.body.steps[2]",
+        ),
+    ],
+    ids=["writer", "gate", "publisher"],
+)
+def test_a_plain_writer_gate_or_publisher_in_the_loop_is_still_refused(
+    node: dict[str, Any], path: str
+) -> None:
+    assert ("not_allowed_in_loop", path, "plain") in where(validate(review_loop(node)))
+
+
+def test_an_orchestrator_in_a_loop_still_cannot_be_in_a_map_inside_it() -> None:
+    root = {
+        "type": "loop",
+        "id": "again",
+        "body": {
+            "type": "map",
+            "id": "each",
+            "over": "[last]",
+            "body": orchestrator(agent("w")),
+            "max_concurrency": 2,
+        },
+        "until": "true",
+        "max_iterations": 2,
+    }
+    codes = where(validate(root))
+    assert ("not_allowed_in_map", "root.body.body", "fix") in codes
 
 
 def test_an_orchestrator_may_be_on_a_route_at_the_top_of_the_run() -> None:

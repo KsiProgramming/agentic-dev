@@ -2320,6 +2320,111 @@
       }
     },
     {
+      "name": "set the run input the document asks for",
+      "ops": [
+        {
+          "op": "setParam",
+          "path": "input",
+          "value": {
+            "required": true,
+            "label": "What should change?"
+          }
+        }
+      ],
+      "result": {
+        "spec_version": "0",
+        "id": "flow",
+        "name": "Flow",
+        "input": {
+          "required": true,
+          "label": "What should change?"
+        },
+        "root": {
+          "type": "sequence",
+          "id": "main",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "a",
+              "role": "a",
+              "instructions": "Do a."
+            },
+            {
+              "type": "loop",
+              "id": "l",
+              "body": {
+                "type": "sequence",
+                "id": "body",
+                "steps": [
+                  {
+                    "type": "agent",
+                    "id": "x",
+                    "role": "x",
+                    "instructions": "Do x."
+                  },
+                  {
+                    "type": "agent",
+                    "id": "y",
+                    "role": "y",
+                    "instructions": "Do y."
+                  }
+                ]
+              },
+              "until": "true",
+              "max_iterations": 2
+            },
+            {
+              "type": "router",
+              "id": "r",
+              "routes": [
+                {
+                  "id": "one",
+                  "when": "true",
+                  "then": {
+                    "type": "agent",
+                    "id": "r1",
+                    "role": "r1",
+                    "instructions": "Do r1."
+                  }
+                }
+              ],
+              "default": {
+                "type": "agent",
+                "id": "r2",
+                "role": "r2",
+                "instructions": "Do r2."
+              }
+            },
+            {
+              "type": "parallel",
+              "id": "p",
+              "branches": [
+                {
+                  "type": "agent",
+                  "id": "p1",
+                  "role": "p1",
+                  "instructions": "Do p1."
+                },
+                {
+                  "type": "agent",
+                  "id": "p2",
+                  "role": "p2",
+                  "instructions": "Do p2."
+                }
+              ],
+              "join": "all"
+            },
+            {
+              "type": "agent",
+              "id": "c",
+              "role": "c",
+              "instructions": "Do c."
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "set then unset the document budget",
       "ops": [
         {

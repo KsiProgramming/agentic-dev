@@ -14,6 +14,8 @@ Read this before every task. It is short on purpose: the details live in `specs/
 - The spec change lands in the same PR as the work, never after it, and every PR adds an entry under `## [Unreleased]` in `CHANGELOG.md`.
 - A rule added to this file is written in the specs first; this file only points to it. If code and the specs disagree, fix one of them in the PR and say which.
 
+**Learn from real runs.** `specs/lessons.md` records the mistakes that reached a real run and the rule each one left. Read it before changing the engine, the runtime or the tools, or writing a workflow or template. When a real run goes wrong in a way tests did not catch, add an entry (what happened, the rule, what enforces it) in the same PR as the fix. A phase that changes what agents receive is done only once a real run with Claude has been read step by step in the console.
+
 Work happens one roadmap phase at a time: plan it with the `plan-feature` skill (`specs/YYYY-MM-DD-<slug>/` with requirements, plan, validation), build it, open it with the `open-pr` skill.
 
 ## Frontend (`web/`)

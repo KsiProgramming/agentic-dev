@@ -57,14 +57,53 @@ OUTPUT_SCHEMA_INSTRUCTION = (
 """Added, with the schema after it, to the instructions of an agent with an `output_schema`
 (4.2). The engine parses the answer and checks it (`agentic_engine.ports`)."""
 
+NO_TOOLS_INSTRUCTION = (
+    "You have no tools in this step: you cannot read files or run anything. Answer from your "
+    "input alone, and never write a tool call out as text: your answer is what the next step "
+    "receives."
+)
+"""Added to the instructions of an agent with no tools. One that wanted to check something would
+otherwise write a pretend tool call as its answer, which the next step then receives as the work
+(6.9)."""
 
-def to_request(node: AgentNode, input: str, route_as: str | None = None) -> AgentRequest:
-    """The runtime request for `node` on `input`. `route_as` replaces the node id the request
-    (and so its tool calls) is known by: a writer working on an orchestrator's task (6.1) writes
-    on that task's branch (`task_writer_key`)."""
+
+class RunContext(BaseModel):
+    """What the platform tells every agent of a run about it, after its instructions: the
+    repository the run works on (`repo`, `owner/name` or its URL; `repo_url` if different).
+    Written from the run's own settings, never from model or repo output, so an agent knows where
+    it works even when its input is only the work before it, or empty."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo: str | None = None
+    repo_url: str | None = None
+
+    def text(self) -> str:
+        """The context as the agent reads it; empty when there is nothing to say."""
+        if not self.repo:
+            return ""
+        url = f" ({self.repo_url})" if self.repo_url and self.repo_url != self.repo else ""
+        return (
+            f"This run works on the repository `{self.repo}`{url}, cloned for the run. The "
+            "`repo.*` tools you are given read it, and change it if you may write. Your input is "
+            "the work the step before you produced (for the first step, what the person who "
+            "started the run asked for), never the repository itself: read the repository with "
+            "your tools, if you have any. After a team of workers merged their work, your tools "
+            "read the code with that work in it."
+        )
+
+
+def to_request(
+    node: AgentNode, input: str, route_as: str | None = None, context: str = ""
+) -> AgentRequest:
+    """The runtime request for `node` on `input`, with the run's `context` (`RunContext.text`).
+    `route_as` replaces the node id the request (and so its tool calls) is known by: a writer
+    working on an orchestrator's task (6.1) writes on that task's branch (`task_writer_key`)."""
     instructions = node.instructions
     if node.tools:
         instructions = f"{instructions}\n\n{TOOL_INTENT_INSTRUCTION}"
+    else:
+        instructions = f"{instructions}\n\n{NO_TOOLS_INSTRUCTION}"
     if node.output_schema is not None:
         schema = json.dumps(node.output_schema, ensure_ascii=False)
         instructions = f"{instructions}\n\n{OUTPUT_SCHEMA_INSTRUCTION}\n\n{schema}"
@@ -75,6 +114,7 @@ def to_request(node: AgentNode, input: str, route_as: str | None = None) -> Agen
         input=input,
         model=node.model,
         tools=list(node.tools),
+        context=context,
     )
 
 
@@ -84,14 +124,15 @@ async def run_agent_node(
     input: str,
     on_event: OnAgentEvent | None = None,
     route_as: str | None = None,
+    context: str = "",
 ) -> AgentNodeResult:
-    """Run `node` to its terminal event and summarise the stream.
+    """Run `node` to its terminal event and summarise the stream, with the run's `context`.
 
     `on_event` sees each event as it arrives, before the stream is checked. Raises
     `ContractViolation` if the runtime's stream breaks the contract. If the caller is cancelled
     while the run is in flight, the run is cancelled too.
     """
-    run = runtime.start(to_request(node, input, route_as))
+    run = runtime.start(to_request(node, input, route_as, context))
     events: list[AgentEvent] = []
     try:
         async for event in run:

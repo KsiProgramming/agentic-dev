@@ -211,6 +211,25 @@ async def test_a_run_started_by_a_person_says_so(
     assert refused.status_code == 422
 
 
+async def test_a_workflow_that_requires_an_input_is_refused_without_one(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    workflow = {
+        **spec_json("valid/two-step-sequence.json"),
+        "input": {"required": True, "label": "What should the team change?"},
+    }
+    runs_before = await count_runs(sessions)
+    async with api(postgres_url, redis_url) as client:
+        empty = await client.post("/runs", json={"workflow": workflow, "input": "  "})
+        given = await client.post("/runs", json={"workflow": workflow, "input": "Add a test."})
+    await unqueue(redis_url, given.json()["run_id"])
+
+    assert empty.status_code == 422
+    assert empty.json()["detail"] == "This workflow needs an input: What should the team change?"
+    assert given.status_code == 202
+    assert await count_runs(sessions) == runs_before + 1
+
+
 async def test_post_run_rejects_an_invalid_spec(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
 ) -> None:

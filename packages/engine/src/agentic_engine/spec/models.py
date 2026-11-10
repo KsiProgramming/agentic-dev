@@ -8,7 +8,15 @@ from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from agentic_engine.expr import (
     ROUTE_VARIABLES,
@@ -169,7 +177,8 @@ class LoopNode(_Base):
     output), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,
     data}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop
     normally. The body cannot contain gates, writers, publishers or loops: each is keyed by node
-    id, which repeats in every iteration."""
+    id, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept
+    per iteration and whose writers all land on its one integration branch."""
 
     type: Literal["loop"]
     id: NodeId
@@ -408,7 +417,9 @@ writer unambiguously (`task_writer_key`); not `lock`, as git refuses a branch en
 
 class OrchestratorHub(_Base):
     """The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the
-    tasks through a typed output the engine makes (`orchestrator_plan_schema`)."""
+    tasks through a typed output the engine makes (`orchestrator_plan_schema`). With `tools`, it
+    may read the repo first, to plan from the code (6.9): read tools only, as it never writes;
+    in a loop's later iteration, or a replan, it reads the integration branch once there is one."""
 
     role: NonEmptyStr
     instructions: NonEmptyStr
@@ -416,6 +427,21 @@ class OrchestratorHub(_Base):
         default=None, description="Unset means the workspace default."
     )
     model: NonEmptyStr | None = None
+    tools: list[str] = Field(
+        default_factory=list[str],
+        description="The repo tools the hub may call while it plans: `repo.list_files`, "
+        "`repo.read_file`, `repo.search` and `repo.list_modules` only.",
+    )
+
+    @field_validator("tools")
+    @classmethod
+    def _reads_only(cls, tools: list[str]) -> list[str]:
+        if other := sorted(set(tools) - READ_TOOLS):
+            raise ValueError(
+                f"a hub may only read the repo, not call {', '.join(other)}; give the work "
+                "to its worker instead"
+            )
+        return tools
 
 
 MAX_REPLAN_ROUNDS = 3
@@ -446,7 +472,9 @@ class OrchestratorNode(_Base):
     branch (`agent/<run>/<orchestrator>.<task>`). The hub and every worker's agents count toward
     the run's `agents_spawned` limit once the plan is made; one worker that does not complete
     cancels the others and fails the orchestrator, unless `replan` (6.2) lets the hub plan the
-    remaining work again."""
+    remaining work again. In a loop's body (6.9) it plans afresh each iteration, from the loop
+    body's input and every earlier iteration's tasks, and every iteration's tasks build on its one
+    integration branch."""
 
     type: Literal["orchestrator"]
     id: NodeId
@@ -646,12 +674,15 @@ def within(path: str, scope: str) -> bool:
 
 
 def node_tools(node: Node) -> list[str]:
-    """The platform tools `node` itself may call: an agent's `tools`, a tool node's `tool`."""
+    """The platform tools `node` itself may call: an agent's `tools`, a tool node's `tool`, an
+    orchestrator's hub's `tools` (its worker's are its body's)."""
     match node:
         case AgentNode():
             return list(node.tools)
         case ToolNode():
             return [node.tool]
+        case OrchestratorNode():
+            return list(node.hub.tools)
         case (
             GateNode()
             | SequenceNode()
@@ -660,7 +691,6 @@ def node_tools(node: Node) -> list[str]:
             | ReduceNode()
             | ParallelNode()
             | RouterNode()
-            | OrchestratorNode()
             | SubflowNode()
         ):
             return []
@@ -772,10 +802,13 @@ def publish_gate_issues(root: Node) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     seen: list[tuple[str, Node]] = []
     tasked = task_workers(root)
+    loops: set[str] = set()
     for path, node in iter_nodes(root):
         if isinstance(node, OrchestratorNode):
-            seen.append((path, node))
+            seen.append((_runs_in(path, loops), node))
             continue
+        if isinstance(node, LoopNode):
+            loops.add(path)
         if isinstance(node, SequenceNode | LoopNode | MapNode | ParallelNode | RouterNode):
             continue
         for tool in sorted(PUBLISH_TOOLS.intersection(node_tools(node))):
@@ -795,8 +828,18 @@ def publish_gate_issues(root: Node) -> list[ValidationIssue]:
                 issues.append(
                     ValidationIssue(code=code, path=path, node_id=node.id, message=message)
                 )
-        seen.append((path, node))
+        seen.append((_runs_in(path, loops), node))
     return issues
+
+
+def _runs_in(path: str, loops: Collection[str]) -> str:
+    """`path` as where its node runs for the nodes after it: a loop's body runs at least once and
+    ends before the nodes after the loop (6.9), so a node in it counts as at its loop's place."""
+    scope = scope_of(path)
+    while scope.endswith(".body") and scope.removesuffix(".body") in loops:
+        path = scope.removesuffix(".body")
+        scope = scope_of(path)
+    return path
 
 
 def publish_gate_errors(root: Node) -> list[str]:
@@ -907,7 +950,8 @@ def loop_issues(root: Node) -> list[ValidationIssue]:
     """Why the loops under `root` cannot run, in run order (depth first); empty if they can. A
     loop's `until` must be a valid condition, and its body must not hold a gate, a writer, a
     publisher, another loop, a map or a parallel: the issue is on that node, which is the one to
-    move."""
+    move. An orchestrator may be in it (6.9): its worker is checked by `orchestrator_issues`, and
+    its writers, which commit on task branches merged into its integration branch, are allowed."""
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, LoopNode):
@@ -921,7 +965,7 @@ def loop_issues(root: Node) -> list[ValidationIssue]:
                     code="invalid_expression", path=path, node_id=node.id, message=message
                 )
             )
-        for inner_path, inner in iter_nodes(node.body, f"{path}.body"):
+        for inner_path, inner in _outside_workers(node.body, f"{path}.body"):
             if reason := _not_in_loop(inner):
                 message = (
                     f"loop {node.id!r} at {path}: {reason} {inner.id!r} at {inner_path} cannot "
@@ -943,6 +987,18 @@ def loop_errors(root: Node) -> list[str]:
     return messages(loop_issues(root))
 
 
+def _outside_workers(node: Node, path: str) -> Iterator[tuple[str, Node]]:
+    """`iter_nodes`, without the nodes of an orchestrator's worker: they run once per task, and
+    `orchestrator_issues` checks them."""
+    workers: list[str] = []
+    for at, inner in iter_nodes(node, path):
+        if any(within(at, worker) for worker in workers):
+            continue
+        if isinstance(inner, OrchestratorNode):
+            workers.append(f"{at}.body")
+        yield at, inner
+
+
 def _not_in_loop(node: Node) -> str | None:
     tools = set(node_tools(node))
     match node:
@@ -955,7 +1011,7 @@ def _not_in_loop(node: Node) -> str | None:
         case ParallelNode():
             return "parallel"
         case OrchestratorNode():
-            return "orchestrator"
+            return None  # 6.9: planned afresh each iteration, on one integration branch
         case _ if tools & PUBLISH_TOOLS:
             return "publisher"
         case _ if tools & CREATE_TOOLS:
@@ -1166,8 +1222,8 @@ def orchestrator_issues(root: Node) -> list[ValidationIssue]:
     """Why the orchestrators under `root` cannot run, in run order; empty if they can. Its body
     may hold only agent, tool and sequence nodes, none of them a publisher or a repo creator
     (`not_allowed_in_orchestrator`, on that node). An orchestrator may not be inside a map, a
-    parallel or another orchestrator (the map and parallel rules and this one say so), nor a
-    loop (the loop rules)."""
+    parallel or another orchestrator (the map and parallel rules and this one say so); it may be
+    in a loop (6.9)."""
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, OrchestratorNode):
@@ -1825,6 +1881,25 @@ def task_writer_orchestrators(root: Node, write_tools: Collection[str] = WRITE_T
     }
 
 
+class WorkflowInput(_Base):
+    """What a run of the workflow is given to work on: the first step's input. A workflow that
+    needs it (a change to make, a question to answer) says so with `required`, and `label`,
+    `description` and `example` tell the person starting a run what to write."""
+
+    required: bool = Field(default=False, description="A run cannot start with an empty input.")
+    label: str = Field(
+        min_length=1,
+        max_length=80,
+        description='What the input is, as a field label, e.g. "What should the team change?".',
+    )
+    description: str | None = Field(
+        default=None, max_length=300, description="One more sentence of help under the field."
+    )
+    example: str | None = Field(
+        default=None, max_length=300, description="An example input, shown in the empty field."
+    )
+
+
 class WorkflowSpec(_Base):
     """A versioned workflow document with a single root node."""
 
@@ -1838,6 +1913,11 @@ class WorkflowSpec(_Base):
         le=BUDGET_MAX_USD,
         description="USD a run of this workflow may spend, a hard stop once reached. A run's own "
         "budget replaces it; unset, the workspace's default applies (or none).",
+    )
+    input: WorkflowInput | None = Field(
+        default=None,
+        description="What a run is given to work on, and whether it must be given; unset, the "
+        "input is optional.",
     )
     root: Node
 

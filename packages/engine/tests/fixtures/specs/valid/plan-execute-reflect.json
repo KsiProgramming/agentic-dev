@@ -3,6 +3,11 @@
   "id": "plan-execute-reflect",
   "name": "Plan, execute, reflect",
   "description": "A goal is decomposed into subtasks and scheduled, an executor does them, and a monitor checks the result: not OK sends its feedback back to planning, OK goes on to the output. Read-only: it reads the repo and writes artifacts, never code.",
+  "input": {
+    "required": true,
+    "label": "What do you want done?",
+    "example": "Find why the nightly build is slow and suggest a fix."
+  },
   "root": {
     "type": "sequence",
     "id": "main",

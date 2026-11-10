@@ -124,6 +124,19 @@ async def test_request_mapping() -> None:
     assert mock.requests[1]["model"] == "claude-opus-5-5"
 
 
+async def test_the_runs_context_follows_the_instructions_and_no_input_is_said() -> None:
+    mock = MockClaude([text_reply("a")])
+    context = "This run works on the repository `acme/shop`."
+
+    await collect_and_check(runtime(mock), request(input="  ", context=context))
+
+    body = mock.requests[0]
+    assert body["system"] == f"Your role: Writer\n\nWrite.\n\n# The run\n\n{context}"
+    [turn] = body["messages"]
+    assert "<input>" not in turn["content"]
+    assert turn["content"].startswith("There is no input for this step.")
+
+
 @pytest.mark.parametrize(
     "reply",
     [

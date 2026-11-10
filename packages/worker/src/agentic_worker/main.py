@@ -81,6 +81,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from agentic_engine.agent import RunContext
 from agentic_engine.artifacts import ArtifactStore
 from agentic_engine.events import RUN_CANCELLED, RUN_FAILED, EventSink, RunEvent, RunEventLog
 from agentic_engine.gate import GateDecision, GateReview
@@ -734,6 +735,14 @@ async def _clone_token(
         return None
 
 
+def run_context(run: StoredRun) -> RunContext | None:
+    """What every agent of `run` is told about it: the repository it works on, by its
+    `owner/name` when it is on GitHub, else its URL."""
+    if run.repo is None:
+        return None
+    return RunContext(repo=repo_full_name(run.repo.url) or run.repo.url, repo_url=run.repo.url)
+
+
 async def _workflow(
     worker: Worker,
     run: StoredRun,
@@ -766,6 +775,7 @@ async def _workflow(
             review=review,
             artifacts=artifacts,
             integrator=integrator,
+            context=run_context(run),
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -784,6 +794,7 @@ async def _workflow(
         review=review,
         artifacts=artifacts,
         integrator=integrator,
+        context=run_context(run),
     )
 
 

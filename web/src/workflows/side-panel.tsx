@@ -263,15 +263,44 @@ const DOCUMENT_SCHEMA: Schema = {
         "What a run of this workflow may spend, a hard stop once reached. A run can set its own. " +
         "Unset: the workspace's default budget, or none.",
     },
+    input: {
+      type: "object",
+      title: "Run input",
+      description:
+        "What a person starting a run is asked for: the first step works on it. Without a label, " +
+        "the input is optional and unnamed.",
+      required: ["label"],
+      properties: {
+        label: {
+          type: "string",
+          minLength: 1,
+          maxLength: 80,
+          title: "Label",
+          description: 'The question the run sheet asks, e.g. "What should the team change?".',
+        },
+        required: {
+          type: "boolean",
+          title: "Required",
+          description: "A run cannot start without it.",
+        },
+        description: { type: "string", maxLength: 300, title: "Help" },
+        example: { type: "string", maxLength: 300, title: "Example" },
+      },
+    },
   },
 };
 
 const DOCUMENT_UI: UiSchema = {
   description: { "ui:widget": "textarea", "ui:options": { rows: 3 } },
   budget_usd: { "ui:widget": "usd", "ui:placeholder": "No budget" },
+  input: {
+    "ui:order": ["label", "required", "description", "example"],
+    description: { "ui:widget": "textarea", "ui:options": { rows: 2 } },
+    example: { "ui:widget": "textarea", "ui:options": { rows: 2 } },
+  },
 };
 
-/** The workflow's own fields: name, description and budget. */
+/** The workflow's own fields: name, description, budget and run input. */
 export function WorkflowPanel({
   spec,
   changes = null,

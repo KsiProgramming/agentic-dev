@@ -3,10 +3,14 @@
 `integrate_branches` makes (or reuses) the worktree and branch `agent/<run>/<target>` from the
 clone's `HEAD`, the base every writer's branch starts from, then merges each source branch into
 it with `git merge --no-ff`, one merge commit each, as the agent identity. A source with no
-commits past the base is `empty`; one already in the integration branch counts as merged, so a
-call repeated after a crash merges nothing twice. A source that conflicts is aborted and listed
-with its conflicting paths; the integration branch keeps every source merged before it, and the
-sources after it are still merged.
+commits past the base is `empty`; one already merged into the integration branch counts as
+merged, so a call repeated after a crash merges nothing twice. A source that conflicts is aborted
+and listed with its conflicting paths; the integration branch keeps every source merged before
+it, and the sources after it are still merged.
+
+`start_branches` starts writers' branches from the integration branch instead of the clone's
+`HEAD` (6.9: an orchestrator in a loop, whose later iterations build on the work merged so far).
+Such a source with no commits of its own is `empty` too.
 
 Nothing is pushed and no source branch is changed. Repo content is data: git runs with
 `GIT_SAFETY`, and nothing read here is executed.
@@ -57,7 +61,13 @@ while [ $# -gt 0 ]; do
      || g -C "$tree" merge-base --is-ancestor "$src" "$base"; then
     printf 'empty\\0'
   elif g -C "$tree" merge-base --is-ancestor "$src" HEAD; then
-    printf 'merged\\0'
+    # Merged by a merge commit of ours, or started from this branch with nothing new (6.9).
+    tip=$(g -C "$tree" rev-parse "$src")
+    if g -C "$tree" rev-list --merges --parents HEAD | grep -q " $tip\\$"; then
+      printf 'merged\\0'
+    else
+      printf 'empty\\0'
+    fi
   elif g -C "$tree" merge -q --no-ff --no-verify --no-edit -m "$msg" "$src" >/dev/null 2>&1; then
     printf 'merged\\0'
   elif g -C "$tree" diff --quiet --diff-filter=U; then
@@ -119,6 +129,48 @@ async def integrate_branches(
     if result.exit_code != 0 or result.truncated:
         raise SandboxError(f"could not build the integration branch {tree.branch}")
     return _parse(tree.branch, result.stdout, [s.key for s in sources])
+
+
+# `$1` the integration branch, `$2` the checkout, `$3` and `$4` the identity, then the branches
+# to start. Prints `missing` if the integration branch does not exist yet. The options hold no
+# shell syntax.
+_START_SCRIPT = f"""
+target=$1
+checkout=$2
+name=$3
+email=$4
+shift 4
+g() {{
+  git -C "$checkout" -c safe.directory="$checkout" -c user.name="$name" \\
+    -c user.email="$email" {" ".join(GIT_SAFETY)} "$@"
+}}
+if ! g rev-parse --verify -q "refs/heads/$target" >/dev/null; then
+  printf missing
+  exit 0
+fi
+for branch in "$@"; do
+  g rev-parse --verify -q "refs/heads/$branch" >/dev/null && continue
+  g branch -q "$branch" "refs/heads/$target" || exit 1
+done
+"""
+
+
+async def start_branches(sandbox: Sandbox, run_id: UUID, target: str, keys: Sequence[str]) -> bool:
+    """Make the branch of each writer in `keys` at the tip of `agent/<run_id>/<target>`, the
+    integration branch, so its worktree (`add_worktree`) starts from the work merged so far. A
+    branch that exists is left as it is, so a resumed run keeps its commits. Returns `False`,
+    making nothing, if the integration branch does not exist yet (the writers start from the
+    clone's `HEAD`). Raises `SandboxError` if git fails."""
+    target_branch = Worktree.of(sandbox, run_id, target).branch
+    branches = [Worktree.of(sandbox, run_id, key).branch for key in keys]
+    argv = [
+        "sh", "-c", _START_SCRIPT, "start_branches",
+        target_branch, sandbox.workdir, *AGENT_IDENTITY, *branches,
+    ]  # fmt: skip
+    result = await sandbox.exec(argv)
+    if result.exit_code != 0:
+        raise SandboxError(f"could not start task branches from {target_branch}")
+    return result.stdout.strip() != "missing"
 
 
 def _parse(branch: str, stdout: str, keys: list[str]) -> IntegrationOutcome:
