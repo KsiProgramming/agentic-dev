@@ -1,4 +1,5 @@
 import {
+  BadgeCheckIcon,
   BanIcon,
   CircleCheckIcon,
   CircleXIcon,
@@ -49,6 +50,11 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "workflow.created": { label: "Workflow created", icon: FilePlusIcon, category: "workflows" },
   "workflow.updated": { label: "Workflow changed", icon: FilePenIcon, category: "workflows" },
   "workflow.restored": { label: "Version restored", icon: HistoryIcon, category: "workflows" },
+  "workflow.published": {
+    label: "Version published",
+    icon: BadgeCheckIcon,
+    category: "workflows",
+  },
   "connection.added": { label: "Connection added", icon: PlugIcon, category: "settings" },
   "connection.removed": { label: "Connection removed", icon: UnplugIcon, category: "settings" },
   "policy.updated": { label: "Run limits changed", icon: GaugeIcon, category: "settings" },
@@ -196,11 +202,18 @@ export function describe(event: AuditEvent): string {
     }
     case "workflow.created":
     case "workflow.updated":
-    case "workflow.restored": {
+    case "workflow.restored":
+    case "workflow.published": {
       const workflow = text(d, "workflow_id") ?? "A workflow";
       const version = count(d, "version");
       const at = version > 0 ? ` v${version}` : "";
-      if (event.action === "workflow.created") return `Created ${workflow}${at}`;
+      if (event.action === "workflow.published") return `Published ${workflow}${at}`;
+      if (event.action === "workflow.created") {
+        const source = record(d, "extracted_from");
+        const from = typeof source.workflow_id === "string" ? source.workflow_id : null;
+        const fromVersion = typeof source.version === "number" ? ` v${source.version}` : "";
+        return `Created ${workflow}${at}` + (from ? ` from steps of ${from}${fromVersion}` : "");
+      }
       if (event.action === "workflow.restored") {
         const from = count(d, "restored_from");
         return `Restored ${workflow}${from > 0 ? ` v${from}` : ""} as${at || " the latest"}`;

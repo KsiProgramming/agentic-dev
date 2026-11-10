@@ -13,7 +13,9 @@ export type GraphOp =
   | components["schemas"]["RemoveNode"]
   | components["schemas"]["Connect"]
   | components["schemas"]["Disconnect"]
-  | components["schemas"]["SetParam"];
+  | components["schemas"]["SetParam"]
+  | components["schemas"]["Wrap"]
+  | components["schemas"]["Extract"];
 export type OpErrorCode = components["schemas"]["OpErrorDetail"]["code"];
 
 /** Why a batch cannot apply: the op at `op_index` (`null`: the batch's result) and its node. */
@@ -104,7 +106,20 @@ class Tree {
 
 /** `spec` with `ops` applied in order; `spec` is not changed. Throws `OpError`. */
 export function applyOps<S>(spec: S, ops: readonly GraphOp[]): S {
+  return applyGraphOps(spec, ops).spec;
+}
+
+/** What a batch makes: the spec, and the workflow an `extract` moved nodes into (6.6), which the
+ * server stores as that workflow's version 1 (`null` without one). */
+export interface AppliedOps<S> {
+  spec: S;
+  extracted: Json | null;
+}
+
+/** As `applyOps`, with the workflow an `extract` made. */
+export function applyGraphOps<S>(spec: S, ops: readonly GraphOp[]): AppliedOps<S> {
   const tree = new Tree(spec);
+  let extracted: Json | null = null;
   ops.forEach((op, index) => {
     switch (op.op) {
       case "addNode":
@@ -117,10 +132,231 @@ export function applyOps<S>(spec: S, ops: readonly GraphOp[]): S {
         return disconnect(tree, op, index);
       case "setParam":
         return setParam(tree, op, index);
+      case "wrap":
+        return wrap(tree, op, index);
+      case "extract":
+        if (extracted !== null) {
+          throw new OpError(
+            "invalid_extract",
+            "a batch may hold one extract; save, then extract again",
+            index,
+            op.node_ids[0] ?? null,
+          );
+        }
+        extracted = extract(tree, op, index);
+        return;
     }
   });
   checkResult(tree);
-  return tree.doc as S;
+  return { spec: tree.doc as S, extracted };
+}
+
+/** The containers `wrap` may put nodes in (6.6). */
+export const WRAP_KINDS = ["sequence", "parallel", "loop", "map"] as const;
+
+/** The nodes `nodeIds` name, in run order, with the place of the first: one node anywhere (but
+ * detached), or consecutive steps of one sequence. */
+function selection(
+  tree: Tree,
+  nodeIds: readonly string[],
+  index: number,
+  code: OpErrorCode,
+): [Place, Json[]] {
+  const refuse = (message: string, nodeId: string) => new OpError(code, message, index, nodeId);
+  const repeated = nodeIds.find((id, i) => nodeIds.indexOf(id) !== i);
+  if (repeated !== undefined) throw refuse(`'${repeated}' is named twice`, repeated);
+  const found = nodeIds.map((id) => require(tree, id, index));
+  const detached = new Set(
+    Object.values(tree.pool)
+      .filter(isObject)
+      .flatMap((node) => subtreeIds(node)),
+  );
+  for (const id of nodeIds) {
+    if (detached.has(id)) throw refuse(`'${id}' is not placed in the workflow`, id);
+  }
+  if (found.length === 1) {
+    const [node, place] = found[0];
+    return [place, [node]];
+  }
+  const holder = found[0][1].holder;
+  found.forEach(([, place], i) => {
+    if (place.slot !== "steps" || place.holder !== holder) {
+      throw refuse(
+        `'${nodeIds[i]}' is not a step of the same sequence as '${nodeIds[0]}'; pick one node, or consecutive steps of one sequence`,
+        nodeIds[i],
+      );
+    }
+  });
+  const ordered = [...found].sort((a, b) => (a[1].key as number) - (b[1].key as number));
+  const keys = ordered.map(([, place]) => place.key as number);
+  for (let i = 1; i < keys.length; i++) {
+    if (keys[i] !== keys[i - 1] + 1) {
+      const gap = (holder as unknown[])[keys[i - 1] + 1] as Json;
+      throw refuse(
+        `the steps are not consecutive: '${String(gap.id)}' is between them`,
+        String(gap.id),
+      );
+    }
+  }
+  return [ordered[0][1], ordered.map(([node]) => node)];
+}
+
+/** Put `value` where the `count` nodes from `place` on are. */
+function replace(place: Place, count: number, value: Json): void {
+  if (count === 1) setAt(place, value);
+  else (place.holder as unknown[]).splice(place.key as number, count, value);
+}
+
+function wrap(tree: Tree, op: components["schemas"]["Wrap"], index: number): void {
+  const [place, nodes] = selection(tree, op.node_ids, index, "invalid_wrap");
+  const first = op.node_ids[0];
+  const refuse = (message: string) => new OpError("invalid_wrap", message, index, first);
+  const container = structuredClone(op.with) as Json;
+  const kind = container.type;
+  const containerId = container.id;
+  if (!(WRAP_KINDS as readonly unknown[]).includes(kind)) {
+    throw refuse("wrap puts nodes in a sequence, parallel, loop or map");
+  }
+  if (typeof containerId !== "string") throw refuse(`give the new ${String(kind)} an \`id\``);
+  const held = Object.keys(container)
+    .filter((key) => NODE_SLOTS.has(key))
+    .sort();
+  if (held.length > 0) {
+    throw refuse(`\`with\` holds no nodes (${held.join(", ")}); they are the wrapped ones`);
+  }
+  if (tree.ids().has(containerId)) throw duplicate(containerId, index);
+  if (kind === "sequence") container.steps = nodes;
+  else if (kind === "parallel") {
+    if (nodes.length < 2) {
+      throw refuse("a parallel needs two or more branches; wrap two or more steps");
+    }
+    container.branches = nodes;
+  } else if (nodes.length === 1) container.body = nodes[0];
+  else {
+    const sequenceId = op.sequence_id ?? null;
+    if (sequenceId === null) {
+      throw refuse(`give \`sequence_id\`: the ${kind}'s body holds the steps in a sequence`);
+    }
+    if (sequenceId === containerId)
+      throw refuse(`\`sequence_id\` and the ${kind}'s id must differ`);
+    if (tree.ids().has(sequenceId)) throw duplicate(sequenceId, index);
+    container.body = { type: "sequence", id: sequenceId, steps: nodes };
+  }
+  replace(place, nodes.length, container);
+}
+
+const RESULTS = /\bresults\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([^"']+)["']\s*\])/g;
+
+/** The node ids `node` itself refers to: a reduce's `from`, a publisher's `from_node` and the
+ * results its expressions read. */
+function references(node: Json): Set<string> {
+  const found = new Set<string>();
+  if (node.type === "reduce" && typeof node.from === "string") found.add(node.from);
+  if (isObject(node.args) && typeof node.args.from_node === "string") {
+    found.add(node.args.from_node);
+  }
+  const expressions: unknown[] = [node.until, node.over];
+  if (node.type === "subflow") expressions.push(node.input);
+  if (node.type === "router" && Array.isArray(node.routes)) {
+    for (const route of node.routes) if (isObject(route)) expressions.push(route.when);
+  }
+  for (const expression of expressions) {
+    if (typeof expression !== "string") continue;
+    for (const match of expression.matchAll(RESULTS)) found.add(match[1] ?? match[2]);
+  }
+  return found;
+}
+
+/** The orchestrator whose worker holds `nodeId`, if one does. */
+function inWorker(tree: Tree, nodeId: string): string | null {
+  for (const [node] of tree.places()) {
+    if (
+      node.type === "orchestrator" &&
+      isObject(node.body) &&
+      subtreeIds(node.body).includes(nodeId)
+    ) {
+      return String(node.id);
+    }
+  }
+  return null;
+}
+
+/** The `side` schema of the agent or tool node whose port is `node`'s. */
+function portOf(node: Json, side: "input" | "output"): unknown {
+  if (node.type === "agent" || node.type === "tool") return node[`${side}_schema`];
+  if (node.type !== "sequence" || !Array.isArray(node.steps)) return undefined;
+  const steps = node.steps.filter((s): s is Json => isObject(s) && s.type !== "gate");
+  if (steps.length === 0) return undefined;
+  return portOf(side === "input" ? steps[0] : steps[steps.length - 1], side);
+}
+
+function extract(tree: Tree, op: components["schemas"]["Extract"], index: number): Json {
+  const [place, nodes] = selection(tree, op.node_ids, index, "invalid_extract");
+  const first = op.node_ids[0];
+  const refuse = (message: string, nodeId: string = first) =>
+    new OpError("invalid_extract", message, index, nodeId);
+  if (place.holder === tree.doc) {
+    throw new OpError(
+      "root_node",
+      `'${first}' is the workflow's root; extract steps of it instead`,
+      index,
+      first,
+    );
+  }
+  if (op.workflow.id === tree.doc.id) {
+    throw refuse(`the new workflow needs an id of its own, not '${op.workflow.id}'`);
+  }
+  const hub = inWorker(tree, first);
+  if (hub !== null) {
+    throw refuse(`'${first}' is in the worker of orchestrator '${hub}', which runs no subflow`);
+  }
+  const inside = new Set(nodes.flatMap((node) => subtreeIds(node)));
+  for (const node of nodes) {
+    for (const [inner] of walk(node, { holder: {}, key: "", parent: null, slot: null })) {
+      for (const ref of references(inner)) {
+        if (!inside.has(ref)) {
+          throw refuse(
+            `'${String(inner.id)}' refers to '${ref}', which stays outside; extract them together, or change the reference first`,
+            String(inner.id),
+          );
+        }
+      }
+    }
+  }
+  for (const [outer] of tree.places()) {
+    if (inside.has(String(outer.id))) continue;
+    for (const ref of references(outer)) {
+      if (inside.has(ref)) {
+        throw refuse(
+          `'${String(outer.id)}' refers to '${ref}', which would move into the new workflow; extract them together, or change the reference first`,
+          String(outer.id),
+        );
+      }
+    }
+  }
+  if (tree.ids().has(op.subflow_id) && !inside.has(op.subflow_id)) {
+    throw duplicate(op.subflow_id, index);
+  }
+  let root: Json;
+  if (nodes.length === 1) root = nodes[0];
+  else {
+    let rootId = "main";
+    for (let n = 2; inside.has(rootId); n++) rootId = `main_${n}`;
+    root = { type: "sequence", id: rootId, steps: nodes };
+  }
+  const document: Json = { spec_version: "0", id: op.workflow.id, name: op.workflow.name };
+  if (op.workflow.description) document.description = op.workflow.description;
+  const input = portOf(nodes[0], "input");
+  if (input != null) document.input_schema = input;
+  const output = portOf(nodes[nodes.length - 1], "output");
+  if (output != null) document.output_schema = output;
+  document.root = root;
+  replace(place, nodes.length, {
+    type: "subflow",
+    id: op.subflow_id,
+    workflow: { id: op.workflow.id, version: 1 },
+  });
+  return structuredClone(document);
 }
 
 function subtreeIds(node: Json): string[] {

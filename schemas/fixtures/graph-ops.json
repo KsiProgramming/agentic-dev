@@ -3892,26 +3892,6 @@
       }
     },
     {
-      "name": "wrap a loop without its parameters",
-      "ops": [
-        {
-          "op": "wrap",
-          "node_ids": [
-            "c"
-          ],
-          "with": {
-            "type": "loop",
-            "id": "redo"
-          }
-        }
-      ],
-      "error": {
-        "code": "schema",
-        "op_index": null,
-        "node_id": "redo"
-      }
-    },
-    {
       "name": "wrap an unknown node",
       "ops": [
         {

@@ -129,6 +129,23 @@ describe("describe", () => {
       },
       "Restored docs v1 as v4",
     ],
+    [
+      "workflow version published",
+      { action: "workflow.published", details: { workflow_id: "review", version: 2 } },
+      "Published review v2",
+    ],
+    [
+      "workflow extracted from another",
+      {
+        action: "workflow.created",
+        details: {
+          workflow_id: "review",
+          version: 1,
+          extracted_from: { workflow_id: "docs", version: 3 },
+        },
+      },
+      "Created review v1 from steps of docs v3",
+    ],
   ])("%s", (_, overrides, expected) => {
     expect(line(overrides)).toBe(expected);
   });
@@ -154,9 +171,9 @@ describe("describe", () => {
   });
 
   test("an action the page does not know shows its name", () => {
-    const unknown = { action: "workflow.published" } as unknown as Partial<AuditEvent>;
-    expect(line(unknown)).toBe("workflow.published");
-    expect(actionInfo("workflow.published")).toEqual({ label: "workflow.published", icon: null });
+    const unknown = { action: "workflow.archived" } as unknown as Partial<AuditEvent>;
+    expect(line(unknown)).toBe("workflow.archived");
+    expect(actionInfo("workflow.archived")).toEqual({ label: "workflow.archived", icon: null });
   });
 });
 
@@ -173,6 +190,7 @@ test("each category has its actions", () => {
     "workflow.created",
     "workflow.updated",
     "workflow.restored",
+    "workflow.published",
   ]);
   expect(actionsOf("settings")).toEqual([
     "connection.added",

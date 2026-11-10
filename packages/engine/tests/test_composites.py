@@ -6,6 +6,7 @@ composite is given exactly what it was given inline."""
 from collections.abc import Mapping
 from typing import Any
 
+import pytest
 from pydantic import TypeAdapter
 
 from agentic_engine.agent import RunContext
@@ -15,6 +16,7 @@ from agentic_engine.graph import WorkflowRunResult, run_workflow
 from agentic_engine.policy import PLATFORM_POLICY
 from agentic_engine.spec import (
     GraphOp,
+    OpError,
     ValidationIssue,
     WorkflowSpec,
     apply_graph_ops,
@@ -290,3 +292,18 @@ async def test_an_extracted_agent_receives_what_it_received_inline() -> None:
 
     assert told(after.requests) == told(before.requests)
     assert [r.node_id for r in after.requests] == ["plan", "write", "check", "after"]
+
+
+# --- Ops the browser does not mirror ----------------------------------------------------------
+
+
+def test_a_wrap_whose_container_misses_its_parameters_is_off_the_schema() -> None:
+    """Only the server checks the schema (the browser's `applyOps` is a preview), so this case
+    is not in the shared fixture: the builder fills `with` from the kind's manifest default."""
+    spec = workflow("w", agent("a"), agent("b"))
+    ops = [{"op": "wrap", "node_ids": ["b"], "with": {"type": "loop", "id": "redo"}}]
+
+    with pytest.raises(OpError) as exc:
+        apply_graph_ops(spec, OPS.validate_python(ops))
+
+    assert (exc.value.code, exc.value.op_index, exc.value.node_id) == ("schema", None, "redo")
