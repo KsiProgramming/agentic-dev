@@ -4,18 +4,18 @@ Order chosen with the user: the engine check first, then the browser, then the t
 
 ## 1. The AC-2 spec and what its agents receive
 
-- [ ] Add `packages/engine/tests/fixtures/specs/valid/ac2-plan-build-review.json`: the flow in `requirements.md` (ids `explore`, `code_analyst`, `test_analyst`, `review_loop`, `pass`, `implement`, `engineer`, `synthesizer`, `reviewer`, `approve_pr`, `publish`), with real instructions and tools.
-- [ ] Test that it validates (`POST /workflows/{id}/validate` codes empty) and compiles.
-- [ ] "What agents receive" test (lessons rule 1, fake runtime): for each agent, its input, tools, run context and the node id its tool calls go out as. Settle the open question: does the lead's input hold the request? Pick the fix if not, and write it in tech-stack (and lessons, if it changes what every agent gets).
-- [ ] Assert the readers after `implement` (`synthesizer`, `reviewer`) read its integration branch (lessons rule 5), and `approve_pr` shows the integration branch as the one writer.
+- [x] Add `packages/engine/tests/fixtures/specs/valid/ac2-plan-build-review.json`: the flow in `requirements.md` (ids `explore`, `code_analyst`, `test_analyst`, `review_loop`, `pass`, `implement`, `engineer`, `synthesizer`, `reviewer`, `approve_pr`, `publish`), with real instructions and tools.
+- [x] Test that it validates (`POST /workflows/{id}/validate` codes empty) and compiles.
+- [x] "What agents receive" test (lessons rule 1, fake runtime): for each agent, its input, tools, run context and the node id its tool calls go out as. Settle the open question: does the lead's input hold the request? Pick the fix if not, and write it in tech-stack (and lessons, if it changes what every agent gets).
+- [x] Assert the readers after `implement` (`synthesizer`, `reviewer`) read its integration branch (lessons rule 5), and `approve_pr` shows the integration branch as the one writer.
 
 ## 2. The "run matches the graph" check
 
-- [ ] `packages/engine/src/agentic_engine/conformance.py`: `trace_mismatches(spec, events) -> list[Mismatch]` with the four rules in `requirements.md` (unknown node, drawn node with no outcome, order, version). `Mismatch` names the node id, its spec path and a sentence.
-- [ ] Unit tests on hand-made event lists, one per rule, including: a parallel branch that ends after the join, a loop iteration out of order, a route not taken (no mismatch), a run stopped at the gate (later nodes "not reached", no mismatch), an orchestrator task id (allowed), a node id not in the spec (mismatch).
-- [ ] Engine end-to-end test on the fake runtime: the AC-2 spec runs with the reviewer answering `changes` then `ok`, the hub planning two tasks per pass, the gate approved and a fake `openPR`; `trace_mismatches` is empty and the run has two loop iterations, four tasks and one PR.
-- [ ] Run the check over the existing run fixtures (`orchestrator-run.json`, `orchestrator-loop-run.json`, `audit-fix-run.json`, `subflow-run.json`) as a regression: they must match their specs too.
-- [ ] Export `schemas/fixtures/ac2-run.json` (spec plus events) from that run, with a staleness test like `audit-fix-run.json`.
+- [x] `packages/engine/src/agentic_engine/conformance.py`: `trace_mismatches(spec, events) -> list[Mismatch]` with the four rules in `requirements.md` (unknown node, drawn node with no outcome, order, version). `Mismatch` names the node id, its spec path and a sentence.
+- [x] Unit tests on hand-made event lists, one per rule, including: a parallel branch that ends after the join, a loop iteration out of order, a route not taken (no mismatch), a run stopped at the gate (later nodes "not reached", no mismatch), an orchestrator task id (allowed), a node id not in the spec (mismatch).
+- [x] Engine end-to-end test on the fake runtime: the AC-2 spec runs with the reviewer answering `changes` then `ok`, the hub planning two tasks per pass, the gate approved and a fake `openPR`; `trace_mismatches` is empty and the run has two loop iterations, four tasks and one PR.
+- [x] Run the check over the existing run fixtures (`orchestrator-run.json`, `orchestrator-loop-run.json`, `audit-fix-run.json`, `subflow-run.json`) as a regression: they must match their specs too.
+- [x] Export `schemas/fixtures/ac2-run.json` (spec plus events) from that run, with a staleness test like `audit-fix-run.json`.
 
 ## 3. Build it on the canvas (browser e2e)
 
@@ -32,17 +32,24 @@ Order chosen with the user: the engine check first, then the browser, then the t
 
 ## 4. The template
 
-- [ ] `packages/engine/src/agentic_engine/templates/plan_build_review.py`: `PlanBuildReviewParams` (models, `max_passes`) and `build_plan_build_review_spec`, building the fixture's flow; register it in `templates/__init__.py` with `requires=("claude", "github")` and a description that says it writes and opens a PR after approval.
-- [ ] Template tests: every option validates; only `engineer` writes; only `publish` publishes and it comes after `approve_pr`; every agent that checks code has read tools; no placeholder instructions; `input` is required and named.
-- [ ] The engine end-to-end test of group 2 also runs on the template's default spec.
+- [x] `packages/engine/src/agentic_engine/templates/plan_build_review.py`: `PlanBuildReviewParams` (models, `max_passes`) and `build_plan_build_review_spec`, building the fixture's flow; register it in `templates/__init__.py` with `requires=("claude", "github")` and a description that says it writes and opens a PR after approval.
+- [x] Template tests: every option validates; only `engineer` writes; only `publish` publishes and it comes after `approve_pr`; every agent that checks code has read tools; no placeholder instructions; `input` is required and named.
+- [x] The engine end-to-end test of group 2 also runs on the template's default spec.
 - [ ] Regenerate `schemas/fixtures/node-types.json` and the OpenAPI client if they change; the start screen's gallery shows the template (check the start-screen e2e and layout screenshots).
 
 ## 5. Specs and docs
 
-- [ ] `specs/tech-stack.md`: a "Plan, build and review template" section (as "Audit codebase template"), the conformance helper under "Testing & quality", and decisions-log rows (template vs fixture; check as a helper, not an endpoint; the answer to the open question).
-- [ ] `specs/roadmap.md`: 6.8's row links this plan; the Acceptance criteria map keeps AC-2 → 6.8.
+- [x] `specs/tech-stack.md`: a "Plan, build and review template" section (as "Audit codebase template"), the conformance helper under "Testing & quality", and decisions-log rows (template vs fixture; check as a helper, not an endpoint; the answer to the open question).
+- [x] `specs/roadmap.md`: 6.8's row links this plan; the Acceptance criteria map keeps AC-2 → 6.8.
 - [ ] `specs/lessons.md`: an entry for anything the real run shows that tests did not.
-- [ ] `CHANGELOG.md`: an entry under `## [Unreleased]`.
+- [x] `CHANGELOG.md`: an entry under `## [Unreleased]`.
+
+## Found while building
+
+- [x] The lead lost the request after the parallel and in later passes: `RunContext.request` (lessons rule 8).
+- [x] `GET /templates` did not say a template needs an input, so the gallery's sheet could not ask for it: `TemplateOut.input`, and the sheet shows the field.
+- [x] The stack's fake agents only echoed, so no orchestrator could run in an e2e: `AgentRequest.output_schema` and `FakeRuntime(fit_schemas=True)`.
+- [x] The canvas and the run map had no way to compare their edges: `data-from` / `data-to` on each drawn edge; `RunMap` takes `layout` for tests.
 
 ## 6. Real run with Claude
 

@@ -183,6 +183,7 @@ export function RunMap({
   onOpen,
   onOpenTask,
   now,
+  layout,
 }: {
   spec: WorkflowSpec;
   steps: Step[];
@@ -193,6 +194,8 @@ export function RunMap({
   /** Selects a task's worker step. */
   onOpenTask?: (task: OrchestratorTask) => void;
   now: number;
+  /** Forces the flow or the tree (tests, previews); by default the pane's width picks. */
+  layout?: "flow" | "tree";
 }) {
   const states = new Map([...nodeStatuses(spec, steps), ...routeStates(spec, steps)]);
   const runs = runsById(steps);
@@ -309,6 +312,7 @@ export function RunMap({
           spec={spec}
           renderCard={renderCard}
           isSkipped={(route) => states.get(route)?.status === "skipped"}
+          layout={layout}
         />
       </div>
       <p className="border-t bg-surface-subtle px-4 py-2 text-caption text-muted-foreground">

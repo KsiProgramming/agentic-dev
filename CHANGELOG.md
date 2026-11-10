@@ -9,6 +9,13 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 6.8 AC-2 end to end:
+  - **"Plan, build and review" template** (`plan-build-review`): two analysts in a parallel, a lead and two engineers (an orchestrator) with a synthesizer and a reviewer in a review loop, a gate on the integration branch and one pull request. `GET /templates` returns a template's `input`, and the New run sheet asks for it when a template declares one.
+  - **The run's request reaches every agent.** `RunContext.request` tells each agent what the person who started the run asked for, as data, so a lead after a parallel or in a later review pass keeps the goal.
+  - **Does a run match its graph.** `agentic_engine.conformance` lists how a run's events disagree with the version it ran (unknown nodes, drawn nodes with no outcome, order, containers, loop iterations, workflow); every recorded run fixture is checked with it, and `schemas/fixtures/ac2-run.json` is the AC-2 run.
+  - **Typed agents on the stack's fake runtime.** `AgentRequest.output_schema`, and `FakeRuntime(fit_schemas=True)` answers a value that fits a typed node's schema, so an orchestrator runs on a stack with no provider.
+  - **Web.** The run map and the canvas mark each drawn edge with `data-from` / `data-to`; `RunMap` takes `layout`; `web/e2e/ac2.spec.ts` builds the AC-2 flow from a blank canvas by menu items, runs it and compares the run map with the canvas.
+  - Specs: tech-stack (Agent runtime, the template, Testing, four decisions), lessons (rule 8), roadmap, and the 6.8 plan (`specs/2026-11-10-ac2-canvas-end-to-end/`).
 - Phase 6.7 "fix selected findings" ([#170](https://github.com/KsiProgramming/agentic-dev/pull/170)):
   - **Selection gates.** A `gate` takes `select` (`artifact`, `items`, `key`, `preselect`, `min`): it shows a JSON run artifact's items, its approval names the ones chosen (`selection` on `POST /runs/{id}/approvals`, refused with `selection_required`, `selection_not_allowed`, `unknown_selection`, `duplicate_selection` or `selection_too_small`), and its output, and `writes` artifact, is the artifact with only those items (a findings report's counts recomputed). `gate_waiting` and `GET /runs/{id}/gate` carry `select`; the approval keeps it (Alembic `0028_approval_selection`); `gate.approved` audits how many were chosen.
   - **Ending a run at a gate.** `on_reject: "end"` on a step of the root sequence completes the run when the gate is rejected, skipping the steps after it (`invalid_gate` elsewhere).

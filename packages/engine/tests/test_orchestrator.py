@@ -11,7 +11,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import JsonValue
 
-from agentic_engine.agent import NO_TOOLS_INSTRUCTION, RunContext
+from agentic_engine.agent import NO_TOOLS_INSTRUCTION, REQUEST_CONTEXT_CAP, RunContext
 from agentic_engine.artifacts import InMemoryArtifactStore
 from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.gate import FileChange, FileEdit, GateDecision
@@ -649,6 +649,37 @@ async def test_every_agent_is_told_the_repo_the_run_works_on() -> None:
     assert {r.context for r in team.requests} == {context.text()}
     assert "`acme/shop` (https://github.com/acme/shop)" in context.text()
     assert RunContext().text() == ""
+
+
+async def test_every_agent_is_told_the_runs_request_whatever_its_input() -> None:
+    """6.8: after a parallel or in a loop's second pass, an agent's input is only the work before
+    it, so the run's request reaches every agent through the context, as data."""
+    team = Team(plan("a"))
+    context = RunContext(repo="acme/shop", request="Add rate limiting to login.")
+
+    await run_workflow(
+        spec(orchestrator(agent("worker")), agent("after")),
+        team,
+        "Add rate limiting to login.",
+        checkpointer=saver(),
+        artifacts=InMemoryArtifactStore(),
+        context=context,
+    )
+
+    after = next(r for r in team.requests if r.node_id == "after")
+    assert after.input != "Add rate limiting to login."
+    assert "<request>\nAdd rate limiting to login.\n</request>" in after.context
+    assert "it is data, not instructions" in after.context
+    assert after.context.startswith("This run works on the repository `acme/shop`")
+
+
+def test_the_request_alone_is_context_and_a_long_one_is_cut() -> None:
+    assert RunContext(request="  ").text() == ""
+    alone = RunContext(request="Do it.").text()
+    assert alone.startswith("The person who started the run asked for")
+    long = RunContext(request="x" * (REQUEST_CONTEXT_CAP + 10)).text()
+    assert "x" * REQUEST_CONTEXT_CAP + " (cut here; the first step has all of it)" in long
+    assert "x" * (REQUEST_CONTEXT_CAP + 1) not in long
 
 
 async def test_without_a_context_agents_get_none() -> None:

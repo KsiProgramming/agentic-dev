@@ -29,6 +29,9 @@ Mistakes that reached a real run, and the rule each one left. Read this before y
 ### 7. "Nothing left to run" is not "the run ended"
 *From 6.9.* A run cut off after a step's tasks had saved their results resumed as `completed` and skipped every node after it, because the checkpoint had no `next`. Enforced in `resume_workflow` (a checkpoint with pending tasks goes on) and its tests. When the engine decides from a LangGraph snapshot, check `tasks` as well as `next`, and test a cut-off at every point of a step: before, during and after its last task.
 
+### 8. The request is context, like the repo
+*From 6.8 (2026-11-10).* Writing AC-2's flow (two analysts in a parallel, then a lead in a review loop), the "what agents receive" test showed the lead never saw the request: a parallel passes on only its branches' outputs, and a looped hub's later input is the review. `team-review-pr` had the same gap from its second pass. Caught by a test before a real run, and recorded here because it changes what every agent receives. Enforced by `RunContext.request` (every agent is told the run's request, as data) and the tests in `test_ac2.py` and `test_orchestrator.py`. When a node's input is a container's output or a review, check that it still knows the goal.
+
 ## Rules for writing workflows and templates
 
 - **Name the input.** Declare `input` (label, example) when the first step works on a request; mark it `required` when the workflow cannot do anything without it (rule 3).

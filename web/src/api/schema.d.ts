@@ -2750,6 +2750,8 @@ export interface components {
              * @description Connections the workspace needs to run it: `claude` for its agents, `github` for a repo from the GitHub App's installation.
              */
             requires: components["schemas"]["Requirement"][];
+            /** @description What a run is given to work on, if the template asks for it (its spec's `input`, 6.8): `POST /runs` refuses an empty `input` when it is `required`. */
+            input?: components["schemas"]["WorkflowInput"] | null;
         };
         /**
          * TemplateRun

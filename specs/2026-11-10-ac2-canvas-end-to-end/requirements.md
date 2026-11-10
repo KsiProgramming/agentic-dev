@@ -56,4 +56,12 @@ The user chose to ship this flow as a built-in template as well, so AC-2's flow 
 
 ## Open questions
 
+None left. Answered while building:
+
+- **Does the lead see the request after the parallel?** No, and not in a later pass either: a looped hub's input is the review. Decided: the run's request is in every agent's context (`RunContext.request`, tech-stack → Agent runtime; lessons rule 8).
+- **"At the same place"** means the same cards joined by the same edges. Grid cells may differ, since a sequence wraps to its pane's width, which differs between the canvas and the run map.
+- **The e2e stack's fake agents only echoed,** so no orchestrator could run there. Decided: `FakeRuntime(fit_schemas=True)` in the worker's fake runtime (tech-stack → Agent runtime).
+
+As first written:
+
 - **Does the lead see the request after the parallel?** Its input is the parallel's output (the analysts' answers), and `RunContext` tells agents the repo but not the request. Group 1 checks it with a "what agents receive" test. If the request is lost, the choice is between the analysts each writing an artifact the lead `reads` with the request restated, or the run's request added to `RunContext` for every agent (a wider change, which would need its own lessons entry and tech-stack line). Decided in group 1, recorded in tech-stack before the template is written.

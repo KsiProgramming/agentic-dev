@@ -24,7 +24,7 @@ def test_the_docs_template_is_registered() -> None:
     template = get_template("generate-docs")
 
     assert template is not None
-    assert [t.id for t in TEMPLATES] == ["generate-docs", "audit-codebase"]
+    assert [t.id for t in TEMPLATES] == ["generate-docs", "audit-codebase", "plan-build-review"]
     assert set(template.parameters_schema()["properties"]) == {
         "output_dir",
         "include",

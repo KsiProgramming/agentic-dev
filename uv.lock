@@ -158,6 +158,7 @@ source = { editable = "packages/runtime" }
 dependencies = [
     { name = "anthropic" },
     { name = "httpx2" },
+    { name = "jsonschema" },
     { name = "pydantic" },
 ]
 
@@ -165,6 +166,7 @@ dependencies = [
 requires-dist = [
     { name = "anthropic", specifier = ">=1.17" },
     { name = "httpx2", specifier = ">=2.0,<3" },
+    { name = "jsonschema", specifier = ">=4.26" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
 

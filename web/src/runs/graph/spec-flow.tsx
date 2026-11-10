@@ -35,6 +35,9 @@ export function columnsIn(width: number): number {
 
 interface Drawn {
   key: string;
+  /** The cards it joins, as `data-from` and `data-to`: tests compare two views' graphs (6.8). */
+  from: string;
+  to: string;
   d: string;
   kind: FlowEdge["kind"];
   dashed: boolean;
@@ -93,6 +96,8 @@ export function SpecFlow({
           const tx = (to.left + to.right) / 2;
           paths.push({
             key: `${i}`,
+            from: edge.from,
+            to: edge.to,
             d: `M ${fx} ${from.bottom} V ${y} H ${tx} V ${to.bottom}`,
             kind: edge.kind,
             dashed,
@@ -107,6 +112,8 @@ export function SpecFlow({
           const y2 = to.top + ANCHOR_Y;
           paths.push({
             key: `${i}`,
+            from: edge.from,
+            to: edge.to,
             d: `M ${from.right} ${y1} H ${from.right + 6} V ${gap} H ${to.left - 12} V ${y2} H ${to.left}`,
             kind: edge.kind,
             dashed: false,
@@ -122,6 +129,8 @@ export function SpecFlow({
         const d = y1 === y2 ? `M ${x1} ${y1} H ${x2}` : `M ${x1} ${y1} H ${elbow} V ${y2} H ${x2}`;
         paths.push({
           key: `${i}`,
+          from: edge.from,
+          to: edge.to,
           d,
           kind: edge.kind,
           dashed,
@@ -185,7 +194,7 @@ export function SpecFlow({
           </marker>
         </defs>
         {drawn.paths.map((p) => (
-          <g key={p.key} data-edge={p.kind}>
+          <g key={p.key} data-edge={p.kind} data-from={p.from} data-to={p.to}>
             <path
               d={p.d}
               fill="none"
