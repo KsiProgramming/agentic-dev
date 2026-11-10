@@ -309,6 +309,7 @@ async def test_applying_ops_produces_a_new_immutable_version(
             "created_at": second["created_at"],
             "op_count": 2,
             "restored_from": None,
+            "published_at": None,
         },
         {
             "version": 1,
@@ -316,6 +317,7 @@ async def test_applying_ops_produces_a_new_immutable_version(
             "created_at": first["created_at"],
             "op_count": 0,
             "restored_from": None,
+            "published_at": None,
         },
     ]
 
@@ -558,8 +560,10 @@ async def test_the_list_has_each_workflow_by_its_last_change(
         "latest_version",
         "created_at",
         "updated_at",
+        "published_version",
     }
     assert (items[1]["name"], items[1]["description"]) == ("Notes", None)
+    assert items[1]["published_version"] is None
     unknown = await client.get("/workflows", params={"workspace_id": str(uuid4())})
     assert unknown.status_code == 404
 

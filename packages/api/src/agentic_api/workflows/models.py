@@ -1,5 +1,5 @@
 """Checking workflow specs before they run, and storing them as versions changed by graph
-operations (5.1), restored from an older version (5.7)."""
+operations (5.1), restored from an older version (5.7), published as composites (6.6)."""
 
 from datetime import datetime
 from typing import Literal, Self
@@ -104,6 +104,19 @@ class UpdateWorkflowRequest(BaseModel):
     )
 
 
+class PublishWorkflowRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1, description="The version to publish; it must be able to run.")
+
+
+class ExtractedWorkflowRef(BaseModel):
+    """The workflow an `extract` stored (6.6), as version 1."""
+
+    workflow_id: str
+    version: int
+
+
 class RestoreWorkflowRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -126,6 +139,19 @@ class WorkflowVersionResponse(BaseModel):
     restored_from: int | None = Field(
         description="The version a restore copied; unset unless a restore made it."
     )
+    published_at: datetime | None = Field(
+        default=None, description="When this version was published (6.6); unset for a draft."
+    )
+    published_version: int | None = Field(
+        default=None,
+        description="The workflow's latest published version (6.6); unset when it was never "
+        "published, i.e. it is not a composite.",
+    )
+    extracted: ExtractedWorkflowRef | None = Field(
+        default=None,
+        description="With an `extract` op (6.6): the workflow it stored as version 1, which the "
+        "new subflow calls.",
+    )
     valid: bool = Field(description="Whether it could run in the workspace now.")
     issues: list[ValidationIssue] = Field(
         description="Why it could not run now, as `POST /workflows/{id}/validate` gives them. "
@@ -141,6 +167,9 @@ class WorkflowVersionItem(BaseModel):
         description="Graph operations that made it; 0 for version 1 and a restore."
     )
     restored_from: int | None = Field(description="The version a restore copied, if one did.")
+    published_at: datetime | None = Field(
+        default=None, description="When it was published (6.6); unset for a draft."
+    )
 
 
 class WorkflowVersionsResponse(BaseModel):
@@ -156,6 +185,25 @@ class WorkflowSummary(BaseModel):
     latest_version: int
     created_at: datetime
     updated_at: datetime = Field(description="When the latest version was made.")
+    published_version: int | None = Field(
+        default=None,
+        description="Its latest published version (6.6); unset when it is not a composite.",
+    )
+
+
+class WorkflowCallerItem(BaseModel):
+    """A workflow whose latest version calls the composite (6.6)."""
+
+    workflow_id: str
+    name: str
+    latest_version: int
+    calls_version: int = Field(description="The composite's version it calls.")
+
+
+class WorkflowCallersResponse(BaseModel):
+    """The workflows whose latest version calls this one, by name (6.6)."""
+
+    items: list[WorkflowCallerItem]
 
 
 class WorkflowsResponse(BaseModel):
@@ -176,12 +224,20 @@ class OpErrorDetail(BaseModel):
 
 
 class WorkflowErrorDetail(BaseModel):
-    """The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`
-    (`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does
-    not match the schema, with its `issues`), `already_latest` (a restore of the latest
-    version)."""
+    """The `detail` of a refused create or update: `workflow_exists` (create, or an `extract`
+    whose workflow id is taken), `version_conflict` (`base_version` is not the latest, which
+    `latest_version` names), `schema` (a spec that does not match the schema, with its
+    `issues`), `already_latest` (a restore of the latest version), `already_published` and
+    `cannot_publish` (a version that could not run, with its `issues`; 6.6)."""
 
-    code: Literal["workflow_exists", "version_conflict", "schema", "already_latest"]
+    code: Literal[
+        "workflow_exists",
+        "version_conflict",
+        "schema",
+        "already_latest",
+        "already_published",
+        "cannot_publish",
+    ]
     message: str
     workflow_id: str | None = Field(
         default=None, description="With `workflow_exists`: the workflow that already exists."

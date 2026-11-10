@@ -291,6 +291,32 @@ class WorkflowVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkflowPublication(Base):
+    """A published version of a workflow (6.6), append only (a trigger refuses `UPDATE` and
+    `DELETE`). A workflow with one is a composite: other workflows call its published versions,
+    and its other versions are drafts."""
+
+    __tablename__ = "workflow_publications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "workflow_id", "version"],
+            [
+                "workflow_versions.workspace_id",
+                "workflow_versions.workflow_id",
+                "workflow_versions.version",
+            ],
+            name="fk_workflow_publications_version",
+        ),
+    )
+
+    workspace_id: Mapped[UUID] = mapped_column(primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Approval(Base):
     """A human decision at a gate of a run, `approve` or `reject`; the paused run continues with
     it. One per gate and run: gates inside loops and maps will need an iteration key."""

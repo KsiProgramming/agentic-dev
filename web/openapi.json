@@ -1462,7 +1462,8 @@
                       "pricing.updated",
                       "workflow.created",
                       "workflow.updated",
-                      "workflow.restored"
+                      "workflow.restored",
+                      "workflow.published"
                     ],
                     "type": "string"
                   }
@@ -2130,7 +2131,7 @@
           "workflows"
         ],
         "summary": "Update",
-        "description": "Apply graph operations to version `base_version`, which must be the latest, and store the\nresult as the next version. Versions never change. The ops apply all or nothing: one that\ncannot apply, or a result with a node left detached, an empty slot, or off the schema,\nstores nothing. The result's other issues (structure, run limits) are returned with it.",
+        "description": "Apply graph operations to version `base_version`, which must be the latest, and store the\nresult as the next version. Versions never change. The ops apply all or nothing: one that\ncannot apply, or a result with a node left detached, an empty slot, or off the schema,\nstores nothing. The result's other issues (structure, run limits) are returned with it. An\n`extract` (6.6) also stores the workflow it makes as version 1, in the same transaction, and\nnames it in `extracted`; its id must be new in the workspace (`workflow_exists`).",
         "operationId": "updateWorkflow",
         "parameters": [
           {
@@ -2187,7 +2188,7 @@
             "description": "No such workspace or workflow"
           },
           "409": {
-            "description": "`version_conflict`",
+            "description": "`version_conflict`, or `workflow_exists` for an `extract`",
             "content": {
               "application/json": {
                 "schema": {
@@ -2267,6 +2268,156 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/callers": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Callers",
+        "description": "The workspace's workflows whose latest version calls this one (6.6), by name, with the\nversion each calls. A caller moves to a newer version only by its own edit.",
+        "operationId": "listWorkflowCallers",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowCallersResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace or workflow"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/publish": {
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Publish",
+        "description": "Publish a version (6.6): the workflow becomes a composite, listed in the palette and\ncalled by its published versions; its other versions are drafts, which no workflow may call.\nA version that could not run now is refused with its issues. Publishing changes no caller.",
+        "operationId": "publishWorkflow",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Default: the default workspace.",
+              "title": "Workspace Id"
+            },
+            "description": "Default: the default workspace."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowVersionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, workflow or version"
+          },
+          "409": {
+            "description": "`already_published`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowErrorDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`cannot_publish`, with its issues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowErrorDetail"
                 }
               }
             }
@@ -2414,19 +2565,53 @@
           "node-types"
         ],
         "summary": "List Node Types",
-        "description": "Every primitive's manifest, in palette order: the builder draws its palette and cards\nfrom them, so a primitive the engine knows needs no web change.",
+        "description": "Every primitive's manifest, in palette order: the builder draws its palette and cards\nfrom them, so a primitive the engine knows needs no web change. With `workspace_id`, each of\nthe workspace's composites follows, by name (category `workspace`): a `subflow` that calls\nits latest published version.",
         "operationId": "listNodeTypes",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Add this workspace's composites after the primitives (6.6).",
+              "title": "Workspace Id"
+            },
+            "description": "Add this workspace's composites after the primitives (6.6)."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/NodeManifest"
                   },
-                  "type": "array",
                   "title": "Response Listnodetypes"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2834,7 +3019,8 @@
               "pricing.updated",
               "workflow.created",
               "workflow.updated",
-              "workflow.restored"
+              "workflow.restored",
+              "workflow.published"
             ],
             "title": "Action"
           },
@@ -3038,7 +3224,8 @@
         "enum": [
           "step",
           "flow",
-          "combine"
+          "combine",
+          "workspace"
         ]
       },
       "ChangeStatus": {
@@ -3049,6 +3236,28 @@
           "deleted",
           "renamed"
         ]
+      },
+      "CompositeRef": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version",
+            "description": "Its latest published version."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "version"
+        ],
+        "title": "CompositeRef",
+        "description": "The composite a workspace manifest adds (6.6): a stored workflow and its latest published\nversion."
       },
       "Connect": {
         "properties": {
@@ -3419,6 +3628,98 @@
         "title": "EditErrorDetail",
         "description": "The `detail` of an approval refused because its edits do not fit the files the gate\nshowed: `code` says how, `path` names the file at fault, if one is."
       },
+      "Extract": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "extract",
+            "title": "Op"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Node Ids"
+          },
+          "subflow_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Subflow Id",
+            "description": "The id of the subflow that takes their place."
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/ExtractedWorkflow"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "node_ids",
+          "subflow_id",
+          "workflow"
+        ],
+        "title": "Extract",
+        "description": "Move nodes into a new stored workflow, and call it in their place (6.6): one node anywhere\na step goes, or consecutive steps of one sequence, become the new workflow's root (in a\nsequence when there are several), and a `subflow` `subflow_id` that calls its version 1 takes\ntheir place. No reference may cross the boundary: a reduce's `from`, a publisher's\n`from_node` or a `results.<id>` in an expression. The API stores the new workflow with the\ncaller's new version, both or neither. At most one per batch."
+      },
+      "ExtractedWorkflow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id",
+            "description": "Its id, new in the workspace."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name",
+            "description": "Its name."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ExtractedWorkflow",
+        "description": "The workflow `extract` makes."
+      },
+      "ExtractedWorkflowRef": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "version"
+        ],
+        "title": "ExtractedWorkflowRef",
+        "description": "The workflow an `extract` stored (6.6), as version 1."
+      },
       "FileChange": {
         "properties": {
           "node_id": {
@@ -3760,7 +4061,8 @@
           "invalid_router",
           "not_allowed_in_orchestrator",
           "subflow_unknown",
-          "subflow_cycle"
+          "subflow_cycle",
+          "subflow_unpublished"
         ]
       },
       "JsonValue": {},
@@ -4250,6 +4552,17 @@
             "type": "object",
             "title": "Ui",
             "description": "How the side panel lays out `parameters`: an rjsf `uiSchema` keyed by field, with `ui:order`, `ui:widget` (`textarea`, `checkboxes`), `ui:field` (`json`, `workflow_ref`), `ui:placeholder`, `ui:readonly` and `ui:options` (`advanced`, `addable`, `removable`, `orderable`)."
+          },
+          "composite": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompositeRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a workspace composite's entry (category `workspace`): the workflow its `default` subflow calls, at its latest published version."
           }
         },
         "additionalProperties": false,
@@ -4291,6 +4604,8 @@
           "invalid_path",
           "detached_nodes",
           "missing_child",
+          "invalid_wrap",
+          "invalid_extract",
           "schema"
         ]
       },
@@ -4728,6 +5043,22 @@
       "Provider": {
         "type": "string",
         "const": "claude"
+      },
+      "PublishWorkflowRequest": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version",
+            "description": "The version to publish; it must be able to run."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "PublishWorkflowRequest"
       },
       "PutClaudeConnection": {
         "properties": {
@@ -6802,6 +7133,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/SetParam"
+                },
+                {
+                  "$ref": "#/components/schemas/Wrap"
+                },
+                {
+                  "$ref": "#/components/schemas/Extract"
                 }
               ],
               "discriminator": {
@@ -6810,8 +7147,10 @@
                   "addNode": "#/components/schemas/AddNode",
                   "connect": "#/components/schemas/Connect",
                   "disconnect": "#/components/schemas/Disconnect",
+                  "extract": "#/components/schemas/Extract",
                   "removeNode": "#/components/schemas/RemoveNode",
-                  "setParam": "#/components/schemas/SetParam"
+                  "setParam": "#/components/schemas/SetParam",
+                  "wrap": "#/components/schemas/Wrap"
                 }
               }
             },
@@ -7057,6 +7396,53 @@
         ],
         "title": "WaitingGate"
       },
+      "WorkflowCallerItem": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "latest_version": {
+            "type": "integer",
+            "title": "Latest Version"
+          },
+          "calls_version": {
+            "type": "integer",
+            "title": "Calls Version",
+            "description": "The composite's version it calls."
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "name",
+          "latest_version",
+          "calls_version"
+        ],
+        "title": "WorkflowCallerItem",
+        "description": "A workflow whose latest version calls the composite (6.6)."
+      },
+      "WorkflowCallersResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowCallerItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WorkflowCallersResponse",
+        "description": "The workflows whose latest version calls this one, by name (6.6)."
+      },
       "WorkflowErrorDetail": {
         "properties": {
           "code": {
@@ -7065,7 +7451,9 @@
               "workflow_exists",
               "version_conflict",
               "schema",
-              "already_latest"
+              "already_latest",
+              "already_published",
+              "cannot_publish"
             ],
             "title": "Code"
           },
@@ -7110,7 +7498,7 @@
           "message"
         ],
         "title": "WorkflowErrorDetail",
-        "description": "The `detail` of a refused create or update: `workflow_exists` (create), `version_conflict`\n(`base_version` is not the latest, which `latest_version` names), `schema` (a spec that does\nnot match the schema, with its `issues`), `already_latest` (a restore of the latest\nversion)."
+        "description": "The `detail` of a refused create or update: `workflow_exists` (create, or an `extract`\nwhose workflow id is taken), `version_conflict` (`base_version` is not the latest, which\n`latest_version` names), `schema` (a spec that does not match the schema, with its\n`issues`), `already_latest` (a restore of the latest version), `already_published` and\n`cannot_publish` (a version that could not run, with its `issues`; 6.6)."
       },
       "WorkflowInput": {
         "properties": {
@@ -7239,6 +7627,60 @@
             ],
             "description": "What a run is given to work on, and whether it must be given; unset, the input is optional."
           },
+          "input_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object",
+                "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+                "examples": [
+                  {
+                    "properties": {
+                      "findings": {}
+                    },
+                    "required": [
+                      "findings"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Schema",
+            "description": "The workflow's typed input (6.6): a subflow that calls it checks its input against this, and the step before it must declare what it requires."
+          },
+          "output_schema": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object",
+                "description": "A JSON Schema 2020-12 whose root is an object, with only local `$ref`s.",
+                "examples": [
+                  {
+                    "properties": {
+                      "findings": {}
+                    },
+                    "required": [
+                      "findings"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Schema",
+            "description": "The workflow's typed output (6.6): a subflow that calls it checks the called workflow's output against this, and the step after it reads it as typed."
+          },
           "root": {
             "oneOf": [
               {
@@ -7342,6 +7784,18 @@
             "format": "date-time",
             "title": "Updated At",
             "description": "When the latest version was made."
+          },
+          "published_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version",
+            "description": "Its latest published version (6.6); unset when it is not a composite."
           }
         },
         "type": "object",
@@ -7393,6 +7847,19 @@
             ],
             "title": "Restored From",
             "description": "The version a restore copied, if one did."
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At",
+            "description": "When it was published (6.6); unset for a draft."
           }
         },
         "type": "object",
@@ -7465,6 +7932,42 @@
             ],
             "title": "Restored From",
             "description": "The version a restore copied; unset unless a restore made it."
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At",
+            "description": "When this version was published (6.6); unset for a draft."
+          },
+          "published_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Version",
+            "description": "The workflow's latest published version (6.6); unset when it was never published, i.e. it is not a composite."
+          },
+          "extracted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExtractedWorkflowRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With an `extract` op (6.6): the workflow it stored as version 1, which the new subflow calls."
           },
           "valid": {
             "type": "boolean",
@@ -7599,6 +8102,55 @@
         ],
         "title": "WorkspacePricing",
         "description": "The prices the workspace's runs are priced with: each model's `override`, else its\n`default`. A run keeps the cost it was priced with when its usage was logged."
+      },
+      "Wrap": {
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "wrap",
+            "title": "Op"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Node Ids"
+          },
+          "with": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "With",
+            "description": "The new container without its nodes: `type` (sequence, parallel, loop or map), `id` and its other parameters."
+          },
+          "sequence_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence Id",
+            "description": "Loop and map only: the id of the sequence that holds the nodes, when there are several."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "op",
+          "node_ids",
+          "with"
+        ],
+        "title": "Wrap",
+        "description": "Put nodes in a new container, in their place (6.6): one node anywhere, or consecutive steps\nof one sequence. A `sequence` runs them in order, a `parallel` runs each as a branch (two or\nmore), a `loop` or `map` runs them as its body (in a new sequence `sequence_id` when there are\nseveral). `with` is the container without the nodes: its `type`, a new `id` and its other\nparameters (a loop's `until` and `max_iterations`, a map's `over`)."
       },
       "agentic_api__runs__models__WorkflowRef": {
         "properties": {
