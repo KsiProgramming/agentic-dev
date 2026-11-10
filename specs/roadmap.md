@@ -125,7 +125,7 @@ A review of the screens shipped in Milestones 2 and 3 found that they work but r
 | 6.6 | `wrap` / `extract` operations; composite nodes (draft → published) | AC-3: composite saved in one workflow is reused in another, updated by version | — |
 | 6.7 | Audit "fix selected findings" step with orchestrator | Selected findings become fix PRs | — |
 | 6.8 | AC-2 end-to-end: canvas flow with parallel, orchestrator, loop, gate | Run matches the drawn graph | — |
-| 6.9 | Orchestrator in a loop: a loop's body may hold an orchestrator; each iteration plans afresh with the last iteration's output (a review) as data and builds on the same integration branch. [Plan](2026-11-09-orchestrator-review-loop/requirements.md) | A reviewer's rejection inside a loop makes the orchestrator plan again on top of the merged work, and an approval goes on to one PR | — |
+| 6.9 | Orchestrator in a loop: a loop's body may hold an orchestrator; each iteration plans afresh with the last iteration's output (a review) as data and builds on the same integration branch. [Plan](2026-11-09-orchestrator-review-loop/requirements.md) | A reviewer's rejection inside a loop makes the orchestrator plan again on top of the merged work, and an approval goes on to one PR | ✅ Done ([#166](https://github.com/KsiProgramming/agentic-dev/pull/166)) |
 
 6.9 was added after 6.5, from a team workflow (a lead, two engineers, a synthesizer and a reviewer) whose review had to send the work back to the lead; it lifts 6.1's "no orchestrator in a loop" rule.
 
