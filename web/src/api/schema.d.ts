@@ -1511,7 +1511,9 @@ export interface components {
         /**
          * OrchestratorHub
          * @description The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the
-         *     tasks through a typed output the engine makes (`orchestrator_plan_schema`).
+         *     tasks through a typed output the engine makes (`orchestrator_plan_schema`). With `tools`, it
+         *     may read the repo first, to plan from the code (6.9): read tools only, as it never writes;
+         *     in a loop's later iteration, or a replan, it reads the integration branch once there is one.
          */
         OrchestratorHub: {
             /** Role */
@@ -1525,6 +1527,11 @@ export interface components {
             provider?: "claude" | null;
             /** Model */
             model?: string | null;
+            /**
+             * Tools
+             * @description The repo tools the hub may call while it plans: `repo.list_files`, `repo.read_file`, `repo.search` and `repo.list_modules` only.
+             */
+            tools?: string[];
         };
         /**
          * OrchestratorNode

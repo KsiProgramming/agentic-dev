@@ -19,7 +19,8 @@
                 "id": "fix",
                 "hub": {
                   "role": "Lead",
-                  "instructions": "Plan the fixes."
+                  "instructions": "Plan the fixes.",
+                  "tools": []
                 },
                 "body": {
                   "type": "agent",

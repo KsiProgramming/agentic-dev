@@ -80,10 +80,17 @@ const REPO_TOOL_PREFIXES = ["repo.", "github.", "scan."];
 export function workflowRequires(spec: WorkflowSpec): Requirement[] {
   const nodes = allSpecNodes(spec);
   const tools = nodes.flatMap((n) =>
-    n.type === "agent" ? (n.tools ?? []) : n.type === "tool" ? [n.tool] : [],
+    n.type === "agent"
+      ? (n.tools ?? [])
+      : n.type === "tool"
+        ? [n.tool]
+        : n.type === "orchestrator"
+          ? (n.hub.tools ?? [])
+          : [],
   );
   const requires: Requirement[] = [];
-  if (nodes.some((n) => n.type === "agent")) requires.push("claude");
+  // An orchestrator's hub is an agent too (6.1); it may read the repo (6.9).
+  if (nodes.some((n) => n.type === "agent" || n.type === "orchestrator")) requires.push("claude");
   if (tools.some((t) => REPO_TOOL_PREFIXES.some((p) => t.startsWith(p)))) requires.push("github");
   return requires;
 }

@@ -403,7 +403,7 @@
     },
     "OrchestratorHub": {
       "additionalProperties": false,
-      "description": "The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the\ntasks through a typed output the engine makes (`orchestrator_plan_schema`).",
+      "description": "The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the\ntasks through a typed output the engine makes (`orchestrator_plan_schema`). With `tools`, it\nmay read the repo first, to plan from the code (6.9): read tools only, as it never writes;\nin a loop's later iteration, or a replan, it reads the integration branch once there is one.",
       "properties": {
         "instructions": {
           "minLength": 1,
@@ -441,6 +441,14 @@
           "minLength": 1,
           "title": "Role",
           "type": "string"
+        },
+        "tools": {
+          "description": "The repo tools the hub may call while it plans: `repo.list_files`, `repo.read_file`, `repo.search` and `repo.list_modules` only.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tools",
+          "type": "array"
         }
       },
       "required": [

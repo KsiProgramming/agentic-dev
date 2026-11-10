@@ -41,6 +41,17 @@ test("a stored workflow needs Claude for its agents and GitHub for repo tools", 
   expect(workflowRequires(spec([{ type: "tool", id: "t", tool: "scan.secrets" }]))).toEqual([
     "github",
   ]);
+  const hub = { role: "Lead", instructions: "Plan.", tools: ["repo.read_file"] };
+  const tool = { type: "tool", id: "t", tool: "scan.secrets" };
+  const lead = {
+    type: "orchestrator",
+    id: "o",
+    hub,
+    body: tool,
+    max_workers: 1,
+    max_concurrency: 1,
+  };
+  expect(workflowRequires(spec([lead]))).toEqual(["claude", "github"]);
 });
 
 test("starting runs the stored version with its input, then opens the run", async () => {

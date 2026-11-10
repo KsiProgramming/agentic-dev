@@ -655,3 +655,34 @@ async def test_without_a_context_agents_get_none() -> None:
     team = Team(plan("a"))
     await run(spec(orchestrator(agent("worker"))), team)
     assert {r.context for r in team.requests} == {""}
+
+
+async def test_a_hub_with_read_tools_reads_the_repo_before_it_plans() -> None:
+    """6.9: a hub given `repo.*` read tools calls them as the orchestrator while it plans."""
+    desk = Desk()
+    runtime = FakeRuntime(
+        {
+            HUB: [
+                CallTool("repo.read_file", {"path": "README.md"}),
+                Message(text=plan("a")),
+                ECHO_USAGE,
+            ]
+        },
+        tools=desk,
+    )
+    hub = {"role": "Lead", "instructions": "Plan.", "tools": ["repo.read_file", "repo.search"]}
+
+    result = await run(spec(orchestrator(agent("worker"), hub=hub)), cast(Team, runtime))
+
+    assert result.status == "completed", result.results[HUB].error
+    assert desk.calls[0] == ("repo.read_file", HUB)
+    [asked] = [r for r in runtime.requests if r.node_id == HUB]
+    assert asked.tools == ["repo.read_file", "repo.search"]
+
+
+def test_a_hub_may_not_write() -> None:
+    hub = {"role": "Lead", "instructions": "Plan.", "tools": ["repo.read_file", "repo.write_file"]}
+    with pytest.raises(
+        ValueError, match=r"a hub may only read the repo, not call repo\.write_file"
+    ):
+        spec(orchestrator(agent("worker"), hub=hub))

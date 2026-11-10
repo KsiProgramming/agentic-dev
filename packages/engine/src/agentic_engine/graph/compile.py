@@ -1904,6 +1904,7 @@ async def _plan(
         instructions=instructions or hub_instructions(orchestrator),
         provider=hub.provider,
         model=hub.model,
+        tools=list(hub.tools),
         output_schema=orchestrator_plan_schema(orchestrator, max_tasks),
     )
     log, limits = scope.log, scope.limits

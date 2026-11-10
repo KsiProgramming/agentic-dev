@@ -27,7 +27,12 @@
               "id": "implement",
               "hub": {
                 "role": "Tech lead",
-                "instructions": "Split the change requested in your input into at most two independent tasks, one per engineer, each touching different files so their work merges cleanly. Each task's instructions must say exactly which files to change and what done looks like.\n\nIn a later pass, your input is the reviewer's answer (`input`: its `verdict` and `feedback`) and the tasks of the earlier passes (`previous`). Their work is already in the code: plan only what the feedback asks to change, with the feedback written into each task's instructions so the engineer fixes exactly what was asked."
+                "instructions": "First read the repository with your tools: find the code the change touches (list the files, search for the names in the request, read the relevant files and their tests). Then split the change requested in your input into at most two independent tasks, one per engineer, each touching different files so their work merges cleanly. Each task's instructions must name exactly which files to change and what done looks like, following the patterns the code already uses.\n\nIn a later pass, your input is the reviewer's answer (`input`: its `verdict` and `feedback`) and the tasks of the earlier passes (`previous`). Their work is already in the code you read: plan only what the feedback asks to change, with the feedback written into each task's instructions so the engineer fixes exactly what was asked.",
+                "tools": [
+                  "repo.list_files",
+                  "repo.read_file",
+                  "repo.search"
+                ]
               },
               "body": {
                 "type": "agent",
@@ -44,7 +49,10 @@
               },
               "max_workers": 2,
               "max_concurrency": 2,
-              "replan": { "on": "failure", "max_rounds": 1 }
+              "replan": {
+                "on": "failure",
+                "max_rounds": 1
+              }
             },
             {
               "type": "agent",
@@ -57,13 +65,27 @@
               "id": "reviewer",
               "role": "Senior reviewer",
               "instructions": "Review the change described in your input as one pull request: does it do what was asked, do the parts fit together, is anything missing or risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` say exactly what to change in a few sentences.",
-              "tools": ["repo.read_file", "repo.search"],
+              "tools": [
+                "repo.read_file",
+                "repo.search"
+              ],
               "output_schema": {
                 "type": "object",
-                "required": ["verdict", "feedback"],
+                "required": [
+                  "verdict",
+                  "feedback"
+                ],
                 "properties": {
-                  "verdict": { "type": "string", "enum": ["ok", "changes"] },
-                  "feedback": { "type": "string" }
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "changes"
+                    ]
+                  },
+                  "feedback": {
+                    "type": "string"
+                  }
                 }
               }
             }

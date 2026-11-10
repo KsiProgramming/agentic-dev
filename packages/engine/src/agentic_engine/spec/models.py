@@ -8,7 +8,15 @@ from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from agentic_engine.expr import (
     ROUTE_VARIABLES,
@@ -409,7 +417,9 @@ writer unambiguously (`task_writer_key`); not `lock`, as git refuses a branch en
 
 class OrchestratorHub(_Base):
     """The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the
-    tasks through a typed output the engine makes (`orchestrator_plan_schema`)."""
+    tasks through a typed output the engine makes (`orchestrator_plan_schema`). With `tools`, it
+    may read the repo first, to plan from the code (6.9): read tools only, as it never writes;
+    in a loop's later iteration, or a replan, it reads the integration branch once there is one."""
 
     role: NonEmptyStr
     instructions: NonEmptyStr
@@ -417,6 +427,21 @@ class OrchestratorHub(_Base):
         default=None, description="Unset means the workspace default."
     )
     model: NonEmptyStr | None = None
+    tools: list[str] = Field(
+        default_factory=list[str],
+        description="The repo tools the hub may call while it plans: `repo.list_files`, "
+        "`repo.read_file`, `repo.search` and `repo.list_modules` only.",
+    )
+
+    @field_validator("tools")
+    @classmethod
+    def _reads_only(cls, tools: list[str]) -> list[str]:
+        if other := sorted(set(tools) - READ_TOOLS):
+            raise ValueError(
+                f"a hub may only read the repo, not call {', '.join(other)}; give the work "
+                "to its worker instead"
+            )
+        return tools
 
 
 MAX_REPLAN_ROUNDS = 3
@@ -649,12 +674,15 @@ def within(path: str, scope: str) -> bool:
 
 
 def node_tools(node: Node) -> list[str]:
-    """The platform tools `node` itself may call: an agent's `tools`, a tool node's `tool`."""
+    """The platform tools `node` itself may call: an agent's `tools`, a tool node's `tool`, an
+    orchestrator's hub's `tools` (its worker's are its body's)."""
     match node:
         case AgentNode():
             return list(node.tools)
         case ToolNode():
             return [node.tool]
+        case OrchestratorNode():
+            return list(node.hub.tools)
         case (
             GateNode()
             | SequenceNode()
@@ -663,7 +691,6 @@ def node_tools(node: Node) -> list[str]:
             | ReduceNode()
             | ParallelNode()
             | RouterNode()
-            | OrchestratorNode()
             | SubflowNode()
         ):
             return []
