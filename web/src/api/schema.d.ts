@@ -2562,8 +2562,8 @@ export interface components {
         /**
          * SetParam
          * @description Set one parameter of a node, or of the document without `node_id` (`name`,
-         *     `description`, `budget_usd`, `input`). `null` unsets it. Ids, types and the slots that hold
-         *     nodes change through the other ops.
+         *     `description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets
+         *     it. Ids, types and the slots that hold nodes change through the other ops.
          */
         SetParam: {
             /**

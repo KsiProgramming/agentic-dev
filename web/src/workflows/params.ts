@@ -16,7 +16,14 @@ type Json = Record<string, unknown>;
 export type Schema = Json;
 
 /** The workflow's own fields, as `setParam` without a node sets them. */
-export const DOCUMENT_FIELDS = ["name", "description", "budget_usd", "input"] as const;
+export const DOCUMENT_FIELDS = [
+  "name",
+  "description",
+  "budget_usd",
+  "input",
+  "input_schema",
+  "output_schema",
+] as const;
 
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);

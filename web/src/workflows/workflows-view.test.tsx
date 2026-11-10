@@ -84,3 +84,21 @@ test("?blank=1 opens the new workflow sheet", async () => {
 
   expect(await screen.findByTestId("new-workflow-sheet")).toBeDefined();
 });
+
+test("a composite is marked, with its published version when an older one is published (6.6)", async () => {
+  const review: WorkflowSummary = {
+    ...NOTES,
+    workflow_id: "review",
+    name: "Review",
+    latest_version: 3,
+    published_version: 2,
+  };
+  stubApi({ [LIST]: () => json(200, { items: [review, { ...NOTES, published_version: null }] }) });
+  show();
+
+  const table = within(await screen.findByRole("table", { name: "Workflows" }));
+  const [first, second] = table.getAllByRole("row").slice(1);
+  expect(within(first).getByTestId("composite-badge").textContent).toBe("Composite");
+  expect(within(first).getByText("Published 2")).toBeDefined();
+  expect(within(second).queryByTestId("composite-badge")).toBeNull();
+});

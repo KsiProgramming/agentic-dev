@@ -9,17 +9,23 @@ import {
   addBranch,
   addStep,
   blockReason,
+  extractNodes,
+  laterSteps,
   moveStep,
   moveTargets,
   moveTo,
   newMismatches,
   newNode,
+  pendingExtracts,
   placeOf,
+  rangeOf,
   removeStep,
   replaceNode,
   rootSteps,
   stayReason,
   subtreeSize,
+  updateCall,
+  wrapNodes,
 } from "./edits";
 import type { NodeManifest } from "./node-types";
 import { applyOps } from "./ops";
@@ -395,5 +401,89 @@ describe("an orchestrator's worker on the canvas (6.4)", () => {
     );
     // A gate after the orchestrator, outside its worker, is fine.
     expect(blockReason(ORCHESTRATED, addStep(ORCHESTRATED, "fix", "gate", NODE_TYPES))).toBeNull();
+  });
+});
+
+describe("composite edits (6.6)", () => {
+  const FLOW = {
+    ...SPEC,
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [agent("a"), agent("b"), agent("c"), agent("subflow_1")],
+    },
+  } as unknown as WorkflowSpec;
+
+  it("ranges run from a step through a later one of its sequence", () => {
+    expect(laterSteps(FLOW, "b")).toEqual(["c", "subflow_1"]);
+    expect(laterSteps(SPEC, "agent_1")).toEqual([]);
+    expect(rangeOf(FLOW, "a", "c")).toEqual(["a", "b", "c"]);
+    expect(rangeOf(FLOW, "b", null)).toEqual(["b"]);
+    expect(rangeOf(FLOW, "c", "a")).toEqual(["c"]);
+  });
+
+  it("wraps steps in a container from its manifest, without the nodes it holds", () => {
+    const edit = wrapNodes(FLOW, ["a", "b"], "loop", NODE_TYPES);
+    expect(edit.ops).toEqual([
+      {
+        op: "wrap",
+        node_ids: ["a", "b"],
+        with: { type: "loop", id: "loop_1", until: expect.any(String), max_iterations: 3 },
+        sequence_id: "sequence_1",
+      },
+    ]);
+    expect(edit.focus).toBe("loop_1");
+    const wrapped = applyOps(FLOW, edit.ops);
+    expect(ids(wrapped)).toEqual(["loop_1", "c", "subflow_1"]);
+    // One node needs no sequence; a sequence takes the steps as they are.
+    expect(wrapNodes(FLOW, ["c"], "map", NODE_TYPES).ops[0]).not.toHaveProperty("sequence_id");
+    const sequence = applyOps(FLOW, wrapNodes(FLOW, ["b", "c"], "sequence", NODE_TYPES).ops);
+    expect(ids(sequence)).toEqual(["a", "sequence_1", "subflow_1"]);
+  });
+
+  it("extracts steps into a workflow called in their place, under a fresh id", () => {
+    const edit = extractNodes(FLOW, ["b", "c"], { id: "review", name: "Review" });
+    expect(edit.ops).toEqual([
+      {
+        op: "extract",
+        node_ids: ["b", "c"],
+        subflow_id: "subflow_2",
+        workflow: { id: "review", name: "Review" },
+      },
+    ]);
+    expect(ids(applyOps(FLOW, edit.ops))).toEqual(["a", "subflow_2", "subflow_1"]);
+    // An extracted node's id is free once it has moved.
+    const own = extractNodes(FLOW, ["subflow_1"], { id: "w", name: "W", description: "D." });
+    expect(own.ops[0]).toMatchObject({ subflow_id: "subflow_1", workflow: { description: "D." } });
+    expect(pendingExtracts([edit, removeStep("a")])).toEqual(new Set(["review"]));
+  });
+
+  it("moves a call to a newer version with one setParam", () => {
+    expect(updateCall("check", 3)).toEqual({
+      label: "Update check to version 3",
+      focus: "check",
+      ops: [{ op: "setParam", node_id: "check", path: "workflow.version", value: 3 }],
+    });
+  });
+
+  it("adds a composite from its palette entry, pinned to its published version", () => {
+    const subflow = NODE_TYPES.find((m) => m.kind === "subflow")!;
+    const composite = {
+      ...subflow,
+      label: "Review",
+      category: "workspace",
+      composite: { workflow_id: "review", version: 2 },
+      default: { type: "subflow", id: "subflow", workflow: { id: "review", version: 2 } },
+    } as NodeManifest;
+    const node = newNode(FLOW, "composite:review", [...NODE_TYPES, composite]);
+    expect(node).toEqual({
+      type: "subflow",
+      id: "subflow_2",
+      workflow: { id: "review", version: 2 },
+    });
+    // The primitive keeps its own default.
+    expect(newNode(FLOW, "subflow", [...NODE_TYPES, composite])).toMatchObject({
+      workflow: { id: "workflow", version: 1 },
+    });
   });
 });

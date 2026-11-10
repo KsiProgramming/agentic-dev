@@ -43,6 +43,8 @@ afterEach(() => {
 
 const PATH = `/workflows/flow?workspace_id=${DEFAULT_WORKSPACE_ID}`;
 const VERSIONS = `GET /workflows/flow/versions?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+/** The palette: the primitives, then the workspace's composites (6.6). */
+const NODE_TYPES_ROUTE = `GET /node-types?workspace_id=${DEFAULT_WORKSPACE_ID}`;
 const versionPath = (n: number) => `GET ${PATH}&version=${n}`;
 // The engine's manifests, as `GET /node-types` answers them (`scripts/export_workflow_schema.py`).
 const NODE_TYPES = JSON.parse(
@@ -106,7 +108,7 @@ function item(n: number, extra: object = {}) {
 function show(routes: Routes) {
   const fetch = stubApi({
     [`GET ${PATH}`]: () => json(200, version(1)),
-    "GET /node-types": () => json(200, NODE_TYPES),
+    [NODE_TYPES_ROUTE]: () => json(200, NODE_TYPES),
     [VERSIONS]: () => json(200, { items: [item(1)] }),
     ...routes,
   });
@@ -227,7 +229,7 @@ test("removing a step asks first and names what goes with it", async () => {
 test("after a conflict the edits are applied to the latest version and kept", async () => {
   const routes: Routes = {
     [`GET ${PATH}`]: () => json(200, version(1)),
-    "GET /node-types": () => json(200, NODE_TYPES),
+    [NODE_TYPES_ROUTE]: () => json(200, NODE_TYPES),
     [`PATCH ${PATH}`]: () =>
       json(409, { detail: { code: "version_conflict", message: "stale", latest_version: 2 } }),
   };
@@ -271,7 +273,7 @@ test("a refused batch is shown on the card it names", async () => {
 });
 
 test("the palette lists the engine's node types by category, a new one included", async () => {
-  show({ "GET /node-types": () => json(200, [...NODE_TYPES, ECHO]) });
+  show({ [NODE_TYPES_ROUTE]: () => json(200, [...NODE_TYPES, ECHO]) });
   await screen.findByRole("heading", { name: "Flow" });
 
   await add("a", "echo");
@@ -312,7 +314,7 @@ test("a container comes with its children, every one under a fresh id", async ()
 test("the palette says when the node types cannot load, and retries", async () => {
   const routes: Routes = {
     [`GET ${PATH}`]: () => json(200, version(1)),
-    "GET /node-types": () => json(500, { detail: "down" }),
+    [NODE_TYPES_ROUTE]: () => json(500, { detail: "down" }),
   };
   stubApi(routes);
   renderWithQueries(<WorkflowBuilder workflowId="flow" />);
@@ -321,7 +323,7 @@ test("the palette says when the node types cannot load, and retries", async () =
   await waitFor(() => expect(failed.getByRole("menuitem", { name: "Retry" })).toBeDefined());
   expect(failed.getByText("down")).toBeDefined();
 
-  routes["GET /node-types"] = () => json(200, []);
+  routes[NODE_TYPES_ROUTE] = () => json(200, []);
   fireEvent.click(failed.getByRole("menuitem", { name: "Retry" }));
   await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
   const empty = await openPalette("a");
@@ -522,7 +524,7 @@ test("a parallel gets a branch, and loses one only while two are left", async ()
   };
   stubApi({
     [`GET ${PATH}`]: () => json(200, version(1, parallel)),
-    "GET /node-types": () => json(200, NODE_TYPES),
+    [NODE_TYPES_ROUTE]: () => json(200, NODE_TYPES),
   });
   renderWithQueries(<WorkflowBuilder workflowId="flow" />);
   await screen.findByRole("heading", { name: "Flow" });
@@ -707,7 +709,13 @@ test("the history lists every version, and opens one", async () => {
   show({
     [`GET ${PATH}`]: () => json(200, version(3)),
     [VERSIONS]: () =>
-      json(200, { items: [item(3, { restored_from: 1, op_count: 0 }), item(2), item(1)] }),
+      json(200, {
+        items: [
+          item(3, { restored_from: 1, op_count: 0 }),
+          item(2, { published_at: "2026-11-02T11:00:00Z" }),
+          item(1),
+        ],
+      }),
   });
   await screen.findByRole("heading", { name: "Flow" });
 
@@ -725,6 +733,9 @@ test("the history lists every version, and opens one", async () => {
   expect(links[0].getAttribute("aria-current")).toBe("page");
   expect(links[1].textContent).toContain("2 changes");
   expect(links[2].textContent).toContain("Created");
+  // A published version (6.6) is marked; drafts are not.
+  expect(within(links[1]).getByTestId("published-badge").textContent).toBe("Published");
+  expect(within(links[0]).queryByTestId("published-badge")).toBeNull();
 });
 
 test("leaving unsaved edits for another version asks first", async () => {
@@ -885,4 +896,201 @@ test("?node= opens with that node selected (a new blank workflow's starter agent
   expect(
     screen.getByRole("button", { name: "Edit parameters of inner" }).getAttribute("aria-pressed"),
   ).toBe("false");
+});
+
+// --- Composites (6.6) ------------------------------------------------------------------------
+
+const WORKFLOWS_ROUTE = `GET /workflows?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+const CALLERS_ROUTE = `GET /workflows/flow/callers?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+const PUBLISH_ROUTE = `POST /workflows/flow/publish?workspace_id=${DEFAULT_WORKSPACE_ID}`;
+
+/** A stored workflow as `GET /workflows` lists it. */
+function summary(workflowId: string, name: string, latest: number, published: number | null) {
+  return {
+    workflow_id: workflowId,
+    name,
+    description: null,
+    latest_version: latest,
+    published_version: published,
+    created_at: "2026-11-02T10:00:00Z",
+    updated_at: "2026-11-02T10:00:00Z",
+  };
+}
+
+/** The palette entry of the workspace's composite `workflowId` at `version`. */
+function compositeEntry(workflowId: string, name: string, at: number): NodeManifest {
+  const subflow = NODE_TYPES.find((m) => m.kind === "subflow")!;
+  return {
+    ...subflow,
+    label: name,
+    description: `Runs the composite ${name}, version ${at}.`,
+    category: "workspace",
+    default: { type: "subflow", id: "subflow", workflow: { id: workflowId, version: at } },
+    composite: { workflow_id: workflowId, version: at },
+  } as NodeManifest;
+}
+
+test("a run of steps is extracted to a composite in one edit, and stored with the next save", async () => {
+  const fetch = show({
+    [WORKFLOWS_ROUTE]: () => json(200, { items: [summary("flow", "Flow", 1, null)] }),
+    [`PATCH ${PATH}`]: async (request) => {
+      const body = (await request.clone().json()) as { ops: GraphOp[] };
+      return json(201, {
+        ...version(2, applyOps(SPEC, body.ops)),
+        extracted: { workflow_id: "review", version: 1 },
+      });
+    },
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("a");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Extract to composite…" }));
+  const dialog = within(await screen.findByRole("dialog"));
+  fireEvent.change(dialog.getByLabelText("Steps"), { target: { value: "l" } });
+  fireEvent.change(dialog.getByLabelText("Name"), { target: { value: "Review" } });
+  expect(dialog.getByLabelText("Id")).toHaveProperty("value", "review");
+  expect(dialog.getByText("a, l")).toBeDefined();
+  fireEvent.click(dialog.getByRole("button", { name: "Extract" }));
+
+  expect(cards()).toEqual(["subflow_1", "c"]);
+  const call = screen.getAllByTestId("builder-node").find((c) => c.dataset.node === "subflow_1")!;
+  expect(call.textContent).toContain("Calls review · version 1 · stored when you save");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith(
+      "Saved version 2, and review as its version 1, a draft.",
+    ),
+  );
+  expect(await patched(fetch)).toEqual({
+    base_version: 1,
+    ops: [
+      {
+        op: "extract",
+        node_ids: ["a", "l"],
+        subflow_id: "subflow_1",
+        workflow: { id: "review", name: "Review" },
+      },
+    ],
+  });
+});
+
+test("an extract says why it cannot be made, and a taken id is refused", async () => {
+  const spec = {
+    ...SPEC,
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [agent("a"), agent("c"), { type: "reduce", id: "r", from: "c", strategy: "concat" }],
+    },
+  };
+  show({
+    [`GET ${PATH}`]: () => json(200, version(1, spec)),
+    [WORKFLOWS_ROUTE]: () => json(200, { items: [summary("taken", "Taken", 1, null)] }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("c");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Extract to composite…" }));
+  const dialog = within(await screen.findByRole("dialog"));
+  expect(dialog.getByRole("status").textContent).toContain("'r' refers to 'c', which would move");
+  expect(dialog.getByRole("button", { name: "Extract" })).toHaveProperty("disabled", true);
+
+  fireEvent.change(dialog.getByLabelText("Steps"), { target: { value: "r" } });
+  fireEvent.change(dialog.getByLabelText("Name"), { target: { value: "Taken" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Extract" }));
+  expect(dialog.getByText("A workflow with this id exists; choose another.")).toBeDefined();
+  expect(cards()).toEqual(["a", "c", "r"]);
+});
+
+test("steps are wrapped in a loop from the card's menu; a parallel needs two of them", async () => {
+  show({});
+  await screen.findByRole("heading", { name: "Flow" });
+
+  const sub = await openSub("c", "Wrap in…");
+  const parallel = sub.getAllByRole("menuitem").find((i) => i.textContent?.startsWith("Parallel"))!;
+  expect(parallel.getAttribute("aria-disabled")).toBe("true");
+  expect(parallel.textContent).toContain("A parallel needs two or more steps in a row.");
+  await pick(sub, (i) => i.textContent === "Loop…");
+  const dialog = within(await screen.findByRole("dialog"));
+  fireEvent.click(dialog.getByRole("button", { name: "Wrap" }));
+
+  expect(cards()).toEqual(["a", "l", "inner", "loop_1", "c"]);
+  expect(screen.getByRole("button", { name: "Undo: Wrap c in loop_1" })).toBeDefined();
+});
+
+test("the workspace's composites are in the palette, and a call moves to a newer published version", async () => {
+  const calling = {
+    ...SPEC,
+    root: {
+      type: "sequence",
+      id: "main",
+      steps: [agent("a"), { type: "subflow", id: "check", workflow: { id: "review", version: 1 } }],
+    },
+  };
+  show({
+    [`GET ${PATH}`]: () => json(200, version(1, calling)),
+    [NODE_TYPES_ROUTE]: () =>
+      json(200, [
+        ...NODE_TYPES,
+        compositeEntry("review", "Review", 2),
+        compositeEntry("flow", "Flow", 1),
+      ]),
+    [WORKFLOWS_ROUTE]: () =>
+      json(200, { items: [summary("review", "Review", 3, 2), summary("flow", "Flow", 1, 1)] }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+  const card = () => screen.getAllByTestId("builder-node").find((c) => c.dataset.node === "check")!;
+  await waitFor(() =>
+    expect(card().textContent).toContain("Calls Review · version 1 · version 2 is published"),
+  );
+
+  menu("check");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Update to version 2" }));
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0));
+  expect(card().textContent).toContain("Calls Review · version 2");
+  expect(card().textContent).not.toContain("is published");
+
+  const palette = await openPalette("a");
+  expect(palette.getByText("Workspace nodes")).toBeDefined();
+  // The workflow being edited is not offered to itself.
+  const entries = palette.getAllByRole("menuitem").filter((i) => i.dataset.composite);
+  expect(entries.map((i) => i.dataset.composite)).toEqual(["review"]);
+  fireEvent.click(entries[0]);
+  await waitFor(() => expect(cards()).toEqual(["a", "subflow_1", "check"]));
+});
+
+test("publishing asks first, names who calls it, and marks the version", async () => {
+  let published = false;
+  const draft = { ...version(2), published_version: 1, published_at: null };
+  const done = { ...draft, published_version: 2, published_at: "2026-11-10T10:00:00Z" };
+  const fetch = show({
+    [`GET ${PATH}`]: () => json(200, published ? done : draft),
+    [CALLERS_ROUTE]: () =>
+      json(200, {
+        items: [{ workflow_id: "docs", name: "Docs", latest_version: 4, calls_version: 1 }],
+      }),
+    [PUBLISH_ROUTE]: () => {
+      published = true;
+      return json(200, done);
+    },
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+  const status = () => screen.getByTestId("builder-status");
+  expect(status().textContent).toContain("Draft · version 1 is published");
+  await waitFor(() => expect(status().textContent).toContain("Used by 1 workflow"));
+
+  fireEvent.click(screen.getByRole("button", { name: "Publish version 2" }));
+  const dialog = within(screen.getByRole("alertdialog"));
+  await waitFor(() =>
+    expect(dialog.getByRole("link", { name: "Docs" }).getAttribute("href")).toBe("/workflows/docs"),
+  );
+  expect(dialog.getByText("calls version 1")).toBeDefined();
+  fireEvent.click(dialog.getByRole("button", { name: "Publish" }));
+
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Published version 2."));
+  const call = fetch.mock.calls.find(([r]) => r.method === "POST" && r.url.includes("/publish"));
+  expect(await call![0].clone().json()).toEqual({ version: 2 });
+  await waitFor(() => expect(screen.getByTestId("published-badge")).toBeDefined());
+  expect(screen.queryByRole("button", { name: /Publish version/ })).toBeNull();
 });

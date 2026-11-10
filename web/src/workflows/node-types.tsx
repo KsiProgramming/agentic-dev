@@ -11,6 +11,7 @@ import {
   ShieldCheckIcon,
   SignpostIcon,
   SplitIcon,
+  WorkflowIcon,
   WrenchIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -21,20 +22,29 @@ import type { components } from "@/api/schema";
 
 /**
  * The node types the engine knows (5.3), each described by its manifest: the builder's palette
- * and its cards are drawn from them, so a primitive the engine adds needs no change here.
+ * and its cards are drawn from them, so a primitive the engine adds needs no change here. A
+ * workspace's composites (6.6) follow the primitives, each a `subflow` pinned to its latest
+ * published version, under "Workspace nodes".
  */
 
 export type NodeManifest = components["schemas"]["NodeManifest"];
 
-/** `GET /node-types`: every primitive's manifest, in palette order. They change only with an
- * engine release, so they are fetched once a session. */
-export function useNodeTypes(baseUrl = apiBaseUrl()) {
+export function nodeTypesKey(workspaceId?: string) {
+  return workspaceId ? (["node-types", workspaceId] as const) : (["node-types"] as const);
+}
+
+/** `GET /node-types`: every primitive's manifest, in palette order, then, with `workspaceId`,
+ * the workspace's composites. The primitives change only with an engine release; the composites
+ * when one is published, which refreshes them. */
+export function useNodeTypes(baseUrl = apiBaseUrl(), workspaceId?: string) {
   return useQuery({
-    queryKey: ["node-types"],
+    queryKey: nodeTypesKey(workspaceId),
     queryFn: async () => {
       let result;
       try {
-        result = await createApiClient(baseUrl).GET("/node-types");
+        result = await createApiClient(baseUrl).GET("/node-types", {
+          params: { query: workspaceId ? { workspace_id: workspaceId } : {} },
+        });
       } catch (err) {
         throw err instanceof TypeError ? new Error("Could not reach the API.") : err;
       }
@@ -44,6 +54,17 @@ export function useNodeTypes(baseUrl = apiBaseUrl()) {
     },
     staleTime: Infinity,
   });
+}
+
+/** How the palette names an entry: the kind for a primitive, `composite:<workflow id>` for a
+ * workspace's composite, which shares the `subflow` kind. */
+export function paletteKey(manifest: NodeManifest): string {
+  return manifest.composite ? `composite:${manifest.composite.workflow_id}` : manifest.kind;
+}
+
+/** The manifest the palette entry `key` names (`paletteKey`). */
+export function manifestByKey(manifests: NodeManifest[], key: string): NodeManifest | undefined {
+  return manifests.find((m) => paletteKey(m) === key);
 }
 
 // The icons manifests name today. A name not here is drawn as a box, so a new primitive still
@@ -58,6 +79,7 @@ const ICONS: Record<string, LucideIcon> = {
   signpost: SignpostIcon,
   repeat: RepeatIcon,
   merge: MergeIcon,
+  workflow: WorkflowIcon,
 };
 
 /** A manifest's icon, by its lucide name; a box for a name this app does not have. */
@@ -66,7 +88,12 @@ export function ManifestIcon({ name, className }: { name: string; className?: st
   return <Icon aria-hidden="true" className={className} />;
 }
 
-const CATEGORIES: Record<string, string> = { step: "Steps", flow: "Flow", combine: "Combine" };
+const CATEGORIES: Record<string, string> = {
+  step: "Steps",
+  flow: "Flow",
+  combine: "Combine",
+  workspace: "Workspace nodes",
+};
 
 export interface PaletteGroup {
   label: string;
