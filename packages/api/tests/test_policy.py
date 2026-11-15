@@ -22,8 +22,11 @@ DEFAULTS = {
     "wall_time_s": 7200,
     "approval_ttl_s": 259_200,
     "budget_usd": None,
+    "sandbox_ttl_s": 86_400,
+    "branch_retention_days": 30,
 }
 UNSET = dict.fromkeys(DEFAULTS)
+CEILINGS = {**DEFAULTS, "sandbox_ttl_s": 259_200, "branch_retention_days": 90}
 
 
 @pytest.fixture
@@ -54,7 +57,24 @@ async def test_a_new_workspace_has_the_platform_limits(
     response = await client.get(f"/workspaces/{workspace}/policy")
 
     assert response.status_code == 200
-    assert response.json() == {"defaults": DEFAULTS, "overrides": UNSET, "effective": DEFAULTS}
+    assert response.json() == {
+        "defaults": DEFAULTS,
+        "ceilings": CEILINGS,
+        "overrides": UNSET,
+        "effective": DEFAULTS,
+    }
+
+
+async def test_the_retention_limits_may_go_above_their_default(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    """12.3: a kept sandbox's time to live and the saved commits' retention may be raised, up to
+    their ceiling; the other limits only go down."""
+    raised = {"sandbox_ttl_s": 259_200, "branch_retention_days": 90}
+    put = await client.put(f"/workspaces/{workspace}/policy", json=raised)
+
+    assert put.status_code == 200, put.text
+    assert put.json()["effective"] == {**DEFAULTS, **raised}
 
 
 async def test_lowered_limits_round_trip_and_reset(client: AsyncClient, workspace: UUID) -> None:
@@ -77,6 +97,9 @@ async def test_lowered_limits_round_trip_and_reset(client: AsyncClient, workspac
         {"agents_spawned": 41},
         {"wall_time_s": 7201},
         {"approval_ttl_s": 259_201},
+        {"sandbox_ttl_s": 259_201},
+        {"sandbox_ttl_s": 0},
+        {"branch_retention_days": 91},
         {"loop_iterations": 0},
         {"max_depth": -1},
         {"budget_usd": 0},

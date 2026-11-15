@@ -10,8 +10,10 @@ writer's branch as a git bundle). The run's artifacts are copied to `artifacts_d
 limits, working in a directory under `staging_dir`, never in the checkout. The manager owns the
 lifecycle: `open()`
 creates the sandbox and clones the repo, and leaving the context destroys it, whether the run
-succeeded, failed or was cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and
-the attempt that continues it opens it again (`open(..., reuse=True)`). A fresh sandbox for a run
+succeeded, failed or was cancelled, unless the run kept it (`keep()`). A run that pauses at a gate
+keeps its sandbox, and the attempt that continues it opens it again (`open(..., reuse=True)`); a
+run that fails or is cancelled keeps it for a time to live (12.3), after which a sweep removes
+it (`discard()`). A fresh sandbox for a run
 that has already worked is cloned at the run's base commit and gets the writers' branches the run
 saved back (`open(..., at=..., restore=...)`, 12.2).
 """
@@ -175,7 +177,12 @@ class SandboxManager(Protocol):
         ...
 
     async def discard(self, run_id: UUID) -> None:
-        """Remove the sandbox the run kept, if any (a run cancelled while paused at a gate)."""
+        """Remove the sandbox the run kept, if any: a kept sandbox past its time to live (12.3)."""
+        ...
+
+    async def exists(self, run_id: UUID) -> bool:
+        """Whether a sandbox of the run is left on this host, kept or not (12.3: a run ended while
+        paused at a gate keeps the sandbox it kept there)."""
         ...
 
 

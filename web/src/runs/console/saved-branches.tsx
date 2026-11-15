@@ -1,8 +1,13 @@
-import { GitCommitHorizontalIcon } from "lucide-react";
+"use client";
+
+import { FileDiffIcon, GitCommitHorizontalIcon } from "lucide-react";
+import { useState } from "react";
 
 import { IdChip, RelativeTime } from "@/components/display";
+import { Button } from "@/components/ui/button";
 
 import type { SavedBranch } from "../timeline";
+import { RunChangesSheet } from "./run-changes-sheet";
 import { ErrorLine } from "./step-view";
 
 function commitsLabel(n: number): string {
@@ -12,9 +17,19 @@ function commitsLabel(n: number): string {
 /**
  * The branches a step's writers committed on, saved outside the sandbox (12.2): each with how
  * many commits it holds, its tip and when it was saved, so a lost sandbox loses none of it. A
- * branch whose last save failed says why: its newer commits are only in the sandbox.
+ * branch whose last save failed says why: its newer commits are only in the sandbox. "View
+ * changes" shows what a branch changed, from what was saved (12.3), so after its sandbox is gone.
  */
-export function SavedBranches({ branches }: { branches: SavedBranch[] }) {
+export function SavedBranches({
+  branches,
+  runId,
+  baseUrl,
+}: {
+  branches: SavedBranch[];
+  runId: string;
+  baseUrl?: string;
+}) {
+  const [shown, setShown] = useState<string | null>(null);
   return (
     <section
       aria-label="Commits saved"
@@ -35,6 +50,17 @@ export function SavedBranches({ branches }: { branches: SavedBranch[] }) {
                 <span>{commitsLabel(saved.commits)}</span>
                 <IdChip id={saved.head} label="commit" />
                 {saved.error === null ? <RelativeTime iso={saved.at} prefix="saved " /> : null}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  aria-label={`View changes on ${saved.branch}`}
+                  onClick={() => setShown(saved.key)}
+                >
+                  <FileDiffIcon aria-hidden="true" data-icon="inline-start" />
+                  View changes
+                </Button>
               </p>
             ) : (
               <p className="min-w-0 font-mono text-meta break-all text-foreground">
@@ -49,6 +75,15 @@ export function SavedBranches({ branches }: { branches: SavedBranch[] }) {
           </li>
         ))}
       </ul>
+      <RunChangesSheet
+        runId={runId}
+        open={shown !== null}
+        onOpenChange={(open) => {
+          if (!open) setShown(null);
+        }}
+        only={shown ?? undefined}
+        baseUrl={baseUrl}
+      />
     </section>
   );
 }

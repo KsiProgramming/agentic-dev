@@ -156,6 +156,9 @@ services:
       # again: their id was lost before a worker claimed them (phase 12.1).
       QUEUE_STALE_S: ${QUEUE_STALE_S:-60}
       QUEUE_SWEEP_S: ${QUEUE_SWEEP_S:-15}
+      # Every SANDBOX_SWEEP_S, the sandboxes failed and cancelled runs kept past their time to live
+      # are removed, and saved bundles past their run's retention dropped (phase 12.3).
+      SANDBOX_SWEEP_S: ${SANDBOX_SWEEP_S:-60}
       # Runs with a repo get a sandbox container on the host's Docker. Local repo paths may only
       # come from /samples, where this project's own git history is mounted as a demo repo.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}

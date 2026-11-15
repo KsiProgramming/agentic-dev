@@ -1,7 +1,9 @@
 """Policy limits: what a run may use, whatever its spec says (mission principle 2).
 
 `PLATFORM_POLICY` holds the tech-stack defaults, which are also the ceilings: a workspace may
-lower each limit, never raise it. A run gets its effective policy when it is created and keeps it,
+lower each limit, never raise it. Two retention limits (12.3) have a ceiling above their default,
+in `CEILINGS`: how long a failed or cancelled run's sandbox is kept, and how long its saved
+commits are. A run gets its effective policy when it is created and keeps it,
 resumes included. Specs are checked against it before the run starts (`policy_errors` in
 `agentic_engine.spec`), and the engine and worker enforce it while the run executes.
 
@@ -35,6 +37,14 @@ BUDGET_MAX_USD: Final = 1_000_000
 APPROVAL_TTL_S: Final = 72 * 60 * 60
 """How long a gate waits for a decision by default, and at most: 72 h."""
 
+SANDBOX_TTL_S: Final = 24 * 60 * 60
+"""How long a failed or cancelled run's sandbox is kept by default (12.3): 24 h."""
+SANDBOX_TTL_MAX_S: Final = 72 * 60 * 60
+BRANCH_RETENTION_DAYS: Final = 30
+"""How long a finished run's saved commits (its branches' bundles) are kept by default: 30 days.
+Their changed files are kept for good."""
+BRANCH_RETENTION_MAX_DAYS: Final = 90
+
 
 class Policy(BaseModel):
     """The limits one run executes under."""
@@ -58,6 +68,15 @@ class Policy(BaseModel):
         default=None,
         description="USD the run may spend, a hard stop once reached; `None` is no cost cap.",
     )
+    # Defaults, so the policy frozen on a run created before phase 12.3 still loads.
+    sandbox_ttl_s: Limit = Field(
+        default=SANDBOX_TTL_S,
+        description="Seconds a failed or cancelled run's sandbox is kept before it is removed.",
+    )
+    branch_retention_days: Limit = Field(
+        default=BRANCH_RETENTION_DAYS,
+        description="Days a finished run's saved commits are kept; their changed files stay.",
+    )
 
 
 PLATFORM_POLICY: Final = Policy(
@@ -67,8 +86,24 @@ PLATFORM_POLICY: Final = Policy(
     loop_iterations=5,
     wall_time_s=2 * 60 * 60,
     approval_ttl_s=APPROVAL_TTL_S,
+    sandbox_ttl_s=SANDBOX_TTL_S,
+    branch_retention_days=BRANCH_RETENTION_DAYS,
 )
-"""The tech-stack defaults, and the ceilings a workspace policy cannot go above."""
+"""The tech-stack defaults, and the ceilings a workspace policy cannot go above, except those in
+`CEILINGS`."""
+
+CEILINGS: Final[dict[str, int]] = {
+    "sandbox_ttl_s": SANDBOX_TTL_MAX_S,
+    "branch_retention_days": BRANCH_RETENTION_MAX_DAYS,
+}
+"""The limits a workspace may set above their default, up to these values."""
+
+
+def ceiling(name: str) -> int:
+    """The most a workspace may set the integer limit `name` to."""
+    value = CEILINGS.get(name, getattr(PLATFORM_POLICY, name))
+    assert isinstance(value, int)
+    return value
 
 
 class PolicyOverrides(BaseModel):
@@ -83,15 +118,17 @@ class PolicyOverrides(BaseModel):
     wall_time_s: Limit | None = None
     approval_ttl_s: Limit | None = None
     budget_usd: Usd | None = None
+    sandbox_ttl_s: Limit | None = None
+    branch_retention_days: Limit | None = None
 
 
 def effective_policy(overrides: PolicyOverrides | None = None) -> Policy:
-    """`PLATFORM_POLICY` with each limit lowered to the workspace's, where it set one, and the
-    workspace's budget, which has no platform ceiling."""
+    """`PLATFORM_POLICY` with each limit replaced by the workspace's, where it set one, up to the
+    limit's `ceiling`, and the workspace's budget, which has no platform ceiling."""
     base = PLATFORM_POLICY.model_dump()
     if overrides is not None:
         for name, value in overrides.model_dump(exclude_none=True).items():
-            base[name] = value if name == "budget_usd" else min(base[name], value)
+            base[name] = value if name == "budget_usd" else min(ceiling(name), value)
     return Policy.model_validate(base)
 
 

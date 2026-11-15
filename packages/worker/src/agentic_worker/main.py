@@ -54,7 +54,14 @@ numbered.
 
 A user can cancel a run (`POST /runs/{id}/cancel`): the worker running it checks every
 `CANCEL_POLL_S`, cancels its graph and writes `run_cancelled`; a cancelled run that is claimed
-(queued, or paused at a gate) is ended at once, and a sandbox it kept is removed.
+(queued, or paused at a gate) is ended at once, and a sandbox it kept at its gate stays kept.
+
+A run that fails or is cancelled (an expired approval and a policy stop included) keeps its
+sandbox for its policy's `sandbox_ttl_s` (12.3): just before its end event is written, the worker
+keeps the sandbox and adds `sandbox_kept_until` to the event (`EndKeeper`). Every
+`SANDBOX_SWEEP_S`, each worker removes the kept sandboxes past that time
+(`agentic_store.remove_expired_sandboxes`) and drops the saved bundles of runs past their
+`branch_retention_days` (`drop_old_bundles`). A worker that starts spares kept sandboxes.
 
 A gate waits at most its time to live (phase 11.3). Every `GATE_SWEEP_S`, each worker cancels
 the runs whose gate has expired (`agentic_store.expire_gates`) and queues them; they are ended
@@ -80,9 +87,10 @@ import signal
 import socket
 import sys
 import time
-from collections.abc import AsyncGenerator, Callable, Collection, Coroutine
+from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from types import FrameType
 from typing import Any, Literal
@@ -173,9 +181,11 @@ from agentic_store import (
     cancel_requested,
     claim_run,
     dequeue_run,
+    drop_old_bundles,
     enqueue_run,
     expire_gates,
     get_github_installation,
+    kept_sandbox_run_ids,
     latest_branches,
     leased_run_ids,
     load_secret,
@@ -185,6 +195,7 @@ from agentic_store import (
     reclaim_expired_run,
     record_base_sha,
     release_run,
+    remove_expired_sandboxes,
     renew_lease,
     repo_created,
     requeue_stale_runs,
@@ -192,6 +203,7 @@ from agentic_store import (
     waiting_run_ids,
     workspace_price_table,
 )
+from agentic_store.sink import SANDBOX_KEPT_UNTIL
 from agentic_tools.artifacts import open_artifact_tools
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
@@ -260,6 +272,9 @@ class WorkerSettings(BaseSettings):
     queue_stale_s: float = Field(default=60.0, gt=0)
     # How often the worker looks for such runs (and once when it starts).
     queue_sweep_s: float = Field(default=15.0, gt=0)
+    # How often kept sandboxes past their time to live are removed, and saved bundles past their
+    # run's retention dropped (12.3).
+    sandbox_sweep_s: float = Field(default=60.0, gt=0)
     # Claims of one run before it fails instead of being resumed again (a run that kills workers).
     max_attempts: int = Field(default=3, ge=1)
     # The platform's GitHub App (the same settings as the API's). Unset, runs clone GitHub repos
@@ -480,18 +495,66 @@ class Worker:
 class AttemptSink:
     """Writes one attempt's events until the worker lets the run go (it is stopping, or another
     worker took the lease). Later events are dropped, so a cancelled attempt does not end the run
-    and it stays resumable. Live secrets are redacted from payloads before they are written."""
+    and it stays resumable. Live secrets are redacted from payloads before they are written.
+    `before_end` sees a failed or cancelled run's end event first, and may add to it."""
 
-    def __init__(self, sink: EventSink, detached: Callable[[], bool]) -> None:
+    def __init__(
+        self,
+        sink: EventSink,
+        detached: Callable[[], bool],
+        before_end: Callable[[RunEvent], Awaitable[RunEvent]] | None = None,
+    ) -> None:
         self._sink = sink
         self._detached = detached
+        self._before_end = before_end
 
     async def emit(self, event: RunEvent) -> None:
         if not self._detached():
+            if self._before_end is not None and event.type in KEEPING_ENDS:
+                event = await self._before_end(event)
             payload = redact_json(event.payload)
             if payload != event.payload:
                 event = event.model_copy(update={"payload": payload})
             await self._sink.emit(event)
+
+
+KEEPING_ENDS: frozenset[str] = frozenset({RUN_FAILED, RUN_CANCELLED})
+"""The end events whose run keeps its sandbox (12.3)."""
+
+
+class EndKeeper:
+    """Keeps the sandbox of a run that fails or is cancelled, for its policy's `sandbox_ttl_s`
+    (12.3). `before_end` runs just before the run's end event is written: it keeps the sandbox
+    the attempt has open (`sandbox`), or, with none open (a run ended while queued or paused at a
+    gate), finds one left on this host from before, and adds `sandbox_kept_until` to the event,
+    which the event sink copies to the run. The end event so stays the run's last, and a run
+    never reads ended without saying what became of its sandbox."""
+
+    def __init__(self, worker: "Worker", run: StoredRun) -> None:
+        self._worker = worker
+        self._run = run
+        self.sandbox: Sandbox | None = None
+        # Saves the writers' uncommitted work from `sandbox` before it is kept.
+        self.saver: SandboxBranchSaver | None = None
+
+    async def before_end(self, event: RunEvent) -> RunEvent:
+        run = self._run
+        if run.repo is None:
+            return event
+        try:
+            if self.sandbox is not None:
+                if self.saver is not None:
+                    await self.saver.save_uncommitted()
+                self._worker.sandboxes.keep(run.id)
+            elif not await self._worker.sandboxes.exists(run.id):
+                return event
+        except Exception:
+            log.warning("run %s: could not keep its sandbox", run.id, exc_info=True)
+            return event
+        until = event.created_at + timedelta(seconds=run.policy.sandbox_ttl_s)
+        log.info("run %s: sandbox kept until %s", run.id, until.isoformat())
+        payload = {**event.payload, SANDBOX_KEPT_UNTIL: until.isoformat()}
+        return event.model_copy(update={"payload": payload})
 
 
 async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> None:
@@ -499,7 +562,12 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
     logged and the worker carries on with the next run; if the run had started, its `run_failed`
     event is already written. If the lease is lost, the run is left to the worker that has it."""
     lost = asyncio.Event()
-    sink = AttemptSink(PostgresEventSink(worker.sessions), lambda: stop.is_set() or lost.is_set())
+    keeper = EndKeeper(worker, run)
+    sink = AttemptSink(
+        PostgresEventSink(worker.sessions),
+        lambda: stop.is_set() or lost.is_set(),
+        keeper.before_end,
+    )
     if await cancel_requested(worker.sessions, run.id):
         try:
             await _end_cancelled(worker, run, sink)
@@ -509,7 +577,7 @@ async def process_run(worker: Worker, run: StoredRun, stop: asyncio.Event) -> No
         return
     used = await active_seconds(worker.sessions, run.id)
     began = time.monotonic()
-    attempt = asyncio.create_task(_attempts(worker, run, sink))
+    attempt = asyncio.create_task(_attempts(worker, run, sink, keeper))
     heartbeat = asyncio.create_task(_keep_lease(worker, run.id, lost))
     cancel = asyncio.create_task(_watch_cancel(worker, run.id))
     wall = asyncio.create_task(asyncio.sleep(max(0.0, run.policy.wall_time_s - used)))
@@ -585,9 +653,7 @@ async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> Non
     """End a run its user cancelled, or whose gate expired, unless its graph already wrote its
     end: `run_cancelled` with the reason after its last event (a run that never started gets
     `run_started` first), and `expired: true` for an expired gate. A sandbox the run kept at a
-    gate is removed first, so a run that reads `cancelled` has none left."""
-    if run.repo is not None:
-        await worker.sandboxes.discard(run.id)
+    gate stays kept for the run's time to live (`EndKeeper`), then a sweep removes it."""
     if not await run_ended(worker.sessions, run.id):
         reason = await cancel_reason(worker.sessions, run.id)
         last_seq = await max_event_seq(worker.sessions, run.id)
@@ -636,6 +702,23 @@ async def _sweep_queue(worker: Worker, redis: Redis) -> None:
         await asyncio.sleep(worker.settings.queue_sweep_s)
 
 
+async def _sweep_sandboxes(worker: Worker) -> None:
+    """Every `sandbox_sweep_s`, remove the kept sandboxes past their time to live, and drop the
+    saved bundles of runs past their retention (12.3). Runs as long as the worker does."""
+    while True:
+        try:
+            for run_id in await remove_expired_sandboxes(worker.sessions, worker.sandboxes.discard):
+                log.info("run %s: its kept sandbox was removed", run_id)
+        except Exception:
+            log.warning("could not remove kept sandboxes", exc_info=True)
+        try:
+            if dropped := await drop_old_bundles(worker.sessions):
+                log.info("dropped %d saved bundle(s) past their run's retention", dropped)
+        except Exception:
+            log.warning("could not drop old saved bundles", exc_info=True)
+        await asyncio.sleep(worker.settings.sandbox_sweep_s)
+
+
 async def fail_unloadable(worker: Worker, run: UnloadableRun) -> None:
     """End a claimed run whose spec this worker cannot load, with the reason, and release it. A
     run that never started gets `run_started` then `run_failed`; one resumed only `run_failed`
@@ -669,7 +752,8 @@ async def _end_over_limit(
 ) -> None:
     """End a run that went over its wall time, unless its graph already wrote its end (it does
     when it was cut off mid-node): `policy_limit_exceeded` and `run_failed` after its last event,
-    or, for a run that never started, `run_started` and `run_failed`. Its sandbox is removed."""
+    or, for a run that never started, `run_started` and `run_failed`. Its sandbox is kept for
+    its time to live, like any failed run's (`EndKeeper`)."""
     if not await run_ended(worker.sessions, run.id):
         last_seq = await max_event_seq(worker.sessions, run.id)
         if last_seq == 0:
@@ -678,19 +762,21 @@ async def _end_over_limit(
             )
         else:
             await log_policy_stop(RunEventLog(run.id, sink, next_seq=last_seq + 1), over)
-    if run.repo is not None:
-        await worker.sandboxes.discard(run.id)
 
 
-async def _attempts(worker: Worker, run: StoredRun, sink: EventSink) -> str:
+async def _attempts(
+    worker: Worker, run: StoredRun, sink: EventSink, keeper: EndKeeper | None = None
+) -> str:
     """Run `run`'s attempts while it holds its lease: one, and another each time an attempt
     ends `suspended` (it created its repo, which the next one clones). Returns its status."""
-    while (status := await _attempt(worker, run, sink)) == "suspended":
+    while (status := await _attempt(worker, run, sink, keeper)) == "suspended":
         log.info("run %s created its repo; continuing in a new attempt", run.id)
     return status
 
 
-async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
+async def _attempt(
+    worker: Worker, run: StoredRun, sink: EventSink, keeper: EndKeeper | None = None
+) -> str:
     """Start `run`, or resume it if an earlier attempt wrote events; returns its status. A run
     with a repo runs inside a sandbox holding it; one that cannot be opened ends the run. A run
     whose repo it has yet to create has none, and only the `github` tools.
@@ -698,7 +784,8 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
     A run continued after a gate decision opens the sandbox it kept when it paused, so its
     writers' commits are still there; a run that pauses at a gate keeps its sandbox. A fresh
     sandbox is cloned at the run's base commit and gets the branches the run saved back (12.2),
-    which the run logs (`branches_restored`) before its graph resumes."""
+    which the run logs (`branches_restored`) before its graph resumes. While the sandbox is open,
+    `keeper` holds it, so a run that fails or is cancelled keeps it (12.3)."""
     last_seq = await max_event_seq(worker.sessions, run.id)
     decision = await pending_decision(worker.sessions, run.id) if last_seq else None
     tries = run.attempt - 1
@@ -741,6 +828,10 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
                             restore=saved,
                         )
                     )
+                if keeper is not None:
+                    keeper.sandbox = sandbox
+                    # Runs before the sandbox closes: the stack unwinds in reverse.
+                    stack.callback(setattr, keeper, "sandbox", None)
                 if run.base_sha is None:
                     await _record_base(worker, run, sandbox)
             except SandboxError as e:
@@ -758,6 +849,9 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             review = SandboxGateReview(sandbox, run.id, writers, tasked)
             integrator = SandboxIntegrator(sandbox, run.id)
             saver = SandboxBranchSaver(sandbox, worker.sessions, run.id, tasked)
+            if keeper is not None:
+                keeper.saver = saver
+                stack.callback(setattr, keeper, "saver", None)
             tools = await stack.enter_async_context(
                 open_repo_tools(sandbox, run_id=run.id, writers=writers, task_writers=tasked)
             )
@@ -1007,7 +1101,11 @@ async def run(
             open_runtime = run_runtimes(settings, sessions, keys, make_client or anthropic_client)
         async with contextlib.AsyncExitStack() as stack:
             if sandboxes is None:
-                keep = await leased_run_ids(sessions) | await waiting_run_ids(sessions)
+                keep = (
+                    await leased_run_ids(sessions)
+                    | await waiting_run_ids(sessions)
+                    | await kept_sandbox_run_ids(sessions)
+                )
                 sandboxes = build_sandboxes(settings, keep={str(i) for i in keep})
             if checkpointer is None:
                 checkpointer = await stack.enter_async_context(
@@ -1037,6 +1135,8 @@ async def run(
             stack.push_async_callback(_stop_task, sweep)
             requeue = asyncio.create_task(_sweep_queue(worker, redis))
             stack.push_async_callback(_stop_task, requeue)
+            kept = asyncio.create_task(_sweep_sandboxes(worker))
+            stack.push_async_callback(_stop_task, kept)
             while not stop.is_set():
                 run = await _next_run(worker, redis)
                 if isinstance(run, UnloadableRun):

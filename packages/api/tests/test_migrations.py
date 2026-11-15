@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0030_run_branches"
+    assert version == "0031_kept_sandboxes"
     assert {
         "runs",
         "run_events",
@@ -637,3 +637,53 @@ async def test_the_runs_list_revision_backfills_trigger_and_branch(postgres_url:
     await engine.dispose()
 
     assert rows == {api_run: ("api", "dev"), manual: ("manual", None), rerun: ("rerun", "main")}
+
+
+async def test_the_kept_sandboxes_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    """12.3: going back drops what the older schema cannot hold (uncommitted work, and versions
+    whose bundle was dropped) and keeps the rest."""
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert {"sandbox_kept_until", "sandbox_removed_at"} <= await run_columns(postgres_url)
+
+    engine = create_async_engine(postgres_url)
+    branch = (
+        "INSERT INTO run_branches (run_id, branch, version, node_key, kind, base_sha, head_sha, "
+        "commits, size, data) VALUES (:run, :branch, 1, 'writer', :kind, :sha, :sha, 1, 1, :data)"
+    )
+    sha = "a" * 40
+    async with engine.begin() as conn:
+        run = (
+            await conn.execute(
+                text(
+                    "INSERT INTO runs (id, workspace_id, status, spec, policy) VALUES "
+                    "(gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'failed', "
+                    "'{}', '{}') RETURNING id"
+                )
+            )
+        ).scalar_one()
+        for name, kind, data in (
+            ("agent/r/writer", "writer", b"x"),
+            ("agent/r/old", "writer", None),
+            ("wip/r/writer", "wip", b"x"),
+        ):
+            params = {"run": run, "branch": name, "kind": kind, "sha": sha, "data": data}
+            await conn.execute(text(branch), params)
+
+    await asyncio.to_thread(command.downgrade, config, "0030_run_branches")
+    assert "sandbox_kept_until" not in await run_columns(postgres_url)
+    async with engine.connect() as conn:
+        left = (
+            await conn.execute(
+                text("SELECT branch FROM run_branches WHERE run_id = :run"), {"run": run}
+            )
+        ).scalars()
+        kept = list(left)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM run_branches WHERE run_id = :run"), {"run": run})
+        await conn.execute(text("DELETE FROM runs WHERE id = :run"), {"run": run})
+    await engine.dispose()
+
+    assert kept == ["agent/r/writer"]

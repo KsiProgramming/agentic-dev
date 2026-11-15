@@ -28,6 +28,7 @@ from agentic_sandbox.protocol import (
     Sandbox,
     SandboxManager,
 )
+from agentic_sandbox.snapshot import Snapshot, snapshot_worktrees, wip_branch
 from agentic_sandbox.source import COMMIT_ID, RepoSource, clone_shallow
 from agentic_sandbox.worktree import (
     AGENT_IDENTITY,
@@ -65,6 +66,7 @@ __all__ = [
     "Sandbox",
     "SandboxError",
     "SandboxManager",
+    "Snapshot",
     "Worktree",
     "add_worktree",
     "branch_heads",
@@ -73,5 +75,7 @@ __all__ = [
     "export_branch",
     "import_bundles",
     "integrate_branches",
+    "snapshot_worktrees",
     "start_branches",
+    "wip_branch",
 ]

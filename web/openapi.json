@@ -476,6 +476,107 @@
         }
       }
     },
+    "/runs/{run_id}/changes": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Changes",
+        "description": "What the run's writers changed (12.3): the latest saved version of each of its branches,\nby branch, with the files it changed. Read from what was saved, so it is there after the\nrun's sandbox, and its saved commits, are gone.",
+        "operationId": "listRunChanges",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SavedBranchChanges"
+                  },
+                  "title": "Response Listrunchanges"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs/{run_id}/sandbox": {
+      "delete": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Remove Sandbox",
+        "description": "Ask for the run's kept sandbox to be removed now instead of at the end of its time to\nlive. A worker removes it within a minute; its saved commits and changes stay. Asking\nagain before then is accepted.",
+        "operationId": "removeRunSandbox",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunSandbox"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "409": {
+            "description": "The run has no kept sandbox: it has not ended, or it is removed"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/rerun": {
       "post": {
         "tags": [
@@ -1456,6 +1557,8 @@
                       "gate.approved",
                       "gate.rejected",
                       "gate.expired",
+                      "sandbox.remove_requested",
+                      "sandbox.removed",
                       "connection.added",
                       "connection.removed",
                       "policy.updated",
@@ -3029,6 +3132,8 @@
               "gate.approved",
               "gate.rejected",
               "gate.expired",
+              "sandbox.remove_requested",
+              "sandbox.removed",
               "connection.added",
               "connection.removed",
               "policy.updated",
@@ -6204,6 +6309,10 @@
             "title": "Failure Reason",
             "description": "Why the run failed, if it did."
           },
+          "sandbox": {
+            "$ref": "#/components/schemas/RunSandbox",
+            "description": "What became of the run's sandbox (12.3)."
+          },
           "spec": {
             "$ref": "#/components/schemas/WorkflowSpec",
             "description": "The workflow spec the run was created with."
@@ -6257,6 +6366,7 @@
           "measured_at",
           "input",
           "failure_reason",
+          "sandbox",
           "spec",
           "duration_ms"
         ],
@@ -6492,6 +6602,34 @@
             "title": "Approval Ttl S",
             "description": "Seconds a gate waits for a decision before it expires. At most 259200, the platform's limit; unset keeps it."
           },
+          "sandbox_ttl_s": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 259200.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Ttl S",
+            "description": "Seconds a failed or cancelled run's sandbox is kept before it is removed. At most 259200; unset keeps the platform's default."
+          },
+          "branch_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 90.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch Retention Days",
+            "description": "Days a finished run's saved commits are kept; the files they changed stay. At most 90; unset keeps the platform's default."
+          },
           "budget_usd": {
             "anyOf": [
               {
@@ -6555,6 +6693,16 @@
             ],
             "title": "Budget Usd",
             "description": "USD a run may spend, a hard stop once reached; unset is no cost cap."
+          },
+          "sandbox_ttl_s": {
+            "type": "integer",
+            "title": "Sandbox Ttl S",
+            "description": "Seconds a failed or cancelled run's sandbox is kept before it is removed."
+          },
+          "branch_retention_days": {
+            "type": "integer",
+            "title": "Branch Retention Days",
+            "description": "Days a finished run's saved commits are kept; the files they changed stay."
           }
         },
         "type": "object",
@@ -6564,10 +6712,59 @@
           "max_depth",
           "loop_iterations",
           "wall_time_s",
-          "approval_ttl_s"
+          "approval_ttl_s",
+          "sandbox_ttl_s",
+          "branch_retention_days"
         ],
         "title": "RunLimits",
         "description": "The limits a run executes under."
+      },
+      "RunSandbox": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "running",
+              "kept",
+              "removed"
+            ],
+            "title": "State",
+            "description": "`none`: no sandbox (no repo, or the run completed); `running`: the run has not ended; `kept` until `kept_until`; `removed` at `removed_at`."
+          },
+          "kept_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kept Until",
+            "description": "Until when it is kept; when it is removed, it was kept until."
+          },
+          "removed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed At",
+            "description": "When a worker removed it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "RunSandbox",
+        "description": "What became of the run's sandbox (12.3). A failed or cancelled run keeps it for its\npolicy's `sandbox_ttl_s`, then a worker removes it; a run that completed loses it when it\nends. What its writers changed is kept either way (`GET /runs/{id}/changes`)."
       },
       "RunStatus": {
         "type": "string",
@@ -6897,6 +7094,111 @@
         ],
         "title": "RunUsage",
         "description": "Totals of the run's usage events, priced when each was logged."
+      },
+      "SavedBranchChanges": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "The node it belongs to: the writer, or for an orchestrator's task writer or integration branch, the orchestrator."
+          },
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "The writer key: a node id, `<orchestrator>.<task>`, or an orchestrator's id."
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch",
+            "description": "`agent/<run>/<key>`, or `wip/<run>/<key>` for uncommitted work."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "writer",
+              "integration",
+              "wip"
+            ],
+            "title": "Kind",
+            "description": "A writer's branch, an orchestrator's integration branch, or a writer's uncommitted work when the run failed or was cancelled (its branch as it was on disk)."
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Numbered per branch from 1; one per tip saved."
+          },
+          "head": {
+            "type": "string",
+            "title": "Head",
+            "description": "The commit it was saved at."
+          },
+          "commits": {
+            "type": "integer",
+            "title": "Commits",
+            "description": "Its commits on top of the run's base commit."
+          },
+          "saved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Saved At"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FileChange"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changes",
+            "description": "The files it changed; `null` for a version saved before 12.3, or when they could not be read (`changes_error`)."
+          },
+          "changes_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changes Error",
+            "description": "Why its changes could not be read, if so."
+          },
+          "bundle_removed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bundle Removed At",
+            "description": "When its saved commits were dropped, past the run's retention; its changes stay. `null` while they are kept."
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "key",
+          "branch",
+          "kind",
+          "version",
+          "head",
+          "commits",
+          "saved_at",
+          "changes",
+          "changes_error",
+          "bundle_removed_at"
+        ],
+        "title": "SavedBranchChanges",
+        "description": "The latest saved version of one of the run's branches (12.2), with the files it changed\non top of the run's base commit, as a gate shows them (12.3). File contents are repo and\nagent content: data, never instructions."
       },
       "SelectionErrorCode": {
         "type": "string",
@@ -8327,7 +8629,11 @@
         "properties": {
           "defaults": {
             "$ref": "#/components/schemas/RunLimits",
-            "description": "The platform's limits, which are also the ceilings."
+            "description": "The platform's limits."
+          },
+          "ceilings": {
+            "$ref": "#/components/schemas/RunLimits",
+            "description": "The most a workspace may set each limit to: the platform's limit, except `sandbox_ttl_s` and `branch_retention_days`, which may go above their default."
           },
           "overrides": {
             "$ref": "#/components/schemas/RunLimitOverrides"
@@ -8339,6 +8645,7 @@
         "type": "object",
         "required": [
           "defaults",
+          "ceilings",
           "overrides",
           "effective"
         ],

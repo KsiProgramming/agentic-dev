@@ -1,10 +1,12 @@
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.events import RUN_FAILED, RUN_STARTED, RunEventLog
 from agentic_engine.graph import run_workflow
 from agentic_engine.spec import parse_spec
 from agentic_runtime import Failed, Message, Usage
@@ -100,6 +102,23 @@ async def test_failed_run_sets_status_failed(
         run = await session.get(Run, run_id)
     assert run is not None
     assert run.status == "failed"
+
+
+async def test_an_end_event_says_until_when_the_sandbox_is_kept(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """12.3: the worker adds `sandbox_kept_until` to a failed or cancelled run's end event, and
+    the run gets it with its end status, in one transaction."""
+    run_id = await create_run(sessions, two_step_spec(), "go")
+    until = datetime(2026, 11, 16, 9, 30, tzinfo=UTC)
+    log = RunEventLog(run_id, PostgresEventSink(sessions))
+    await log.emit(RUN_STARTED)
+    await log.emit(RUN_FAILED, payload={"error": "boom", "sandbox_kept_until": until.isoformat()})
+
+    async with sessions() as session:
+        run = await session.get(Run, run_id)
+    assert run is not None
+    assert (run.status, run.sandbox_kept_until, run.sandbox_removed_at) == ("failed", until, None)
 
 
 async def test_create_run_stores_spec_and_input_as_queued(

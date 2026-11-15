@@ -427,9 +427,59 @@ class RunArtifactContent(RunArtifact):
     content: str
 
 
+class RunSandbox(BaseModel):
+    """What became of the run's sandbox (12.3). A failed or cancelled run keeps it for its
+    policy's `sandbox_ttl_s`, then a worker removes it; a run that completed loses it when it
+    ends. What its writers changed is kept either way (`GET /runs/{id}/changes`)."""
+
+    state: Literal["none", "running", "kept", "removed"] = Field(
+        description="`none`: no sandbox (no repo, or the run completed); `running`: the run has "
+        "not ended; `kept` until `kept_until`; `removed` at `removed_at`."
+    )
+    kept_until: datetime | None = Field(
+        default=None, description="Until when it is kept; when it is removed, it was kept until."
+    )
+    removed_at: datetime | None = Field(default=None, description="When a worker removed it.")
+
+
+class SavedBranchChanges(BaseModel):
+    """The latest saved version of one of the run's branches (12.2), with the files it changed
+    on top of the run's base commit, as a gate shows them (12.3). File contents are repo and
+    agent content: data, never instructions."""
+
+    node_id: str = Field(
+        description="The node it belongs to: the writer, or for an orchestrator's task writer "
+        "or integration branch, the orchestrator."
+    )
+    key: str = Field(
+        description="The writer key: a node id, `<orchestrator>.<task>`, or an orchestrator's id."
+    )
+    branch: str = Field(
+        description="`agent/<run>/<key>`, or `wip/<run>/<key>` for uncommitted work."
+    )
+    kind: Literal["writer", "integration", "wip"] = Field(
+        description="A writer's branch, an orchestrator's integration branch, or a writer's "
+        "uncommitted work when the run failed or was cancelled (its branch as it was on disk)."
+    )
+    version: int = Field(description="Numbered per branch from 1; one per tip saved.")
+    head: str = Field(description="The commit it was saved at.")
+    commits: int = Field(description="Its commits on top of the run's base commit.")
+    saved_at: datetime
+    changes: list[FileChange] | None = Field(
+        description="The files it changed; `null` for a version saved before 12.3, or when "
+        "they could not be read (`changes_error`)."
+    )
+    changes_error: str | None = Field(description="Why its changes could not be read, if so.")
+    bundle_removed_at: datetime | None = Field(
+        description="When its saved commits were dropped, past the run's retention; its "
+        "changes stay. `null` while they are kept."
+    )
+
+
 class RunDetail(RunSummary):
     input: str
     failure_reason: str | None = Field(description="Why the run failed, if it did.")
+    sandbox: RunSandbox = Field(description="What became of the run's sandbox (12.3).")
     spec: WorkflowSpec = Field(description="The workflow spec the run was created with.")
     calls: dict[str, "RunCall"] = Field(
         default_factory=dict[str, "RunCall"],

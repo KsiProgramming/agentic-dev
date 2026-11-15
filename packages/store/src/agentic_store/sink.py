@@ -40,6 +40,10 @@ from agentic_store.models import AuditEvent, Run, RunEventRow
 
 USAGE: Final = "usage"
 
+SANDBOX_KEPT_UNTIL: Final = "sandbox_kept_until"
+"""The end event's payload field saying until when the run's sandbox is kept (12.3); the worker
+that ends a failed or cancelled run adds it."""
+
 RUN_EVENTS_CHANNEL = "run_events"
 """Postgres `NOTIFY` channel; the payload of each notification is `<run_id>:<seq>`."""
 
@@ -67,6 +71,7 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     | `run_completed`, `run_cancelled` | end status, `finished_at`; clears the gate and reason |
     | `run_cancelled` with a `reason` | `cancel_reason` |
     | `run_failed` | `failed`, `finished_at`, clears `waiting_gate`; `failure_reason` = `error` |
+    | an end event with `sandbox_kept_until` | `sandbox_kept_until` (12.3) |
     | `usage` | adds its tokens and `estimated_usd`; `cost_complete=false` if it has no price |
 
     and the time columns (see `time_values`).
@@ -113,6 +118,8 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
             values["failure_reason"] = None
         if event.type == RUN_CANCELLED and isinstance(reason := payload.get("reason"), str):
             values["cancel_reason"] = reason
+        if (kept_until := _datetime(payload.get(SANDBOX_KEPT_UNTIL))) is not None:
+            values["sandbox_kept_until"] = kept_until
     return values
 
 

@@ -10,10 +10,12 @@ import {
   HistoryIcon,
   FolderPlusIcon,
   GaugeIcon,
+  PackageXIcon,
   PlayIcon,
   PlugIcon,
   RotateCcwIcon,
   TimerOffIcon,
+  Trash2Icon,
   UnplugIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -44,6 +46,12 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "run.cancel_requested": { label: "Cancel requested", icon: BanIcon, category: "runs" },
   "run.ended": { label: "Run ended", icon: FlagIcon, category: "runs" },
   "repo.created": { label: "Repo created", icon: FolderPlusIcon, category: "runs" },
+  "sandbox.remove_requested": {
+    label: "Sandbox removal asked",
+    icon: Trash2Icon,
+    category: "runs",
+  },
+  "sandbox.removed": { label: "Sandbox removed", icon: PackageXIcon, category: "runs" },
   "gate.approved": { label: "Gate approved", icon: CircleCheckIcon, category: "approvals" },
   "gate.rejected": { label: "Gate rejected", icon: CircleXIcon, category: "approvals" },
   "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
@@ -114,6 +122,8 @@ const LIMITS: [key: string, label: string][] = [
   ["wall_time_s", "wall time (s)"],
   ["approval_ttl_s", "approval time to live (s)"],
   ["budget_usd", "budget"],
+  ["sandbox_ttl_s", "sandbox kept (s)"],
+  ["branch_retention_days", "saved commits kept (days)"],
 ];
 
 const END_STATUS: Record<string, string> = {
@@ -198,6 +208,20 @@ export function describe(event: AuditEvent): string {
       return join(
         `${event.node_id ?? "A gate"} expired with no decision; the run was cancelled`,
         at && `due ${formatAbsolute(at)}`,
+      );
+    }
+    case "sandbox.remove_requested": {
+      const until = text(d, "kept_until");
+      return join(
+        "Asked to remove the run's sandbox now",
+        until && `it was kept until ${formatAbsolute(until)}`,
+      );
+    }
+    case "sandbox.removed": {
+      const until = text(d, "kept_until");
+      return join(
+        "Removed the run's sandbox; what its writers changed is still saved",
+        until && `kept until ${formatAbsolute(until)}`,
       );
     }
     case "workflow.created":

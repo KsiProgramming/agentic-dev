@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_sandbox import RepoSource
 from agentic_store.models import Run
+from agentic_store.sandboxes import SandboxInfo, sandbox_info
 
 
 class InvalidCursorError(ValueError):
@@ -57,6 +58,8 @@ class RunSummaryRow:
     cancel_reason: str | None
     usage: "RunUsageRow"
     times: "RunTimesRow"
+    # What became of the run's sandbox: kept until when, or removed (12.3).
+    sandbox: SandboxInfo
     # The workflow spec the run was created with; read only for one run's detail.
     spec: dict[str, Any] | None = None
     # The copies of the workflows the spec calls (6.5), by `<id>@<version>`; with `spec`.
@@ -151,6 +154,8 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.waiting_ms,
         Run.active_since,
         Run.waiting_since,
+        Run.sandbox_kept_until,
+        Run.sandbox_removed_at,
     )
 
 
@@ -193,6 +198,12 @@ def _summary(
             waiting_ms=row.waiting_ms,
             active_since=row.active_since,
             waiting_since=row.waiting_since,
+        ),
+        sandbox=sandbox_info(
+            row.status,
+            row.sandbox_kept_until,
+            row.sandbox_removed_at,
+            has_repo=row.repo is not None,
         ),
         spec=spec,
         subflows=subflows,

@@ -233,6 +233,7 @@ async def _policy(
         raise _not_found(workspace_id) from None
     return WorkspacePolicyOut(
         defaults=RunLimits.of(PLATFORM_POLICY),
+        ceilings=RunLimits.ceilings(),
         overrides=RunLimitOverrides.of(overrides),
         effective=RunLimits.of(effective_policy(overrides)),
     )

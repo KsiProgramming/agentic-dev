@@ -197,6 +197,9 @@ class FakeSandboxManager:
         self._kept.discard(run_id)
         await asyncio.to_thread(_remove_dir, self._base_dir / f"agentic-sandbox-{run_id}")
 
+    async def exists(self, run_id: UUID) -> bool:
+        return await asyncio.to_thread((self._base_dir / f"agentic-sandbox-{run_id}").is_dir)
+
     @asynccontextmanager
     async def open(
         self,
