@@ -30,10 +30,10 @@ Specs it follows:
 - **API:** `GET /runs/{id}` gains `sandbox` `{state: "running" | "kept" | "removed" | "none", kept_until, removed_at}`. `GET /runs/{id}/changes`: the latest version of each saved branch, `{node_id, key, branch, kind ("writer" | "integration" | "wip"), version, head, commits, saved_at, changes, changes_error, bundle_removed_at}`.
 - **Log:** no new run events, since the end event stays last. `run_failed` / `run_cancelled` carry `sandbox_kept_until`; removals happen after the end, so they go to the audit log: `sandbox.removed` (actor `system`, with the `kept_until` it was removed at; a `sandbox.remove_requested` entry before it says a person asked) and `sandbox.remove_requested`. A `wip` save is a `run_branches` row, not an event.
 - **Console:**
-  - A failed or cancelled run's header says "Sandbox kept until <time>" (`ExpiresIn`) with "Remove sandbox now", or "Sandbox removed <time>" (`RelativeTime`) once swept.
-  - Each writer and orchestrator step's "Commits saved" (12.2) gains "View changes", which opens the review sheet read-only; a `wip` version reads "Includes uncommitted work" beside it. "Saved commits removed on …" when the bundle is gone.
-  - A run-level "Changes" entry in the failure summary opens the same sheet with every writer's files.
-  - Loading, empty ("No writer changed a file") and error states.
+  - A failed or cancelled run has a sandbox line under the banner (`RunSandboxLine`): "Sandbox kept" with `ExpiresIn`, "View changes" and "Remove sandbox now" (confirm dialog); "Sandbox being removed" once its time is up or a removal was asked (the run is read again every 15 s until it is); "Sandbox removed" with `RelativeTime`, "what the writers changed is still saved" and "View changes". On the line rather than in the failure banner, so a cancelled run, which has no banner, gets it too.
+  - Each branch in a step's "Commits saved" (12.2) has "View changes", for that writer alone.
+  - "View changes" opens the review sheet read-only (`RunChangesSheet`), from `GET /runs/{id}/changes`: one writer at a time, with a "Writer" picker when there are several; a writer's `wip` version stands for its branch and reads "includes uncommitted work"; "Its saved commits were removed …" once the bundle is gone. Loading, empty ("No writer changed a file.") and error (Retry) states.
+  - Settings, Run limits: "Keep a failed run's sandbox (hours)" and "Keep saved commits (days)", checked against the API's `ceilings`.
 
 ### Out of scope
 - Rerun from a step with the code restored, and restoring `wip` work: **12.4**.

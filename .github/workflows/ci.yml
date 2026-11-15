@@ -140,6 +140,8 @@ jobs:
           echo "CLAUDE_KEY_CHECK=fake" >> .env
           # The approval expiry e2e test waits for a gate with a 2 s time to live (phase 11.3).
           echo "GATE_SWEEP_S=1" >> .env
+          # The kept sandbox e2e test removes a failed run's sandbox and waits for it (phase 12.3).
+          echo "SANDBOX_SWEEP_S=1" >> .env
       - name: Start stack
         # Three workers: each takes one run at a time, and the e2e suite starts runs from several
         # browsers at once; with one, runs queue behind each other and gates time out. Workers

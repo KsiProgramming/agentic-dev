@@ -35,11 +35,12 @@ Failing test first, as in 12.2: prove the gap, then backend, then console. Each 
 - [x] Regenerate the web's OpenAPI client; API tests for each (`test_run_sandboxes.py`). The web's audit log names the two new actions, and the settings card has the two new limits (from group 2), checked against `ceilings`.
 
 ## 6. Console
-- [ ] `web/src/runs/`: the end event's `sandbox_kept_until` in the timeline; the run summary's `sandbox` drives the line.
-- [ ] Header/failure summary: "Sandbox kept until" (`ExpiresIn`) with "Remove sandbox now" (confirm dialog, toast), or "Sandbox removed" (`RelativeTime`); a "Changes" action opening every writer's files.
-- [ ] `saved-branches.tsx`: "View changes" per branch, "Includes uncommitted work" for `wip`, "Saved commits removed on …".
-- [ ] Review sheet in a read-only mode (no edits, no Approve/Reject footer), fed by `GET /runs/{id}/changes`; `LoadingState`, `EmptyState`, `ErrorState`.
-- [ ] Vitest for the line, the actions and the read-only sheet; a Playwright step in the console spec: a failed run on the fake sandbox shows "Sandbox kept until" and opens its changes.
+- [x] `@/runs/use-run-changes`: `useRunChanges` (fetched only while a sheet shows it) and `changeSets` (one per writer key, its `wip` version in place of its branch).
+- [x] `RunSandboxLine` under the banner: kept (`ExpiresIn`, "View changes", "Remove sandbox now" behind an `AlertDialog`), being removed (refetches every 15 s), removed (`RelativeTime`); hidden for `running` and `none`, and for an API from before 12.3.
+- [x] `saved-branches.tsx`: "View changes" per branch, for that writer alone.
+- [x] `RunChangesSheet` over `GateReviewSheet` read-only (its new `body` slot holds the loading, empty and error states); a "Writer" picker when there are several.
+- [x] Settings and audit log: the two limits and the two actions (done with group 5).
+- [x] Vitest: `run-sandbox-line.test.tsx` (9), `saved-branches.test.tsx` (+1); `e2e/kept-sandbox.spec.ts` (the Done when, with axe on the sheet), with `SANDBOX_SWEEP_S=1` in the CI e2e env and `SANDBOX_SWEEP_S` in compose and `.env.example`.
 
 ## 7. Specs and docs
 - [ ] `specs/tech-stack.md`: Sandbox (kept sandboxes), "Saved branches" (changes, `wip`, retention), run history contract (`sandbox`, `/changes`, `DELETE /sandbox`), audit actions, Run console lines, decisions-log rows (time to live, stored changes, `wip`, retention).

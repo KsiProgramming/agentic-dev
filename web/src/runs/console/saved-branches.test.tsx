@@ -1,5 +1,7 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { API, json, renderWithQueries, stubApi } from "@/testing/api";
 
 import { summarizePayload } from "../summarize";
 import { runEvent } from "../testing";
@@ -109,7 +111,7 @@ describe("saved branches (12.2)", () => {
     const [row] = stepRows(entries);
     if (!row) throw new Error("no row");
 
-    render(
+    renderWithQueries(
       <StepOutput
         runId="run-1"
         step={row.step}
@@ -127,5 +129,68 @@ describe("saved branches (12.2)", () => {
     expect(
       within(section).getByText("Not saved: too large. Its newer commits are only in the sandbox."),
     ).toBeTruthy();
+  });
+});
+
+describe("a saved branch's changes (12.3)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("open read-only from what was saved", async () => {
+    const fetch = stubApi({
+      "GET /runs/run-1/changes": () =>
+        json(200, [
+          {
+            node_id: "writer",
+            key: "writer",
+            branch: BRANCH,
+            kind: "writer",
+            version: 1,
+            head: HEAD,
+            commits: 1,
+            saved_at: "2026-11-15T10:00:00Z",
+            changes: [
+              {
+                node_id: "writer",
+                path: "NOTES.md",
+                old_path: null,
+                status: "added",
+                editable: true,
+                reason: null,
+                before: null,
+                after: "notes\n",
+              },
+            ],
+            changes_error: null,
+            bundle_removed_at: null,
+          },
+        ]),
+    });
+    const timeline = writerRun(saved(5, HEAD, 1, 1));
+    const entries = stepEntries(timeline.steps);
+    const [row] = stepRows(entries);
+    if (!row) throw new Error("no row");
+    renderWithQueries(
+      <StepOutput
+        runId="run-1"
+        step={row.step}
+        row={row}
+        kind="agent"
+        entries={entries}
+        onSelect={() => undefined}
+        baseUrl={API}
+      />,
+    );
+    // Nothing is fetched until it is asked for.
+    expect(fetch).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: `View changes on ${BRANCH}` }));
+
+    const sheet = await screen.findByTestId("gate-review");
+    expect(within(sheet).getByRole("heading", { name: "What writer changed" })).toBeTruthy();
+    expect(await within(sheet).findAllByText("NOTES.md")).not.toHaveLength(0);
+    expect(within(sheet).getByText("1 commit")).toBeTruthy();
+    expect(within(sheet).queryByRole("button", { name: /Approve/ })).toBeNull();
   });
 });
