@@ -101,12 +101,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function minutesFromNow(minutes: number): string {
+  return new Date(Date.now() + minutes * 60_000).toISOString();
+}
+
 test("the header shows the workflow, repo and status from the summary before any event", async () => {
   api(
     detail({
       status: "queued",
       started_at: null,
       repo: { url: "https://github.com/acme/docs", ref: "main" },
+      queued_at: minutesFromNow(-2),
+      queue_stalled_at: minutesFromNow(-1 + 60),
     }),
   );
   show();
@@ -115,7 +121,32 @@ test("the header shows the workflow, repo and status from the summary before any
   expectStatus("queued", "Queued");
   expect(screen.getByText("acme/docs")).toBeTruthy();
   expect(screen.getByText("main")).toBeTruthy();
-  expect(screen.getByText("Waiting for the run to start…")).toBeTruthy();
+  expect(screen.getByText("Queued 2 min ago")).toBeTruthy();
+  expect(screen.getByText("Waiting for a worker to pick it up.")).toBeTruthy();
+});
+
+test("12.1: a queued run no worker claimed past the threshold says a worker may not be running", async () => {
+  api(
+    detail({
+      status: "queued",
+      started_at: null,
+      queued_at: minutesFromNow(-5),
+      queue_stalled_at: minutesFromNow(-4),
+    }),
+  );
+  show();
+
+  expect(await screen.findByText("Queued 5 min ago")).toBeTruthy();
+  expect(
+    screen.getByText("No worker has picked this run up yet. Check that a worker is running."),
+  ).toBeTruthy();
+});
+
+test("a started run with no event yet waits for its first one", async () => {
+  api(detail({ status: "running", queue_stalled_at: null }));
+  show();
+
+  expect(await screen.findByText("Waiting for the run to start…")).toBeTruthy();
 });
 
 test("Done when (11.2): the header shows active time and the wait apart", () => {

@@ -106,8 +106,8 @@ Copy this block to add an idea. Only the title and the problem are needed to sta
 - **Problem:** A worker pops a run id from Redis, then claims the run in Postgres. If it crashes between the two, or while parsing the stored spec (seen on 2026-11-02: a worker older than 5.4 could not parse `budget_usd`), the id is gone from the queue and the run has no lease, so `reclaim_expired_run` never sees it. The run stays "Queued" for good, and the console shows "Waiting for the run to start…" with nothing to explain why.
 - **Idea:** Treat Postgres as the queue's source of truth: on startup and on a timer, the worker re-enqueues runs that have been `queued` with no lease for longer than a threshold. A run that fails to load (a spec this worker cannot parse) is failed with a clear `failure_reason` rather than crashing the worker. The console could show "Queued for N min" and a hint once that passes the threshold.
 - **Already covered:** In part. Leases and `reclaim_expired_run` (1.3) resume only runs a worker stopped mid-way, not runs it never claimed. Rerun (2.6) lets a user start over by hand.
-- **Open questions:** Is a version check between API and worker (refusing to claim a spec from a newer schema) needed as well? What threshold avoids re-enqueuing a run another worker is about to claim? Should the API, not the worker, do the sweep?
-- **Links:** `agentic_worker.main._next_run`, `agentic_store.lease`; principle 9 (nothing is lost)
+- **Open questions:** Is a version check between API and worker (refusing to claim a spec from a newer schema) needed as well? Still open: 12.1 fails such a run with a clear reason, and the deployment guide rolls workers out before the API. Answered by 12.1: the threshold is 60 s since the run was queued or last announced (an id announced twice is harmless, since one claim wins), and every worker sweeps, as for gate expiry.
+- **Links:** `agentic_worker.main._next_run`, `agentic_store.lease`, `agentic_store.queue.requeue_stale_runs`; principle 9 (nothing is lost)
 
 ### Keep agents' code when a run fails or its worker crashes
 

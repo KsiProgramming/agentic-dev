@@ -149,6 +149,12 @@ class Run(Base):
             "lease_expires_at",
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
+        # The queue sweep (`agentic_store.queue.requeue_stale_runs`).
+        Index(
+            "ix_runs_queued_unleased",
+            "queued_at",
+            postgresql_where=text("status = 'queued' AND lease_expires_at IS NULL"),
+        ),
         # The expiry sweep (`agentic_store.expiry`).
         Index(
             "ix_runs_gate_expires_at",
@@ -206,6 +212,11 @@ class Run(Base):
     # the `reason` of its `run_cancelled` event, which also sets it.
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancel_reason: Mapped[str | None] = mapped_column(Text)
+    # When the run last became `queued` (created, decided at a gate, cancelled or expired while
+    # waiting), and when the queue sweep last pushed its id again (`agentic_store.queue`). A
+    # sweep never moves `queued_at`, so "Queued 4 min ago" stays true.
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Totals of the run's `usage` events.
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")

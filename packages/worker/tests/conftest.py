@@ -25,6 +25,8 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LEASE_TTL_S",
         "MASTER_KEY_FILE",
         "MAX_ATTEMPTS",
+        "QUEUE_STALE_S",
+        "QUEUE_SWEEP_S",
         "RUNTIME",
         "SANDBOX_BACKEND",
         "SANDBOX_IMAGE",

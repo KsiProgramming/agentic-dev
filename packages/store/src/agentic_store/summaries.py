@@ -41,6 +41,9 @@ class RunSummaryRow:
     started_at: datetime | None
     finished_at: datetime | None
     pr_url: str | None
+    # When the run last became `queued`, and until when a worker holds its lease (12.1).
+    queued_at: datetime
+    lease_expires_at: datetime | None
     # `{node_id, title, expires_at}` of the gate the run is paused at.
     waiting_gate: dict[str, Any] | None
     rerun_of: UUID | None
@@ -128,6 +131,8 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.started_at,
         Run.finished_at,
         Run.pr_url,
+        Run.queued_at,
+        Run.lease_expires_at,
         Run.waiting_gate,
         Run.rerun_of,
         Run.trigger,
@@ -165,6 +170,8 @@ def _summary(
         started_at=row.started_at,
         finished_at=row.finished_at,
         pr_url=row.pr_url,
+        queued_at=row.queued_at,
+        lease_expires_at=row.lease_expires_at,
         waiting_gate=row.waiting_gate,
         rerun_of=row.rerun_of,
         trigger=row.trigger,

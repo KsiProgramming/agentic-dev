@@ -9,6 +9,13 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 12.1 recover runs lost before a worker claims them ([#172](https://github.com/KsiProgramming/agentic-dev/pull/172)):
+  - **Lost runs come back.** Postgres is the queue's source of truth: when a worker starts and every `QUEUE_SWEEP_S` (15 s), it queues again the runs left `queued` with no worker holding them for `QUEUE_STALE_S` (60 s), so a run whose id was popped by a worker killed before it claimed the run still starts. `runs.queued_at` and `runs.enqueued_at` (Alembic `0029_run_queue_times`).
+  - **A spec the worker cannot load fails the run, not the worker.** The claim commits before the spec is parsed; such a run ends `failed` with "this worker cannot load the run's spec: …", and the worker carries on. Before, the worker loop stopped and the run stayed queued for good.
+  - **API.** Run summaries have `queued_at` and `queue_stalled_at`; the API reads `QUEUE_STALE_S`.
+  - **Console.** A queued run's step list reads "Queued 2 min ago" and, once stalled, "No worker has picked this run up yet. Check that a worker is running."
+  - Docs: the deployment guide rolls workers out before the API, and its troubleshooting covers stalled and unloadable runs; `.env.example` and `docker-compose.yml` set the two variables.
+  - Specs: tech-stack (Run workers, Run history, Run console, a decision), `ideas.md`, and the 12.1 plan (`specs/2026-11-15-recover-unclaimed-runs/`).
 - Phase 6.8 AC-2 end to end:
   - **"Plan, build and review" template** (`plan-build-review`): two analysts in a parallel, a lead and two engineers (an orchestrator) with a synthesizer and a reviewer in a review loop, a gate on the integration branch and one pull request. `GET /templates` returns a template's `input`, and the New run sheet asks for it when a template declares one.
   - **The run's request reaches every agent.** `RunContext.request` tells each agent what the person who started the run asked for, as data, so a lead after a parallel or in a later review pass keeps the goal.

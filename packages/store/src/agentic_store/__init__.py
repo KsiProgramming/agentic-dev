@@ -48,6 +48,8 @@ from agentic_store.connections import (
 )
 from agentic_store.expiry import APPROVAL_EXPIRED_REASON, expire_gates
 from agentic_store.lease import (
+    ClaimedRun,
+    UnloadableRun,
     claim_run,
     leased_run_ids,
     reclaim_expired_run,
@@ -85,7 +87,7 @@ from agentic_store.pricing import (
     replace_price_overrides,
     workspace_price_table,
 )
-from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run
+from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run, requeue_stale_runs
 from agentic_store.rerun import RunNotEndedError, create_rerun
 from agentic_store.runs import StoredRun, create_run, get_run
 from agentic_store.sink import (
@@ -148,6 +150,7 @@ __all__ = [
     "AuditEventRow",
     "AuditRunRef",
     "Base",
+    "ClaimedRun",
     "Connection",
     "ConnectionInfo",
     "GateExpiredError",
@@ -174,6 +177,7 @@ __all__ = [
     "StoredRun",
     "StoredWorkflowSummary",
     "StoredWorkflowVersion",
+    "UnloadableRun",
     "VersionConflictError",
     "Workflow",
     "WorkflowCaller",
@@ -241,6 +245,7 @@ __all__ = [
     "replace_price_overrides",
     "repo_created",
     "request_cancel",
+    "requeue_stale_runs",
     "resolve_workflow",
     "restore_workflow",
     "run_ended",

@@ -54,6 +54,7 @@ async def request_cancel(sessions: async_sessionmaker[AsyncSession], run_id: UUI
                 "worker_id": None,
                 "lease_expires_at": None,
                 "attempt": 0,
+                "queued_at": func.now(),
             }
         await session.execute(update(Run).where(Run.id == run_id).values(values))
         if first_request:

@@ -6086,6 +6086,25 @@
             "title": "Pr Url",
             "description": "The last pull request the run opened."
           },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At",
+            "description": "When the run last became `queued`: created, or queued again after a gate decision, a cancel or an expiry while it waited."
+          },
+          "queue_stalled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Stalled At",
+            "description": "While the run is queued and no worker holds it: when it counts as stalled (`queued_at` plus the queue's stale threshold). Past it, the workers announce it again; a run still queued then likely has no worker running. `null` otherwise."
+          },
           "waiting_gate": {
             "anyOf": [
               {
@@ -6224,6 +6243,8 @@
           "started_at",
           "finished_at",
           "pr_url",
+          "queued_at",
+          "queue_stalled_at",
           "waiting_gate",
           "cancel_reason",
           "expired",
@@ -6640,6 +6661,25 @@
             "title": "Pr Url",
             "description": "The last pull request the run opened."
           },
+          "queued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Queued At",
+            "description": "When the run last became `queued`: created, or queued again after a gate decision, a cancel or an expiry while it waited."
+          },
+          "queue_stalled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Stalled At",
+            "description": "While the run is queued and no worker holds it: when it counts as stalled (`queued_at` plus the queue's stale threshold). Past it, the workers announce it again; a run still queued then likely has no worker running. `null` otherwise."
+          },
           "waiting_gate": {
             "anyOf": [
               {
@@ -6750,6 +6790,8 @@
           "started_at",
           "finished_at",
           "pr_url",
+          "queued_at",
+          "queue_stalled_at",
           "waiting_gate",
           "cancel_reason",
           "expired",

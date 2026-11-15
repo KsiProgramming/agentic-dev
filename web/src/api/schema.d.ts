@@ -2269,6 +2269,17 @@ export interface components {
              * @description The last pull request the run opened.
              */
             pr_url: string | null;
+            /**
+             * Queued At
+             * Format: date-time
+             * @description When the run last became `queued`: created, or queued again after a gate decision, a cancel or an expiry while it waited.
+             */
+            queued_at: string;
+            /**
+             * Queue Stalled At
+             * @description While the run is queued and no worker holds it: when it counts as stalled (`queued_at` plus the queue's stale threshold). Past it, the workers announce it again; a run still queued then likely has no worker running. `null` otherwise.
+             */
+            queue_stalled_at: string | null;
             /** @description Set while the run waits at a gate. */
             waiting_gate: components["schemas"]["WaitingGate"] | null;
             /**
@@ -2518,6 +2529,17 @@ export interface components {
              * @description The last pull request the run opened.
              */
             pr_url: string | null;
+            /**
+             * Queued At
+             * Format: date-time
+             * @description When the run last became `queued`: created, or queued again after a gate decision, a cancel or an expiry while it waited.
+             */
+            queued_at: string;
+            /**
+             * Queue Stalled At
+             * @description While the run is queued and no worker holds it: when it counts as stalled (`queued_at` plus the queue's stale threshold). Past it, the workers announce it again; a run still queued then likely has no worker running. `null` otherwise.
+             */
+            queue_stalled_at: string | null;
             /** @description Set while the run waits at a gate. */
             waiting_gate: components["schemas"]["WaitingGate"] | null;
             /**

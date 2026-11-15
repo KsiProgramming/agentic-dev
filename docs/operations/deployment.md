@@ -196,8 +196,8 @@ Reliability:
 1. Read the [changelog](../../CHANGELOG.md) for migrations and breaking changes.
 2. Build and push new images.
 3. Run the migration job (`alembic upgrade head`). Migrations are additive where possible; take a database snapshot first.
-4. Roll out the API and web.
-5. Roll out workers. A worker that receives `SIGTERM` cancels its graph without ending the run and releases its lease, so another worker resumes the run from its last checkpoint. Give workers a termination grace period of at least 30 s.
+4. Roll out workers. A worker that receives `SIGTERM` cancels its graph without ending the run and releases its lease, so another worker resumes the run from its last checkpoint. Give workers a termination grace period of at least 30 s.
+5. Roll out the API and web. Workers go first because a newer worker reads the specs an older API wrote, but an older worker fails a run whose spec a newer API wrote ("this worker cannot load the run's spec").
 
 Runs paused at a gate keep their sandbox container. Do not prune containers labelled `agentic.run_id` while their run is `waiting`.
 
@@ -208,7 +208,7 @@ Runs paused at a gate keep their sandbox container. Do not prune containers labe
 | PostgreSQL | Managed PITR + daily snapshots | Holds everything durable, including encrypted keys |
 | Master key | Secret manager with versioning, plus an offline escrow copy | Without it, stored model keys cannot be decrypted |
 | GitHub App private key | Secret manager; can be regenerated in GitHub | Regenerating revokes the old key |
-| Redis | Persistence on the managed service | Only announcements of unclaimed runs and install states; after a loss, rerun stale `queued` runs |
+| Redis | Persistence on the managed service | Only announcements of unclaimed runs and install states; after a loss, the workers queue the unclaimed runs again within `QUEUE_STALE_S` + `QUEUE_SWEEP_S` |
 | Sandboxes | No backup needed | Recreated on resume; artifacts live in Postgres |
 
 Target: RPO = your Postgres PITR window; RTO = time to restore Postgres and start services. Runs that were executing resume from their last checkpoint once workers are back.
@@ -227,7 +227,8 @@ Target: RPO = your Postgres PITR window; RTO = time to restore Postgres and star
 |---|---|---|
 | Settings says "GitHub App is not configured" | `GITHUB_APP_ID`/`SLUG` or key file missing on the API | Set them; check the key file is mounted and readable by uid 10001 |
 | Install returns to `?github=error&reason=state` | Install took more than 10 minutes, or Redis was flushed | Start the install again |
-| Runs stay `queued` | No worker running, workers cannot reach Redis/Postgres, or Redis lost the run's announcement | Check worker health and logs; a run whose announcement was lost is not picked up automatically yet: rerun it (see `specs/ideas.md`) |
+| Runs stay `queued` (the console says "No worker has picked this run up yet") | No worker running, or workers cannot reach Redis/Postgres | Check worker health and logs. A run whose announcement was lost is queued again by any running worker within `QUEUE_STALE_S` + `QUEUE_SWEEP_S` (75 s by default; the worker logs "queued but never claimed") |
+| A run fails with "this worker cannot load the run's spec: …" | The worker is older than the API that wrote the spec (a rollout in progress) | Finish rolling out the workers, then rerun the run |
 | Runs fail with a sandbox error | Worker cannot reach Docker, or `SANDBOX_IMAGE` missing | Check `DOCKER_GID`/socket permissions; build or pull the sandbox image |
 | .NET modules "skipped: NuGet restore is not configured" | `SANDBOX_NUGET_NETWORK`/`SANDBOX_NUGET_PROXY` unset on the worker | Run the egress proxy and set both (see Execution tier) |
 | .NET modules "restore failed: a package source is not reachable" | The proxy cannot reach `api.nuget.org`, or a package is only on a private feed | Check the proxy host's outbound HTTPS and its log; private feeds are not supported yet |
