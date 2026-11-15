@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 12.2 writers' commits saved outside the sandbox:
+- Phase 12.2 writers' commits saved outside the sandbox ([#234](https://github.com/KsiProgramming/agentic-dev/pull/234)):
   - **Nothing a completed step committed is lost with its sandbox.** Every step that may commit (agent, tool and gate steps, map items, parallel branches, orchestrator tasks and their integration) saves the run's branches whose tip moved as git bundles in Postgres before the step is checkpointed (`run_branches`, append only, 64 MB cap per bundle; Alembic `0030_run_branches`). A worker killed mid-run, or a gate's kept sandbox that is gone, resumes in a fresh sandbox with every saved branch restored.
   - **A run keeps its base commit.** The commit a run's first clone was at is recorded (`runs.base_sha`), and its later sandboxes are cloned there, so its saved branches apply and its agents read the code it started on even after the default branch moved on.
   - **Events.** `branch_saved`, `branch_save_failed` and `branches_restored`.
@@ -443,7 +443,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
-- The live run console now receives an orchestrator's and a router's own events (`plan_made`, `task_started`, `task_completed`, `replan_started`, `branch_integrated`, `route_chosen`): the browser's event stream only delivers the event names it listens for, and these were missing from its list (phase 12.2).
+- The live run console now receives an orchestrator's and a router's own events (`plan_made`, `task_started`, `task_completed`, `replan_started`, `branch_integrated`, `route_chosen`): the browser's event stream only delivers the event names it listens for, and these were missing from its list ([#234](https://github.com/KsiProgramming/agentic-dev/pull/234)).
 - Run map cards' accessible name now holds their visible line ("each, Done, 2 of 2 items, map"): an `aria-label` left it out, which axe reports as a WCAG 2.5.3 failure ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - About 40 end-to-end tests that went stale when phases 11.6 and 11.9 merged without CI now pass: the run map's `map-node` cards, the "Step" filter, the console's time tiles and pull request link, the artifact sheet's JSON groups, the pricing table's container query, and page checks made while a modal sheet is open ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Flaky a11y e2e check of the new workflow sheet: axe now runs once the sheet has finished sliding in, not while its fading text reads as low contrast ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
