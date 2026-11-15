@@ -5,10 +5,21 @@ import json
 import logging
 import os
 import re
+import shutil
+import stat
 import subprocess
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping, Sequence
+import tempfile
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Collection,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -79,6 +90,7 @@ from agentic_store import (
     replace_policy_overrides,
     replace_price_overrides,
     request_cancel,
+    saved_changes,
 )
 from agentic_tools.artifacts import ARTIFACT_TOOL_NAMES
 from agentic_tools.github import CREATE_TOOL_NAMES, PUBLISH_TOOL_NAMES, GithubPublisher
@@ -508,6 +520,9 @@ class RecordingSandboxes:
 
     async def discard(self, run_id: UUID) -> None:
         await self._inner.discard(run_id)
+
+    async def exists(self, run_id: UUID) -> bool:
+        return await self._inner.exists(run_id)
 
     @asynccontextmanager
     async def open(
@@ -981,9 +996,10 @@ async def test_an_approval_s_edits_are_committed_on_the_writer_s_branch(
     ]
 
 
-async def test_cancelling_a_run_at_a_gate_removes_the_sandbox_it_kept(
+async def test_cancelling_a_run_at_a_gate_keeps_the_sandbox_it_kept_for_its_time_to_live(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
 ) -> None:
+    """Until 12.3 the sandbox was removed at once; now it stays kept, for the sweep."""
     repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
     make_repo(repos / "hello")
     boxes.mkdir()
@@ -1004,18 +1020,22 @@ async def test_cancelling_a_run_at_a_gate_removes_the_sandbox_it_kept(
             await redis.aclose()
         await wait_for_status(sessions, run_id, "cancelled")
 
-    assert list(boxes.iterdir()) == []
+    assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
     events = await list_run_events(sessions, run_id)
     assert events[-1].type == "run_cancelled"
-    assert events[-1].payload == {"reason": "cancelled by user"}
+    assert events[-1].payload == {
+        "reason": "cancelled by user",
+        "sandbox_kept_until": kept_until(events[-1]),
+    }
     assert "gate_decided" not in {e.type for e in events}
 
 
 async def test_done_when_a_gate_past_its_time_to_live_cancels_its_run_cleanly(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
 ) -> None:
-    """Done when (11.3): the run ends `cancelled` through the cancel path, its kept sandbox is
-    removed, the reason is kept, and nobody approved or rejected anything."""
+    """Done when (11.3): the run ends `cancelled` through the cancel path, the reason is kept,
+    and nobody approved or rejected anything. Since 12.3 the sandbox it kept at its gate stays
+    kept for its time to live, instead of being removed at once."""
     repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
     make_repo(repos / "hello")
     boxes.mkdir()
@@ -1035,14 +1055,19 @@ async def test_done_when_a_gate_past_its_time_to_live_cancels_its_run_cleanly(
         await wait_for_status(sessions, run_id, "waiting")
         await wait_for_status(sessions, run_id, "cancelled")
 
-    assert list(boxes.iterdir()) == []
+    assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
     events = await list_run_events(sessions, run_id)
     assert events[-1].type == "run_cancelled"
-    assert events[-1].payload == {"reason": "Approval expired", "expired": True}
+    assert events[-1].payload == {
+        "reason": "Approval expired",
+        "expired": True,
+        "sandbox_kept_until": kept_until(events[-1]),
+    }
     assert "gate_decided" not in {e.type for e in events}
     summary = await get_run_summary(sessions, run_id)
     assert summary is not None
     assert (summary.cancel_reason, summary.waiting_gate) == ("Approval expired", None)
+    assert summary.sandbox is not None and summary.sandbox.state == "kept"
     entries, _ = await list_audit_events(sessions, DEFAULT_WORKSPACE_ID, run_id=run_id)
     assert [e.action for e in entries][:2] == ["run.ended", "gate.expired"]
 
@@ -1078,6 +1103,9 @@ class MirroredSandboxes:
 
     async def discard(self, run_id: UUID) -> None:
         await self._inner.discard(run_id)
+
+    async def exists(self, run_id: UUID) -> bool:
+        return await self._inner.exists(run_id)
 
     @asynccontextmanager
     async def open(
@@ -2103,13 +2131,39 @@ def sandbox_dirs(boxes: Path) -> list[str]:
     return sorted(p.name for p in boxes.iterdir())
 
 
-@pytest.mark.xfail(strict=True, reason="12.3: a failed run's sandbox is removed today")
+@pytest.fixture
+def boxes() -> Iterator[Path]:
+    """Where the fake sandboxes go: a short path, as git on Windows cannot name a bundle's range
+    from a sandbox nested deep in `tmp_path` ("Filename too long")."""
+    path = Path(tempfile.mkdtemp(prefix="ag-"))
+    yield path
+    shutil.rmtree(path, onexc=_writable_then_retry)
+
+
+def _writable_then_retry(func: Callable[[str], object], path: str, _: BaseException) -> None:
+    """git marks its objects read-only, which Windows refuses to delete."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def kept_until(end: RunEvent) -> str:
+    """The `sandbox_kept_until` an end event carries, checked to be its time plus the default
+    time to live."""
+    value = end.payload["sandbox_kept_until"]
+    assert isinstance(value, str)
+    assert datetime.fromisoformat(value) == end.created_at + timedelta(seconds=SANDBOX_TTL_S)
+    return value
+
+
 async def test_a_failed_run_keeps_its_sandbox_for_its_time_to_live(
-    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    boxes: Path,
 ) -> None:
-    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    repos = tmp_path / "repos"
     make_repo(repos / "hello")
-    boxes.mkdir()
     sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos, base_dir=boxes))
     spec = commit_then({"type": "agent", "id": "reviewer", "role": "R", "instructions": "Go."})
     runtime = scripted({"writer": notes_writer(), "reviewer": [Failed(error="boom")]})
@@ -2121,20 +2175,23 @@ async def test_a_failed_run_keeps_its_sandbox_for_its_time_to_live(
     assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
     summary = await get_run_summary(sessions, run_id)
     assert summary is not None and summary.finished_at is not None
-    assert summary.sandbox is not None and summary.sandbox.state == "kept"
-    assert summary.sandbox.kept_until == summary.finished_at + timedelta(seconds=SANDBOX_TTL_S)
+    until = summary.sandbox.kept_until
+    assert summary.sandbox.state == "kept" and until is not None
+    assert until == summary.finished_at + timedelta(seconds=SANDBOX_TTL_S)
     events = await list_run_events(sessions, run_id)
     assert events[-1].type == "run_failed"
-    assert events[-1].payload["sandbox_kept_until"] == summary.sandbox.kept_until.isoformat()
+    assert kept_until(events[-1]) == until.isoformat()
 
 
-@pytest.mark.xfail(strict=True, reason="12.3: uncommitted work is lost with the sandbox today")
 async def test_a_cancelled_run_saves_its_writer_s_uncommitted_work(
-    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    boxes: Path,
 ) -> None:
-    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    repos = tmp_path / "repos"
     make_repo(repos / "hello")
-    boxes.mkdir()
     sandboxes = RecordingSandboxes(
         FakeSandboxManager(local_root=repos, base_dir=boxes), inspect=BranchLog()
     )
@@ -2154,34 +2211,139 @@ async def test_a_cancelled_run_saves_its_writer_s_uncommitted_work(
         await asyncio.wait_for(sandboxes.closed.wait(), 10)
 
     assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
-    [wip] = [b for b in await list_saved_branches(sessions, run_id) if b.kind == "wip"]
+    [wip] = [b for b in await saved_changes(sessions, run_id) if b.kind == "wip"]
     assert (wip.branch, wip.node_key, wip.commits) == (f"wip/{run_id}/writer", "writer", 1)
-    assert [c.path for c in wip.changes] == ["DRAFT.md"]
-    assert wip.changes[0].after == "draft\n"
+    assert wip.changes is not None
+    assert [(c.path, c.after) for c in wip.changes] == [("DRAFT.md", "draft\n")]
+    # The writer's worktree and branch are as the run left them: nothing was committed there.
+    assert not any(
+        b.branch == f"agent/{run_id}/writer" for b in await saved_changes(sessions, run_id)
+    )
 
 
-@pytest.mark.xfail(strict=True, reason="12.3: an expired run's kept sandbox is removed today")
-async def test_a_run_whose_approval_expired_keeps_the_sandbox_it_kept_at_its_gate(
+async def test_a_kept_sandbox_is_removed_once_its_time_to_live_is_over(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    boxes: Path,
+) -> None:
+    """12.3: a workspace keeps failed runs' sandboxes for 1 s; the next sweep removes it, says so
+    in the audit log, and the run reads `removed`."""
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos, base_dir=boxes))
+    workspace_id = await new_workspace(sessions)
+    await replace_policy_overrides(sessions, workspace_id, PolicyOverrides(sandbox_ttl_s=1))
+    spec = commit_then({"type": "agent", "id": "reviewer", "role": "R", "instructions": "Go."})
+    repo = RepoSource(url=str(repos / "hello"))
+    runtime = scripted({"writer": notes_writer(), "reviewer": [Failed(error="boom")]})
+    async with worker(
+        postgres_url, redis_url, make_runtime=runtime, sandboxes=sandboxes, sandbox_sweep_s=0.2
+    ):
+        run_id = await create_run(sessions, spec, "go", repo, workspace_id=workspace_id)
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "failed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+        await wait_until_empty(boxes)
+
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None and summary.sandbox.state == "removed"
+    assert summary.sandbox.removed_at is not None
+    entries, _ = await list_audit_events(sessions, workspace_id, run_id=run_id)
+    assert entries[0].action == "sandbox.removed"
+    # The writer's commit outlives the sandbox.
+    [saved] = await saved_changes(sessions, run_id)
+    assert saved.changes is not None and [c.path for c in saved.changes] == ["NOTES.md"]
+
+
+async def wait_for_sandbox(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID, state: str
+) -> None:
+    async with asyncio.timeout(30):
+        while True:
+            summary = await get_run_summary(sessions, run_id)
+            if summary is not None and summary.sandbox.state == state:
+                return
+            await asyncio.sleep(0.1)
+
+
+def volumes_of(client: docker.DockerClient, run_id: UUID) -> list[str]:
+    return [v.name for v in client.volumes.list(filters={"label": f"{RUN_LABEL}={run_id}"})]
+
+
+async def test_done_when_a_failed_run_s_container_is_kept_then_swept_with_its_changes_saved(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
 ) -> None:
-    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    """Done when (12.3), on Docker: a failed run's container and volume are kept, the run says
+    until when, and once its time is over the sweep removes them; what its writer changed is
+    still saved."""
+    client = docker_or_skip()
+    repos = tmp_path / "repos"
     make_repo(repos / "hello")
-    boxes.mkdir()
-    sandboxes = FakeSandboxManager(local_root=repos, base_dir=boxes)
-    data = json.loads((SPECS / "gate-approval.json").read_text(encoding="utf-8"))
-    data["root"]["steps"][1]["ttl_s"] = 1
+    spec = commit_then({"type": "agent", "id": "reviewer", "role": "R", "instructions": "Go."})
+    runtime = scripted({"writer": notes_writer(), "reviewer": [Failed(error="boom")]})
+    sandboxes = RecordingSandboxes(DockerSandboxManager(client, local_root=repos))
     async with worker(
-        postgres_url,
-        redis_url,
-        make_runtime=fake_with_tools,
-        sandboxes=sandboxes,
-        gate_sweep_s=0.2,
+        postgres_url, redis_url, make_runtime=runtime, sandboxes=sandboxes, sandbox_sweep_s=0.2
     ):
-        repo = RepoSource(url=str(repos / "hello"))
-        run_id = await submit(sessions, redis_url, parse_spec(data), repo)
-        await wait_for_status(sessions, run_id, "cancelled")
+        run_id = await submit(sessions, redis_url, spec, RepoSource(url=str(repos / "hello")))
+        await wait_for_status(sessions, run_id, "failed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 30)
 
-    assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
-    summary = await get_run_summary(sessions, run_id)
-    assert summary is not None and summary.sandbox is not None
-    assert summary.sandbox.state == "kept"
+        assert len(await asyncio.to_thread(containers_of, client, run_id)) == 1
+        assert await asyncio.to_thread(volumes_of, client, run_id) == [f"agentic-sandbox-{run_id}"]
+        summary = await get_run_summary(sessions, run_id)
+        assert summary is not None and summary.sandbox.state == "kept"
+
+        await set_run(sessions, run_id, sandbox_kept_until=func.now())
+        await wait_for_sandbox(sessions, run_id, "removed")
+
+    assert await asyncio.to_thread(containers_of, client, run_id) == []
+    assert await asyncio.to_thread(volumes_of, client, run_id) == []
+    [saved] = await saved_changes(sessions, run_id)
+    assert saved.changes is not None
+    assert [(c.path, c.status, c.after) for c in saved.changes] == [
+        ("NOTES.md", "added", "notes\n")
+    ]
+
+
+async def test_a_starting_worker_spares_kept_sandboxes(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """12.3: the orphan sweep of a starting worker keeps the sandboxes of runs still within
+    their time to live. Checked on what it is given, not on Docker: a real sweep would remove
+    every other sandbox on this host."""
+    kept = await create_run(sessions, two_step_spec(), "go")
+    await set_run(
+        sessions, kept, status="failed", sandbox_kept_until=func.now() + timedelta(hours=1)
+    )
+    swept = await create_run(sessions, two_step_spec(), "go")
+    await set_run(
+        sessions,
+        swept,
+        status="failed",
+        sandbox_kept_until=func.now() - timedelta(hours=1),
+        sandbox_removed_at=func.now(),
+    )
+    given: list[Collection[str]] = []
+
+    def build(settings: WorkerSettings, keep: Collection[str] = frozenset()) -> SandboxManager:
+        given.append(keep)
+        return FakeSandboxManager()
+
+    monkeypatch.setattr("agentic_worker.main.build_sandboxes", build)
+    async with worker(postgres_url, redis_url, sandboxes=None):
+        pass
+
+    [keep] = given
+    assert str(kept) in keep
+    assert str(swept) not in keep
+    await set_run(sessions, kept, sandbox_removed_at=func.now())  # out of later sweeps

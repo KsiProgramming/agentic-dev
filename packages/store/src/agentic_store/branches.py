@@ -4,20 +4,29 @@ A run's first clone records its commit (`runs.base_sha`); later sandboxes are cl
 writer's branch and each integration branch is saved as a git bundle when a step completes, a
 new version only when its tip moved (`run_branches`, append only), and the latest version of each
 is fetched into a fresh sandbox (`latest_branches`).
+
+Each version also keeps the files it changed on top of the base, as a gate shows them (12.3), so
+they are shown after the sandbox, and later the bundle, is gone (`saved_changes`). A run that
+failed or was cancelled saves each writer's uncommitted work as a `wip` version of
+`wip/<run>/<key>`, which is never restored.
 """
 
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.gate import FileChange
 from agentic_sandbox import COMMIT_ID, MAX_TAKE_FILE_BYTES, BranchBundle
 from agentic_store.models import Run, RunBranch
 
-type BranchKind = Literal["writer", "integration"]
+type BranchKind = Literal["writer", "integration", "wip"]
+
+_CHANGES = TypeAdapter(list[FileChange])
+_KINDS: dict[str, BranchKind] = {"writer": "writer", "integration": "integration", "wip": "wip"}
 
 
 class BundleTooLargeError(ValueError):
@@ -38,6 +47,16 @@ class SavedBranch(BaseModel):
     commits: int
     size: int
     created_at: datetime
+    # When the bundle was dropped past the run's retention (12.3); its changes stay.
+    bundle_removed_at: datetime | None = None
+
+
+class SavedChanges(SavedBranch):
+    """A saved version with the files it changed on top of its base (12.3): `changes`, or why
+    they could not be read (`changes_error`); neither for a version saved before 12.3."""
+
+    changes: list[FileChange] | None = None
+    changes_error: str | None = None
 
 
 async def record_base_sha(
@@ -63,9 +82,12 @@ async def save_branch(
     node_key: str,
     kind: BranchKind,
     bundle: BranchBundle,
+    changes: list[FileChange] | None = None,
+    changes_error: str | None = None,
 ) -> SavedBranch | None:
-    """Save `bundle` as the next version of its branch, or nothing (`None`) if the latest saved
-    version has the same tip. Raises `BundleTooLargeError` over `MAX_TAKE_FILE_BYTES`."""
+    """Save `bundle` as the next version of its branch, with the files it changed (`changes`,
+    or `changes_error`), or nothing (`None`) if the latest saved version has the same tip. Raises
+    `BundleTooLargeError` over `MAX_TAKE_FILE_BYTES`."""
     if len(bundle.data) > MAX_TAKE_FILE_BYTES:
         raise BundleTooLargeError(
             f"the branch's bundle is {len(bundle.data)} bytes, over the "
@@ -93,6 +115,8 @@ async def save_branch(
             commits=bundle.commits,
             size=len(bundle.data),
             data=bundle.data,
+            changes=None if changes is None else _CHANGES.dump_python(changes, mode="json"),
+            changes_error=changes_error,
         )
         session.add(row)
         await session.flush()
@@ -103,7 +127,9 @@ async def save_branch(
 async def latest_branches(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID
 ) -> list[BranchBundle]:
-    """The latest saved version of each of the run's branches, with its bundle, by branch."""
+    """The latest saved version of each of the run's writer and integration branches, with its
+    bundle, by branch: what a fresh sandbox gets back. Uncommitted work (`wip`) is never restored,
+    and a version whose bundle was dropped cannot be."""
     async with sessions() as session:
         rows = await session.scalars(_latest(run_id))
         return [
@@ -115,6 +141,7 @@ async def latest_branches(
                 commits=r.commits,
             )
             for r in rows
+            if r.kind != "wip" and r.data is not None
         ]
 
 
@@ -124,6 +151,22 @@ async def list_saved_branches(
     """The latest saved version of each of the run's branches, without bundles, by branch."""
     async with sessions() as session:
         return [_saved(r) for r in await session.scalars(_latest(run_id))]
+
+
+async def saved_changes(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID
+) -> list[SavedChanges]:
+    """The latest saved version of each of the run's branches with the files it changed, by
+    branch (12.3)."""
+    async with sessions() as session:
+        return [
+            SavedChanges(
+                **_saved(r).model_dump(),
+                changes=None if r.changes is None else _CHANGES.validate_python(r.changes),
+                changes_error=r.changes_error,
+            )
+            for r in await session.scalars(_latest(run_id))
+        ]
 
 
 def _latest(run_id: UUID) -> Select[RunBranch]:
@@ -148,11 +191,12 @@ def _saved(row: RunBranch) -> SavedBranch:
     return SavedBranch(
         branch=row.branch,
         node_key=row.node_key,
-        kind="integration" if row.kind == "integration" else "writer",
+        kind=_KINDS.get(row.kind, "writer"),
         version=row.version,
         base_sha=row.base_sha,
         head_sha=row.head_sha,
         commits=row.commits,
         size=row.size,
         created_at=row.created_at,
+        bundle_removed_at=row.bundle_removed_at,
     )

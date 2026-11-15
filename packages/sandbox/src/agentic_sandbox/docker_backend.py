@@ -347,6 +347,18 @@ class DockerSandboxManager:
         if removed := await asyncio.to_thread(_sweep, self._client, f"{RUN_LABEL}={run_id}"):
             log.info("sandbox agentic-sandbox-%s discarded (%d container)", run_id, removed)
 
+    async def exists(self, run_id: UUID) -> bool:
+        return await asyncio.to_thread(self._exists, f"agentic-sandbox-{run_id}")
+
+    def _exists(self, name: str) -> bool:
+        for get in (self._client.containers.get, self._client.volumes.get):
+            try:
+                get(name)
+            except NotFound:
+                continue
+            return True
+        return False
+
     @asynccontextmanager
     async def open(
         self,

@@ -24,6 +24,8 @@ AuditAction = Literal[
     "gate.approved",
     "gate.rejected",
     "gate.expired",
+    "sandbox.remove_requested",
+    "sandbox.removed",
     "connection.added",
     "connection.removed",
     "policy.updated",

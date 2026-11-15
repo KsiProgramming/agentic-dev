@@ -8,9 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, field_v
 from agentic_engine.policy import (
     BUDGET_MAX_USD,
     BUDGET_MIN_USD,
+    CEILINGS,
     PLATFORM_POLICY,
     Policy,
     PolicyOverrides,
+    ceiling,
 )
 from agentic_github import installation_settings_url
 from agentic_runtime import ModelPrice
@@ -187,10 +189,22 @@ class RunLimits(BaseModel):
         default=None,
         description="USD a run may spend, a hard stop once reached; unset is no cost cap.",
     )
+    sandbox_ttl_s: int = Field(
+        description="Seconds a failed or cancelled run's sandbox is kept before it is removed."
+    )
+    branch_retention_days: int = Field(
+        description="Days a finished run's saved commits are kept; the files they changed stay."
+    )
 
     @classmethod
     def of(cls, policy: Policy) -> "RunLimits":
         return cls.model_validate(policy.model_dump())
+
+    @classmethod
+    def ceilings(cls) -> "RunLimits":
+        """The most a workspace may set each limit to: the platform's limit, except where a
+        limit's default is below its ceiling (`CEILINGS`)."""
+        return cls.model_validate(PLATFORM_POLICY.model_dump() | CEILINGS)
 
 
 def budget_field(what: str) -> Any:
@@ -207,12 +221,22 @@ def to_usd(amount: float | None) -> Decimal | None:
     return None if amount is None else Decimal(str(round(amount, 8)))
 
 
-def _lower_limit(ceiling: int, what: str) -> Any:
+def _lower_limit(most: int, what: str) -> Any:
     return Field(
         default=None,
         ge=1,
-        le=ceiling,
-        description=f"{what} At most {ceiling}, the platform's limit; unset keeps it.",
+        le=most,
+        description=f"{what} At most {most}, the platform's limit; unset keeps it.",
+    )
+
+
+def _limit(most: int, what: str) -> Any:
+    """A limit a workspace may also raise above the platform's default, up to `most`."""
+    return Field(
+        default=None,
+        ge=1,
+        le=most,
+        description=f"{what} At most {most}; unset keeps the platform's default.",
     )
 
 
@@ -237,6 +261,14 @@ class RunLimitOverrides(BaseModel):
     approval_ttl_s: int | None = _lower_limit(
         PLATFORM_POLICY.approval_ttl_s, "Seconds a gate waits for a decision before it expires."
     )
+    sandbox_ttl_s: int | None = _limit(
+        ceiling("sandbox_ttl_s"),
+        "Seconds a failed or cancelled run's sandbox is kept before it is removed.",
+    )
+    branch_retention_days: int | None = _limit(
+        ceiling("branch_retention_days"),
+        "Days a finished run's saved commits are kept; the files they changed stay.",
+    )
     budget_usd: float | None = budget_field(
         "The default budget of the workspace's runs, which a run may replace. It has no "
         "platform ceiling."
@@ -256,7 +288,11 @@ class WorkspacePolicyOut(BaseModel):
     """The limits the workspace's new runs get: each of its `overrides`, else the platform's
     `defaults`. A run keeps the limits it was created with."""
 
-    defaults: RunLimits = Field(description="The platform's limits, which are also the ceilings.")
+    defaults: RunLimits = Field(description="The platform's limits.")
+    ceilings: RunLimits = Field(
+        description="The most a workspace may set each limit to: the platform's limit, except "
+        "`sandbox_ttl_s` and `branch_retention_days`, which may go above their default."
+    )
     overrides: RunLimitOverrides
     effective: RunLimits
 

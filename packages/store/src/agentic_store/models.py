@@ -118,6 +118,8 @@ class WorkspacePolicy(Base):
     wall_time_s: Mapped[int | None] = mapped_column(Integer)
     approval_ttl_s: Mapped[int | None] = mapped_column(Integer)
     budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(16, 8))
+    sandbox_ttl_s: Mapped[int | None] = mapped_column(Integer)
+    branch_retention_days: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -160,6 +162,12 @@ class Run(Base):
             "ix_runs_gate_expires_at",
             "gate_expires_at",
             postgresql_where=text("status = 'waiting'"),
+        ),
+        # The kept-sandbox sweep (`agentic_store.sandboxes`).
+        Index(
+            "ix_runs_sandbox_kept_until",
+            "sandbox_kept_until",
+            postgresql_where=text("sandbox_removed_at IS NULL"),
         ),
         # Listing runs, newest first.
         Index(
@@ -220,6 +228,11 @@ class Run(Base):
     # The commit the run's first clone was at (12.2); its later sandboxes are cloned there, so
     # its saved branches apply and its agents read the same code. Null until it has a sandbox.
     base_sha: Mapped[str | None] = mapped_column(String(40))
+    # Until when the sandbox of a failed or cancelled run is kept (12.3): the end event's
+    # `sandbox_kept_until`, moved to now when a user asks to remove it. A worker's sweep removes it
+    # after that and sets `sandbox_removed_at`. Null for a run whose sandbox was not kept.
+    sandbox_kept_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sandbox_removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Totals of the run's `usage` events.
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
@@ -272,11 +285,17 @@ class RunBranch(Base):
     `(run_id, branch, version)` is its key, versions are numbered per branch from 1, and a new
     one is written only when the branch's tip moved. `data` is a git bundle of the branch's
     commits on top of `base_sha` (`agentic_sandbox.export_branch`); the latest version of each
-    branch is fetched into a fresh sandbox."""
+    writer and integration branch is fetched into a fresh sandbox.
+
+    A `wip` version (12.3) is a writer's uncommitted work when its run failed or was cancelled,
+    on `wip/<run>/<key>`; it is never restored. `changes` are the files the version changed on
+    top of `base_sha`, as a gate shows them (`agentic_engine.gate.FileChange`), or
+    `changes_error`. Past the run's `branch_retention_days`, `data` is dropped
+    (`bundle_removed_at`); the row and its `changes` stay."""
 
     __tablename__ = "run_branches"
     __table_args__ = (
-        CheckConstraint("kind IN ('writer', 'integration')", name="ck_run_branches_kind"),
+        CheckConstraint("kind IN ('writer', 'integration', 'wip')", name="ck_run_branches_kind"),
     )
 
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"), primary_key=True)
@@ -290,7 +309,10 @@ class RunBranch(Base):
     head_sha: Mapped[str] = mapped_column(String(40))
     commits: Mapped[int] = mapped_column(Integer)
     size: Mapped[int] = mapped_column(Integer)
-    data: Mapped[bytes] = mapped_column(LargeBinary)
+    data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    changes: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
+    changes_error: Mapped[str | None] = mapped_column(Text)
+    bundle_removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
