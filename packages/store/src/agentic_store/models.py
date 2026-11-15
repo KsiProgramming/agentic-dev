@@ -217,6 +217,9 @@ class Run(Base):
     # sweep never moves `queued_at`, so "Queued 4 min ago" stays true.
     queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The commit the run's first clone was at (12.2); its later sandboxes are cloned there, so
+    # its saved branches apply and its agents read the same code. Null until it has a sandbox.
+    base_sha: Mapped[str | None] = mapped_column(String(40))
     # Totals of the run's `usage` events.
     input_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
     output_tokens: Mapped[int] = mapped_column(BigInteger, server_default="0")
@@ -261,6 +264,33 @@ class RunArtifact(Base):
     content: Mapped[str] = mapped_column(Text)
     # The writer's `output_schema`, if it had one.
     output_schema: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RunBranch(Base):
+    """One saved version of a run's writer or integration branch (12.2), append only:
+    `(run_id, branch, version)` is its key, versions are numbered per branch from 1, and a new
+    one is written only when the branch's tip moved. `data` is a git bundle of the branch's
+    commits on top of `base_sha` (`agentic_sandbox.export_branch`); the latest version of each
+    branch is fetched into a fresh sandbox."""
+
+    __tablename__ = "run_branches"
+    __table_args__ = (
+        CheckConstraint("kind IN ('writer', 'integration')", name="ck_run_branches_kind"),
+    )
+
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"), primary_key=True)
+    branch: Mapped[str] = mapped_column(String(255), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # The writer key the branch belongs to: a node id, `<orchestrator>.<task>`, or an
+    # orchestrator's id for its integration branch.
+    node_key: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(16))
+    base_sha: Mapped[str] = mapped_column(String(40))
+    head_sha: Mapped[str] = mapped_column(String(40))
+    commits: Mapped[int] = mapped_column(Integer)
+    size: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

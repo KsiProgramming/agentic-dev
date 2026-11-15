@@ -11,17 +11,22 @@ limits, working in a directory under `staging_dir`, never in the checkout. The m
 lifecycle: `open()`
 creates the sandbox and clones the repo, and leaving the context destroys it, whether the run
 succeeded, failed or was cancelled. A run that pauses at a gate keeps its sandbox (`keep()`), and
-the attempt that continues it opens it again (`open(..., reuse=True)`).
+the attempt that continues it opens it again (`open(..., reuse=True)`). A fresh sandbox for a run
+that has already worked is cloned at the run's base commit and gets the writers' branches the run
+saved back (`open(..., at=..., restore=...)`, 12.2).
 """
 
 import re
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Final, Literal, Protocol
+from typing import TYPE_CHECKING, Final, Literal, Protocol
 from uuid import UUID
 
 from agentic_sandbox.source import RepoSource
+
+if TYPE_CHECKING:
+    from agentic_sandbox.bundle import BranchBundle
 
 # Each stream of an exec is cut to this many bytes; `ExecResult.truncated` says so.
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -63,6 +68,12 @@ class Sandbox(Protocol):
     @property
     def worktrees_dir(self) -> str:
         """The directory writer nodes' worktrees go in, writable by the sandbox user."""
+        ...
+
+    @property
+    def restored(self) -> tuple[str, ...]:
+        """The branches `open` fetched into this sandbox from saved bundles (12.2): empty for a
+        sandbox reopened as it was kept, or for a run with nothing saved."""
         ...
 
     async def exec(
@@ -139,6 +150,8 @@ class SandboxManager(Protocol):
         *,
         reuse: bool = False,
         git_env: Mapping[str, str] | None = None,
+        at: str | None = None,
+        restore: Sequence["BranchBundle"] = (),
     ) -> AbstractAsyncContextManager[Sandbox]:
         """Create a sandbox for `run_id` holding a shallow clone of `repo`; destroy it on exit,
         unless `keep(run_id)` was called meanwhile.
@@ -148,6 +161,10 @@ class SandboxManager(Protocol):
         worktrees and commits; if there is none, a fresh one is created. `git_env` goes to the
         clone (`clone_shallow`), e.g. to authenticate to a private repo; the sandbox never sees
         it.
+
+        A fresh sandbox is cloned at the commit `at` when it is given (the run's base, 12.2), and
+        each bundle in `restore` is fetched into it as its branch (`import_bundles`), which
+        `Sandbox.restored` then names. A reopened sandbox is left as it was kept.
 
         Raises `SandboxError` if the sandbox cannot be created or the repo cannot be cloned."""
         ...

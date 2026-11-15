@@ -123,3 +123,68 @@ async def test_git_env_never_reaches_a_local_clone(
     )
 
     assert captured.env.get("GIT_CONFIG_VALUE_0") != "x"
+
+
+def _git(cwd: Path, *args: str) -> str:
+    import os
+    import subprocess
+
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@e.invalid", *args],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+async def test_a_clone_at_a_commit_stays_there_after_the_branch_moved_on(
+    repos: Path, tmp_path: Path
+) -> None:
+    """12.2: a run's later attempts clone the commit its first one did, not the branch's tip."""
+    origin = repos / "hello"
+    base = _git(origin, "rev-parse", "HEAD")
+    (origin / "LATER.md").write_text("later\n")
+    _git(origin, "add", "LATER.md")
+    _git(origin, "commit", "-q", "-m", "later")
+    dest = tmp_path / "clone"
+
+    await clone_shallow(RepoSource(url=str(origin)), dest, local_root=repos, at=base)
+
+    assert _git(dest, "rev-parse", "HEAD") == base
+    assert _git(dest, "rev-parse", "--abbrev-ref", "HEAD") != "HEAD"  # still on its branch
+    assert not (dest / "LATER.md").exists()
+
+
+async def test_a_clone_at_its_tip_needs_no_fetch(repos: Path, tmp_path: Path) -> None:
+    base = _git(repos / "hello", "rev-parse", "HEAD")
+
+    await clone_shallow(
+        RepoSource(url=str(repos / "hello")), tmp_path / "c", local_root=repos, at=base
+    )
+
+    assert _git(tmp_path / "c", "rev-parse", "HEAD") == base
+
+
+async def test_a_clone_at_a_commit_that_is_gone_fails_clearly(repos: Path, tmp_path: Path) -> None:
+    with pytest.raises(
+        SandboxError, match=r"the commit the run started from \(012345678901\) is gone"
+    ):
+        await clone_shallow(
+            RepoSource(url=str(repos / "hello")),
+            tmp_path / "c",
+            local_root=repos,
+            at="0123456789" * 4,
+        )
+
+
+async def test_only_a_full_commit_id_is_a_clone_s_base(repos: Path, tmp_path: Path) -> None:
+    with pytest.raises(SandboxError, match="not a commit id"):
+        await clone_shallow(
+            RepoSource(url=str(repos / "hello")),
+            tmp_path / "c",
+            local_root=repos,
+            at="--upload-pack=x",
+        )

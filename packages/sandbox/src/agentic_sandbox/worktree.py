@@ -117,6 +117,10 @@ class Worktree:
     def worktrees_dir(self) -> str:
         return self._sandbox.worktrees_dir
 
+    @property
+    def restored(self) -> tuple[str, ...]:
+        return self._sandbox.restored
+
     async def exec(
         self,
         argv: Sequence[str],
