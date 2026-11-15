@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_api import create_app
@@ -19,7 +20,7 @@ from agentic_api.settings import Settings
 from agentic_engine.events import RunEvent, RunEventLog
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_sandbox import RepoSource
-from agentic_store import PostgresEventSink, Workspace, create_run
+from agentic_store import PostgresEventSink, Run, Workspace, claim_run, create_run
 
 pytestmark = pytest.mark.integration
 
@@ -441,3 +442,56 @@ async def test_a_summary_says_what_started_the_run_and_its_branch(
     )
     assert (by_id[str(on_default)]["trigger"], by_id[str(on_default)]["branch"]) == ("api", None)
     assert by_id[str(new_repo)]["branch"] == "trunk"
+
+
+def at(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+async def test_a_queued_run_says_when_it_counts_as_stalled(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    """12.1: `queue_stalled_at` is `queued_at` plus the stale threshold (60 s by default) while
+    the run is queued and no worker holds it."""
+    queued = await create_run(sessions, two_step_spec(), "go", None, workspace)
+    claimed = await create_run(sessions, two_step_spec(), "go", None, workspace)
+    assert await claim_run(sessions, claimed, "w1", 300) is not None
+    started = await add_run(sessions, workspace, ("run_started", {}))
+
+    detail = (await client.get(f"/runs/{queued}")).json()
+    by_id = {item["id"]: item for item in (await list_runs(client, workspace))["items"]}
+
+    for run in (detail, by_id[str(queued)]):
+        assert at(run["queue_stalled_at"]) - at(run["queued_at"]) == timedelta(seconds=60)
+    assert by_id[str(claimed)]["queue_stalled_at"] is None
+    assert by_id[str(started)]["queue_stalled_at"] is None
+    assert by_id[str(started)]["queued_at"] is not None
+
+
+async def test_a_run_whose_worker_lost_its_lease_counts_as_unclaimed(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    run_id = await create_run(sessions, two_step_spec(), "go", None, workspace)
+    assert await claim_run(sessions, run_id, "w1", 300) is not None
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.id == run_id)
+            .values(lease_expires_at=datetime.now(UTC) - timedelta(minutes=1))
+        )
+
+    assert (await client.get(f"/runs/{run_id}")).json()["queue_stalled_at"] is not None
+
+
+async def test_the_stale_threshold_comes_from_the_settings(
+    postgres_url: str, redis_url: str, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    run_id = await create_run(sessions, two_step_spec(), "go", None, workspace)
+    app = create_app(Settings(database_url=postgres_url, redis_url=redis_url, queue_stale_s=300))
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        run = (await client.get(f"/runs/{run_id}")).json()
+
+    assert at(run["queue_stalled_at"]) - at(run["queued_at"]) == timedelta(seconds=300)

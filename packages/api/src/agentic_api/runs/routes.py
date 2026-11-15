@@ -151,9 +151,13 @@ async def existing_workspace(
     return workspace_id
 
 
-def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
+def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
     now = datetime.now(UTC)
     active_ms, waiting_ms = row.times.at(now)
+    stale_s: float = request.app.state.settings.queue_stale_s
+    unclaimed = row.status == "queued" and (
+        row.lease_expires_at is None or row.lease_expires_at <= now
+    )
     cancel_reason = row.cancel_reason if row.status == "cancelled" else None
     return {
         "id": row.id,
@@ -168,6 +172,8 @@ def _summary_fields(row: RunSummaryRow) -> dict[str, Any]:
         "started_at": row.started_at,
         "finished_at": row.finished_at,
         "pr_url": row.pr_url,
+        "queued_at": row.queued_at,
+        "queue_stalled_at": row.queued_at + timedelta(seconds=stale_s) if unclaimed else None,
         "waiting_gate": WaitingGate.model_validate(row.waiting_gate) if row.waiting_gate else None,
         "cancel_reason": cancel_reason,
         "expired": cancel_reason == APPROVAL_EXPIRED_REASON,
@@ -233,7 +239,7 @@ async def list_runs(
     except InvalidCursorError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     return RunSummaryPage(
-        items=[RunSummary(**_summary_fields(row)) for row in rows], next_cursor=next_cursor
+        items=[RunSummary(**_summary_fields(request, row)) for row in rows], next_cursor=next_cursor
     )
 
 
@@ -282,7 +288,7 @@ async def stream_summaries(
                 sessions, workspace_id, since=watermark - SUMMARY_LOOKBACK
             )
             for updated_at, row in changed:
-                summary = RunSummary(**_summary_fields(row))
+                summary = RunSummary(**_summary_fields(request, row))
                 # Its times grow with the clock, which the client follows by itself.
                 seen = (
                     row.times,
@@ -316,7 +322,7 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
     return RunDetail(
-        **_summary_fields(row),
+        **_summary_fields(request, row),
         input=row.input,
         failure_reason=row.failure_reason,
         spec=WorkflowSpec.model_validate(row.spec),

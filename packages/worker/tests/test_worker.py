@@ -7,6 +7,7 @@ import re
 import subprocess
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -19,6 +20,7 @@ from docker.models.containers import Container
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import SecretStr
 from redis.asyncio import Redis
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import RunEvent
@@ -56,9 +58,11 @@ from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_secrets import LocalKeyProvider, generate_key_file, install_redaction
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
+    Run,
     Workspace,
     active_seconds,
     create_run,
+    dequeue_run,
     enqueue_run,
     get_run,
     get_run_artifact,
@@ -79,7 +83,7 @@ from agentic_tools.github import CREATE_TOOL_NAMES, PUBLISH_TOOL_NAMES, GithubPu
 from agentic_tools.repo import COMMIT_AUTHOR, READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.scan import SCAN_TOOL_NAMES
 from agentic_tools.testing import FakeGithub, bare_remote
-from agentic_worker.main import RuntimeFactory, WorkerSettings, run
+from agentic_worker.main import UNLOADABLE_SPEC_REASON, RuntimeFactory, WorkerSettings, run
 
 SPECS = Path(__file__).resolve().parents[2] / "engine" / "tests" / "fixtures" / "specs" / "valid"
 PROJECT = Path(__file__).resolve().parents[3]
@@ -116,6 +120,9 @@ async def worker(
     on the Windows test loop); pass one `checkpointer` to workers that must share them."""
     stop, ready = asyncio.Event(), asyncio.Event()
     checkpointer = checkpointer or InMemorySaver(serde=checkpoint_serde())
+    # Long, so the queue sweep never picks up runs other tests left queued in the shared
+    # database; the 12.1 tests move their own runs' `queued_at` past it instead.
+    more_settings.setdefault("queue_stale_s", STALE_S)
     settings = WorkerSettings(
         database_url=postgres_url,
         redis_url=redis_url,
@@ -200,6 +207,49 @@ async def submit(
 
 pytestmark = pytest.mark.integration
 
+STALE_S = 3600
+
+
+async def lose_queued_id(
+    sessions: async_sessionmaker[AsyncSession], redis_url: str, run_id: UUID
+) -> None:
+    """Take the run's id from the queue and drop it, as a worker killed between popping it and
+    claiming it would, and date the run's queueing past `STALE_S`."""
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        async with asyncio.timeout(5):
+            while (popped := await dequeue_run(redis, 0.1)) != run_id:
+                assert popped is None, f"another run {popped} was queued"
+    finally:
+        await redis.aclose()
+    await set_run(sessions, run_id, queued_at=func.now() - timedelta(seconds=2 * STALE_S))
+
+
+async def set_run(sessions: async_sessionmaker[AsyncSession], run_id: UUID, **values: Any) -> None:
+    async with sessions.begin() as session:
+        await session.execute(update(Run).where(Run.id == run_id).values(**values))
+
+
+async def wait_for_summary_status(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID, status: str
+) -> None:
+    """As `wait_for_status`, for a run whose spec `get_run` cannot load."""
+    async with asyncio.timeout(30):
+        while True:
+            summary = await get_run_summary(sessions, run_id)
+            if summary is not None and summary.status == status:
+                return
+            await asyncio.sleep(0.05)
+
+
+async def spoil_spec(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> None:
+    """Give the run's stored spec a field this worker does not know, as an older worker sees a
+    field a newer API wrote (2026-11-02: `budget_usd`)."""
+    async with sessions.begin() as session:
+        run = await session.get(Run, run_id)
+        assert run is not None
+        run.spec = {**run.spec, "unknown_field": 1}
+
 
 async def test_worker_starts_and_stops(
     sessions: async_sessionmaker[AsyncSession],
@@ -277,6 +327,102 @@ async def test_a_stopped_worker_releases_its_run_and_the_next_resumes_it(
     completed = [e.node_id for e in events if e.type == "node_completed"]
     assert completed == ["writer", "reviewer"]
     assert not [e for e in events if e.type in ("run_cancelled", "node_cancelled")]
+
+
+async def test_done_when_a_run_popped_by_a_killed_worker_still_starts(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """12.1: the id is gone from Redis and the run has no lease; the sweep a worker makes when
+    it starts announces it again."""
+    run_id = await submit(sessions, redis_url, two_step_spec())
+    await lose_queued_id(sessions, redis_url, run_id)
+
+    async with worker(postgres_url, redis_url):
+        await wait_for_status(sessions, run_id, "completed")
+
+    run = await get_run(sessions, run_id)
+    assert run is not None
+    assert run.attempt == 1
+
+
+async def test_a_running_worker_sweeps_lost_runs_on_its_timer(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url, queue_sweep_s=0.2):
+        await asyncio.sleep(0.3)  # past the sweep at start
+        run_id = await create_run(sessions, two_step_spec(), "go")  # its id is in no queue
+        await set_run(sessions, run_id, queued_at=func.now() - timedelta(seconds=2 * STALE_S))
+        await wait_for_status(sessions, run_id, "completed")
+
+
+async def test_a_run_lost_after_its_gate_decision_resumes(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """A decision queues the run again, with a new `queued_at`; its id is lost before a worker
+    claims it, and the sweep brings it back to resume after the gate."""
+    async with worker(postgres_url, redis_url, queue_sweep_s=0.2):
+        run_id = await submit(sessions, redis_url, gated_spec())
+        await wait_for_status(sessions, run_id, "waiting")
+        await record_approval(sessions, run_id, "approve", GateDecision(decision="approve"))
+        await set_run(sessions, run_id, queued_at=func.now() - timedelta(seconds=2 * STALE_S))
+        await wait_for_status(sessions, run_id, "completed")
+
+    completed = [
+        e.node_id for e in await list_run_events(sessions, run_id) if e.type == "node_completed"
+    ]
+    assert completed == ["writer", "approve", "after"]
+
+
+async def test_done_when_an_unloadable_spec_fails_its_run_and_the_worker_goes_on(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    bad = await create_run(sessions, two_step_spec(), "go")
+    await spoil_spec(sessions, bad)
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await enqueue_run(redis, bad)
+    finally:
+        await redis.aclose()
+    good = await submit(sessions, redis_url, two_step_spec())
+
+    async with worker(postgres_url, redis_url):
+        await wait_for_summary_status(sessions, bad, "failed")
+        await wait_for_status(sessions, good, "completed")
+
+    summary = await get_run_summary(sessions, bad)
+    assert summary is not None
+    assert summary.failure_reason is not None
+    assert summary.failure_reason == (
+        f"{UNLOADABLE_SPEC_REASON}: unknown_field: Extra inputs are not permitted"
+    )
+    events = await list_run_events(sessions, bad)
+    assert [e.type for e in events] == ["run_started", "run_failed"]
+    assert events[0].payload["workflow_id"] == two_step_spec().id
+    assert events[0].payload["input"] == "go"
+
+
+async def test_a_resumed_run_with_an_unloadable_spec_fails_after_its_last_event(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """The reclaim path: a worker stopped mid-run, and the next one cannot load the spec. Every
+    worker that reclaimed it used to stop; now the run fails and the worker goes on."""
+    first = FakeRuntime({"reviewer": [Delay(30), ECHO_USAGE]})
+    async with worker(postgres_url, redis_url, runtime=first):
+        run_id = await submit(sessions, redis_url, two_step_spec())
+        await wait_for_event(sessions, run_id, "node_started", "reviewer")
+    before = await list_run_events(sessions, run_id)
+    await spoil_spec(sessions, run_id)
+
+    async with worker(postgres_url, redis_url):
+        await wait_for_summary_status(sessions, run_id, "failed")
+        good = await submit(sessions, redis_url, two_step_spec())
+        await wait_for_status(sessions, good, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    assert [e.seq for e in events[: len(before)]] == [e.seq for e in before]
+    assert [e.type for e in events[len(before) :]] == ["run_failed"]
+    assert [e.seq for e in events] == list(range(1, len(events) + 1))
+    assert str(events[-1].payload["error"]).startswith(UNLOADABLE_SPEC_REASON)
 
 
 async def test_a_one_node_run_on_claude_stores_text_and_usage(

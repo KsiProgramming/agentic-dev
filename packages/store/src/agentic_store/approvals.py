@@ -132,7 +132,13 @@ async def record_approval(
             await session.execute(
                 update(Run)
                 .where(Run.id == run_id)
-                .values(status="queued", worker_id=None, lease_expires_at=None, attempt=0)
+                .values(
+                    status="queued",
+                    worker_id=None,
+                    lease_expires_at=None,
+                    attempt=0,
+                    queued_at=func.now(),
+                )
             )
             audit(
                 session,

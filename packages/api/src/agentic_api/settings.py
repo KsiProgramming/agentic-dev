@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://agentic:agentic@localhost:5432/agentic"
     redis_url: str = "redis://localhost:6379/0"
     readiness_timeout_s: float = 2.0
+    # A run queued with no worker holding it for this long is stalled (`queue_stalled_at`); the
+    # workers read the same variable to announce it again (12.1).
+    queue_stale_s: float = Field(default=60.0, gt=0)
     # Browser origins allowed to call the API (the web app). Env: a JSON list.
     cors_origins: list[str] = ["http://localhost:3000"]
     # The master key that encrypts stored secrets (a 32-byte file). Unset, keys cannot be

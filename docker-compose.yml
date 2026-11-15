@@ -76,6 +76,9 @@ services:
     environment:
       <<: [*db-env, *master-key, *fakes]
       CLAUDE_KEY_CHECK: ${CLAUDE_KEY_CHECK:-anthropic}
+      # A run queued this long with no worker holding it is shown as stalled (phase 12.1); the
+      # worker reads the same value.
+      QUEUE_STALE_S: ${QUEUE_STALE_S:-60}
       # Where the browser reaches the API (the fake GitHub install flow redirects back to it).
       API_BASE_URL: http://localhost:${API_PORT:-8000}
       # The browser calls the API directly, so the web app's origin must be allowed.
@@ -149,6 +152,10 @@ services:
       MAX_ATTEMPTS: ${MAX_ATTEMPTS:-3}
       # How often the worker cancels runs whose gate waited past its time to live (phase 11.3).
       GATE_SWEEP_S: ${GATE_SWEEP_S:-30}
+      # Every QUEUE_SWEEP_S, runs queued with no worker holding them for QUEUE_STALE_S are queued
+      # again: their id was lost before a worker claimed them (phase 12.1).
+      QUEUE_STALE_S: ${QUEUE_STALE_S:-60}
+      QUEUE_SWEEP_S: ${QUEUE_SWEEP_S:-15}
       # Runs with a repo get a sandbox container on the host's Docker. Local repo paths may only
       # come from /samples, where this project's own git history is mounted as a demo repo.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}

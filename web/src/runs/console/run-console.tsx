@@ -47,6 +47,7 @@ import { useRunEvents } from "../use-run-events";
 import { currentActivity } from "./activity";
 import { ActivityLine } from "./activity-line";
 import { ApprovalDock, DOCK_ID } from "./approval-dock";
+import { QueuedState } from "./queued-state";
 import { canRerun, RerunButton } from "../rerun";
 import { CancelRunButton } from "./cancel-run-button";
 import { RunBanner, type BannerState } from "./run-banner";
@@ -431,7 +432,7 @@ function Console({
           <TabsContent value="list" className="p-2">
             {entries.length === 0 ? (
               live ? (
-                <EmptyState icon={RadioIcon} message="Waiting for the run to start…" />
+                <QueuedState run={run} now={now} />
               ) : (
                 <EmptyState icon={RadioIcon} message="This run ended before its first step." />
               )

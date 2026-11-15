@@ -4,6 +4,7 @@ from agentic_engine.graph.checkpoint import Checkpointer, checkpoint_serde, thre
 from agentic_engine.graph.compile import CompiledWorkflow, CompileError, compile_workflow
 from agentic_engine.graph.run import (
     log_policy_stop,
+    record_unloadable_run,
     record_unstarted_run,
     resume_workflow,
     run_workflow,
@@ -20,6 +21,7 @@ __all__ = [
     "checkpoint_serde",
     "compile_workflow",
     "log_policy_stop",
+    "record_unloadable_run",
     "record_unstarted_run",
     "resume_workflow",
     "run_workflow",

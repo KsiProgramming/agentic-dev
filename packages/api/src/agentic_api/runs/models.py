@@ -355,6 +355,15 @@ class RunSummary(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     pr_url: str | None = Field(description="The last pull request the run opened.")
+    queued_at: datetime = Field(
+        description="When the run last became `queued`: created, or queued again after a gate "
+        "decision, a cancel or an expiry while it waited."
+    )
+    queue_stalled_at: datetime | None = Field(
+        description="While the run is queued and no worker holds it: when it counts as stalled "
+        "(`queued_at` plus the queue's stale threshold). Past it, the workers announce it "
+        "again; a run still queued then likely has no worker running. `null` otherwise."
+    )
     waiting_gate: WaitingGate | None = Field(description="Set while the run waits at a gate.")
     cancel_reason: str | None = Field(
         description="Why a cancelled run was cancelled: `cancelled by user`, or `Approval "

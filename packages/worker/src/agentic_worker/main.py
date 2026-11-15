@@ -53,6 +53,12 @@ A gate waits at most its time to live (phase 11.3). Every `GATE_SWEEP_S`, each w
 the runs whose gate has expired (`agentic_store.expire_gates`) and queues them; they are ended
 like a cancelled run, with `run_cancelled` `{reason: "Approval expired", expired: true}`.
 
+Postgres is the queue's source of truth (phase 12.1). A run id popped from Redis by a worker that
+died before claiming it is lost from Redis, so when it starts and every `QUEUE_SWEEP_S` each worker
+announces again the runs `queued` with no lease for longer than `QUEUE_STALE_S`
+(`agentic_store.requeue_stale_runs`). A claimed run whose spec this worker cannot load (one a
+newer API wrote) is failed with `UNLOADABLE_SPEC_REASON` and the worker goes on to the next run.
+
 A run executes under the policy it was created with (`StoredRun.policy`). The worker enforces its
 wall time: the run's time spent executing so far (`agentic_store.active_seconds`, which leaves out
 time paused at a gate) plus this attempt's must stay within `wall_time_s`. Past it, the worker
@@ -89,6 +95,7 @@ from agentic_engine.graph import (
     Checkpointer,
     WorkflowRunResult,
     log_policy_stop,
+    record_unloadable_run,
     record_unstarted_run,
     resume_workflow,
     run_workflow,
@@ -136,6 +143,7 @@ from agentic_store import (
     PostgresArtifactStore,
     PostgresEventSink,
     StoredRun,
+    UnloadableRun,
     active_seconds,
     cancel_reason,
     cancel_requested,
@@ -153,6 +161,7 @@ from agentic_store import (
     release_run,
     renew_lease,
     repo_created,
+    requeue_stale_runs,
     run_ended,
     waiting_run_ids,
     workspace_price_table,
@@ -167,6 +176,9 @@ from agentic_worker.integrate import SandboxIntegrator
 from agentic_worker.review import SandboxGateReview
 
 log = logging.getLogger("agentic_worker")
+
+# The start of a run's `failure_reason` when its stored spec cannot be loaded by this worker.
+UNLOADABLE_SPEC_REASON = "this worker cannot load the run's spec"
 
 
 def _default_worker_id() -> str:
@@ -215,6 +227,12 @@ class WorkerSettings(BaseSettings):
     cancel_poll_s: float = Field(default=1.0, gt=0)
     # How often waiting runs are checked for a gate past its time to live (`expire_gates`).
     gate_sweep_s: float = Field(default=30.0, gt=0)
+    # A run `queued` with no lease for this long (since it was queued or last announced) is
+    # announced again: its id was lost before a worker claimed it (12.1). The API reads the same
+    # variable to call a queued run stalled.
+    queue_stale_s: float = Field(default=60.0, gt=0)
+    # How often the worker looks for such runs (and once when it starts).
+    queue_sweep_s: float = Field(default=15.0, gt=0)
     # Claims of one run before it fails instead of being resumed again (a run that kills workers).
     max_attempts: int = Field(default=3, ge=1)
     # The platform's GitHub App (the same settings as the API's). Unset, runs clone GitHub repos
@@ -577,6 +595,48 @@ async def _sweep_gates(worker: Worker, redis: Redis) -> None:
         await asyncio.sleep(worker.settings.gate_sweep_s)
 
 
+async def _sweep_queue(worker: Worker, redis: Redis) -> None:
+    """Once at start, then every `queue_sweep_s`, announce again the runs left `queued` with no
+    lease past `queue_stale_s` (`requeue_stale_runs`). Runs as long as the worker does."""
+    while True:
+        try:
+            for run_id in await requeue_stale_runs(
+                worker.sessions, redis, worker.settings.queue_stale_s
+            ):
+                log.warning("run %s was queued but never claimed; queued again", run_id)
+        except Exception:
+            log.warning("could not queue unclaimed runs again", exc_info=True)
+        await asyncio.sleep(worker.settings.queue_sweep_s)
+
+
+async def fail_unloadable(worker: Worker, run: UnloadableRun) -> None:
+    """End a claimed run whose spec this worker cannot load, with the reason, and release it. A
+    run that never started gets `run_started` then `run_failed`; one resumed only `run_failed`
+    after its last event. An error is logged, and the worker carries on."""
+    reason = f"{UNLOADABLE_SPEC_REASON}: {run.error}"
+    log.error("run %s failed: %s", run.id, reason)
+    sink = AttemptSink(PostgresEventSink(worker.sessions), lambda: False)
+    try:
+        last_seq = await max_event_seq(worker.sessions, run.id)
+        if last_seq == 0:
+            await record_unloadable_run(
+                run.input,
+                run_id=run.id,
+                sink=sink,
+                reason=reason,
+                workflow_id=run.workflow_id,
+                workflow_name=run.workflow_name,
+            )
+        else:
+            await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
+                RUN_FAILED, payload={"error": reason}
+            )
+    except Exception:
+        log.exception("run %s: could not record its failure", run.id)
+    finally:
+        await release_run(worker.sessions, run.id, worker.settings.worker_id)
+
+
 async def _end_over_limit(
     worker: Worker, run: StoredRun, sink: EventSink, over: PolicyLimitExceeded
 ) -> None:
@@ -820,9 +880,9 @@ async def _fail(run: StoredRun, sink: EventSink, last_seq: int, error: str) -> N
         )
 
 
-async def _next_run(worker: Worker, redis: Redis) -> StoredRun | None:
+async def _next_run(worker: Worker, redis: Redis) -> StoredRun | UnloadableRun | None:
     """An abandoned run to resume if there is one, else a new run from the queue (waiting up to
-    `queue_poll_s`); `None` if there is neither."""
+    `queue_poll_s`); `None` if there is neither. Either may be a run this worker cannot load."""
     settings = worker.settings
     run = await reclaim_expired_run(worker.sessions, settings.worker_id, settings.lease_ttl_s)
     if run is not None:
@@ -899,9 +959,13 @@ async def run(
                 ready.set()
             sweep = asyncio.create_task(_sweep_gates(worker, redis))
             stack.push_async_callback(_stop_task, sweep)
+            requeue = asyncio.create_task(_sweep_queue(worker, redis))
+            stack.push_async_callback(_stop_task, requeue)
             while not stop.is_set():
                 run = await _next_run(worker, redis)
-                if run is not None:
+                if isinstance(run, UnloadableRun):
+                    await fail_unloadable(worker, run)
+                elif run is not None:
                     await _until_stopped(process_run(worker, run, stop), stop)
             log.info("worker stopping")
     finally:

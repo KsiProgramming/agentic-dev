@@ -372,7 +372,30 @@ async def record_unstarted_run(
     await log.emit(RUN_END[status], payload={key: reason})
 
 
+async def record_unloadable_run(
+    input: str,
+    *,
+    run_id: UUID,
+    sink: EventSink,
+    reason: str,
+    workflow_id: str | None = None,
+    workflow_name: str | None = None,
+) -> None:
+    """Log a run whose spec could not be loaded (12.1): `run_started` with the workflow's id and
+    name as far as they could be read, then `run_failed` with `reason`."""
+    log = RunEventLog(run_id, sink)
+    await _emit_start(log, workflow_id, workflow_name, input)
+    await log.emit(RUN_END["failed"], payload={"error": reason})
+
+
 async def _start(log: RunEventLog, spec: WorkflowSpec, input: str) -> None:
+    await _emit_start(log, spec.id, spec.name, input)
+
+
+async def _emit_start(
+    log: RunEventLog, workflow_id: str | None, workflow_name: str | None, input: str
+) -> None:
     await log.emit(
-        RUN_STARTED, payload={"workflow_id": spec.id, "workflow_name": spec.name, "input": input}
+        RUN_STARTED,
+        payload={"workflow_id": workflow_id, "workflow_name": workflow_name, "input": input},
     )

@@ -68,6 +68,7 @@ async def expire_gates(sessions: async_sessionmaker[AsyncSession]) -> list[UUID]
                     worker_id=None,
                     lease_expires_at=None,
                     attempt=0,
+                    queued_at=func.now(),
                     cancel_requested_at=func.coalesce(Run.cancel_requested_at, func.now()),
                     cancel_reason=func.coalesce(Run.cancel_reason, APPROVAL_EXPIRED_REASON),
                 )

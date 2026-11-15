@@ -21,11 +21,11 @@ The phase does not change what agents receive, so lessons.md rule 1's real Claud
 ## Scope
 
 ### In scope
-- **Postgres is the queue's source of truth.** A new `queued_at` column (set whenever a run becomes `queued`: on creation, after a gate decision, after an expiry) and `enqueued_at` (the last push to Redis).
+- **Postgres is the queue's source of truth.** A new `queued_at` column (set whenever a run becomes `queued`: on creation, after a gate decision, a cancel or an expiry while waiting) and `enqueued_at` (the last time the sweep pushed it; the API's own pushes need not write it, since staleness is `GREATEST(queued_at, enqueued_at)`).
 - **A queue sweep in every worker,** beside `_sweep_gates`: when the worker starts and every `QUEUE_SWEEP_S` (default 15 s), the runs that are `queued` with no lease, `queued_at` older than `QUEUE_STALE_S` (default 60 s) and `enqueued_at` older than the same threshold are locked (`SKIP LOCKED`), given a new `enqueued_at`, and pushed to Redis again. Pushing an id twice is harmless: `claim_run` takes it only once and skips the rest.
 - **A spec this worker cannot load fails the run, not the worker.** The claim commits first; the spec is parsed after it. A parse error (a new claim or a reclaim) ends the run `failed` with `failure_reason = "this worker cannot load the run's spec: <error>"`, releases it, and the worker goes on to the next run. The `run_started` written first uses the raw spec's `id` and `name` where present.
-- **API:** `GET /runs/{id}` (and the summaries in `GET /runs`) return `queued_at` and `queue_stalled` (queued with no lease for longer than `QUEUE_STALE_S`, read from the same setting as the worker).
-- **Console:** a queued run's empty state shows "Queued <RelativeTime>" in place of "Waiting for the run to start…", and, when `queue_stalled`, a hint: "No worker has picked this run up yet. Check that a worker is running."
+- **API:** `GET /runs/{id}` (and the summaries in `GET /runs`) return `queued_at` and `queue_stalled_at` (while queued with no live lease, `queued_at` plus `QUEUE_STALE_S`, read from the same setting as the worker; else `null`). A timestamp rather than the planned `queue_stalled` boolean: nothing is written when a run becomes stalled, so the runs stream would never push the change, and the client compares the time with its own clock.
+- **Console:** a queued run's empty state shows "Queued <RelativeTime>" in place of "Waiting for the run to start…", and, once past `queue_stalled_at`, a hint: "No worker has picked this run up yet. Check that a worker is running."
 - Specs: tech-stack (queue and lease rules, run history contract, decisions-log row), `ideas.md` entry's open questions answered, CHANGELOG.
 
 ### Out of scope
@@ -44,7 +44,8 @@ The phase does not change what agents receive, so lessons.md rule 1's real Claud
 | When a run is stale | `queued_at` and `enqueued_at` both older than `QUEUE_STALE_S` (60 s) | Well above `queue_poll_s` (1 s) and a claim's round trip, so a run a live worker is about to claim is rarely pushed twice. A double push is harmless anyway, and `enqueued_at` stops the sweep from pushing the same id every tick. |
 | Two columns, not one | `queued_at` for people (the console), `enqueued_at` for the sweep | Pushing an id again must not reset "Queued 4 min ago". |
 | Unloadable spec | Parse after the claim commits; fail the run with a fixed-prefix reason and release it | The run reaches an outcome (principle 9) and one bad row cannot stop every worker. A rerun from a current worker recovers it. |
-| Stalled flag | Computed by the API from `QUEUE_STALE_S`, not by the browser | One threshold, read by both processes from one env var; the web never guesses it. |
+| Stalled flag | `queue_stalled_at`, computed by the API from `QUEUE_STALE_S`; the browser compares it with its clock | One threshold, read by both processes from one env var; the web never guesses it, and the hint appears on time without a write to push it. |
+| Upgrade order | The deployment guide rolls workers out before the API | A newer worker reads an older API's specs; an older worker now fails a run whose spec a newer API wrote. |
 
 ## Open questions
 - None. The idea's version-check question stays open in `ideas.md` (out of scope above).
