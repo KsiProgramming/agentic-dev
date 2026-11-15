@@ -43,6 +43,6 @@ Failing test first, as in 12.2: prove the gap, then backend, then console. Each 
 - [x] Vitest: `run-sandbox-line.test.tsx` (9), `saved-branches.test.tsx` (+1); `e2e/kept-sandbox.spec.ts` (the Done when, with axe on the sheet), with `SANDBOX_SWEEP_S=1` in the CI e2e env and `SANDBOX_SWEEP_S` in compose and `.env.example`.
 
 ## 7. Specs and docs
-- [ ] `specs/tech-stack.md`: Sandbox (kept sandboxes), "Saved branches" (changes, `wip`, retention), run history contract (`sandbox`, `/changes`, `DELETE /sandbox`), audit actions, Run console lines, decisions-log rows (time to live, stored changes, `wip`, retention).
-- [ ] `docs/operations/deployment.md`: `SANDBOX_SWEEP_S`, disk held by kept sandboxes.
-- [ ] `CHANGELOG.md` entry under `## [Unreleased]`.
+- [x] `specs/tech-stack.md`: Sandbox (kept sandboxes), "Saved branches" (changes, `wip`, retention), run history contract (`sandbox`, `/changes`, `DELETE /sandbox`), audit actions, Run console lines, decisions-log rows (time to live, stored changes, `wip`, retention).
+- [x] `docs/operations/deployment.md`: sizing (kept sandboxes, saved commits) and a troubleshooting row; `SANDBOX_SWEEP_S` in `.env.example` and `docker-compose.yml`.
+- [x] `CHANGELOG.md` entry under `## [Unreleased]`.

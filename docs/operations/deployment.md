@@ -158,9 +158,9 @@ Run the worker with `python -m agentic_worker` on the Python image, and set `SAN
 | web | 2 × (0.25 vCPU, 256 MB) | CPU |
 | api | 2 × (0.5 vCPU, 512 MB) | CPU, open SSE connections |
 | worker | 1 process per 1–2 concurrent runs; VMs of 4–8 vCPU, 16–32 GB | Queue depth (`runs` with status `queued`), waiting time to claim |
-| sandbox | 1 per active run, 1 CPU / 512 MB / 256 PIDs each | — |
+| sandbox | 1 per active run, 1 CPU / 512 MB / 256 PIDs each; a failed or cancelled run's stays (stopped work, its volume on disk) for the workspace's sandbox time to live, 24 h by default | Disk: kept volumes are about a clone each. Lower "Keep a failed run's sandbox" in Settings, Run limits, or remove one from its run's page |
 | job container | During a .NET lint only: 2 CPU / 2 GB / 512 PIDs, one at a time per lint | `SANDBOX_JOB_MEMORY`, `SANDBOX_JOB_CPUS` |
-| PostgreSQL | 2 vCPU, 8 GB, 100 GB SSD | Event and artifact volume; connections (each API process holds one `LISTEN` connection) |
+| PostgreSQL | 2 vCPU, 8 GB, 100 GB SSD | Event and artifact volume; saved commits (`run_branches`, bundles of up to 64 MB, dropped after the workspace's retention, 30 days by default); connections (each API process holds one `LISTEN` connection) |
 | Redis | Smallest managed tier | — |
 
 Each agent run is mostly waiting on the model provider, so CPU per worker is low. The policy limit `agents_alive` (8 by default) bounds concurrency within one run.
@@ -230,6 +230,7 @@ Target: RPO = your Postgres PITR window; RTO = time to restore Postgres and star
 | Runs stay `queued` (the console says "No worker has picked this run up yet") | No worker running, or workers cannot reach Redis/Postgres | Check worker health and logs. A run whose announcement was lost is queued again by any running worker within `QUEUE_STALE_S` + `QUEUE_SWEEP_S` (75 s by default; the worker logs "queued but never claimed") |
 | A run fails with "this worker cannot load the run's spec: …" | The worker is older than the API that wrote the spec (a rollout in progress) | Finish rolling out the workers, then rerun the run |
 | Runs fail with a sandbox error | Worker cannot reach Docker, or `SANDBOX_IMAGE` missing | Check `DOCKER_GID`/socket permissions; build or pull the sandbox image |
+| Sandboxes of failed runs pile up on a worker host | Kept for the workspace's sandbox time to live (24 h by default), or no worker is running the sweep | Lower the time in Settings, Run limits; check a worker is up (each one sweeps every `SANDBOX_SWEEP_S`, 60 s). A run's page says until when its sandbox is kept, and "Remove sandbox now" removes it within a minute |
 | .NET modules "skipped: NuGet restore is not configured" | `SANDBOX_NUGET_NETWORK`/`SANDBOX_NUGET_PROXY` unset on the worker | Run the egress proxy and set both (see Execution tier) |
 | .NET modules "restore failed: a package source is not reachable" | The proxy cannot reach `api.nuget.org`, or a package is only on a private feed | Check the proxy host's outbound HTTPS and its log; private feeds are not supported yet |
 | Runs on Claude fail because the stored key cannot be decrypted | Master key changed or differs between API and worker | Use the same key file on both; restore it, or enter keys again |

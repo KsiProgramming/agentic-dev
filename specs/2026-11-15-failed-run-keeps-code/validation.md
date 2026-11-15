@@ -4,13 +4,13 @@
 > A failed run's console shows what its writers changed and until when its sandbox is kept; once swept, the console says so and the changes are still shown
 
 ## Automated checks
-- [ ] Worker (Docker backend, run by test name, never all of `packages/sandbox/tests`): a failed run keeps its sandbox with `sandbox_kept_until`; a cancelled run and an expired approval's run do too; a succeeded run's is removed; the sweep removes a kept sandbox past its time to live and writes `sandbox.removed`; the startup orphan sweep spares a kept one; "remove now" is done by the next sweep.
-- [ ] Worker: a cancelled run's uncommitted edits (tracked and untracked) are a `wip` version with its changes; the worktree and branch are unchanged by the snapshot; a restore ignores `wip`.
-- [ ] Store: migration 0031 up and down; `expired_sandboxes` locks and skips; retention nulls `data` and keeps `changes`; limits and ceilings for `sandbox_ttl_s` and `branch_retention_days`.
-- [ ] API: `GET /runs/{id}` `sandbox` in each state; `GET /runs/{id}/changes`; `DELETE /runs/{id}/sandbox` `202` / `409` and its audit entry.
-- [ ] Engine and store: the stored `changes` match the gate's shape and caps (50 files, 512 KB).
-- [ ] Python: `ruff`, `pyright`, the package tests touched.
-- [ ] Web: `pnpm lint && pnpm typecheck && pnpm test` (Vitest for the sandbox line, "Remove sandbox now", the read-only sheet and its three states).
+- [x] Worker (`test_worker.py`, 82 passing; the fake sandbox for most, Docker for the Done-when test; never all of `packages/sandbox/tests`): a failed run keeps its sandbox with `sandbox_kept_until`; a cancelled run at a gate and an expired approval's run do too; a completed run's is removed; the sweep removes a kept sandbox past its time to live and writes `sandbox.removed`; the startup orphan sweep is given kept runs to spare (checked on what `build_sandboxes` receives, as a real sweep would remove the dev stack's sandboxes); "remove now" is the store's and the API's tests.
+- [x] Worker: a cancelled run's uncommitted edits (tracked and untracked) are a `wip` version with its changes; the worktree and branch are unchanged by the snapshot; a restore ignores `wip`.
+- [x] Store: migration 0031 up and down; `expired_sandboxes` locks and skips; retention nulls `data` and keeps `changes`; limits and ceilings for `sandbox_ttl_s` and `branch_retention_days`.
+- [x] API: `GET /runs/{id}` `sandbox` in each state; `GET /runs/{id}/changes`; `DELETE /runs/{id}/sandbox` `202` / `409` and its audit entry.
+- [x] Engine and store: the stored `changes` match the gate's shape and caps (50 files, 512 KB).
+- [x] Python: `ruff`, `pyright`, the package tests touched.
+- [x] Web: `pnpm lint && pnpm typecheck && pnpm test` (Vitest for the sandbox line, "Remove sandbox now", the read-only sheet and its three states).
 - [ ] Web: `pnpm test:e2e` locally, with your OK to start the e2e stack, including the new failed-run step, `a11y.spec.ts` and `layout.spec.ts`.
 
 ## Manual / demo checks
