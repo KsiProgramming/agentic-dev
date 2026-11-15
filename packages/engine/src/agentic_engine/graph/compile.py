@@ -77,7 +77,9 @@ end the run.
 """
 
 import asyncio
+import functools
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TypedDict, cast
@@ -105,10 +107,13 @@ from agentic_engine.artifacts import (
     reader_input,
     write_artifact,
 )
+from agentic_engine.branches import BranchSaver, owner_node
 from agentic_engine.budget import BudgetMeter
 from agentic_engine.events import (
     ARTIFACT_WRITTEN,
     BRANCH_INTEGRATED,
+    BRANCH_SAVE_FAILED,
+    BRANCH_SAVED,
     LOOP_CONDITION_EVALUATED,
     LOOP_ITERATION_STARTED,
     MAP_ITEM_COMPLETED,
@@ -196,6 +201,8 @@ from agentic_runtime.findings import (
     merge_reports,
 )
 
+_logger = logging.getLogger("agentic_engine")
+
 type CompiledWorkflow = CompiledStateGraph[RunState]
 type StepNode = AgentNode | ToolNode | GateNode
 
@@ -209,8 +216,9 @@ class _Limits:
     """A run's policy, the slots of its `agents_alive` limit, its budget meter if it has a
     budget, the review its gates show and edit branches through, the node each typed input
     comes from (consumer id → producer id, `port_edges`), the store of its artifacts, what
-    merges its orchestrators' task branches (6.3) and what every agent is told about the run
-    (`context`, `RunContext.text`), shared by all its nodes for one attempt."""
+    merges its orchestrators' task branches (6.3), what every agent is told about the run
+    (`context`, `RunContext.text`) and what saves its branches outside the sandbox (`saver`,
+    12.2), shared by all its nodes for one attempt."""
 
     policy: Policy
     budget: BudgetMeter | None = None
@@ -220,6 +228,7 @@ class _Limits:
     integrator: BranchIntegrator | None = None
     views: dict[str, dict[str, str]] = field(default_factory=dict[str, dict[str, str]])
     context: str = ""
+    saver: BranchSaver | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -385,12 +394,14 @@ def compile_workflow(
     artifacts: ArtifactStore | None = None,
     integrator: BranchIntegrator | None = None,
     context: RunContext | None = None,
+    saver: BranchSaver | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
     commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
     one), orchestrators merge their tasks' branches through `integrator` (6.3; none are merged
     without one), every agent is told `context` about the run (the repository it works on), and
-    all write to `log`, if given. With `checkpointer`,
+    all write to `log`, if given. Each step that may commit saves the run's branches through
+    `saver` before it is checkpointed (12.2; nothing is saved without one). With `checkpointer`,
     the state is saved after each node, in the run's thread; a spec with a gate needs one, since
     a paused run continues from it. The run's agents are held to `policy`'s `agents_alive` and
     `agents_spawned`, and their usage to `budget`; the spec itself is checked against it before
@@ -411,6 +422,7 @@ def compile_workflow(
         integrator,
         expression_views(spec.root),
         context.text() if context is not None else "",
+        saver,
     )
 
     loops: list[LoopNode] = []  # the loops `add` is inside
@@ -443,7 +455,9 @@ def compile_workflow(
                     node.id, _fan_out(node, over, items, limits), [worker, join, END]
                 )
                 builder.add_node(
-                    worker, _map_item(node, runtime, tools, log, limits), input_schema=MapItem
+                    worker,
+                    _saving(_map_item(node, runtime, tools, log, limits), log, limits),
+                    input_schema=MapItem,
                 )
                 builder.add_edge(worker, join)
                 builder.add_node(join, _map_join(node, log))
@@ -459,7 +473,7 @@ def compile_workflow(
                 builder.add_conditional_edges(node.id, _fan_out_branches(node), [worker, END])
                 builder.add_node(
                     worker,
-                    _parallel_branch(node, runtime, tools, log, limits),
+                    _saving(_parallel_branch(node, runtime, tools, log, limits), log, limits),
                     input_schema=ParallelBranch,
                 )
                 builder.add_edge(worker, join)
@@ -473,12 +487,14 @@ def compile_workflow(
                 builder.add_conditional_edges(node.id, _fan_out_tasks(at), [worker, join, END])
                 builder.add_node(
                     worker,
-                    _orchestrator_task(at, runtime, tools, log, limits),
+                    _saving(_orchestrator_task(at, runtime, tools, log, limits), log, limits),
                     input_schema=OrchestratorTask,
                 )
                 if body_writes(node):
                     merge = integrate_node_id(node)
-                    builder.add_node(merge, _orchestrator_integrate(at, log, limits))
+                    builder.add_node(
+                        merge, _saving(_orchestrator_integrate(at, log, limits), log, limits)
+                    )
                     builder.add_edge(worker, merge)
                     builder.add_edge(merge, join)
                 else:
@@ -524,13 +540,15 @@ def compile_workflow(
                 return node.id
             case ToolNode() if creates_repo(node):
                 ready = repo_ready_node_id(node)
-                builder.add_node(node.id, _step(node, runtime, tools, log, limits))
+                builder.add_node(node.id, _step(node, runtime, tools, log, limits))  # no sandbox
                 go_on(node.id, node.id, ready)
                 builder.add_node(ready, _repo_ready)
                 builder.add_edge(ready, then)
                 return node.id
             case AgentNode() | ToolNode() | GateNode():
-                builder.add_node(node.id, _step(node, runtime, tools, log, limits))
+                builder.add_node(
+                    node.id, _saving(_step(node, runtime, tools, log, limits), log, limits)
+                )
                 go_on(node.id, node.id, then)
                 return node.id
 
@@ -553,6 +571,46 @@ async def _repo_ready(state: RunState) -> RunUpdate:
     Changes nothing, so the next node gets the creating node's output."""
     interrupt({"kind": REPO_READY_KIND})
     return {}
+
+
+def _saving[T](
+    work: Callable[[T], Awaitable[RunUpdate]], log: RunEventLog, limits: _Limits
+) -> Callable[[T], Awaitable[RunUpdate]]:
+    """`work`, a step that may commit, then the run's branches saved through `limits.saver`
+    before its update is returned, and so before it is checkpointed (12.2): a crash cannot fall
+    between the step completing and its commits being saved. A step that raises (a gate pausing,
+    a cancel) saves nothing. Without a saver, `work` as it is."""
+    saver = limits.saver
+    if saver is None:
+        return work
+
+    @functools.wraps(work)
+    async def saving(state: T) -> RunUpdate:
+        update = await work(state)
+        await _save_branches(saver, log)
+        return update
+
+    return saving
+
+
+async def _save_branches(saver: BranchSaver, log: RunEventLog) -> None:
+    """Save the run's moved branches and log `branch_saved` or `branch_save_failed` for each.
+    A saver that breaks is logged and the step goes on: its commits stay in the sandbox."""
+    try:
+        saves = await saver.save()
+    except Exception:
+        _logger.exception("run %s: could not save its branches", log.run_id)
+        return
+    for saved in saves.saved:
+        await log.emit(
+            BRANCH_SAVED, node_id=owner_node(saved.key), payload=saved.model_dump(mode="json")
+        )
+    for failed in saves.failed:
+        await log.emit(
+            BRANCH_SAVE_FAILED,
+            node_id=owner_node(failed.key),
+            payload=failed.model_dump(mode="json"),
+        )
 
 
 def _step(

@@ -10,6 +10,13 @@ A run that reaches a gate pauses: it becomes `waiting`, the worker releases it a
 the run's sandbox is kept. A decision (`POST /runs/{id}/approvals`) queues it again, and the
 worker that claims it opens the kept sandbox and continues the run with the decision.
 
+Nothing a completed step committed is lost with a sandbox (12.2). A run's first clone records its
+commit (`runs.base_sha`), and every later sandbox of the run is cloned there. Each step that may
+commit saves the run's branches whose tip moved to Postgres as git bundles before it is
+checkpointed (`SandboxBranchSaver`). A fresh sandbox for a run that saved branches (its worker
+died, or the sandbox it kept at a gate is gone) gets them back before the graph resumes, and the
+run logs `branches_restored`.
+
 Each run's spec and input are read from Postgres and its events are written back there
 (`PostgresEventSink`), where the API streams them. Agents run on the fake runtime unless
 `AGENTIC_RUNTIME=claude`, which runs them on Claude with the Claude key stored (encrypted) in the
@@ -89,7 +96,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from agentic_engine.agent import RunContext
 from agentic_engine.artifacts import ArtifactStore
-from agentic_engine.events import RUN_CANCELLED, RUN_FAILED, EventSink, RunEvent, RunEventLog
+from agentic_engine.branches import BranchSaver
+from agentic_engine.events import (
+    BRANCHES_RESTORED,
+    RUN_CANCELLED,
+    RUN_FAILED,
+    EventSink,
+    RunEvent,
+    RunEventLog,
+)
 from agentic_engine.gate import GateDecision, GateReview
 from agentic_engine.graph import (
     Checkpointer,
@@ -127,7 +142,16 @@ from agentic_github import (
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
-from agentic_sandbox import FakeSandboxManager, RepoSource, SandboxError, SandboxManager
+from agentic_sandbox import (
+    BranchBundle,
+    FakeSandboxManager,
+    RepoSource,
+    Sandbox,
+    SandboxError,
+    SandboxManager,
+    branch_heads,
+    branch_name,
+)
 from agentic_sandbox.docker_backend import DEFAULT_IMAGE
 from agentic_secrets import (
     KeyProvider,
@@ -152,12 +176,14 @@ from agentic_store import (
     enqueue_run,
     expire_gates,
     get_github_installation,
+    latest_branches,
     leased_run_ids,
     load_secret,
     max_event_seq,
     open_checkpointer,
     pending_decision,
     reclaim_expired_run,
+    record_base_sha,
     release_run,
     renew_lease,
     repo_created,
@@ -172,6 +198,7 @@ from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
 from agentic_tools.scan import open_scan_tools
 from agentic_worker.artifacts import MirroredArtifactStore
+from agentic_worker.branches import SandboxBranchSaver
 from agentic_worker.integrate import SandboxIntegrator
 from agentic_worker.review import SandboxGateReview
 
@@ -669,7 +696,9 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
     whose repo it has yet to create has none, and only the `github` tools.
 
     A run continued after a gate decision opens the sandbox it kept when it paused, so its
-    writers' commits are still there; a run that pauses at a gate keeps its sandbox."""
+    writers' commits are still there; a run that pauses at a gate keeps its sandbox. A fresh
+    sandbox is cloned at the run's base commit and gets the branches the run saved back (12.2),
+    which the run logs (`branches_restored`) before its graph resumes."""
     last_seq = await max_event_seq(worker.sessions, run.id)
     decision = await pending_decision(worker.sessions, run.id) if last_seq else None
     tries = run.attempt - 1
@@ -688,6 +717,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
         tools: ToolExecutor | None = None
         review: SandboxGateReview | None = None
         integrator: SandboxIntegrator | None = None
+        saver: SandboxBranchSaver | None = None
         artifacts: ArtifactStore = PostgresArtifactStore(worker.sessions, run.id)
         mirror_dir: str | None = None
         if to_create and target is not None:
@@ -697,6 +727,8 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             )
         elif run.repo is not None:
             token = await _clone_token(worker, run.id, target)
+            # Only a run that has run before can have saved branches.
+            saved = await latest_branches(worker.sessions, run.id) if last_seq else []
             try:
                 with registered(token) if token is not None else contextlib.nullcontext():
                     sandbox = await stack.enter_async_context(
@@ -705,12 +737,18 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
                             worker.clone_source(run.repo) if worker.clone_source else run.repo,
                             reuse=decision is not None,
                             git_env=auth_env(token) if token is not None else None,
+                            at=run.base_sha,
+                            restore=saved,
                         )
                     )
+                if run.base_sha is None:
+                    await _record_base(worker, run, sandbox)
             except SandboxError as e:
                 log.warning("run %s has no sandbox: %s", run.id, e)
                 await _fail(run, sink, last_seq, str(e))
                 return "failed"
+            if sandbox.restored:
+                last_seq = await _log_restored(run, sink, last_seq, sandbox, saved)
             mirrored = MirroredArtifactStore(artifacts, sandbox)
             await mirrored.mirror_all()
             artifacts, mirror_dir = mirrored, sandbox.artifacts_dir
@@ -719,6 +757,7 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             tasked = task_writer_orchestrators(run.spec.root, WRITE_TOOL_NAMES)
             review = SandboxGateReview(sandbox, run.id, writers, tasked)
             integrator = SandboxIntegrator(sandbox, run.id)
+            saver = SandboxBranchSaver(sandbox, worker.sessions, run.id, tasked)
             tools = await stack.enter_async_context(
                 open_repo_tools(sandbox, run_id=run.id, writers=writers, task_writers=tasked)
             )
@@ -744,11 +783,44 @@ async def _attempt(worker: Worker, run: StoredRun, sink: EventSink) -> str:
             await _fail(run, sink, last_seq, str(e))
             return "failed"
         result = await _workflow(
-            worker, run, sink, last_seq, runtime, tools, decision, review, artifacts, integrator
+            worker,
+            run,
+            sink,
+            last_seq,
+            runtime,
+            tools,
+            decision,
+            review,
+            artifacts,
+            integrator,
+            saver,
         )
         if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
         return result.status
+
+
+async def _record_base(worker: Worker, run: StoredRun, sandbox: Sandbox) -> None:
+    """Record the commit the run's first clone is at, which its later sandboxes are cloned at
+    (12.2). Raises `SandboxError` if git cannot say."""
+    heads = await branch_heads(sandbox, branch_name(run.id, ""))
+    await record_base_sha(worker.sessions, run.id, heads.base)
+
+
+async def _log_restored(
+    run: StoredRun, sink: EventSink, last_seq: int, sandbox: Sandbox, saved: list[BranchBundle]
+) -> int:
+    """Log `branches_restored` for the branches a fresh sandbox got back; returns the new last
+    event's seq."""
+    heads = {b.branch: b.head_sha for b in saved}
+    branches: list[JsonValue] = [
+        {"branch": branch, "head": heads[branch]} for branch in sandbox.restored
+    ]
+    await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
+        BRANCHES_RESTORED, payload={"branches": branches}
+    )
+    log.info("run %s: %d saved branch(es) restored", run.id, len(branches))
+    return last_seq + 1
 
 
 def uses_github(spec: WorkflowSpec) -> bool:
@@ -823,11 +895,13 @@ async def _workflow(
     review: GateReview | None = None,
     artifacts: ArtifactStore | None = None,
     integrator: BranchIntegrator | None = None,
+    saver: BranchSaver | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
     run paused at a gate continues with `decision`, and its gates show and edit the writers'
     branches through `review`, and its orchestrators merge their tasks' branches through
-    `integrator` (6.3). Its artifacts go to `artifacts`. A run with a budget counts what
+    `integrator` (6.3). Its branches are saved through `saver` (12.2). Its artifacts go to
+    `artifacts`. A run with a budget counts what
     its earlier attempts spent (`runs.estimated_usd` when it was claimed)."""
     if last_seq == 0:
         log.info("run %s started", run.id)
@@ -845,6 +919,7 @@ async def _workflow(
             artifacts=artifacts,
             integrator=integrator,
             context=run_context(run),
+            saver=saver,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -864,6 +939,7 @@ async def _workflow(
         artifacts=artifacts,
         integrator=integrator,
         context=run_context(run),
+        saver=saver,
     )
 
 

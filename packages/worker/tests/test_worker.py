@@ -3,9 +3,10 @@ import base64
 import io
 import json
 import logging
+import os
 import re
 import subprocess
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from decimal import Decimal
@@ -52,7 +53,7 @@ from agentic_runtime import (
 )
 from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script
 from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
-from agentic_sandbox import FakeSandboxManager, RepoSource, Sandbox, SandboxManager
+from agentic_sandbox import BranchBundle, FakeSandboxManager, RepoSource, Sandbox, SandboxManager
 from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
 from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_secrets import LocalKeyProvider, generate_key_file, install_redaction
@@ -70,6 +71,7 @@ from agentic_store import (
     list_audit_events,
     list_run_artifacts,
     list_run_events,
+    list_saved_branches,
     pending_gate,
     put_connection,
     put_github_connection,
@@ -515,9 +517,13 @@ class RecordingSandboxes:
         *,
         reuse: bool = False,
         git_env: Mapping[str, str] | None = None,
+        at: str | None = None,
+        restore: Sequence[BranchBundle] = (),
     ) -> AsyncGenerator[Sandbox]:
         try:
-            async with self._inner.open(run_id, repo, reuse=reuse, git_env=git_env) as box:
+            async with self._inner.open(
+                run_id, repo, reuse=reuse, git_env=git_env, at=at, restore=restore
+            ) as box:
                 try:
                     yield box
                 finally:
@@ -1081,11 +1087,13 @@ class MirroredSandboxes:
         *,
         reuse: bool = False,
         git_env: Mapping[str, str] | None = None,
+        at: str | None = None,
+        restore: Sequence[BranchBundle] = (),
     ) -> AsyncGenerator[Sandbox]:
         self.git_envs.append(dict(git_env) if git_env is not None else None)
         local = RepoSource(url=self._mirrors.get(repo.url, repo.url), ref=repo.ref)
         try:
-            async with self._inner.open(run_id, local, reuse=reuse) as box:
+            async with self._inner.open(run_id, local, reuse=reuse, at=at, restore=restore) as box:
                 yield box
         finally:
             self.closed.set()
@@ -1917,6 +1925,15 @@ def scripted(scripts: dict[str, Script]) -> RuntimeFactory:
     return lambda tools: FakeRuntime(dict(scripts), tools=tools)
 
 
+def commit_later(origin: Path) -> None:
+    """A new commit on the repo's default branch, as a teammate's push would make."""
+    (origin / "LATER.md").write_text("later\n", encoding="utf-8")
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    identity = ["-c", "user.name=t", "-c", "user.email=t@e.invalid"]
+    subprocess.run(["git", "add", "LATER.md"], cwd=origin, check=True, env=env)
+    subprocess.run(["git", *identity, "commit", "-qm", "later"], cwd=origin, check=True, env=env)
+
+
 def remove_sandbox(client: docker.DockerClient, run_id: UUID) -> None:
     """Remove the run's sandbox container and volume, as a host that lost them would."""
     for container in containers_of(client, run_id):
@@ -1925,7 +1942,6 @@ def remove_sandbox(client: docker.DockerClient, run_id: UUID) -> None:
         volume.remove(force=True)
 
 
-@pytest.mark.xfail(strict=True, reason="12.2: branches are not saved outside the sandbox yet")
 async def test_done_when_a_killed_worker_s_run_resumes_with_its_writer_s_commit(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
 ) -> None:
@@ -1948,6 +1964,18 @@ async def test_done_when_a_killed_worker_s_run_resumes_with_its_writer_s_commit(
         run_id = await submit(sessions, redis_url, spec, repo)
         await wait_for_event(sessions, run_id, "node_started", "reviewer")
 
+    # Saved outside the sandbox before the worker went: the bundle is in Postgres.
+    branch = f"agent/{run_id}/writer"
+    [stored] = await list_saved_branches(sessions, run_id)
+    assert (stored.branch, stored.node_key, stored.kind, stored.commits) == (
+        branch,
+        "writer",
+        "writer",
+        1,
+    )
+    run_before = await get_run(sessions, run_id)
+    assert run_before is not None and run_before.base_sha == stored.base_sha
+
     branch_log = BranchLog()
     sandboxes = RecordingSandboxes(
         DockerSandboxManager(client, local_root=repos), inspect=branch_log
@@ -1963,14 +1991,18 @@ async def test_done_when_a_killed_worker_s_run_resumes_with_its_writer_s_commit(
         await asyncio.wait_for(sandboxes.closed.wait(), 30)
 
     name, email = COMMIT_AUTHOR
-    assert branch_log.branches == [f"agent/{run_id}/writer"]
+    assert branch_log.branches == [branch]
     assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
     events = await list_run_events(sessions, run_id)
+    [saved] = [e.payload for e in events if e.type == "branch_saved"]
+    assert (saved["key"], saved["branch"], saved["head"]) == ("writer", branch, stored.head_sha)
     [restored] = [e for e in events if e.type == "branches_restored"]
-    assert [b["branch"] for b in restored.payload["branches"]] == [f"agent/{run_id}/writer"]
+    assert restored.payload == {"branches": [{"branch": branch, "head": stored.head_sha}]}
+    assert [e.type for e in events].index("branches_restored") < [e.type for e in events].index(
+        "run_resumed"
+    )
 
 
-@pytest.mark.xfail(strict=True, reason="12.2: branches are not saved outside the sandbox yet")
 async def test_done_when_a_waiting_run_whose_sandbox_was_removed_keeps_its_writer_s_commit(
     sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
 ) -> None:
@@ -2007,3 +2039,56 @@ async def test_done_when_a_waiting_run_whose_sandbox_was_removed_keeps_its_write
     name, email = COMMIT_AUTHOR
     assert branch_log.branches == [f"agent/{run_id}/writer"]
     assert branch_log.commits == [f"{name} <{email}>|Add NOTES.md", "NOTES.md"]
+
+
+async def test_a_resumed_run_works_on_its_base_commit_after_the_branch_moved_on(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    """12.2: the default branch gains a commit while the run is between workers; the resumed
+    sandbox is cloned at the run's base commit, so its saved branch applies and its agents read
+    the code the run started on."""
+    repos = tmp_path / "repos"
+    origin = repos / "hello"
+    make_repo(origin)
+    repo = RepoSource(url=str(origin))
+    spec = commit_then({"type": "agent", "id": "reviewer", "role": "R", "instructions": "Go."})
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
+    first = scripted({"writer": notes_writer(), "reviewer": [Delay(30), ECHO_USAGE]})
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=first,
+        sandboxes=FakeSandboxManager(local_root=repos),
+        checkpointer=checkpointer,
+    ):
+        run_id = await submit(sessions, redis_url, spec, repo)
+        await wait_for_event(sessions, run_id, "node_started", "reviewer")
+    run_before = await get_run(sessions, run_id)
+    assert run_before is not None and run_before.base_sha is not None
+    await asyncio.to_thread(commit_later, origin)
+
+    heads: list[str] = []
+
+    async def head(box: Sandbox) -> None:
+        heads.append((await box.exec(["git", "rev-parse", "HEAD"])).stdout.strip())
+
+    branch_log = BranchLog()
+
+    async def inspect(box: Sandbox) -> None:
+        await head(box)
+        await branch_log(box)
+
+    sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos), inspect=inspect)
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=scripted({}),
+        sandboxes=sandboxes,
+        checkpointer=checkpointer,
+    ):
+        await wait_for_status(sessions, run_id, "completed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 30)
+
+    assert heads == [run_before.base_sha]
+    assert branch_log.branches == [f"agent/{run_id}/writer"]
+    assert "NOTES.md" in branch_log.commits
