@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 12.1 recover runs lost before a worker claims them:
+- Phase 12.1 recover runs lost before a worker claims them ([#172](https://github.com/KsiProgramming/agentic-dev/pull/172)):
   - **Lost runs come back.** Postgres is the queue's source of truth: when a worker starts and every `QUEUE_SWEEP_S` (15 s), it queues again the runs left `queued` with no worker holding them for `QUEUE_STALE_S` (60 s), so a run whose id was popped by a worker killed before it claimed the run still starts. `runs.queued_at` and `runs.enqueued_at` (Alembic `0029_run_queue_times`).
   - **A spec the worker cannot load fails the run, not the worker.** The claim commits before the spec is parsed; such a run ends `failed` with "this worker cannot load the run's spec: …", and the worker carries on. Before, the worker loop stopped and the run stayed queued for good.
   - **API.** Run summaries have `queued_at` and `queue_stalled_at`; the API reads `QUEUE_STALE_S`.

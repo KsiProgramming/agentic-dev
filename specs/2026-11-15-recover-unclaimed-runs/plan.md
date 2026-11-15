@@ -26,7 +26,7 @@ Test first: each group starts with the test that fails today, and the project st
 - [x] `packages/api` settings: `queue_stale_s` from the same `QUEUE_STALE_S` env var.
 - [x] `agentic_store.summaries` and `agentic_api.runs.models`: `queued_at: datetime` and `queue_stalled_at: datetime | None` on the run summary and detail. API tests for a fresh and a stalled queued run.
 - [x] `web/src/runs`: the API types gain the two fields. `run-console.tsx`'s queued empty state shows "Queued" with `RelativeTime` (from `queued_at`) and, once past `queue_stalled_at`, the hint as its one sentence. Update `run-console.test.tsx` for both states.
-- [ ] Check at 375 and 1440 px, light and dark.
+- [x] Check at 375 and 1440 px, light and dark.
 
 ## 5. Specs and docs
 - [x] `specs/tech-stack.md`: the queue and lease rules (Postgres is the source of truth, the queue sweep, the two settings, the unloadable-spec failure) next to the expiry rules in "Run history and rerun"; `queued_at` / `queue_stalled` in the run summary contract; the console's queued state in "Run console"; a decisions-log row "Queue recovery (12.1)".
