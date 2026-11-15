@@ -34,9 +34,12 @@ import { ConfirmButton } from "./confirm-dialog";
 import { ConnectionCard } from "./connection-card";
 
 const PURPOSE =
-  "What one run may use. A run that goes over a limit stops with the reason. Lower a limit to tighten it; a run keeps the limits it started with.";
+  "What one run may use, and how long what it leaves is kept. A run that goes over a limit stops with the reason. Lower a limit to tighten it; a run keeps the limits it started with.";
 
-type CountKey = Exclude<keyof RunLimits, "wall_time_s" | "approval_ttl_s" | "budget_usd">;
+type CountKey = Exclude<
+  keyof RunLimits,
+  "wall_time_s" | "approval_ttl_s" | "budget_usd" | "sandbox_ttl_s" | "branch_retention_days"
+>;
 
 const COUNT_FIELDS = [
   {
@@ -74,7 +77,19 @@ function count(max: number) {
     .refine((v) => v === "" || (Number(v) >= 1 && Number(v) <= max), `From 1 to ${max}.`);
 }
 
-function schemaFor(defaults: RunLimits) {
+/** Hours, like 24 or 0.5, from 1 minute to `max` seconds; "" keeps the platform's. */
+function hours(max: number) {
+  return z
+    .string()
+    .trim()
+    .refine((v) => v === "" || /^\d+(\.\d{1,2})?$/.test(v), "Hours, like 24 or 0.5.")
+    .refine(
+      (v) => v === "" || (ttlSeconds(v)! >= 60 && ttlSeconds(v)! <= max),
+      `From 1 minute to ${duration(max)}.`,
+    );
+}
+
+function schemaFor(defaults: RunLimits, ceilings: RunLimits) {
   const minutes = z
     .string()
     .trim()
@@ -87,14 +102,9 @@ function schemaFor(defaults: RunLimits) {
       max_depth: count(defaults.max_depth),
       wall_time_hours: minutes,
       wall_time_minutes: minutes,
-      approval_ttl_hours: z
-        .string()
-        .trim()
-        .refine((v) => v === "" || /^\d+(\.\d{1,2})?$/.test(v), "Hours, like 24 or 0.5.")
-        .refine(
-          (v) => v === "" || (ttlSeconds(v)! >= 60 && ttlSeconds(v)! <= defaults.approval_ttl_s),
-          `From 1 minute to ${duration(defaults.approval_ttl_s)}.`,
-        ),
+      approval_ttl_hours: hours(defaults.approval_ttl_s),
+      sandbox_ttl_hours: hours(ceilings.sandbox_ttl_s),
+      branch_retention_days: count(ceilings.branch_retention_days),
       budget_usd: budgetSchema(),
     })
     .superRefine((v, ctx) => {
@@ -118,7 +128,7 @@ function wallTimeSeconds(hours: string, minutes: string): number | null {
   return (Number(hours || 0) * 60 + Number(minutes || 0)) * 60;
 }
 
-/** Seconds from the approval time to live in hours; null when empty (the platform's). */
+/** Seconds from a time to live in hours; null when empty (the platform's). */
 function ttlSeconds(hours: string): number | null {
   return hours.trim() === "" ? null : Math.round(Number(hours) * 3600);
 }
@@ -145,6 +155,11 @@ function valuesOf(overrides: RunLimitOverrides): Values {
       overrides.approval_ttl_s == null
         ? ""
         : String(Math.round((overrides.approval_ttl_s / 3600) * 100) / 100),
+    sandbox_ttl_hours:
+      overrides.sandbox_ttl_s == null
+        ? ""
+        : String(Math.round((overrides.sandbox_ttl_s / 3600) * 100) / 100),
+    branch_retention_days: overrides.branch_retention_days?.toString() ?? "",
     budget_usd: overrides.budget_usd?.toString() ?? "",
   };
 }
@@ -159,6 +174,8 @@ function overridesOf(values: Values): RunLimitOverrides {
     wall_time_s: wallTimeSeconds(values.wall_time_hours, values.wall_time_minutes),
     approval_ttl_s: ttlSeconds(values.approval_ttl_hours),
     budget_usd: parseBudget(values.budget_usd),
+    sandbox_ttl_s: ttlSeconds(values.sandbox_ttl_hours),
+    branch_retention_days: number(values.branch_retention_days),
   };
 }
 
@@ -206,9 +223,9 @@ function LimitsForm({
   baseUrl?: string;
 }) {
   const save = useSavePolicy({ workspaceId, baseUrl });
-  const { defaults, overrides } = policy;
+  const { defaults, ceilings, overrides } = policy;
   const form = useForm<Values>({
-    resolver: zodResolver(schemaFor(defaults)),
+    resolver: zodResolver(schemaFor(defaults, ceilings)),
     defaultValues: valuesOf(overrides),
   });
   const errors = form.formState.errors;
@@ -232,6 +249,10 @@ function LimitsForm({
           form.setError("approval_ttl_hours", { message: issue.msg });
         }
         if (field === "budget_usd") form.setError("budget_usd", { message: issue.msg });
+        if (field === "sandbox_ttl_s") form.setError("sandbox_ttl_hours", { message: issue.msg });
+        if (field === "branch_retention_days") {
+          form.setError("branch_retention_days", { message: issue.msg });
+        }
         const known = COUNT_FIELDS.find((f) => f.key === field);
         if (known) form.setError(known.key, { message: issue.msg });
       }
@@ -281,6 +302,27 @@ function LimitsForm({
         registration={form.register("approval_ttl_hours")}
         disabled={pending}
       />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <LimitInput
+          label="Keep a failed run's sandbox (hours)"
+          help={`How long the sandbox of a failed or cancelled run stays, to look into; then it is removed and what its writers changed stays. Default ${duration(defaults.sandbox_ttl_s)}, at most ${duration(ceilings.sandbox_ttl_s)}.`}
+          placeholder={String(defaults.sandbox_ttl_s / 3600)}
+          unit="h"
+          inputMode="decimal"
+          error={errors.sandbox_ttl_hours?.message}
+          registration={form.register("sandbox_ttl_hours")}
+          disabled={pending}
+        />
+        <LimitInput
+          label="Keep saved commits (days)"
+          help={`How long a finished run's saved commits stay, for a rerun from a step; the files they changed stay for good. Default ${defaults.branch_retention_days} days, at most ${ceilings.branch_retention_days}.`}
+          placeholder={String(defaults.branch_retention_days)}
+          unit="days"
+          error={errors.branch_retention_days?.message}
+          registration={form.register("branch_retention_days")}
+          disabled={pending}
+        />
+      </div>
       <LimitInput
         label="Budget (USD)"
         help="The most a run may spend; it stops once its cost reaches this. Empty: no budget, and runs are not capped. A run may set its own when it starts."

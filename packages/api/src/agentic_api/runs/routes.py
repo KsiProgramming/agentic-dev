@@ -31,10 +31,12 @@ from agentic_api.runs.models import (
     RunCounts,
     RunDetail,
     RunGate,
+    RunSandbox,
     RunStatus,
     RunSummary,
     RunSummaryPage,
     RunUsage,
+    SavedBranchChanges,
     WaitingGate,
     WorkflowRef,
     uses_github,
@@ -48,6 +50,7 @@ from agentic_engine.spec import (
     call_documents,
     creates_repo,
     messages,
+    task_writer_orchestrator,
 )
 from agentic_engine.templates import wrap_with_create_repo
 from agentic_github import GithubApiError, github_remote
@@ -64,6 +67,8 @@ from agentic_store import (
     RunNotEndedError,
     RunNotFoundError,
     RunSummaryRow,
+    SandboxInfo,
+    SandboxNotKeptError,
     StoredArtifact,
     WorkflowNotFoundError,
     WorkspaceNotFoundError,
@@ -84,8 +89,10 @@ from agentic_store import (
     pending_gate,
     record_approval,
     request_cancel,
+    request_sandbox_removal,
     resolve_workflow,
     run_spec,
+    saved_changes,
 )
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -325,9 +332,65 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
         **_summary_fields(request, row),
         input=row.input,
         failure_reason=row.failure_reason,
+        sandbox=_sandbox(row.sandbox),
         spec=WorkflowSpec.model_validate(row.spec),
         calls=_calls(row.spec, row.subflows),
     )
+
+
+def _sandbox(info: SandboxInfo) -> RunSandbox:
+    return RunSandbox.model_validate(info.model_dump())
+
+
+@router.get(
+    "/{run_id}/changes",
+    operation_id="listRunChanges",
+    responses={404: {"description": "No run with this id"}},
+)
+async def changes(
+    run_id: Annotated[UUID, Depends(existing_run)], request: Request
+) -> list[SavedBranchChanges]:
+    """What the run's writers changed (12.3): the latest saved version of each of its branches,
+    by branch, with the files it changed. Read from what was saved, so it is there after the
+    run's sandbox, and its saved commits, are gone."""
+    return [
+        SavedBranchChanges(
+            node_id=task_writer_orchestrator(saved.node_key) or saved.node_key,
+            key=saved.node_key,
+            branch=saved.branch,
+            kind=saved.kind,
+            version=saved.version,
+            head=saved.head_sha,
+            commits=saved.commits,
+            saved_at=saved.created_at,
+            changes=saved.changes,
+            changes_error=saved.changes_error,
+            bundle_removed_at=saved.bundle_removed_at,
+        )
+        for saved in await saved_changes(_sessions(request), run_id)
+    ]
+
+
+@router.delete(
+    "/{run_id}/sandbox",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="removeRunSandbox",
+    responses={
+        404: {"description": "No run with this id"},
+        409: {"description": "The run has no kept sandbox: it has not ended, or it is removed"},
+    },
+)
+async def remove_sandbox(run_id: UUID, request: Request) -> RunSandbox:
+    """Ask for the run's kept sandbox to be removed now instead of at the end of its time to
+    live. A worker removes it within a minute; its saved commits and changes stay. Asking
+    again before then is accepted."""
+    try:
+        info = await request_sandbox_removal(_sessions(request), run_id)
+    except RunNotFoundError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except SandboxNotKeptError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    return _sandbox(info)
 
 
 def _calls(spec: dict[str, Any] | None, subflows: dict[str, Any] | None) -> dict[str, RunCall]:

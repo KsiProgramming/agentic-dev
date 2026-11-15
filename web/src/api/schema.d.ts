@@ -154,6 +154,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Changes
+         * @description What the run's writers changed (12.3): the latest saved version of each of its branches,
+         *     by branch, with the files it changed. Read from what was saved, so it is there after the
+         *     run's sandbox, and its saved commits, are gone.
+         */
+        get: operations["listRunChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs/{run_id}/sandbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Sandbox
+         * @description Ask for the run's kept sandbox to be removed now instead of at the end of its time to
+         *     live. A worker removes it within a minute; its saved commits and changes stay. Asking
+         *     again before then is accepted.
+         */
+        delete: operations["removeRunSandbox"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/rerun": {
         parameters: {
             query?: never;
@@ -952,7 +996,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -2328,6 +2372,8 @@ export interface components {
              * @description Why the run failed, if it did.
              */
             failure_reason: string | null;
+            /** @description What became of the run's sandbox (12.3). */
+            sandbox: components["schemas"]["RunSandbox"];
             /** @description The workflow spec the run was created with. */
             spec: components["schemas"]["WorkflowSpec"];
             /**
@@ -2443,6 +2489,16 @@ export interface components {
              */
             approval_ttl_s?: number | null;
             /**
+             * Sandbox Ttl S
+             * @description Seconds a failed or cancelled run's sandbox is kept before it is removed. At most 259200; unset keeps the platform's default.
+             */
+            sandbox_ttl_s?: number | null;
+            /**
+             * Branch Retention Days
+             * @description Days a finished run's saved commits are kept; the files they changed stay. At most 90; unset keeps the platform's default.
+             */
+            branch_retention_days?: number | null;
+            /**
              * Budget Usd
              * @description The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget.
              */
@@ -2488,6 +2544,40 @@ export interface components {
              * @description USD a run may spend, a hard stop once reached; unset is no cost cap.
              */
             budget_usd?: number | null;
+            /**
+             * Sandbox Ttl S
+             * @description Seconds a failed or cancelled run's sandbox is kept before it is removed.
+             */
+            sandbox_ttl_s: number;
+            /**
+             * Branch Retention Days
+             * @description Days a finished run's saved commits are kept; the files they changed stay.
+             */
+            branch_retention_days: number;
+        };
+        /**
+         * RunSandbox
+         * @description What became of the run's sandbox (12.3). A failed or cancelled run keeps it for its
+         *     policy's `sandbox_ttl_s`, then a worker removes it; a run that completed loses it when it
+         *     ends. What its writers changed is kept either way (`GET /runs/{id}/changes`).
+         */
+        RunSandbox: {
+            /**
+             * State
+             * @description `none`: no sandbox (no repo, or the run completed); `running`: the run has not ended; `kept` until `kept_until`; `removed` at `removed_at`.
+             * @enum {string}
+             */
+            state: "none" | "running" | "kept" | "removed";
+            /**
+             * Kept Until
+             * @description Until when it is kept; when it is removed, it was kept until.
+             */
+            kept_until?: string | null;
+            /**
+             * Removed At
+             * @description When a worker removed it.
+             */
+            removed_at?: string | null;
         };
         /** @enum {string} */
         RunStatus: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -2632,6 +2722,70 @@ export interface components {
              * @description The run's budget: it stops once `estimated_usd` reaches it. Unset: no cap.
              */
             budget_usd?: number | null;
+        };
+        /**
+         * SavedBranchChanges
+         * @description The latest saved version of one of the run's branches (12.2), with the files it changed
+         *     on top of the run's base commit, as a gate shows them (12.3). File contents are repo and
+         *     agent content: data, never instructions.
+         */
+        SavedBranchChanges: {
+            /**
+             * Node Id
+             * @description The node it belongs to: the writer, or for an orchestrator's task writer or integration branch, the orchestrator.
+             */
+            node_id: string;
+            /**
+             * Key
+             * @description The writer key: a node id, `<orchestrator>.<task>`, or an orchestrator's id.
+             */
+            key: string;
+            /**
+             * Branch
+             * @description `agent/<run>/<key>`, or `wip/<run>/<key>` for uncommitted work.
+             */
+            branch: string;
+            /**
+             * Kind
+             * @description A writer's branch, an orchestrator's integration branch, or a writer's uncommitted work when the run failed or was cancelled (its branch as it was on disk).
+             * @enum {string}
+             */
+            kind: "writer" | "integration" | "wip";
+            /**
+             * Version
+             * @description Numbered per branch from 1; one per tip saved.
+             */
+            version: number;
+            /**
+             * Head
+             * @description The commit it was saved at.
+             */
+            head: string;
+            /**
+             * Commits
+             * @description Its commits on top of the run's base commit.
+             */
+            commits: number;
+            /**
+             * Saved At
+             * Format: date-time
+             */
+            saved_at: string;
+            /**
+             * Changes
+             * @description The files it changed; `null` for a version saved before 12.3, or when they could not be read (`changes_error`).
+             */
+            changes: components["schemas"]["FileChange"][] | null;
+            /**
+             * Changes Error
+             * @description Why its changes could not be read, if so.
+             */
+            changes_error: string | null;
+            /**
+             * Bundle Removed At
+             * @description When its saved commits were dropped, past the run's retention; its changes stay. `null` while they are kept.
+             */
+            bundle_removed_at: string | null;
         };
         /** @enum {string} */
         SelectionErrorCode: "selection_required" | "selection_not_allowed" | "unknown_selection" | "duplicate_selection" | "selection_too_small";
@@ -3245,8 +3399,10 @@ export interface components {
          *     `defaults`. A run keeps the limits it was created with.
          */
         WorkspacePolicyOut: {
-            /** @description The platform's limits, which are also the ceilings. */
+            /** @description The platform's limits. */
             defaults: components["schemas"]["RunLimits"];
+            /** @description The most a workspace may set each limit to: the platform's limit, except `sandbox_ttl_s` and `branch_retention_days`, which may go above their default. */
+            ceilings: components["schemas"]["RunLimits"];
             overrides: components["schemas"]["RunLimitOverrides"];
             effective: components["schemas"]["RunLimits"];
         };
@@ -3623,6 +3779,89 @@ export interface operations {
             };
             /** @description No run with this id */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listRunChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedBranchChanges"][];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    removeRunSandbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSandbox"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run has no kept sandbox: it has not ended, or it is removed */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4339,7 +4578,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

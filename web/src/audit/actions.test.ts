@@ -184,6 +184,8 @@ test("each category has its actions", () => {
     "run.cancel_requested",
     "run.ended",
     "repo.created",
+    "sandbox.remove_requested",
+    "sandbox.removed",
   ]);
   expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
   expect(actionsOf("workflows")).toEqual([

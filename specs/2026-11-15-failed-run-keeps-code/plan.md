@@ -29,10 +29,10 @@ Failing test first, as in 12.2: prove the gap, then backend, then console. Each 
 - [x] Remove the last `xfail`; `test_snapshot.py`: the worktree, index and branch are untouched, untracked files are in, a clean worktree and another run's are left out. The gate's per-branch reading (`branch_file_changes`) is shared with the saver, so the caps are the gate's.
 
 ## 5. API
-- [ ] `GET /runs/{id}`: `sandbox` `{state, kept_until, removed_at}`; runs list unchanged.
-- [ ] `GET /runs/{id}/changes`: latest version per branch with `changes`; `404` unknown run.
-- [ ] `DELETE /runs/{id}/sandbox`: `202` when kept, `409` when running, none or already removed; audit `sandbox.remove_requested`.
-- [ ] Regenerate the web's OpenAPI client; API tests for each.
+- [x] `GET /runs/{id}`: `sandbox` `{state, kept_until, removed_at}` (`RunDetail` only; the runs list is unchanged).
+- [x] `GET /runs/{id}/changes`: latest version per branch with `changes`; `404` unknown run.
+- [x] `DELETE /runs/{id}/sandbox`: `202` when kept, `409` when running, none or already removed; audit `sandbox.remove_requested`.
+- [x] Regenerate the web's OpenAPI client; API tests for each (`test_run_sandboxes.py`). The web's audit log names the two new actions, and the settings card has the two new limits (from group 2), checked against `ceilings`.
 
 ## 6. Console
 - [ ] `web/src/runs/`: the end event's `sandbox_kept_until` in the timeline; the run summary's `sandbox` drives the line.

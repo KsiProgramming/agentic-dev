@@ -17,7 +17,10 @@ const DEFAULTS: RunLimits = {
   wall_time_s: 7200,
   approval_ttl_s: 259_200,
   budget_usd: null,
+  sandbox_ttl_s: 86_400,
+  branch_retention_days: 30,
 };
+const CEILINGS: RunLimits = { ...DEFAULTS, sandbox_ttl_s: 259_200, branch_retention_days: 90 };
 const UNSET: RunLimitOverrides = {
   agents_alive: null,
   agents_spawned: null,
@@ -26,6 +29,8 @@ const UNSET: RunLimitOverrides = {
   wall_time_s: null,
   approval_ttl_s: null,
   budget_usd: null,
+  sandbox_ttl_s: null,
+  branch_retention_days: null,
 };
 
 afterEach(() => {
@@ -37,7 +42,7 @@ function policyOf(overrides: RunLimitOverrides): WorkspacePolicy {
   for (const [key, value] of Object.entries(overrides)) {
     if (value != null) effective[key as keyof typeof DEFAULTS] = value;
   }
-  return { defaults: DEFAULTS, overrides, effective };
+  return { defaults: DEFAULTS, ceilings: CEILINGS, overrides, effective };
 }
 
 /** An API whose stored limits follow PUT. */
@@ -226,6 +231,38 @@ test("the approval time to live is entered in hours and saved in seconds", async
       "1.5",
     ),
   );
+});
+
+test("a failed run's sandbox and saved commits may be kept longer than the default", async () => {
+  const fetch = storingApi();
+  show();
+  const sandbox = await card().findByLabelText("Keep a failed run's sandbox (hours)");
+  expect(sandbox.getAttribute("placeholder")).toBe("24");
+  expect(card().getByText(/Default 24 h, at most 72 h\./)).toBeDefined();
+
+  type("Keep a failed run's sandbox (hours)", "48");
+  type("Keep saved commits (days)", "60");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await putBody(fetch)).toEqual({
+    ...UNSET,
+    sandbox_ttl_s: 172_800,
+    branch_retention_days: 60,
+  });
+});
+
+test("keeping a sandbox or saved commits past their ceiling is caught before calling the API", async () => {
+  const fetch = storingApi();
+  show();
+  await card().findByLabelText("Keep a failed run's sandbox (hours)");
+
+  type("Keep a failed run's sandbox (hours)", "73");
+  type("Keep saved commits (days)", "91");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await card().findByText("From 1 minute to 72 h.")).toBeDefined();
+  expect(card().getByText("From 1 to 90.")).toBeDefined();
+  expect(fetch.mock.calls.some(([r]) => r.method === "PUT")).toBe(false);
 });
 
 test("an approval time to live above the platform's is caught before calling the API", async () => {
