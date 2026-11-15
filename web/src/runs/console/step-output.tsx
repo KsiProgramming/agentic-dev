@@ -33,6 +33,7 @@ import { GateDecision } from "./gate-decision";
 import { OrchestratorPlan } from "./orchestrator-plan";
 import { isLongOutput } from "./long-output";
 import { PortErrors } from "./port-errors";
+import { SavedBranches } from "./saved-branches";
 import { StatusMarker } from "./rail";
 import { lastMessage, stepOutline, type StepEntry, type StepRow } from "./step-entries";
 import { ErrorLine } from "./step-view";
@@ -399,6 +400,9 @@ export function StepOutput({
     );
   }
   if (files.length > 0) parts.push(<WrittenFiles key="files" files={files} />);
+  if (step.savedBranches.length > 0) {
+    parts.push(<SavedBranches key="saved" branches={step.savedBranches} />);
+  }
   if (step.artifactsWritten.length > 0) {
     parts.push(
       <ArtifactCards

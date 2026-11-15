@@ -14,6 +14,7 @@ from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, RunContext, sum_usage
 from agentic_engine.artifacts import ArtifactStore, GateArtifact
+from agentic_engine.branches import BranchSaver
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
     GATE_WAITING,
@@ -65,6 +66,7 @@ async def run_workflow(
     artifacts: ArtifactStore | None = None,
     integrator: BranchIntegrator | None = None,
     context: RunContext | None = None,
+    saver: BranchSaver | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -83,7 +85,8 @@ async def run_workflow(
     committed through it. The gate expires `ttl_s` after it paused (`expires_at`). An
     orchestrator whose body writes merges its tasks' branches through `integrator` (6.3).
     Every agent is told `context` about the run, after its instructions (the repository it
-    works on: `RunContext`).
+    works on: `RunContext`). Each step that may commit saves the run's branches through `saver`
+    before it is checkpointed (12.2).
     A run that created its repo ends the attempt `suspended`, with no event: `resume_workflow`
     continues it, in an attempt that has the repo cloned.
 
@@ -116,6 +119,7 @@ async def run_workflow(
             artifacts,
             integrator=integrator,
             context=context,
+            saver=saver,
         ),
         initial_state(input),
         _config(spec, log.run_id),
@@ -142,6 +146,7 @@ async def resume_workflow(
     artifacts: ArtifactStore | None = None,
     integrator: BranchIntegrator | None = None,
     context: RunContext | None = None,
+    saver: BranchSaver | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -172,6 +177,7 @@ async def resume_workflow(
         artifacts,
         integrator=integrator,
         context=context,
+        saver=saver,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)

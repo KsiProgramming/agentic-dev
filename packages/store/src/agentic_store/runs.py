@@ -32,6 +32,8 @@ class StoredRun:
     # USD the run's usage has cost so far, for its budget.
     spent: Decimal = Decimal(0)
     created_at: datetime | None = None
+    # The commit its first clone was at (12.2), which its later sandboxes are cloned at.
+    base_sha: str | None = None
 
 
 async def create_run(
@@ -114,4 +116,5 @@ def stored_run(run: Run) -> StoredRun:
         policy=Policy.model_validate(run.policy),
         spent=run.estimated_usd,
         created_at=run.created_at,
+        base_sha=run.base_sha,
     )

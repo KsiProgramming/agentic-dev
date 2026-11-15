@@ -1,10 +1,19 @@
 """Writers' branches merged into one integration branch (6.3), on both backends."""
 
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
-from agentic_sandbox import Sandbox, SandboxError, add_worktree
+from agentic_sandbox import (
+    RepoSource,
+    Sandbox,
+    SandboxError,
+    SandboxManager,
+    add_worktree,
+    branch_heads,
+    export_branch,
+)
 from agentic_sandbox.integrate import MergeSource, integrate_branches, start_branches
 
 RUN_ID = UUID("00000000-0000-4000-8000-000000000001")
@@ -135,3 +144,26 @@ async def test_a_started_branch_that_exists_is_left_as_it_is(sandbox: Sandbox) -
     await start_branches(sandbox, RUN_ID, "fix", ["fix.b"])  # a resumed run asks again
 
     assert await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/fix.b") == tip
+
+
+async def test_a_restored_integration_branch_merges_nothing_twice(
+    backend: tuple[str, SandboxManager], repos: Path
+) -> None:
+    """12.2: a run resumed in a fresh sandbox gets its task and integration branches back from
+    their saved bundles; integrating again finds every task merged and merges none twice."""
+    manager, repo = backend[1], RepoSource(url=str(repos / "hello"))
+    async with manager.open(RUN_ID, repo) as first:
+        await task(first, "fix.a", "printf 'a\n' > a.txt")
+        await task(first, "fix.b", "printf 'b\n' > b.txt")
+        before = await integrate_branches(first, RUN_ID, "fix", sources("fix.a", "fix.b"))
+        heads = await branch_heads(first, f"agent/{RUN_ID}/")
+        saved = [await export_branch(first, b) for b in sorted(heads.branches)]
+
+    async with manager.open(RUN_ID, repo, at=heads.base, restore=saved) as second:
+        again = await integrate_branches(second, RUN_ID, "fix", sources("fix.a", "fix.b"))
+        tree = f"{second.worktrees_dir}/fix"
+        merges = await sh(second, "git log --merges --format=%s", cwd=tree)
+
+    assert again.merged == ["fix.a", "fix.b"]
+    assert again.head == before.head
+    assert len(merges.splitlines()) == 2

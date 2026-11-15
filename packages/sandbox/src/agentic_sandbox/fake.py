@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from agentic_sandbox.bundle import BranchBundle, import_bundles
 from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.protocol import (
     DEFAULT_EXEC_TIMEOUT_S,
@@ -37,11 +38,20 @@ class FakeSandbox:
     """Implements `Sandbox` with local processes. `root` holds the clone at `root/repo`."""
 
     def __init__(
-        self, root: Path, *, job_networks: frozenset[JobNetwork] = frozenset({"none"})
+        self,
+        root: Path,
+        *,
+        job_networks: frozenset[JobNetwork] = frozenset({"none"}),
+        restored: tuple[str, ...] = (),
     ) -> None:
         self._root = root
         self._workdir = root / "repo"
         self._job_networks = job_networks
+        self._restored = restored
+
+    @property
+    def restored(self) -> tuple[str, ...]:
+        return self._restored
 
     @property
     def workdir(self) -> str:
@@ -195,20 +205,25 @@ class FakeSandboxManager:
         *,
         reuse: bool = False,
         git_env: Mapping[str, str] | None = None,
+        at: str | None = None,
+        restore: Sequence[BranchBundle] = (),
     ) -> AsyncGenerator[FakeSandbox]:
         root = self._base_dir / f"agentic-sandbox-{run_id}"
         self._kept.discard(run_id)
+        restored: tuple[str, ...] = ()
         try:
             if not (reuse and await asyncio.to_thread((root / "repo").is_dir)):
                 await asyncio.to_thread(_remove_dir, root)
                 await asyncio.to_thread(root.mkdir, parents=True)
                 await clone_shallow(
-                    repo, root / "repo", local_root=self._local_root, git_env=git_env
+                    repo, root / "repo", local_root=self._local_root, git_env=git_env, at=at
                 )
+                await import_bundles(root / "repo", restore)
+                restored = tuple(b.branch for b in restore)
                 (root / "worktrees").mkdir()
                 (root / ".incoming").mkdir()
                 (root / "artifacts").mkdir()
-            yield FakeSandbox(root)
+            yield FakeSandbox(root, restored=restored)
         finally:
             if run_id in self._kept:
                 self._kept.discard(run_id)

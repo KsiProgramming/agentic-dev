@@ -9,7 +9,9 @@ on their way in or out) belong to the sandbox user, so writers can commit on the
 container and volume carries the `agentic.run_id` label, so leftovers can be swept. A run that is
 resumed after its worker died gets a fresh sandbox: `open` first removes the one it left. A run
 paused at a gate keeps its container and volume (`keep`), and `open(..., reuse=True)` attaches
-to them again.
+to them again. A fresh sandbox for a run that has already worked is cloned at the run's base
+commit, and the writers' branches the run saved are fetched into the clone on the worker before
+it is copied in (12.2), so nothing a completed step committed is lost with a sandbox.
 
 docker-py is blocking, so its calls run in threads.
 """
@@ -37,6 +39,7 @@ from docker.models.containers import Container
 from docker.models.volumes import Volume
 from docker.types import Mount
 
+from agentic_sandbox.bundle import BranchBundle, import_bundles
 from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.protocol import (
     DEFAULT_EXEC_TIMEOUT_S,
@@ -170,9 +173,16 @@ class DockerSandbox:
     """Implements `Sandbox` with `docker exec` in the run's container, and jobs as containers
     on its volume (none when `jobs` is not given)."""
 
-    def __init__(self, container: Container, jobs: _Jobs | None = None) -> None:
+    def __init__(
+        self, container: Container, jobs: _Jobs | None = None, restored: tuple[str, ...] = ()
+    ) -> None:
         self._container = container
         self._jobs = jobs
+        self._restored = restored
+
+    @property
+    def restored(self) -> tuple[str, ...]:
+        return self._restored
 
     @property
     def workdir(self) -> str:
@@ -345,21 +355,27 @@ class DockerSandboxManager:
         *,
         reuse: bool = False,
         git_env: Mapping[str, str] | None = None,
+        at: str | None = None,
+        restore: Sequence[BranchBundle] = (),
     ) -> AsyncGenerator[DockerSandbox]:
         name = f"agentic-sandbox-{run_id}"
         started = time.monotonic()
         volume: Volume | None = None
         container: Container | None = None
+        restored: tuple[str, ...] = ()
         self._kept.discard(run_id)
         try:
             if reuse and (kept := await asyncio.to_thread(self._reopen, name)):
                 container, volume = kept
                 log.info("sandbox %s reopened in %.2f s", name, time.monotonic() - started)
             else:
-                container, volume = await self._create_fresh(name, run_id, repo, git_env)
+                container, volume = await self._create_fresh(
+                    name, run_id, repo, git_env, at, restore
+                )
+                restored = tuple(b.branch for b in restore)
                 log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
             jobs = _Jobs(self._client, self._image, name, run_id, self._job_limits, self._nuget)
-            yield DockerSandbox(container, jobs)
+            yield DockerSandbox(container, jobs, restored)
         finally:
             if run_id in self._kept:
                 self._kept.discard(run_id)
@@ -370,9 +386,15 @@ class DockerSandboxManager:
                 log.info("sandbox %s removed after %.2f s", name, time.monotonic() - started)
 
     async def _create_fresh(
-        self, name: str, run_id: UUID, repo: RepoSource, git_env: Mapping[str, str] | None
+        self,
+        name: str,
+        run_id: UUID,
+        repo: RepoSource,
+        git_env: Mapping[str, str] | None,
+        at: str | None = None,
+        restore: Sequence[BranchBundle] = (),
     ) -> tuple[Container, Volume]:
-        archive = await self._clone(repo, git_env)
+        archive = await self._clone(repo, git_env, at, restore)
         volume: Volume | None = None
         container: Container | None = None
         try:
@@ -407,14 +429,22 @@ class DockerSandboxManager:
             return None
         return container, volume
 
-    async def _clone(self, repo: RepoSource, git_env: Mapping[str, str] | None) -> bytes:
-        """A tar of the sandbox's `/workspace`: a shallow clone of `repo` at `repo/`, and the
-        empty `worktrees/` and `.incoming/`."""
+    async def _clone(
+        self,
+        repo: RepoSource,
+        git_env: Mapping[str, str] | None,
+        at: str | None,
+        restore: Sequence[BranchBundle],
+    ) -> bytes:
+        """A tar of the sandbox's `/workspace`: a shallow clone of `repo` at `repo/` (at the
+        commit `at`, with the branches in `restore`), and the empty `worktrees/` and
+        `.incoming/`."""
         staging = Path(tempfile.mkdtemp(prefix="agentic-clone-"))
         try:
             await clone_shallow(
-                repo, staging / "repo", local_root=self._local_root, git_env=git_env
+                repo, staging / "repo", local_root=self._local_root, git_env=git_env, at=at
             )
+            await import_bundles(staging / "repo", restore)
             return await asyncio.to_thread(_workspace_tar, staging / "repo")
         finally:
             await asyncio.to_thread(shutil.rmtree, staging, ignore_errors=True)

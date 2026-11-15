@@ -7,7 +7,17 @@ from uuid import UUID
 
 import pytest
 
-from agentic_sandbox import Sandbox, SandboxError, SandboxManager, add_worktree, export_branch
+from agentic_sandbox import (
+    BranchBundle,
+    EmptyBranchError,
+    RepoSource,
+    Sandbox,
+    SandboxError,
+    SandboxManager,
+    add_worktree,
+    branch_heads,
+    export_branch,
+)
 
 RUN_ID = UUID("00000000-0000-4000-8000-000000000001")
 _ENV = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
@@ -101,3 +111,75 @@ async def test_take_file_refuses_more_than_the_limit(
 
     with pytest.raises(SandboxError, match="too large"):
         await sandbox.take_file(path)
+
+
+async def test_a_bundle_records_its_branch_s_tip_and_commit_count(sandbox: Sandbox) -> None:
+    tree = await add_worktree(sandbox, RUN_ID, "writer")
+    await commit(tree, {"A.md": "a"})
+    await commit(tree, {"B.md": "b"})
+
+    bundle = await export_branch(sandbox, tree.branch)
+    heads = await branch_heads(sandbox, f"agent/{RUN_ID}/")
+
+    assert bundle.commits == 2
+    assert heads.base == bundle.base_sha
+    assert heads.branches == {tree.branch: bundle.head_sha}
+
+
+async def test_a_branch_without_commits_is_an_empty_branch(sandbox: Sandbox) -> None:
+    tree = await add_worktree(sandbox, RUN_ID, "writer")
+
+    with pytest.raises(EmptyBranchError):
+        await export_branch(sandbox, tree.branch)
+
+
+async def test_a_fresh_sandbox_gets_the_saved_branches_back(
+    backend: tuple[str, SandboxManager], repos: Path
+) -> None:
+    """12.2: a branch saved from one sandbox is restored into the next one the run opens, at
+    the run's base, and a writer's worktree reopens on it."""
+    manager = backend[1]
+    repo = RepoSource(url=str(repos / "hello"))
+    async with manager.open(RUN_ID, repo) as first:
+        assert first.restored == ()
+        tree = await add_worktree(first, RUN_ID, "writer")
+        await commit(tree, {"NOTES.md": "notes"})
+        saved = await export_branch(first, tree.branch)
+
+    async with manager.open(RUN_ID, repo, at=saved.base_sha, restore=[saved]) as second:
+        assert second.restored == (tree.branch,)
+        heads = await branch_heads(second, f"agent/{RUN_ID}/")
+        assert heads.branches == {tree.branch: saved.head_sha}
+        again = await add_worktree(second, RUN_ID, "writer")
+        shown = await again.exec(["cat", "NOTES.md"])
+        assert shown.stdout == "notes"
+
+
+async def test_a_reopened_sandbox_is_not_restored_over(
+    backend: tuple[str, SandboxManager], repos: Path
+) -> None:
+    manager = backend[1]
+    repo = RepoSource(url=str(repos / "hello"))
+    async with manager.open(RUN_ID, repo) as first:
+        tree = await add_worktree(first, RUN_ID, "writer")
+        await commit(tree, {"NOTES.md": "notes"})
+        saved = await export_branch(first, tree.branch)
+        await commit(tree, {"MORE.md": "more"})  # after the save
+        manager.keep(RUN_ID)
+
+    try:
+        async with manager.open(RUN_ID, repo, reuse=True, restore=[saved]) as kept:
+            assert kept.restored == ()
+            heads = await branch_heads(kept, f"agent/{RUN_ID}/")
+            assert heads.branches[tree.branch] != saved.head_sha
+    finally:
+        await manager.discard(RUN_ID)
+
+
+async def test_a_bundle_that_does_not_apply_fails_the_open(
+    backend: tuple[str, SandboxManager], repos: Path
+) -> None:
+    bad = BranchBundle(branch=f"agent/{RUN_ID}/writer", base_sha="0" * 40, data=b"not a bundle")
+    with pytest.raises(SandboxError, match=f"could not restore branch agent/{RUN_ID}/writer"):
+        async with backend[1].open(RUN_ID, RepoSource(url=str(repos / "hello")), restore=[bad]):
+            pass

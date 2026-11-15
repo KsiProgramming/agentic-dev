@@ -105,6 +105,18 @@ export function summarizePayload(event: RunEvent): string {
       return truncate(str(payload.full_name));
     case "policy_limit_exceeded":
       return policyLimit(payload);
+    case "branch_saved": {
+      const commits = typeof payload.commits === "number" ? payload.commits : 0;
+      return truncate(
+        `${str(payload.branch)}: ${commits} ${commits === 1 ? "commit" : "commits"} saved`,
+      );
+    }
+    case "branch_save_failed":
+      return truncate(`${str(payload.branch)} not saved: ${str(payload.error)}`);
+    case "branches_restored": {
+      const n = Array.isArray(payload.branches) ? payload.branches.length : 0;
+      return `${n} saved ${n === 1 ? "branch" : "branches"} restored into a fresh sandbox`;
+    }
     default:
       return truncate(fields(payload));
   }

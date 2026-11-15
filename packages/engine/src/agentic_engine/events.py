@@ -71,6 +71,19 @@ integration branch (6.3), once a round's tasks ended: `round`, `branch`
 (`agent/<run>/<orchestrator>`), `head` (its tip), `merged` and `empty` (task ids: merged by now,
 in plan order, and with nothing to merge) and `conflicts` (`id` and conflicting `paths` of each
 task that could not be merged; that task then counts as failed)."""
+BRANCH_SAVED: Final = "branch_saved"
+"""A writer's or an integration branch was saved outside the sandbox (12.2), when a step that may
+commit returned and before it was checkpointed: `key` (the writer key: a node id,
+`<orchestrator>.<task>`, or the orchestrator for its integration branch), `branch`, `kind`
+(`writer` or `integration`), `version` (from 1, one more each time its tip moved), `head` (its
+tip), `commits` (on top of the run's base) and `size` (the bundle's bytes). Its `node_id` is the
+node the key belongs to (a task writer's orchestrator)."""
+BRANCH_SAVE_FAILED: Final = "branch_save_failed"
+"""A branch could not be saved (12.2): `key`, `branch` and `error`. The step still completes; its
+commits stay only in the sandbox. Not repeated for the same tip."""
+BRANCHES_RESTORED: Final = "branches_restored"
+"""A fresh sandbox got the run's saved branches back before its graph resumed (12.2):
+`branches` (`branch` and `head` of each)."""
 TASK_STARTED: Final = "task_started"
 """An orchestrator starts its body for one planned task: `index` (from 0), `task_id`, `title`.
 The worker's events carry `item`, the task's index, as a map item's do."""
