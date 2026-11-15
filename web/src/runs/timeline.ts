@@ -75,6 +75,23 @@ export interface GateInfo {
   onReject: "cancel" | "end";
 }
 
+/** A branch saved outside the sandbox (12.2), as its step's last `branch_saved` or
+ * `branch_save_failed` left it. */
+export interface SavedBranch {
+  branch: string;
+  /** The writer key: the node, `<orchestrator>.<task>`, or the orchestrator's integration. */
+  key: string;
+  kind: "writer" | "integration";
+  /** The last version saved, its tip and commit count; `null` until one was saved. */
+  version: number | null;
+  head: string | null;
+  commits: number | null;
+  /** When it was last saved, or when the save failed. */
+  at: string;
+  /** Why the last save failed: its commits since are only in the sandbox. */
+  error: string | null;
+}
+
 export interface Step {
   /** The node id. */
   id: string;
@@ -113,6 +130,8 @@ export interface Step {
   orchestrator: OrchestratorInfo | null;
   /** Set for a subflow node (6.5): the workflow it calls and that workflow's steps. */
   subflow: SubflowInfo | null;
+  /** The branches its writers committed on, saved outside the sandbox (12.2), by branch. */
+  savedBranches: SavedBranch[];
 }
 
 /** The stored workflow version a subflow calls (6.5), from its `node_started`. */
@@ -359,7 +378,35 @@ function newStep(id: string, at: string): Step {
     router: null,
     orchestrator: null,
     subflow: null,
+    savedBranches: [],
   };
+}
+
+/** Record a `branch_saved` (`saved`) or `branch_save_failed` on `step`, replacing what it said
+ * of that branch before. A failed save keeps the version saved before it. */
+function saveBranch(
+  step: Step,
+  saved: boolean,
+  payload: Record<string, unknown>,
+  at: string,
+): void {
+  const name = str(payload.branch);
+  if (name === null) return;
+  const before = step.savedBranches.find((b) => b.branch === name);
+  const entry: SavedBranch = {
+    branch: name,
+    key: str(payload.key) ?? before?.key ?? step.id,
+    kind:
+      payload.kind === "integration" || before?.kind === "integration" ? "integration" : "writer",
+    version: saved ? num(payload.version) : (before?.version ?? null),
+    head: saved ? str(payload.head) : (before?.head ?? null),
+    commits: saved ? num(payload.commits) : (before?.commits ?? null),
+    at,
+    error: saved ? null : (str(payload.error) ?? "not saved"),
+  };
+  step.savedBranches = before
+    ? step.savedBranches.map((b) => (b === before ? entry : b))
+    : [...step.savedBranches, entry];
 }
 
 /** The workflow a subflow's `node_started` names (6.5), if it names one. */
@@ -600,6 +647,13 @@ class Builder {
           task.conflict = paths;
           task.error = conflictError(paths);
         }
+        return;
+      }
+      case "branch_saved":
+      case "branch_save_failed": {
+        // On the step that committed; a writer nested where these events do not reach is left.
+        const owner = this.scopeFor(nodeId, item, branch).steps.find((s) => s.id === nodeId);
+        if (owner) saveBranch(owner, event.type === "branch_saved", payload, at);
         return;
       }
       case "parallel_branch_completed": {
