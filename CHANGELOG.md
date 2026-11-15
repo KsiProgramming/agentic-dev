@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 12.2 writers' commits saved outside the sandbox:
+  - **Nothing a completed step committed is lost with its sandbox.** Every step that may commit (agent, tool and gate steps, map items, parallel branches, orchestrator tasks and their integration) saves the run's branches whose tip moved as git bundles in Postgres before the step is checkpointed (`run_branches`, append only, 64 MB cap per bundle; Alembic `0030_run_branches`). A worker killed mid-run, or a gate's kept sandbox that is gone, resumes in a fresh sandbox with every saved branch restored.
+  - **A run keeps its base commit.** The commit a run's first clone was at is recorded (`runs.base_sha`), and its later sandboxes are cloned there, so its saved branches apply and its agents read the code it started on even after the default branch moved on.
+  - **Events.** `branch_saved`, `branch_save_failed` and `branches_restored`.
+  - **Console.** A writer step and an orchestrator show "Commits saved": each branch, its commit count, its tip and when it was saved; a failed save says why. Raw events read the three events in one line.
+  - Specs: tech-stack (Sandbox, a "Saved branches" section, Run console, three decisions) and the 12.2 plan (`specs/2026-11-15-save-writer-branches/`).
 - Phase 12.1 recover runs lost before a worker claims them ([#172](https://github.com/KsiProgramming/agentic-dev/pull/172)):
   - **Lost runs come back.** Postgres is the queue's source of truth: when a worker starts and every `QUEUE_SWEEP_S` (15 s), it queues again the runs left `queued` with no worker holding them for `QUEUE_STALE_S` (60 s), so a run whose id was popped by a worker killed before it claimed the run still starts. `runs.queued_at` and `runs.enqueued_at` (Alembic `0029_run_queue_times`).
   - **A spec the worker cannot load fails the run, not the worker.** The claim commits before the spec is parsed; such a run ends `failed` with "this worker cannot load the run's spec: …", and the worker carries on. Before, the worker loop stopped and the run stayed queued for good.
@@ -437,6 +443,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
+- The live run console now receives an orchestrator's and a router's own events (`plan_made`, `task_started`, `task_completed`, `replan_started`, `branch_integrated`, `route_chosen`): the browser's event stream only delivers the event names it listens for, and these were missing from its list (phase 12.2).
 - Run map cards' accessible name now holds their visible line ("each, Done, 2 of 2 items, map"): an `aria-label` left it out, which axe reports as a WCAG 2.5.3 failure ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - About 40 end-to-end tests that went stale when phases 11.6 and 11.9 merged without CI now pass: the run map's `map-node` cards, the "Step" filter, the console's time tiles and pull request link, the artifact sheet's JSON groups, the pricing table's container query, and page checks made while a modal sheet is open ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - Flaky a11y e2e check of the new workflow sheet: axe now runs once the sheet has finished sliding in, not while its fading text reads as low contrast ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).

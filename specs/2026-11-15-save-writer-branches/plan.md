@@ -1,44 +1,44 @@
 # Plan: Writers' commits saved outside the sandbox
 
-Crash test first, as the roadmap row asks: prove the gap, then close it. Each group leaves the project green.
+Crash test first, as the roadmap row asks: prove the gap, then close it. Each group leaves the project green. The crash tests live in `packages/worker/tests/test_worker.py`, beside 12.1's, to reuse its worker helpers.
 
 ## 1. Prove the gap
-- [ ] `packages/worker/tests/test_branches_docker.py` (Docker backend, marked like `test_audit_docker.py`): a two-node run (writer, then a gate), the worker killed after the writer's commit is checkpointed, a second worker resumes it; assert `agent/<run>/writer` holds the writer's commit. Mark it `xfail(strict=True)` until group 5.
-- [ ] Same file: a run waiting at its gate whose sandbox volume is removed, then approved; assert the writer's commit is still on its branch (`xfail` too).
-- [ ] Find out and write down in the test what happens when a running attempt's container and volume are removed mid-step (requirements, open question). If the run fails, add a test that it resumes on a fresh sandbox, and a task in group 5 to make it so.
+- [x] `test_worker.py` (Docker backend): a writer then a reviewer, the worker stopped after the writer's commit is checkpointed, a second worker resumes it; assert `agent/<run>/writer` holds the writer's commit. `xfail(strict=True)` until group 5.
+- [x] Same file: a run waiting at its gate whose sandbox container and volume are removed, then approved; assert the writer's commit is still on its branch (`xfail` too).
+- [x] Find out what happens when a running attempt's sandbox is removed mid-step: the step's tool calls fail; no automatic resume (requirements, open questions; left for a later phase).
 
 ## 2. Pin the run's base commit
-- [ ] Migration `0030_run_branches.py` (part 1): `runs.base_sha` (nullable, 40 hex).
-- [ ] `agentic_sandbox.source.clone_shallow`: clone at an exact SHA (`git fetch --depth 1 origin <sha>`, and the same for a local path); a SHA that is gone fails with a clear `SandboxError`.
-- [ ] `DockerSandboxManager.open` and `FakeSandboxManager`: return or expose the clone's `HEAD`; the worker records it in `runs.base_sha` on first clone (`agentic_store.runs`) and passes it as the ref on every later clone.
-- [ ] Tests: `test_source.py` (clone at a SHA after the remote branch moved on), a store test that `base_sha` is set once and never overwritten.
+- [x] Migration `0030_run_branches.py` (part 1): `runs.base_sha` (nullable, 40 hex).
+- [x] `agentic_sandbox.source.clone_shallow(..., at=)`: clone, then fetch the SHA at depth 1 and reset to it when the branch moved on; a SHA that is gone fails with a clear `SandboxError`.
+- [x] `DockerSandboxManager.open` and `FakeSandboxManager` take `at` and `restore`; the worker reads the clone's `HEAD` (`branch_heads`), records it in `runs.base_sha` on first clone (`record_base_sha`) and passes it as `at` on every later clone.
+- [x] Tests: `test_source.py` (clone at a SHA after the remote branch moved on, a gone SHA, a non-SHA), a store test that `base_sha` is set once and never overwritten.
 
 ## 3. Store saved branches
-- [ ] Migration 0030 (part 2): `run_branches` (`run_id`, `branch`, `node_key`, `kind`, `version`, `base_sha`, `head_sha`, `commits`, `size`, `data bytea`, `created_at`; unique `(run_id, branch, version)`).
-- [ ] `packages/store/src/agentic_store/branches.py`: `save_branch` (new version only if `head_sha` changed, in one transaction with its `branch_saved` event), `latest_branches(run_id)`; refuse a bundle over 64 MB.
-- [ ] `agentic_engine.events`: `BRANCH_SAVED`, `BRANCH_SAVE_FAILED`, `BRANCHES_RESTORED`, with their payload models.
-- [ ] Tests: append-only versions, unchanged head adds nothing, latest per branch, size cap.
+- [x] Migration 0030 (part 2): `run_branches` (`run_id`, `branch`, `node_key`, `kind`, `version`, `base_sha`, `head_sha`, `commits`, `size`, `data bytea`, `created_at`; unique `(run_id, branch, version)`).
+- [x] `packages/store/src/agentic_store/branches.py`: `save_branch` (new version only if `head_sha` changed; the engine logs `branch_saved` after it), `latest_branches`, `list_saved_branches`; refuse a bundle over 64 MB.
+- [x] `agentic_engine.events`: `BRANCH_SAVED`, `BRANCH_SAVE_FAILED`, `BRANCHES_RESTORED`; payload models in `agentic_engine.branches`.
+- [x] Tests: append-only versions, unchanged head adds nothing, latest per branch, size cap.
 
 ## 4. Save from the engine
-- [ ] `agentic_engine.branches`: `BranchSaver` protocol, `save(node_key, branch, kind)`, injected like `BranchIntegrator`; the fake runtime's tests get an in-memory saver.
-- [ ] `compile.py`: call it at the end of a writer node, a map item and a parallel branch that wrote, an orchestrator task's writer, and `<id>.integrate`, **before** the update is returned; a failed save emits `branch_save_failed` and the step still completes.
-- [ ] `packages/worker/src/agentic_worker/branches.py`: `SandboxBranchSaver` over `agentic_sandbox.bundle` (export with the pinned base) and `agentic_store.branches`.
-- [ ] `review.py`: after `Edit at gate` commits, save each edited writer's branch again.
-- [ ] Engine tests: the saver is called for every writer kind and the integration branch, before the node's checkpoint; a writer with no commits is not saved; gate edits trigger a save.
+- [x] `agentic_engine.branches`: `BranchSaver` protocol, `save()` (every moved branch), injected like `BranchIntegrator`; engine tests use a recording saver.
+- [x] `compile.py`: `_saving` wraps agent, tool and gate steps, map items, parallel branches, orchestrator tasks and `<id>.integrate`, saving **before** the update is returned; a failed save emits `branch_save_failed` and the step still completes.
+- [x] `packages/worker/src/agentic_worker/branches.py`: `SandboxBranchSaver` over `agentic_sandbox.bundle` and `agentic_store.branches`.
+- [x] Gate edits: the gate step is wrapped like the others, so the `Edit at gate` commits are saved when it ends (no change to `review.py`).
+- [x] Engine tests (`test_branch_saves.py`): the saver is called after steps, map items, branches, tasks and integration, before the checkpoint; a gate saves once decided, not when it pauses; a broken saver does not fail the step.
 
 ## 5. Restore on a fresh sandbox
-- [ ] `agentic_sandbox.bundle`: `import_bundle(sandbox, branch, data)` fetches the bundle into the checkout's `.git` as `refs/heads/<branch>` (branch name checked against `BRANCH_PATTERN`).
-- [ ] Worker attempt start (`main.py`, where `open(..., reuse=...)` is called): when the sandbox is fresh and the run has saved branches, import the latest of each before the graph resumes; emit `branches_restored`. A reused kept sandbox is left as it is.
-- [ ] The mid-step lost-sandbox path from group 1, if it needs a change.
-- [ ] Remove the `xfail` marks from group 1; add a test that a resumed orchestrator merges on top of its restored integration branch without merging twice (6.3's "merging twice" rule).
+- [x] `agentic_sandbox.bundle.import_bundles(clone, bundles)` fetches each bundle into the clone on the worker as `refs/heads/<branch>` (names checked against `BRANCH_PATTERN`).
+- [x] Worker attempt start (`main.py`): pass the latest saved branches as `restore`; the manager fetches them only into a fresh sandbox; the worker logs `branches_restored` when `Sandbox.restored` is not empty.
+- [x] The mid-step lost-sandbox path: no change in 12.2 (see requirements).
+- [x] Remove the `xfail` marks from group 1; `test_integrate.py`: a restored integration branch merges nothing twice; `test_worker.py`: a resumed run works on its base commit after the branch moved on.
 
 ## 6. Console marker
-- [ ] `web/src/runs/`: read `branch_saved`, `branch_save_failed` and `branches_restored` from the event stream.
-- [ ] Writer step and integration Output: a "Commits saved" line (commit count, `IdChip` head commit, `RelativeTime`); a failed save as a warning with its reason. Built from existing display and state components.
-- [ ] Activity: one line for `branches_restored` on a resumed attempt.
-- [ ] Vitest for the event mapping; an e2e step in the existing console spec that sees the marker.
+- [x] `web/src/runs/`: `EVENT_TYPES` lists the three events (and the 6.x ones it missed); the timeline keeps each step's `savedBranches`.
+- [x] Writer step and orchestrator Output: "Commits saved" (`saved-branches.tsx`: branch, commit count, `IdChip` tip, `RelativeTime`); a failed save as an `ErrorLine`.
+- [x] Raw events: one line each for the three events (`summarizePayload`); the Activity tab is per step.
+- [x] Vitest for the event mapping and the section (`saved-branches.test.tsx`). An e2e step is not added: the e2e stack runs on the fake sandbox and needs the user's OK to run (see validation).
 
 ## 7. Specs and docs
-- [ ] `specs/tech-stack.md`: Sandbox section (pinned base, saved branches, restore), the three events in the events contract, decisions-log rows (bundles in Postgres, pinned base, save before checkpoint, size cap), UI design system line for the marker.
-- [ ] Docker backend module docstring: a fresh sandbox now restores saved branches.
-- [ ] `CHANGELOG.md` entry under `## [Unreleased]`.
+- [x] `specs/tech-stack.md`: Sandbox section, a "Saved branches (12.2)" contract section with the events, three decisions-log rows, the Run console Output line.
+- [x] Docker backend and worker module docstrings: a fresh sandbox now restores saved branches.
+- [x] `CHANGELOG.md` entry under `## [Unreleased]`.
