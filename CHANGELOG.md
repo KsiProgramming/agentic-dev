@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 12.3 a failed, cancelled or expired run keeps its code:
+- Phase 12.3 a failed, cancelled or expired run keeps its code ([#235](https://github.com/KsiProgramming/agentic-dev/pull/235)):
   - **A failed or cancelled run keeps its sandbox** for the workspace's sandbox time to live (24 h by default, up to 72 h), then a sweep in every worker removes it (`SANDBOX_SWEEP_S`, 60 s). The run's end event says until when (`sandbox_kept_until`); an expired approval and a policy stop keep it too. A starting worker spares kept sandboxes.
   - **Uncommitted work is saved.** When a run fails or is cancelled, each writer's uncommitted changes are recorded on `wip/<run>/<key>` without touching its worktree or branch, and saved with the run's other branches. Nothing restores, merges or pushes it.
   - **What the writers changed is kept for good.** Each saved branch version stores the files it changed, as a gate shows them; a finished run's saved commits are dropped after the workspace's retention (30 days by default, up to 90), and the changed files stay.
