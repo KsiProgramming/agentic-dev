@@ -4,7 +4,7 @@
 > A failed run's console shows what its writers changed and until when its sandbox is kept; once swept, the console says so and the changes are still shown
 
 ## Automated checks
-- [ ] Worker (Docker backend, run by test name, never all of `packages/sandbox/tests`): a failed run keeps its sandbox with `sandbox_kept_until`; a cancelled run and an expired approval's run do too; a succeeded run's is removed; the sweep removes a kept sandbox past its time to live and logs `sandbox_removed`; the startup orphan sweep spares a kept one; "remove now" is done by the next sweep.
+- [ ] Worker (Docker backend, run by test name, never all of `packages/sandbox/tests`): a failed run keeps its sandbox with `sandbox_kept_until`; a cancelled run and an expired approval's run do too; a succeeded run's is removed; the sweep removes a kept sandbox past its time to live and writes `sandbox.removed`; the startup orphan sweep spares a kept one; "remove now" is done by the next sweep.
 - [ ] Worker: a cancelled run's uncommitted edits (tracked and untracked) are a `wip` version with its changes; the worktree and branch are unchanged by the snapshot; a restore ignores `wip`.
 - [ ] Store: migration 0031 up and down; `expired_sandboxes` locks and skips; retention nulls `data` and keeps `changes`; limits and ceilings for `sandbox_ttl_s` and `branch_retention_days`.
 - [ ] API: `GET /runs/{id}` `sandbox` in each state; `GET /runs/{id}/changes`; `DELETE /runs/{id}/sandbox` `202` / `409` and its audit entry.

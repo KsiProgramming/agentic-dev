@@ -2092,3 +2092,96 @@ async def test_a_resumed_run_works_on_its_base_commit_after_the_branch_moved_on(
     assert heads == [run_before.base_sha]
     assert branch_log.branches == [f"agent/{run_id}/writer"]
     assert "NOTES.md" in branch_log.commits
+
+
+# Phase 12.3: a failed, cancelled or expired run keeps its code.
+
+SANDBOX_TTL_S = 24 * 60 * 60  # the platform's default `sandbox_ttl_s`
+
+
+def sandbox_dirs(boxes: Path) -> list[str]:
+    return sorted(p.name for p in boxes.iterdir())
+
+
+@pytest.mark.xfail(strict=True, reason="12.3: a failed run's sandbox is removed today")
+async def test_a_failed_run_keeps_its_sandbox_for_its_time_to_live(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    sandboxes = RecordingSandboxes(FakeSandboxManager(local_root=repos, base_dir=boxes))
+    spec = commit_then({"type": "agent", "id": "reviewer", "role": "R", "instructions": "Go."})
+    runtime = scripted({"writer": notes_writer(), "reviewer": [Failed(error="boom")]})
+    async with worker(postgres_url, redis_url, make_runtime=runtime, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, spec, RepoSource(url=str(repos / "hello")))
+        await wait_for_status(sessions, run_id, "failed")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+
+    assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None and summary.finished_at is not None
+    assert summary.sandbox is not None and summary.sandbox.state == "kept"
+    assert summary.sandbox.kept_until == summary.finished_at + timedelta(seconds=SANDBOX_TTL_S)
+    events = await list_run_events(sessions, run_id)
+    assert events[-1].type == "run_failed"
+    assert events[-1].payload["sandbox_kept_until"] == summary.sandbox.kept_until.isoformat()
+
+
+@pytest.mark.xfail(strict=True, reason="12.3: uncommitted work is lost with the sandbox today")
+async def test_a_cancelled_run_saves_its_writer_s_uncommitted_work(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    sandboxes = RecordingSandboxes(
+        FakeSandboxManager(local_root=repos, base_dir=boxes), inspect=BranchLog()
+    )
+    spec = commit_then({"type": "agent", "id": "reviewer", "role": "R", "instructions": "Go."})
+    editing: Script = [
+        CallTool("repo.write_file", {"path": "DRAFT.md", "content": "draft\n"}),
+        Delay(30),
+        ECHO_USAGE,
+        Completed(),
+    ]
+    runtime = scripted({"writer": editing})
+    async with worker(postgres_url, redis_url, make_runtime=runtime, sandboxes=sandboxes):
+        run_id = await submit(sessions, redis_url, spec, RepoSource(url=str(repos / "hello")))
+        await wait_for_event(sessions, run_id, "tool_result", "writer")
+        await request_cancel(sessions, run_id)
+        await wait_for_status(sessions, run_id, "cancelled")
+        await asyncio.wait_for(sandboxes.closed.wait(), 10)
+
+    assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
+    [wip] = [b for b in await list_saved_branches(sessions, run_id) if b.kind == "wip"]
+    assert (wip.branch, wip.node_key, wip.commits) == (f"wip/{run_id}/writer", "writer", 1)
+    assert [c.path for c in wip.changes] == ["DRAFT.md"]
+    assert wip.changes[0].after == "draft\n"
+
+
+@pytest.mark.xfail(strict=True, reason="12.3: an expired run's kept sandbox is removed today")
+async def test_a_run_whose_approval_expired_keeps_the_sandbox_it_kept_at_its_gate(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, tmp_path: Path
+) -> None:
+    repos, boxes = tmp_path / "repos", tmp_path / "sandboxes"
+    make_repo(repos / "hello")
+    boxes.mkdir()
+    sandboxes = FakeSandboxManager(local_root=repos, base_dir=boxes)
+    data = json.loads((SPECS / "gate-approval.json").read_text(encoding="utf-8"))
+    data["root"]["steps"][1]["ttl_s"] = 1
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=fake_with_tools,
+        sandboxes=sandboxes,
+        gate_sweep_s=0.2,
+    ):
+        repo = RepoSource(url=str(repos / "hello"))
+        run_id = await submit(sessions, redis_url, parse_spec(data), repo)
+        await wait_for_status(sessions, run_id, "cancelled")
+
+    assert sandbox_dirs(boxes) == [f"agentic-sandbox-{run_id}"]
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None and summary.sandbox is not None
+    assert summary.sandbox.state == "kept"
