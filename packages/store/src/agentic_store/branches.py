@@ -11,17 +11,19 @@ failed or was cancelled saves each writer's uncommitted work as a `wip` version 
 `wip/<run>/<key>`, which is never restored.
 """
 
+from collections.abc import Collection, Sequence
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.events import NODE_STARTED
 from agentic_engine.gate import FileChange
-from agentic_sandbox import COMMIT_ID, MAX_TAKE_FILE_BYTES, BranchBundle
-from agentic_store.models import Run, RunBranch
+from agentic_sandbox import COMMIT_ID, MAX_TAKE_FILE_BYTES, BranchBundle, branch_name
+from agentic_store.models import Run, RunBranch, RunEventRow
 
 type BranchKind = Literal["writer", "integration", "wip"]
 
@@ -84,10 +86,13 @@ async def save_branch(
     bundle: BranchBundle,
     changes: list[FileChange] | None = None,
     changes_error: str | None = None,
+    *,
+    step: str | None = None,
 ) -> SavedBranch | None:
     """Save `bundle` as the next version of its branch, with the files it changed (`changes`,
-    or `changes_error`), or nothing (`None`) if the latest saved version has the same tip. Raises
-    `BundleTooLargeError` over `MAX_TAKE_FILE_BYTES`."""
+    or `changes_error`) and the top-level step it was saved in (`step`, 12.4), or nothing
+    (`None`) if the latest saved version has the same tip. Raises `BundleTooLargeError` over
+    `MAX_TAKE_FILE_BYTES`."""
     if len(bundle.data) > MAX_TAKE_FILE_BYTES:
         raise BundleTooLargeError(
             f"the branch's bundle is {len(bundle.data)} bytes, over the "
@@ -117,6 +122,7 @@ async def save_branch(
             data=bundle.data,
             changes=None if changes is None else _CHANGES.dump_python(changes, mode="json"),
             changes_error=changes_error,
+            step=step,
         )
         session.add(row)
         await session.flush()
@@ -167,6 +173,102 @@ async def saved_changes(
             )
             for r in await session.scalars(_latest(run_id))
         ]
+
+
+class RerunBranchesError(ValueError):
+    """The original run's saved code cannot be restored for a rerun from a step (12.4)."""
+
+
+async def rerun_branches(
+    sessions: async_sessionmaker[AsyncSession],
+    source_run: UUID,
+    target_run: UUID,
+    before: Sequence[str],
+    wip_step: str | None = None,
+    *,
+    with_data: bool = True,
+) -> list[BranchBundle]:
+    """The code of `source_run` as it was before a top-level step (12.4), for its rerun
+    `target_run` to restore: the latest version of each writer and integration branch saved in
+    the steps `before` it, and, with `wip_step`, each writer's uncommitted work saved when the
+    run ended in that step in place of its branch (the `wip` bundle holds the branch's commits
+    and one more with the work). Each comes under the new run's name (`agent/<target>/<key>`),
+    fetched from the original's (`source`). Without `with_data` the bundles are left empty, to
+    check a rerun can start before it is created.
+
+    Raises `RerunBranchesError` when a version it needs was saved before 12.4 (no step to tell
+    which versions it had), or its bundle was dropped past the run's retention (12.3)."""
+    async with sessions() as session:
+        columns = [c for c in RunBranch.__table__.columns if c.key != "data" or with_data]
+        rows = (
+            await session.execute(
+                select(*columns, RunBranch.data.is_(None).label("dropped"))
+                .where(RunBranch.run_id == source_run)
+                .order_by(RunBranch.branch, RunBranch.version)
+            )
+        ).all()
+    if any(r.step is None and r.kind != "wip" for r in rows):
+        raise RerunBranchesError(
+            "its code was saved before rerunning from a step existed; rerun it from the start"
+        )
+    latest: dict[str, Any] = {}  # by node key: the version to restore
+    for r in rows:
+        if r.kind != "wip" and r.step in before:
+            latest[r.node_key] = r
+    if wip_step is not None:
+        for r in rows:
+            if r.kind == "wip" and r.step == wip_step:
+                latest[r.node_key] = r
+    bundles: list[BranchBundle] = []
+    for key, r in sorted(latest.items()):
+        if r.dropped:
+            raise RerunBranchesError(
+                f"the saved code of {key} was removed after the run's retention"
+            )
+        bundles.append(
+            BranchBundle(
+                branch=branch_name(target_run, key),
+                source=r.branch,
+                base_sha=r.base_sha,
+                data=r.data if with_data else b"",
+                head_sha=r.head_sha,
+                commits=r.commits,
+            )
+        )
+    return bundles
+
+
+async def has_uncommitted(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID, step: str
+) -> bool:
+    """Whether the run saved uncommitted work (`wip`) when it ended in the top-level `step`."""
+    async with sessions() as session:
+        found = await session.scalar(
+            select(RunBranch.branch)
+            .where(RunBranch.run_id == run_id, RunBranch.kind == "wip", RunBranch.step == step)
+            .limit(1)
+        )
+    return found is not None
+
+
+async def last_started_step(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID, steps: Collection[str]
+) -> str | None:
+    """The last of the top-level `steps` the run started (its latest `node_started` among
+    them): the step a run that ended was in."""
+    if not steps:
+        return None
+    async with sessions() as session:
+        return await session.scalar(
+            select(RunEventRow.node_id)
+            .where(
+                RunEventRow.run_id == run_id,
+                RunEventRow.type == NODE_STARTED,
+                RunEventRow.node_id.in_(list(steps)),
+            )
+            .order_by(RunEventRow.seq.desc())
+            .limit(1)
+        )
 
 
 def _latest(run_id: UUID) -> Select[RunBranch]:

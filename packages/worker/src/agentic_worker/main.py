@@ -116,12 +116,17 @@ from agentic_engine.events import (
 from agentic_engine.gate import GateDecision, GateReview
 from agentic_engine.graph import (
     Checkpointer,
+    StepNotFoundError,
+    StepNotReachedError,
     WorkflowRunResult,
     log_policy_stop,
     record_unloadable_run,
     record_unstarted_run,
+    rerun_workflow,
     resume_workflow,
     run_workflow,
+    steps_before,
+    top_level_steps,
 )
 from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.logging import configure_logging
@@ -174,18 +179,21 @@ from agentic_store import (
     APPROVAL_EXPIRED_REASON,
     PostgresArtifactStore,
     PostgresEventSink,
+    RerunBranchesError,
     StoredRun,
     UnloadableRun,
     active_seconds,
     cancel_reason,
     cancel_requested,
     claim_run,
+    copy_run_artifacts,
     dequeue_run,
     drop_old_bundles,
     enqueue_run,
     expire_gates,
     get_github_installation,
     kept_sandbox_run_ids,
+    last_started_step,
     latest_branches,
     leased_run_ids,
     load_secret,
@@ -199,6 +207,7 @@ from agentic_store import (
     renew_lease,
     repo_created,
     requeue_stale_runs,
+    rerun_branches,
     run_ended,
     waiting_run_ids,
     workspace_price_table,
@@ -544,7 +553,9 @@ class EndKeeper:
         try:
             if self.sandbox is not None:
                 if self.saver is not None:
-                    await self.saver.save_uncommitted()
+                    steps = [step.id for step in top_level_steps(run.spec)]
+                    ended_in = await last_started_step(self._worker.sessions, run.id, steps)
+                    await self.saver.save_uncommitted(ended_in)
                 self._worker.sandboxes.keep(run.id)
             elif not await self._worker.sandboxes.exists(run.id):
                 return event
@@ -787,6 +798,7 @@ async def _attempt(
     which the run logs (`branches_restored`) before its graph resumes. While the sandbox is open,
     `keeper` holds it, so a run that fails or is cancelled keeps it (12.3)."""
     last_seq = await max_event_seq(worker.sessions, run.id)
+    first = last_seq == 0  # no event yet: the run starts (a restore below writes one)
     decision = await pending_decision(worker.sessions, run.id) if last_seq else None
     tries = run.attempt - 1
     if tries >= worker.settings.max_attempts:
@@ -814,8 +826,14 @@ async def _attempt(
             )
         elif run.repo is not None:
             token = await _clone_token(worker, run.id, target)
-            # Only a run that has run before can have saved branches.
-            saved = await latest_branches(worker.sessions, run.id) if last_seq else []
+            # Only a run that has run before can have saved branches; a rerun from a step starts
+            # with the original's as they were before that step (12.4).
+            try:
+                saved = await _saved_branches(worker, run, last_seq)
+            except RerunBranchesError as e:
+                log.warning("run %s cannot start from its step: %s", run.id, e)
+                await _fail(run, sink, last_seq, f"cannot rerun from the step: {e}")
+                return "failed"
             try:
                 with registered(token) if token is not None else contextlib.nullcontext():
                     sandbox = await stack.enter_async_context(
@@ -888,10 +906,29 @@ async def _attempt(
             artifacts,
             integrator,
             saver,
+            first=first,
         )
         if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
         return result.status
+
+
+async def _saved_branches(worker: Worker, run: StoredRun, last_seq: int) -> list[BranchBundle]:
+    """The branches a fresh sandbox of `run` gets back: its own latest saved ones once it has run
+    (12.2), or, for the first attempt of a rerun from a step, the original's as they were before
+    that step, with that step's uncommitted work if asked (12.4). Raises `RerunBranchesError`."""
+    if last_seq:
+        return await latest_branches(worker.sessions, run.id)
+    origin = run.rerun_from
+    if origin is None:
+        return []
+    return await rerun_branches(
+        worker.sessions,
+        origin.run_id,
+        run.id,
+        steps_before(run.spec, origin.node_id),
+        origin.node_id if origin.use_wip else None,
+    )
 
 
 async def _record_base(worker: Worker, run: StoredRun, sandbox: Sandbox) -> None:
@@ -990,14 +1027,54 @@ async def _workflow(
     artifacts: ArtifactStore | None = None,
     integrator: BranchIntegrator | None = None,
     saver: BranchSaver | None = None,
+    *,
+    first: bool | None = None,
 ) -> WorkflowRunResult:
-    """Start or resume the run's graph. Tool nodes call `tools`, the executor agents use too. A
+    """Start or resume the run's graph: start it when it has no event before this attempt
+    (`first`, else `last_seq == 0`), from a step of another run if it is a rerun from a step
+    (12.4). Tool nodes call `tools`, the executor agents use too. A
     run paused at a gate continues with `decision`, and its gates show and edit the writers'
     branches through `review`, and its orchestrators merge their tasks' branches through
     `integrator` (6.3). Its branches are saved through `saver` (12.2). Its artifacts go to
     `artifacts`. A run with a budget counts what
     its earlier attempts spent (`runs.estimated_usd` when it was claimed)."""
-    if last_seq == 0:
+    if first is None:
+        first = last_seq == 0
+    if first and run.rerun_from is not None:
+        origin = run.rerun_from
+        log.info("run %s started from step %s of %s", run.id, origin.node_id, origin.run_id)
+
+        async def copy_artifacts(versions: dict[str, int]) -> None:
+            await copy_run_artifacts(worker.sessions, origin.run_id, run.id, versions)
+
+        try:
+            return await rerun_workflow(
+                run.spec,
+                runtime,
+                run.input,
+                run_id=run.id,
+                source_run=origin.run_id,
+                from_node=origin.node_id,
+                sink=sink,
+                checkpointer=worker.checkpointer,
+                next_seq=last_seq + 1,
+                tools=tools,
+                policy=run.policy,
+                spent=run.spent,
+                review=review,
+                artifacts=artifacts,
+                integrator=integrator,
+                context=run_context(run),
+                saver=saver,
+                on_seeded=copy_artifacts,
+            )
+        except (StepNotFoundError, StepNotReachedError) as e:
+            log.warning("run %s cannot start from its step: %s", run.id, e)
+            await _fail(run, sink, last_seq, f"cannot rerun from the step: {e}")
+            return WorkflowRunResult(
+                run_id=run.id, status="failed", text="", order=[], results={}, usage=None
+            )
+    if first:
         log.info("run %s started", run.id)
         return await run_workflow(
             run.spec,

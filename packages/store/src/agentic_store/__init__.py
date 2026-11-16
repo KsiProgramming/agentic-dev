@@ -17,6 +17,7 @@ from agentic_store.approvals import (
 from agentic_store.artifacts import (
     PostgresArtifactStore,
     StoredArtifact,
+    copy_run_artifacts,
     get_run_artifact,
     list_run_artifacts,
 )
@@ -25,11 +26,15 @@ from agentic_store.audit_log import AuditEventRow, AuditRunRef, list_audit_event
 from agentic_store.branches import (
     BranchKind,
     BundleTooLargeError,
+    RerunBranchesError,
     SavedBranch,
     SavedChanges,
+    has_uncommitted,
+    last_started_step,
     latest_branches,
     list_saved_branches,
     record_base_sha,
+    rerun_branches,
     save_branch,
     saved_changes,
 )
@@ -101,7 +106,7 @@ from agentic_store.pricing import (
 )
 from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run, requeue_stale_runs
 from agentic_store.rerun import RunNotEndedError, create_rerun
-from agentic_store.runs import StoredRun, create_run, get_run
+from agentic_store.runs import RerunFrom, StoredRun, create_run, get_run
 from agentic_store.sandboxes import (
     SandboxInfo,
     SandboxNotKeptError,
@@ -185,6 +190,8 @@ __all__ = [
     "PolicyViolationError",
     "PostgresArtifactStore",
     "PostgresEventSink",
+    "RerunBranchesError",
+    "RerunFrom",
     "Run",
     "RunArtifact",
     "RunBranch",
@@ -225,6 +232,7 @@ __all__ = [
     "cancel_requested",
     "check_workflow",
     "claim_run",
+    "copy_run_artifacts",
     "count_runs",
     "create_rerun",
     "create_run",
@@ -242,7 +250,9 @@ __all__ = [
     "get_run_summary",
     "get_workflow_version",
     "get_workspace",
+    "has_uncommitted",
     "kept_sandbox_run_ids",
+    "last_started_step",
     "latest_branches",
     "latest_publications",
     "leased_run_ids",
@@ -283,6 +293,7 @@ __all__ = [
     "request_cancel",
     "request_sandbox_removal",
     "requeue_stale_runs",
+    "rerun_branches",
     "resolve_workflow",
     "restore_workflow",
     "run_ended",

@@ -155,3 +155,52 @@ def _artifact(row: RunArtifact) -> Artifact:
         content=row.content,
         output_schema=row.output_schema,
     )
+
+
+async def copy_run_artifacts(
+    sessions: async_sessionmaker[AsyncSession],
+    source_run: UUID,
+    target_run: UUID,
+    versions: Mapping[str, int],
+) -> int:
+    """Copy into `target_run` every version of `source_run`'s artifacts up to the one named in
+    `versions` (name → version), keeping their numbers: a rerun from a step (12.4) carries the
+    state that refers to them, and its next write of a name follows the version it carries.
+    Versions `target_run` has already are left alone (an attempt that copied them was cut off).
+    Returns how many were copied."""
+    if not versions:
+        return 0
+    async with sessions.begin() as session:
+        have = {
+            (r.name, r.version)
+            for r in await session.execute(
+                select(RunArtifact.name, RunArtifact.version).where(
+                    RunArtifact.run_id == target_run
+                )
+            )
+        }
+        rows = await session.scalars(
+            select(RunArtifact).where(
+                RunArtifact.run_id == source_run, RunArtifact.name.in_(list(versions))
+            )
+        )
+        copied = 0
+        for row in rows:
+            if row.version > versions[row.name] or (row.name, row.version) in have:
+                continue
+            session.add(
+                RunArtifact(
+                    run_id=target_run,
+                    name=row.name,
+                    version=row.version,
+                    node_id=row.node_id,
+                    media_type=row.media_type,
+                    size=row.size,
+                    sha256=row.sha256,
+                    content=row.content,
+                    output_schema=row.output_schema,
+                    created_at=row.created_at,
+                )
+            )
+            copied += 1
+    return copied

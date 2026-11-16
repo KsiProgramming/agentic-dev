@@ -18,6 +18,16 @@ from agentic_store.subflows import run_spec
 
 
 @dataclass(frozen=True)
+class RerunFrom:
+    """Where a rerun from a step (12.4) starts: the top-level step `node_id` of the run
+    `run_id`, with that step's uncommitted work restored if `use_wip`."""
+
+    run_id: UUID
+    node_id: str
+    use_wip: bool = False
+
+
+@dataclass(frozen=True)
 class StoredRun:
     id: UUID
     status: str
@@ -34,6 +44,8 @@ class StoredRun:
     created_at: datetime | None = None
     # The commit its first clone was at (12.2), which its later sandboxes are cloned at.
     base_sha: str | None = None
+    # A rerun from a step (12.4) starts there instead of from the beginning.
+    rerun_from: RerunFrom | None = None
 
 
 async def create_run(
@@ -117,4 +129,15 @@ def stored_run(run: Run) -> StoredRun:
         spent=run.estimated_usd,
         created_at=run.created_at,
         base_sha=run.base_sha,
+        rerun_from=_rerun_from(run),
+    )
+
+
+def _rerun_from(run: Run) -> RerunFrom | None:
+    if run.rerun_from is None or run.rerun_of is None:
+        return None
+    return RerunFrom(
+        run_id=run.rerun_of,
+        node_id=str(run.rerun_from["node_id"]),
+        use_wip=run.rerun_from.get("use_wip") is True,
     )

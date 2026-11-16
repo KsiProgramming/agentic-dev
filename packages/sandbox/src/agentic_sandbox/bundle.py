@@ -62,6 +62,9 @@ class BranchBundle:
     # The branch's tip, and how many commits it has on top of `base_sha`.
     head_sha: str = ""
     commits: int = 0
+    # The branch the bundle holds, when it is fetched under another name (`branch`): a rerun from
+    # a step (12.4) gets the original run's `agent/<run>/<key>` as its own. Empty: `branch`.
+    source: str = ""
 
 
 class EmptyBranchError(SandboxError):
@@ -117,20 +120,22 @@ async def branch_heads(sandbox: Sandbox, prefix: str) -> BranchHeads:
 
 async def import_bundles(clone: Path, bundles: Sequence[BranchBundle]) -> None:
     """Fetch each bundle into the clone at `clone` (on this host, before it is copied into a
-    sandbox) as `refs/heads/<branch>`. Each bundle's base must be the clone's `HEAD`. Raises
-    `SandboxError` if one cannot be fetched."""
+    sandbox) as `refs/heads/<branch>`, from the branch it holds (`source`, else `branch`). Each
+    bundle's base must be the clone's `HEAD`. Raises `SandboxError` if one cannot be fetched."""
     if not bundles:
         return
     env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
     with tempfile.TemporaryDirectory(prefix="agentic-bundles-") as scratch:
         for index, bundle in enumerate(bundles):
+            source = bundle.source or bundle.branch
             _check_branch(bundle.branch)
+            _check_branch(source)
             path = Path(scratch) / f"{index}.bundle"
             await asyncio.to_thread(path.write_bytes, bundle.data)
-            ref = f"refs/heads/{bundle.branch}"
+            ref = f"+refs/heads/{source}:refs/heads/{bundle.branch}"
             argv = [
                 "git", "-C", str(clone), *GIT_SAFETY,
-                "fetch", "-q", "--no-tags", "--update-head-ok", str(path), f"+{ref}:{ref}",
+                "fetch", "-q", "--no-tags", "--update-head-ok", str(path), ref,
             ]  # fmt: skip
             error = f"could not restore branch {bundle.branch}"
             await _run(argv, env, error, hide=(scratch, clone))

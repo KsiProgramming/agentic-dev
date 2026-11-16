@@ -214,6 +214,7 @@ async def rerun_workflow(
     from_node: str,
     sink: EventSink,
     checkpointer: Checkpointer,
+    next_seq: int = 1,
     tools: ToolExecutor | None = None,
     policy: Policy = PLATFORM_POLICY,
     spent: Decimal = Decimal(0),
@@ -234,8 +235,9 @@ async def rerun_workflow(
     `run_started` carries `rerun_from` (`run_id`, `node_id`) and `carried`, the steps the new
     run did not run again. A rerun from the first step carries nothing and starts from `input`.
     A thread already seeded (an attempt cut off before `run_started`) is not seeded again.
-    Raises `StepNotFoundError` or `StepNotReachedError` before any event is written."""
-    log = RunEventLog(run_id, sink)
+    Its events start at `next_seq` (after the `branches_restored` of its sandbox). Raises
+    `StepNotFoundError` or `StepNotReachedError` before any event is written."""
+    log = RunEventLog(run_id, sink, next_seq=next_seq)
     budget = budget_meter(policy, spent)
     graph = compile_workflow(
         spec,
