@@ -90,6 +90,42 @@ describe("describe", () => {
       "Removed GitHub (acme)",
     ],
     [
+      "a Jira connection",
+      {
+        action: "connection.added",
+        run_id: null,
+        details: { provider: "jira", account_login: "Ada Example", sites: 2, replaced: false },
+      },
+      "Added Jira (Ada Example)",
+    ],
+    [
+      "a Jira connection Atlassian refuses",
+      {
+        action: "connection.needs_attention",
+        run_id: null,
+        details: { provider: "jira", reason: "invalid_grant" },
+      },
+      "Jira needs reconnecting · Atlassian refused to renew its access",
+    ],
+    [
+      "a Jira site turned off",
+      {
+        action: "jira.site_updated",
+        run_id: null,
+        details: { site: "Acme", cloud_id: "c1", enabled: false },
+      },
+      "Turned off Acme",
+    ],
+    [
+      "picked Jira projects",
+      {
+        action: "jira.projects_changed",
+        run_id: null,
+        details: { site: "Acme", cloud_id: "c1", count: 3, keys: ["API", "WEB"] },
+      },
+      "3 projects of Acme · API, WEB and 1 more",
+    ],
+    [
       "lowered limits and a budget",
       {
         action: "policy.updated",
@@ -197,6 +233,9 @@ test("each category has its actions", () => {
   expect(actionsOf("settings")).toEqual([
     "connection.added",
     "connection.removed",
+    "connection.needs_attention",
+    "jira.site_updated",
+    "jira.projects_changed",
     "policy.updated",
     "pricing.updated",
   ]);

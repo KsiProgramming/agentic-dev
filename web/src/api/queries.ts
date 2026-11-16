@@ -18,6 +18,10 @@ export type PriceOverride = components["schemas"]["PriceOverride"];
 export type WorkspacePolicy = components["schemas"]["WorkspacePolicyOut"];
 export type RunLimits = components["schemas"]["RunLimits"];
 export type RunLimitOverrides = components["schemas"]["RunLimitOverrides"];
+export type JiraConnection = components["schemas"]["JiraConnectionOut"];
+export type JiraSite = components["schemas"]["JiraSiteOut"];
+export type JiraProject = components["schemas"]["JiraProjectOut"];
+export type JiraProjectPage = components["schemas"]["JiraProjectPage"];
 
 /** What the API says about the workspace's GitHub repos. */
 export type GithubRepos =
@@ -43,6 +47,10 @@ export function policyKey(workspaceId: string) {
 
 export function reposKey(workspaceId: string) {
   return ["workspace", workspaceId, "repos"] as const;
+}
+
+export function jiraKey(workspaceId: string) {
+  return ["workspace", workspaceId, "jira"] as const;
 }
 
 export function newRepoOptionsKey(workspaceId: string) {
@@ -338,5 +346,165 @@ export function useSavePolicy({
       return data;
     },
     onSuccess: (policy) => queries.setQueryData(policyKey(workspaceId), policy),
+  });
+}
+
+/** The workspace's Jira connection (7.1): its account, its sites and the projects picked on
+ * each. Never a token. */
+export function useJira({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  return useQuery({
+    queryKey: jiraKey(workspaceId),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/jira", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the Jira connection");
+      return data;
+    },
+  });
+}
+
+/** Asks for Atlassian's consent URL and sends the browser there; Atlassian sends it back to the
+ * settings page (or `returnTo`). */
+export function useStartJiraAuthorize({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+  navigate = (url: string) => window.location.assign(url),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+  navigate?: (url: string) => void;
+}) {
+  return useMutation({
+    mutationFn: async (returnTo?: string) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).POST("/workspaces/{workspace_id}/connections/jira/authorize", {
+          params: { path: { workspace_id: workspaceId } },
+          body: returnTo ? { return_to: returnTo } : undefined,
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not start connecting Jira");
+      navigate(data.authorize_url);
+    },
+  });
+}
+
+export function useDisconnectJira({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { error, response } = await call(() =>
+        createApiClient(baseUrl).DELETE("/workspaces/{workspace_id}/connections/jira", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!response.ok && response.status !== 404) {
+        throw new ApiError(response.status, error, "Could not disconnect");
+      }
+    },
+    onSuccess: () => {
+      void queries.invalidateQueries({ queryKey: connectionsKey(workspaceId) });
+      void queries.invalidateQueries({ queryKey: jiraKey(workspaceId) });
+    },
+  });
+}
+
+/** Turns a Jira site on or off for the workspace; its picked projects are kept. */
+export function useSetJiraSiteEnabled({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ cloudId, enabled }: { cloudId: string; enabled: boolean }) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).PATCH("/workspaces/{workspace_id}/jira/sites/{cloud_id}", {
+          params: { path: { workspace_id: workspaceId, cloud_id: cloudId } },
+          body: { enabled },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not change the site");
+      return data;
+    },
+    onSuccess: () =>
+      void queries.invalidateQueries({ queryKey: jiraKey(workspaceId), exact: true }),
+  });
+}
+
+/** A site's projects, read live from Jira, filtered by `query` (key or name). A refusal that
+ * says the connection needs attention reloads the connection, so its card says so. */
+export function useJiraProjects({
+  workspaceId,
+  cloudId,
+  query,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  cloudId: string;
+  query: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useQuery({
+    queryKey: [...jiraKey(workspaceId), "projects", cloudId, query] as const,
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects", {
+          params: {
+            path: { workspace_id: workspaceId, cloud_id: cloudId },
+            query: query ? { q: query } : {},
+          },
+        }),
+      );
+      if (data) return data;
+      const refused = new ApiError(response.status, error, "Could not load the projects");
+      if (refused.code === "needs_attention") {
+        void queries.invalidateQueries({ queryKey: jiraKey(workspaceId), exact: true });
+        void queries.invalidateQueries({ queryKey: connectionsKey(workspaceId) });
+      }
+      throw refused;
+    },
+  });
+}
+
+/** Replaces the projects the workspace may use on a site. */
+export function usePutJiraProjects({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ cloudId, projectIds }: { cloudId: string; projectIds: string[] }) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).PUT("/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects", {
+          params: { path: { workspace_id: workspaceId, cloud_id: cloudId } },
+          body: { project_ids: projectIds },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not save the projects");
+      return data;
+    },
+    onSuccess: () =>
+      void queries.invalidateQueries({ queryKey: jiraKey(workspaceId), exact: true }),
   });
 }

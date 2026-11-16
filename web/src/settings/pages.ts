@@ -15,7 +15,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     href: "/settings/integrations",
     segment: "integrations",
     label: "Integrations",
-    description: "The model access and the repositories this workspace works with.",
+    description:
+      "The model access, the repositories and the issue tracker this workspace works with.",
     icon: PlugIcon,
   },
   {
