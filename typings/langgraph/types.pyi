@@ -1,5 +1,6 @@
-from langchain_core.runnables import RunnableConfig
 from typing import Any
+
+from langchain_core.runnables import RunnableConfig
 
 class Interrupt:
     value: Any
