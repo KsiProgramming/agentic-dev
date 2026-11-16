@@ -90,3 +90,11 @@ function* specNodes(node: SpecNode): Generator<SpecNode> {
 export function allSpecNodes(spec: WorkflowSpec): SpecNode[] {
   return [...specNodes(spec.root)];
 }
+
+/** The run's top-level steps in order (12.4): the root sequence's steps, nested sequences
+ * flattened, or the root alone. A rerun from a step starts at one of them. */
+export function topLevelSteps(spec: WorkflowSpec): SpecNode[] {
+  const flatten = (node: SpecNode): SpecNode[] =>
+    node.type === "sequence" ? node.steps.flatMap(flatten) : [node];
+  return flatten(spec.root);
+}

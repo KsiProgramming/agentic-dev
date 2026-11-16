@@ -77,7 +77,9 @@ function RunStatusBadge({ run }: { run: RunSummary }) {
 
 /** What started the run: "Manual", "API" or "Rerun of <id>". */
 function Trigger({ run }: { run: RunSummary }) {
-  if (run.rerun_of) return <RerunOf runId={run.rerun_of} />;
+  if (run.rerun_of) {
+    return <RerunOf runId={run.rerun_of} fromStep={run.rerun_from?.node_id} />;
+  }
   return (
     <span>{run.trigger === "manual" ? "Manual" : run.trigger === "api" ? "API" : "Rerun"}</span>
   );

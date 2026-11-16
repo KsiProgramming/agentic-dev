@@ -50,6 +50,7 @@ export function StepPanel({
   onTab,
   onSelect,
   extra,
+  actions,
 }: {
   runId: string;
   baseUrl?: string;
@@ -65,6 +66,8 @@ export function StepPanel({
   onTab: (tab: StepTab) => void;
   onSelect: (key: string) => void;
   extra?: ReactNode;
+  /** Actions on the step, at the end of its header ("Rerun from here", 12.4). */
+  actions?: ReactNode;
 }) {
   const { step } = row;
   const usage = stepUsage(step);
@@ -100,6 +103,7 @@ export function StepPanel({
           )}
           {usage ? <Money usage={usage} /> : null}
         </span>
+        {actions}
       </header>
       <Tabs value={tab} onValueChange={(next) => onTab(next as StepTab)} className="gap-0">
         <TabsList aria-label="Step views" className="px-4">

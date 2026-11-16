@@ -56,6 +56,12 @@ import { RunHeader, type HeaderFacts } from "./run-header";
 import { stepsProgress } from "./run-stats";
 import { RunTiles } from "./run-tiles";
 import {
+  CarriedSteps,
+  carriedSteps,
+  lastTopLevelStep,
+  StepRerunAction,
+} from "./rerun-from-step";
+import {
   defaultEntry,
   failingEntry,
   findEntry,
@@ -329,6 +335,25 @@ function Console({
   // waiting gate, the failing step or the last agent's answer.
   const selected = findEntry(entries, asked) ?? defaultEntry(entries, live);
   const kind = selected ? (kindOf(selected.step.id) ?? guessKind(selected.step)) : null;
+  // An ended run can be rerun from one of its top-level steps (12.4).
+  const ended = canRerun(facts.status.status) && !live;
+  const stepActions =
+    selected && ended ? (
+      <StepRerunAction
+        runId={runId}
+        spec={spec}
+        nodeId={selected.step.id}
+        endedHere={
+          lastTopLevelStep(
+            spec,
+            rows.map((r) => r.step.id),
+          ) === selected.step.id
+        }
+        baseUrl={baseUrl}
+      />
+    ) : null;
+  const rerunFrom = run?.rerun_from ?? null;
+  const carried = rerunFrom ? carriedSteps(events) : [];
 
   let banner: BannerState | null = null;
   if (facts.status.status === "failed") {
@@ -436,6 +461,7 @@ function Console({
           </TabsList>
 
           <TabsContent value="list" className="p-2">
+            {rerunFrom ? <CarriedSteps from={rerunFrom.run_id} steps={carried} /> : null}
             {entries.length === 0 ? (
               live ? (
                 <QueuedState run={run} now={now} />
@@ -506,6 +532,7 @@ function Console({
                     tab={tab}
                     onTab={(next) => update({ tab: next === "output" ? null : next })}
                     onSelect={select}
+                    actions={stepActions}
                     extra={
                       gate &&
                       selected.step.id === gate.nodeId &&
@@ -533,6 +560,7 @@ function Console({
                 tab={tab}
                 onTab={(next) => update({ tab: next === "output" ? null : next })}
                 onSelect={select}
+                actions={stepActions}
                 extra={
                   gate && selected.step.id === gate.nodeId && selected.step.status === "waiting" ? (
                     <WaitingMarker />

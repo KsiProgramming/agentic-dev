@@ -30,13 +30,14 @@ import { documentParams, nodeParams, paramEdit, sameParams, type Schema } from "
 type Json = Record<string, unknown>;
 
 /** Applied to every manifest's `ui`: list items are removed, never copied or reordered. */
-const GLOBAL_UI = { "ui:globalOptions": { orderable: false, copyable: false } };
+export const GLOBAL_UI = { "ui:globalOptions": { orderable: false, copyable: false } };
 
 /**
  * A form over `values`, which are the spec's: each accepted change goes to `onChange` as the
  * whole new value. A change from outside (undo, Discard, a rebase) starts the form again from it.
+ * Also the step's form when a run is rerun from it (12.4).
  */
-function ParamForm({
+export function ParamForm({
   idPrefix,
   schema,
   ui,
