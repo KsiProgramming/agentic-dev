@@ -8,10 +8,10 @@
 - [x] Engine: rerun from a container step (an orchestrator) runs it whole; a gate step pauses again; a seeded rerun cut off resumes from its own checkpoint. (Router choices carried: not tested yet.)
 - [x] Engine, "what the agent receives" (lessons rule 1): the rerun step's request has the edited instructions, the earlier steps' outputs as input, and the run's request and repo context. (That its tools read the restored branch is the worker's Docker test.)
 - [x] Engine: a step that is not top-level, or was never reached, is refused.
-- [ ] Store (Testcontainers): migration 0032 up and down; `run_branches.step` saved by every step kind that commits; `branches_before` returns the versions as of the step, not later ones, and skips `wip` and dropped bundles.
-- [ ] Worker (fake sandbox, one Docker test; never all of `packages/sandbox/tests`): the new run's `agent/<new run>/*` branches hold the original's commits as of the step; `use_wip` restores the writer's branch with 12.3's snapshot commit on top; a killed worker of a seeded run resumes from the new run's own checkpoint without re-seeding.
-- [ ] API: `from` happy path; `422` unknown or nested node, a parameter `setParam` refuses; `409` not ended, not reached, bundles dropped, saved before 12.4, no `wip` for `use_wip`; the original run unchanged; audit `run.rerun` with `from_node`, `use_wip`, edited paths and no values.
-- [ ] Python: `ruff`, `pyright`, the package tests touched.
+- [x] Store (Testcontainers): migration 0032 up and down; `run_branches.step` saved by every step kind that commits; `branches_before` returns the versions as of the step, not later ones, and skips `wip` and dropped bundles.
+- [x] Worker (fake sandbox, one Docker test; never all of `packages/sandbox/tests`): the new run's `agent/<new run>/*` branches hold the original's commits as of the step; `use_wip` restores the writer's branch with 12.3's snapshot commit on top; a killed worker of a seeded run resumes from the new run's own checkpoint without re-seeding.
+- [x] API: `from` happy path; `422` unknown or nested node, a parameter `setParam` refuses; `409` not ended, not reached, bundles dropped, saved before 12.4, no `wip` for `use_wip`; the original run unchanged; audit `run.rerun` with `from_node`, `use_wip`, edited paths and no values.
+- [x] Python: `ruff`, `pyright`, the package tests touched (the checkpoint copy on the Postgres saver, `test_checkpoint.py`, runs in CI: psycopg needs a selector loop, which Windows lacks).
 - [x] Web: `pnpm lint && pnpm typecheck && pnpm test` (Vitest for the action and the sheet).
 
 ## Manual / demo checks

@@ -20,7 +20,7 @@ Engine and store first, then the API, then the console. Read `specs/lessons.md` 
 - [x] Sandbox `open(..., restore=...)`: restore bundles from the original run under `agent/<new run>/<key>` (fetch refspec renames); the new run's `base_sha` copied from the original.
 - [x] `use_wip`: restore the step's `wip` bundle as its writer's branch (its commits plus 12.3's snapshot commit).
 - [x] Copy the artifact rows the copied state references into the new run's `run_artifacts`.
-- [ ] Worker tests (fake sandbox; one Docker test, never all of `packages/sandbox/tests`): the new run's branches hold the original's commits as of the step, not later ones; `use_wip` adds the snapshot commit; a killed worker of a seeded run resumes from its own checkpoint, not re-seeding. (Engine test covers the resume; the worker test needs Docker.)
+- [x] Worker tests (fake sandbox; one Docker test, never all of `packages/sandbox/tests`): the new run's branches hold the original's commits as of the step, not later ones; `use_wip` adds the snapshot commit; a killed worker of a seeded run resumes from its own checkpoint, not re-seeding. (`packages/worker/tests/test_rerun_from_step.py`, on Docker; the resume is the engine's test.)
 
 ## 4. API
 - [x] `agentic_store.create_rerun(..., from_step=...)`: checks the run ended, the node is top-level and was reached, the needed bundles exist and are not dropped, `use_wip` applies; applies `set_params` with the 5.1 graph-operations code, refusing other ops or nodes; sets `rerun_from_node`; audit `run.rerun` gains `from_node`, `use_wip`, `edited` (paths only, no values).
