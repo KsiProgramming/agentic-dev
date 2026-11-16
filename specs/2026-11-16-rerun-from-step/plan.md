@@ -35,6 +35,6 @@ Engine and store first, then the API, then the console. Read `specs/lessons.md` 
 
 ## 6. Specs, docs and the real run
 - [x] `tech-stack.md`: run history and rerun contract (`from`, `rerun_from`), Saved branches (`step`, restore under new names, `wip` as a commit), Run console (action, sheet, carried steps), audit table, decisions-log rows from requirements.
-- [ ] `lessons.md` entry if the real run shows something tests missed.
+- [x] `lessons.md` entry if the real run shows something tests missed (none: see validation.md).
 - [x] `CHANGELOG.md` under `## [Unreleased]`.
-- [ ] Real run with `AGENTIC_RUNTIME=claude` (see validation.md), read step by step in Activity.
+- [x] Real run with `AGENTIC_RUNTIME=claude` (see validation.md), read step by step in Activity.
