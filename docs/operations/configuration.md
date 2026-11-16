@@ -16,11 +16,14 @@ Files referenced below (master key, GitHub App key) should be mounted read-only 
 | `GITHUB_APP_ID` | unset | Your GitHub App's numeric id. Unset: GitHub endpoints answer `503`, everything else works. |
 | `GITHUB_APP_SLUG` | unset | The App's URL slug (`github.com/apps/<slug>`). |
 | `GITHUB_APP_PRIVATE_KEY_FILE` | unset | Path to the App's private key (`.pem`). |
-| `WEB_BASE_URL` | `http://localhost:3000` | Public URL of the web app; the GitHub install flow redirects the browser there. |
-| `API_BASE_URL` | `http://localhost:8000` | Public URL of the API (used by the fake GitHub install flow). |
+| `ATLASSIAN_CLIENT_ID` | unset | Your Atlassian OAuth 2.0 (3LO) app's client id, for Jira. Unset: Jira endpoints answer `503` and the Jira card says it is not configured. |
+| `ATLASSIAN_CLIENT_SECRET_FILE` | unset | Path to a file holding the app's client secret. Required with the client id. |
+| `WEB_BASE_URL` | `http://localhost:3000` | Public URL of the web app; the GitHub install flow and the Jira consent redirect the browser there. |
+| `API_BASE_URL` | `http://localhost:8000` | Public URL of the API: the Jira callback URL is `<API_BASE_URL>/jira/callback` (also used by the fake GitHub install flow). |
 | `AGENTIC_ENV` | `development` | `production` refuses the fakes below. **Set it in every real deployment.** |
 | `CLAUDE_KEY_CHECK` | `anthropic` | How a Claude key is verified before it is stored: one real call (`anthropic`) or by prefix `sk-ant-test-` (`fake`, tests only). |
 | `AGENTIC_GITHUB` | `app` | `fake` replaces GitHub with local bare repos (dev and e2e only). |
+| `AGENTIC_JIRA` | `app` | `fake` replaces Atlassian with an account that reaches two sample Jira sites (dev and e2e only). |
 | `FAKE_GITHUB_ROOT` | unset | Where the fake App keeps its bare repos. |
 
 ## Worker (`agentic_worker`)

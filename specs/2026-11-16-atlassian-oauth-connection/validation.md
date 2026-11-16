@@ -26,8 +26,8 @@ Made checkable: after the OAuth flow, the workspace's `jira` connection holds th
 - [ ] A state is single use and expires; a callback with a wrong, used or missing state stores nothing and redirects with `reason=state`; `error=access_denied` redirects with `reason=denied`.
 - [ ] A grant missing a scope is stored as `needs_attention` with `reason=scopes`.
 - [ ] Project search and save per site; an unknown project id is refused with `422`; a site switched off keeps its projects and fails `allowed_project`.
-- [ ] Disconnect answers `204`, then `not_connected`; unconfigured server answers `409` `jira_not_configured` and `configured: false`.
-- [ ] Audit entries: `connection.added`, `jira.projects_changed`, `connection.needs_attention`, `connection.removed`.
+- [ ] Disconnect answers `204`, then `not_connected`; an unconfigured server answers `503` on the Jira routes and `configured: false`.
+- [ ] Audit entries: `connection.added`, `jira.projects_changed`, `jira.site_updated`, `connection.needs_attention`, `connection.removed`.
 
 ### Web
 - [ ] `jira-connection.test.tsx`: the four card states (not configured, not connected, connected, needs attention), Connect follows the API's URL, Disconnect confirms first, each error reason has its sentence.
@@ -58,6 +58,6 @@ Needs an OAuth 2.0 (3LO) app in the Atlassian developer console with the callbac
 ## Merge criteria
 - [ ] All checks above pass locally, then in CI
 - [ ] tech-stack (contract, audit actions, decisions log), CHANGELOG and the docs pages are updated in the same PR
-- [ ] No token, client secret or authorization code in any log, fixture or screenshot
+- [ ] No token or client secret in any log, fixture or screenshot (the one-time authorization code is in the callback's access log line: single use, useless without the client secret)
 - [ ] The roadmap row 7.1 is marked done by the PR (CI does it)
 - [ ] A human squash-merges

@@ -42,20 +42,20 @@ flowchart LR
 
     gh[("GitHub<br/><i>repos, installations,<br/>pull requests</i>")]
     llm[("Model provider<br/><i>Anthropic Claude API</i>")]
-    jira[("Jira<br/><i>planned: Milestone 7</i>")]
+    jira[("Jira Cloud<br/><i>sites and projects;<br/>tools planned</i>")]
 
     dev -- "HTTPS (browser)" --> sys
     admin -- "HTTPS (browser)" --> sys
     sys -- "GitHub App JWT +<br/>installation tokens" --> gh
     sys -- "Messages API<br/>(workspace's own key)" --> llm
-    sys -. "OAuth 3LO (planned)" .-> jira
+    sys -- "OAuth 2.0 (3LO) grant<br/>per workspace" --> jira
 ```
 
 | External system | What the platform uses it for | Credential | Who owns the credential |
 |---|---|---|---|
 | GitHub | List repos, clone private repos, push agent branches, open PRs, create org repos | GitHub App private key → short-lived installation tokens | The operator who registers the App |
 | Anthropic | Run `agent` nodes | Workspace API key, stored encrypted | Each workspace ("bring your own key") |
-| Jira *(planned)* | Trigger runs from issues, comment, transition | Atlassian OAuth 3LO | Each workspace |
+| Jira Cloud | Today: connect an account and pick the projects runs may use. Planned (Milestone 7): read issues, comment and transition behind gates, start runs from issues | Atlassian OAuth 2.0 (3LO) app's client secret (operator); the workspace's grant, stored encrypted and renewed | The operator registers the app; each workspace consents |
 | GitHub Copilot *(planned, Milestone 8)* | Second agent provider | GitHub OAuth / App | Each workspace |
 
 No personal access token is ever stored.

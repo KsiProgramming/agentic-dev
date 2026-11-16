@@ -131,7 +131,7 @@ flowchart TB
 
 **NuGet egress (optional).** To lint .NET repos, each worker host runs the egress proxy (`packages/egress-proxy`) on an internal Docker network, as compose does: `docker network create --internal agentic-nuget`, the proxy container on it and on a network with outbound HTTPS to `api.nuget.org`, and the worker started with `SANDBOX_NUGET_NETWORK=agentic-nuget` and `SANDBOX_NUGET_PROXY=http://<proxy container name>:3128`. Restore and build jobs run with 2 GB, 2 CPUs and 512 PIDs by default (`SANDBOX_JOB_MEMORY`, `SANDBOX_JOB_CPUS`). The proxy logs every host it refuses.
 
-Native Kubernetes sandboxes (a `Sandbox` backend that creates pods with a `RuntimeClass` such as gVisor or Kata) are a natural extension of the `Sandbox` protocol; see [Connecting your platforms](../integrations/connecting-platforms.md#6-adding-a-sandbox-backend). Production isolation is roadmap phase 10.2.
+Native Kubernetes sandboxes (a `Sandbox` backend that creates pods with a `RuntimeClass` such as gVisor or Kata) are a natural extension of the `Sandbox` protocol; see [Connecting your platforms](../integrations/connecting-platforms.md#7-adding-a-sandbox-backend). Production isolation is roadmap phase 10.2.
 
 **Data tier.** Managed PostgreSQL 16 with high availability and point-in-time recovery; managed Redis with TLS and authentication. Redis holds no system of record, but it is not entirely disposable: it carries the announcements of runs that are queued and not yet claimed, and pending GitHub install states. A run whose announcement is lost stays `queued` until it is rerun (automatic recovery is tracked in [`specs/ideas.md`](../../specs/ideas.md)). Use a managed Redis with persistence, or check for stale `queued` runs after a Redis restart.
 
@@ -172,7 +172,7 @@ Each agent run is mostly waiting on the model provider, so CPU per worker is low
 Security (see the [security model](../security/security-model.md#6-operator-responsibilities)):
 
 - [ ] Web and API reachable only through an authenticating proxy; no direct access to the API from the internet.
-- [ ] `AGENTIC_ENV=production`; `AGENTIC_GITHUB=app`; `CLAUDE_KEY_CHECK=anthropic`; `SANDBOX_BACKEND=docker`; `SANDBOX_LOCAL_ROOT` unset.
+- [ ] `AGENTIC_ENV=production`; `AGENTIC_GITHUB=app`; `AGENTIC_JIRA=app`; `CLAUDE_KEY_CHECK=anthropic`; `SANDBOX_BACKEND=docker`; `SANDBOX_LOCAL_ROOT` unset.
 - [ ] Unique master key per environment, in a secret manager, mounted read-only, **backed up apart from the database**.
 - [ ] Your own GitHub App with minimal permissions, installed on selected repositories; branch protection on default branches.
 - [ ] Workers on dedicated hosts; sandboxed container runtime; egress restricted to GitHub and the model provider (and, if .NET repos are linted, the egress proxy's to `api.nuget.org`).

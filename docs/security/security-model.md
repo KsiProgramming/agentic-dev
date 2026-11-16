@@ -14,6 +14,8 @@ This document is for security reviewers, platform operators and contributors. It
 | Model provider API keys | `connections`, AES-256-GCM encrypted; in worker memory during a run | Spend on the victim's account; access to their provider data |
 | Master key | Key file (`MASTER_KEY_FILE`) / KMS | Decrypts every stored model key |
 | GitHub App private key | `GITHUB_APP_PRIVATE_KEY_FILE` on API and worker | Mint tokens for every installation: read and write all granted repos |
+| Jira grants (access and refresh tokens) | `connections`, AES-256-GCM encrypted, one per workspace; in API memory during a call | Read and write every project of the sites the consenting account reaches, as that person (the platform's project allowlist does not bind a stolen token) |
+| Atlassian OAuth client secret | `ATLASSIAN_CLIENT_SECRET_FILE` on the API | Exchange codes and renew grants as the deployment's app |
 | Source code of connected repos | Worker clone, sandbox volume, model provider requests, run events and artifacts | Code disclosure |
 | Pull requests and branches | GitHub | Malicious code proposed under the App's identity |
 | Run history, artifacts, audit log | Postgres | Disclosure; loss of accountability |
@@ -93,7 +95,8 @@ flowchart LR
 - **Minimal exposure.** A key is verified once with the provider before it is stored; only its last four characters are ever returned. It is decrypted when a run starts, held in a `SecretStr`, used only by that run's client, and registered with the redactor while held.
 - **Redaction.** `RedactingFilter` on log handlers and `redact()` on event payloads replace any live secret (8+ characters) with `[REDACTED]`. A test fails the build if a key appears in a run's events or logs (`test_no_secret_leak.py`).
 - **No personal tokens.** GitHub uses an App; installation tokens are short-lived and minted on demand. The token reaches git through environment variables only, never argv, URLs or files.
-- **Fakes are refused in production.** `AGENTIC_ENV=production` refuses the fake GitHub App and the fake key check.
+- **Jira grants.** A workspace's Atlassian grant is stored like a model key, with no hint (its tokens rotate). Its tokens are never returned by the API, put in a redirect, an audit entry or a log line; the client's errors carry a status code, never a response body. Atlassian's consent is per site, so the platform keeps its own list of allowed projects per site and checks it on every Jira call. The consent's `state` is random, single use and expires after 10 minutes.
+- **Fakes are refused in production.** `AGENTIC_ENV=production` refuses the fake GitHub App, the fake Atlassian and the fake key check.
 
 ### 4.2 Agents and prompt injection
 
@@ -154,7 +157,7 @@ The platform cannot secure these for you:
 3. Register **your own** GitHub App with the least permissions you need, install it on chosen repositories only, and protect default branches with required reviews.
 4. Run workers on dedicated hosts or nodes; prefer a sandboxed container runtime (gVisor `runsc` or Kata) and restrict worker egress to GitHub and your model provider.
 5. Change all default credentials (`POSTGRES_PASSWORD`), enable TLS to Postgres and Redis, and keep both off the public network.
-6. Set `AGENTIC_ENV=production` and leave `AGENTIC_GITHUB` and `CLAUDE_KEY_CHECK` at their real values.
+6. Set `AGENTIC_ENV=production` and leave `AGENTIC_GITHUB`, `AGENTIC_JIRA` and `CLAUDE_KEY_CHECK` at their real values.
 7. Rotate the GitHub App private key and model keys on your usual schedule; keep the audit log.
 
 ## 7. Known gaps and hardening roadmap

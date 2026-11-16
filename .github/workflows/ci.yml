@@ -138,6 +138,8 @@ jobs:
           # The e2e journey runs on the fake GitHub App and Claude key check (phase 2.6).
           echo "AGENTIC_GITHUB=fake" >> .env
           echo "CLAUDE_KEY_CHECK=fake" >> .env
+          # The Jira card is connectable on the fake Atlassian (phase 7.1).
+          echo "AGENTIC_JIRA=fake" >> .env
           # The approval expiry e2e test waits for a gate with a 2 s time to live (phase 11.3).
           echo "GATE_SWEEP_S=1" >> .env
           # The kept sandbox e2e test removes a failed run's sandbox and waits for it (phase 12.3).
