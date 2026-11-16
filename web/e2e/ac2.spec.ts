@@ -95,8 +95,10 @@ async function drawnGraph(page: Page, scope: string) {
   const cards = await box
     .locator("[data-flow-card]")
     .evaluateAll((els) => els.map((e) => e.getAttribute("data-flow-card")));
+  // Every edge, a wrapped one included: where a sequence wraps to a new row depends on the
+  // width it is drawn in, and the run map's pane is narrower than the canvas.
   const edges = await box
-    .locator("g[data-edge]:not([data-edge='wrap'])")
+    .locator("g[data-edge]")
     .evaluateAll((els) =>
       els.map((e) => `${e.getAttribute("data-from")}→${e.getAttribute("data-to")}`).sort(),
     );
