@@ -49,7 +49,9 @@ Needs an OAuth 2.0 (3LO) app in the Atlassian developer console with the callbac
 - [ ] Revoke the app in the Atlassian account's connected apps, then open "Choose projects": the card turns to Needs attention with Reconnect; Reconnect brings it back with the two projects still picked.
 - [ ] Disconnect → confirm → Not connected; the row, sites and projects are gone.
 - [ ] The card at 375 and 1440 px, light and dark; every action reachable by keyboard.
-- [ ] Record the date, the site used (not its tokens) and the outcome here.
+- [x] Record the date, the site used (not its tokens) and the outcome here.
+
+**Result (2026-11-16):** run by hand on the local compose stack against a real Jira Cloud site, with the maintainer's own Atlassian OAuth 2.0 (3LO) app (callback `http://localhost:8000/jira/callback`, the six scopes). Atlassian's consent screen accepted the scopes, the card came back connected with the real account and sites, and the maintainer reported the checks above as working. The fake Atlassian was used before it for the screens (`AGENTIC_JIRA=fake`).
 
 ### With the fake (no Atlassian account)
 - [ ] `AGENTIC_JIRA=fake docker compose up`: connect, pick projects and disconnect work end to end.
