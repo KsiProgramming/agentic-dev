@@ -48,7 +48,7 @@ class SandboxBranchSaver:
         self._seen: dict[str, str] | None = None  # branch → the tip last saved or tried
         self._lock = asyncio.Lock()
 
-    async def save(self) -> BranchSaves:
+    async def save(self, *, step: str | None = None) -> BranchSaves:
         async with self._lock:
             if self._seen is None:
                 saved = await list_saved_branches(self._sessions, self._run_id)
@@ -61,17 +61,19 @@ class SandboxBranchSaver:
             saves = BranchSaves()
             for branch, head in sorted(heads.branches.items()):
                 if self._seen.get(branch) != head:
-                    await self._save(branch, head, saves)
+                    await self._save(branch, head, saves, step)
             return saves
 
-    async def _save(self, branch: str, head: str, saves: BranchSaves) -> None:
+    async def _save(self, branch: str, head: str, saves: BranchSaves, step: str | None) -> None:
         assert self._seen is not None
         key = branch.removeprefix(self._prefix)
         kind = "integration" if key in self._integrations else "writer"
         try:
             bundle = await export_branch(self._sandbox, branch)
             changes, error = await self._changes(key, branch)
-            row = await save_branch(self._sessions, self._run_id, key, kind, bundle, changes, error)
+            row = await save_branch(
+                self._sessions, self._run_id, key, kind, bundle, changes, error, step=step
+            )
         except EmptyBranchError:
             self._seen[branch] = head
             return
@@ -103,10 +105,11 @@ class SandboxBranchSaver:
             log.warning("run %s: changes of %s not read: %s", self._run_id, branch, e)
             return None, str(e)
 
-    async def save_uncommitted(self) -> int:
+    async def save_uncommitted(self, step: str | None = None) -> int:
         """Save each writer's uncommitted work as a `wip` version of `wip/<run>/<key>` (12.3),
-        for a run that failed or was cancelled; returns how many were saved. A failure is logged,
-        never raised: the run ends either way."""
+        for a run that failed or was cancelled in the top-level `step` (12.4: a rerun from that
+        step may start from it); returns how many were saved. A failure is logged, never raised:
+        the run ends either way."""
         async with self._lock:
             try:
                 snapshots = await snapshot_worktrees(self._sandbox, self._run_id)
@@ -120,7 +123,14 @@ class SandboxBranchSaver:
                     bundle = await export_branch(self._sandbox, snapshot.branch)
                     changes, error = await self._changes(snapshot.key, snapshot.branch)
                     row = await save_branch(
-                        self._sessions, self._run_id, snapshot.key, kind, bundle, changes, error
+                        self._sessions,
+                        self._run_id,
+                        snapshot.key,
+                        kind,
+                        bundle,
+                        changes,
+                        error,
+                        step=step,
                     )
                 except (SandboxError, BundleTooLargeError) as e:
                     log.warning(

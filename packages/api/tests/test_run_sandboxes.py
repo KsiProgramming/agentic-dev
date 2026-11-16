@@ -21,6 +21,7 @@ from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_sandbox import BranchBundle, RepoSource
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
+    BranchKind,
     Run,
     create_run,
     list_audit_events,
@@ -102,7 +103,7 @@ async def test_what_the_writers_changed_is_read_from_what_was_saved(
     client: AsyncClient, sessions: async_sessionmaker[AsyncSession]
 ) -> None:
     run_id = await new_run(sessions, status="failed")
-    branches = [
+    branches: list[tuple[str, BranchKind, str, list[FileChange]]] = [
         ("writer", "writer", f"agent/{run_id}/writer", [change("writer", "NOTES.md")]),
         ("fix.b1", "writer", f"agent/{run_id}/fix.b1", [change("fix.b1", "a.py")]),
         ("fix", "integration", f"agent/{run_id}/fix", [change("fix", "a.py")]),

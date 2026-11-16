@@ -32,6 +32,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }
+      // Above the approval dock while one is open (`--dock-height`, set by the dock), so a toast
+      // never covers Approve or Reject (Sonner's defaults are 24 px, 16 px on a phone).
+      offset={{ bottom: "calc(var(--dock-height, 0px) + 24px)" }}
+      mobileOffset={{ bottom: "calc(var(--dock-height, 0px) + 16px)" }}
       toastOptions={{
         classNames: {
           toast: "cn-toast",

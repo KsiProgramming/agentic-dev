@@ -153,6 +153,7 @@ from agentic_engine.graph.state import (
     RunState,
     RunUpdate,
 )
+from agentic_engine.graph.steps import top_step_of
 from agentic_engine.integrate import (
     BranchIntegrator,
     IntegrationError,
@@ -426,6 +427,7 @@ def compile_workflow(
     )
 
     loops: list[LoopNode] = []  # the loops `add` is inside
+    top = top_step_of(spec)  # node id → the top-level step it runs in, for saved branches (12.4)
 
     def add(node: Node, then: str) -> str:
         """Add `node`, going on to `then` once it completes (to `END` otherwise), and return the
@@ -456,7 +458,9 @@ def compile_workflow(
                 )
                 builder.add_node(
                     worker,
-                    _saving(_map_item(node, runtime, tools, log, limits), log, limits),
+                    _saving(
+                        _map_item(node, runtime, tools, log, limits), log, limits, top[node.id]
+                    ),
                     input_schema=MapItem,
                 )
                 builder.add_edge(worker, join)
@@ -473,7 +477,12 @@ def compile_workflow(
                 builder.add_conditional_edges(node.id, _fan_out_branches(node), [worker, END])
                 builder.add_node(
                     worker,
-                    _saving(_parallel_branch(node, runtime, tools, log, limits), log, limits),
+                    _saving(
+                        _parallel_branch(node, runtime, tools, log, limits),
+                        log,
+                        limits,
+                        top[node.id],
+                    ),
                     input_schema=ParallelBranch,
                 )
                 builder.add_edge(worker, join)
@@ -487,13 +496,21 @@ def compile_workflow(
                 builder.add_conditional_edges(node.id, _fan_out_tasks(at), [worker, join, END])
                 builder.add_node(
                     worker,
-                    _saving(_orchestrator_task(at, runtime, tools, log, limits), log, limits),
+                    _saving(
+                        _orchestrator_task(at, runtime, tools, log, limits),
+                        log,
+                        limits,
+                        top[node.id],
+                    ),
                     input_schema=OrchestratorTask,
                 )
                 if body_writes(node):
                     merge = integrate_node_id(node)
                     builder.add_node(
-                        merge, _saving(_orchestrator_integrate(at, log, limits), log, limits)
+                        merge,
+                        _saving(
+                            _orchestrator_integrate(at, log, limits), log, limits, top[node.id]
+                        ),
                     )
                     builder.add_edge(worker, merge)
                     builder.add_edge(merge, join)
@@ -547,7 +564,8 @@ def compile_workflow(
                 return node.id
             case AgentNode() | ToolNode() | GateNode():
                 builder.add_node(
-                    node.id, _saving(_step(node, runtime, tools, log, limits), log, limits)
+                    node.id,
+                    _saving(_step(node, runtime, tools, log, limits), log, limits, top[node.id]),
                 )
                 go_on(node.id, node.id, then)
                 return node.id
@@ -574,12 +592,13 @@ async def _repo_ready(state: RunState) -> RunUpdate:
 
 
 def _saving[T](
-    work: Callable[[T], Awaitable[RunUpdate]], log: RunEventLog, limits: _Limits
+    work: Callable[[T], Awaitable[RunUpdate]], log: RunEventLog, limits: _Limits, step: str
 ) -> Callable[[T], Awaitable[RunUpdate]]:
     """`work`, a step that may commit, then the run's branches saved through `limits.saver`
     before its update is returned, and so before it is checkpointed (12.2): a crash cannot fall
     between the step completing and its commits being saved. A step that raises (a gate pausing,
-    a cancel) saves nothing. Without a saver, `work` as it is."""
+    a cancel) saves nothing. The versions record `step`, the top-level step `work` runs in
+    (12.4). Without a saver, `work` as it is."""
     saver = limits.saver
     if saver is None:
         return work
@@ -587,17 +606,17 @@ def _saving[T](
     @functools.wraps(work)
     async def saving(state: T) -> RunUpdate:
         update = await work(state)
-        await _save_branches(saver, log)
+        await _save_branches(saver, log, step)
         return update
 
     return saving
 
 
-async def _save_branches(saver: BranchSaver, log: RunEventLog) -> None:
+async def _save_branches(saver: BranchSaver, log: RunEventLog, step: str) -> None:
     """Save the run's moved branches and log `branch_saved` or `branch_save_failed` for each.
     A saver that breaks is logged and the step goes on: its commits stay in the sandbox."""
     try:
-        saves = await saver.save()
+        saves = await saver.save(step=step)
     except Exception:
         _logger.exception("run %s: could not save its branches", log.run_id)
         return

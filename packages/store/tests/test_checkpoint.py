@@ -8,8 +8,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import InMemoryEventSink, RunEvent
-from agentic_engine.graph import resume_workflow, run_workflow
+from agentic_engine.graph import rerun_workflow, resume_workflow, run_workflow, thread_config
 from agentic_engine.spec import parse_spec
+from agentic_runtime import Failed
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime
 from agentic_store import open_checkpointer
 from agentic_store.checkpoint import psycopg_conninfo
@@ -80,3 +81,43 @@ async def test_a_run_resumes_from_its_postgres_checkpoint(
 
     assert [r.node_id for r in second.requests] == ["step-2", "step-3"]
     assert (result.status, result.order) == ("completed", ["step-1", "step-2", "step-3"])
+
+
+@pytest.mark.integration
+@needs_selector_loop
+async def test_a_rerun_from_a_step_is_seeded_from_the_postgres_checkpoint(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str
+) -> None:
+    """12.4 on the workers' saver: the original's checkpoint before `step-3` is copied into the
+    rerun's own thread, so only `step-3` runs, and the original's thread is left as it was."""
+    spec = parse_spec(json.loads(SPEC.read_text(encoding="utf-8")))
+    source, target = uuid4(), uuid4()
+    async with open_checkpointer(postgres_url) as checkpointer:
+        await run_workflow(
+            spec,
+            FakeRuntime({"step-3": [Failed(error="no")]}),
+            "go",
+            run_id=source,
+            sink=InMemoryEventSink(),
+            checkpointer=checkpointer,
+        )
+        before = [c.checkpoint["id"] async for c in checkpointer.alist(thread_config(source))]
+
+    async with open_checkpointer(postgres_url) as checkpointer:
+        runtime = FakeRuntime()
+        result = await rerun_workflow(
+            spec,
+            runtime,
+            "go",
+            run_id=target,
+            source_run=source,
+            from_node="step-3",
+            sink=InMemoryEventSink(),
+            checkpointer=checkpointer,
+        )
+        after = [c.checkpoint["id"] async for c in checkpointer.alist(thread_config(source))]
+
+    assert result.status == "completed"
+    assert [r.node_id for r in runtime.requests] == ["step-3"]
+    assert result.order == ["step-1", "step-2", "step-3"]
+    assert after == before

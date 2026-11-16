@@ -259,7 +259,7 @@ class _RepoTools:
         ] = 100,
     ) -> str:
         """Search the repository's text files for a pattern. Returns one `path:line: text` entry
-        per matching line. The .git directory and binary files are skipped."""
+        per matching line, by path then line. The .git directory and binary files are skipped."""
         relative = _relative_or_refuse(path)
         limits = self._limits
         expression = pattern if regex else _ERE_SPECIAL.sub(r"\\\1", pattern)
@@ -283,7 +283,11 @@ class _RepoTools:
             (f"{prefix}{m[1]}", m[2], m[3]) for line in raw if (m := _HIT.match(line)) is not None
         ]
         binary = await self._binary_files(sorted({file for file, _, _ in hits}))
-        hits = [hit for hit in hits if hit[0] not in binary]
+        # By path and line, not in the order `find` walked the disk, which differs between
+        # machines: the same search returns the same first matches everywhere.
+        hits = sorted(
+            (hit for hit in hits if hit[0] not in binary), key=lambda h: (h[0], int(h[1]))
+        )
         if not hits:
             return f"no matches for {pattern!r}"
 

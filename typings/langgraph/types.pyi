@@ -1,5 +1,7 @@
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+
 class Interrupt:
     value: Any
     id: str
@@ -11,6 +13,7 @@ class PregelTask:
 
 class StateSnapshot:
     values: dict[str, Any]
+    config: RunnableConfig
     next: tuple[str, ...]
     tasks: tuple[PregelTask, ...]
     interrupts: tuple[Interrupt, ...]

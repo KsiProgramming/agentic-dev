@@ -583,7 +583,7 @@
           "runs"
         ],
         "summary": "Rerun",
-        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`. The budget is `budget_usd` if given, else the workflow's own, else the workspace's\ndefault as it is now; the original run's spend does not count. A run that created its repo\nis not rerun: the repo exists now, so start a run on it instead.",
+        "description": "Queue a new run with the same workflow spec, input, repo and workspace as the ended run\n`run_id` (failed, cancelled or completed), linked to it by `rerun_of`. The original run is\nnot changed. The spec is the one the original ran, even if its template has changed since;\nthe limits are the workspace's as they are now, and a spec above them is refused with\n`422`. The budget is `budget_usd` if given, else the workflow's own, else the workspace's\ndefault as it is now; the original run's spend does not count. A run that created its repo\nis not rerun: the repo exists now, so start a run on it instead.\n\nWith `from` (12.4) the new run starts at that top-level step, from the original's checkpoint\nbefore it and with the code the original's writers had then; the steps before it are\nneither run nor charged again. `set_params` change that step's parameters only.",
         "operationId": "rerunRun",
         "parameters": [
           {
@@ -629,10 +629,10 @@
             "description": "No run with this id"
           },
           "409": {
-            "description": "The run has not ended yet, its workflow uses `github.*` tools and the workspace no longer has a GitHub connection, or it created its repo (`repo_exists`)"
+            "description": "The run has not ended yet, its workflow uses `github.*` tools and the workspace no longer has a GitHub connection, or it created its repo (`repo_exists`); with `from`, the run never reached the step, its code before it can no longer be restored, or the step left no uncommitted work for `use_wip`"
           },
           "422": {
-            "description": "The workflow is above the workspace's limits as they are now"
+            "description": "The workflow is above the workspace's limits as they are now; with `from`, the node is not a top-level step or a parameter cannot be set"
           }
         }
       }
@@ -5607,6 +5607,91 @@
           "github"
         ]
       },
+      "RerunFrom": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "A top-level step of the run, which it reached."
+          },
+          "set_params": {
+            "items": {
+              "$ref": "#/components/schemas/RerunParam"
+            },
+            "type": "array",
+            "title": "Set Params",
+            "description": "Parameters of that step to change for the rerun; no other node changes."
+          },
+          "use_wip": {
+            "type": "boolean",
+            "title": "Use Wip",
+            "description": "Start from the uncommitted work the step left when the run ended in it.",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "node_id"
+        ],
+        "title": "RerunFrom"
+      },
+      "RerunFromRef": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "use_wip": {
+            "type": "boolean",
+            "title": "Use Wip",
+            "description": "Whether it started from the uncommitted work that step left.",
+            "default": false
+          },
+          "edited": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Edited",
+            "description": "The parameters of that step changed for the rerun, by path."
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "node_id"
+        ],
+        "title": "RerunFromRef",
+        "description": "Where a rerun from a step (12.4) started: the top-level step `node_id` of `run_id`."
+      },
+      "RerunParam": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "The step's parameter, by its JSON field names, as `setParam` takes it.",
+            "examples": [
+              "instructions"
+            ]
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "value"
+        ],
+        "title": "RerunParam"
+      },
       "RerunRequest": {
         "properties": {
           "budget_usd": {
@@ -5622,6 +5707,17 @@
             ],
             "title": "Budget Usd",
             "description": "USD the new run may spend. Unset: the workspace's default budget as it is now. From $0.01 to $1,000,000; unset is no budget."
+          },
+          "from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerunFrom"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rerun from this step (12.4) instead of from the beginning: the steps before it are neither run nor charged again, and the code is restored as it was before it."
           }
         },
         "additionalProperties": false,
@@ -6250,6 +6346,17 @@
             ],
             "title": "Rerun Of",
             "description": "The run this one repeats."
+          },
+          "rerun_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerunFromRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again."
           },
           "trigger": {
             "$ref": "#/components/schemas/RunTrigger",
@@ -6917,6 +7024,17 @@
             ],
             "title": "Rerun Of",
             "description": "The run this one repeats."
+          },
+          "rerun_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerunFromRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again."
           },
           "trigger": {
             "$ref": "#/components/schemas/RunTrigger",

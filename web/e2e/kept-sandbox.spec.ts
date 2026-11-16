@@ -11,6 +11,8 @@ test("a failed run keeps its sandbox, shows its writer's changes, and keeps them
   page,
   request,
 }) => {
+  // The run fails within a minute, and the sweep removes the sandbox within 45 s of the request.
+  test.setTimeout(180_000);
   const name = `Kept ${Date.now().toString(36)}`;
   const runId = await startRun(request, [REPO_WRITER, FAILING], name, DOCS_DEMO_URL);
   await page.goto(`/runs/${runId}`);
@@ -27,10 +29,17 @@ test("a failed run keeps its sandbox, shows its writer's changes, and keeps them
   const sheet = page.getByTestId("gate-review");
   await expect(sheet.getByRole("heading", { name: "What the writers changed" })).toBeVisible();
   await expect(sheet.getByText("NOTES.md").first()).toBeVisible();
+  // Scan once both editors are set up with their names, not while Monaco is still mounting.
+  await expect(sheet.locator(".monaco-diff-editor")).toBeVisible({ timeout: 30_000 });
+  // Monaco names its editors a moment after it draws them, longer on a loaded machine.
+  await expect(sheet.getByRole("textbox", { name: /, before$/ })).toBeAttached({ timeout: 30_000 });
+  await expect(sheet.getByRole("textbox", { name: /, after/ })).toBeAttached({ timeout: 30_000 });
   expect(
     (await new AxeBuilder({ page }).include("[data-testid=gate-review]").analyze()).violations,
   ).toEqual([]);
-  await page.keyboard.press("Escape");
+  // Not Escape: the diff editor has the focus and keeps the key.
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+  await expect(sheet).toBeHidden();
 
   await line.getByRole("button", { name: "Remove sandbox now" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Remove sandbox" }).click();

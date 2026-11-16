@@ -189,11 +189,42 @@ def uses_github(spec: WorkflowSpec) -> bool:
     )
 
 
-class RerunRequest(BaseModel):
+class RerunParam(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(
+        description="The step's parameter, by its JSON field names, as `setParam` takes it.",
+        examples=["instructions"],
+    )
+    value: JsonValue
+
+
+class RerunFrom(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str = Field(description="A top-level step of the run, which it reached.")
+    set_params: list[RerunParam] = Field(
+        default_factory=list[RerunParam],
+        description="Parameters of that step to change for the rerun; no other node changes.",
+    )
+    use_wip: bool = Field(
+        default=False,
+        description="Start from the uncommitted work the step left when the run ended in it.",
+    )
+
+
+class RerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     budget_usd: float | None = budget_field(
         "USD the new run may spend. Unset: the workspace's default budget as it is now."
+    )
+    from_: RerunFrom | None = Field(
+        default=None,
+        alias="from",
+        description="Rerun from this step (12.4) instead of from the beginning: the steps "
+        "before it are neither run nor charged again, and the code is restored as it was "
+        "before it.",
     )
 
 
@@ -267,6 +298,20 @@ class WorkflowRef(BaseModel):
         default=None,
         description="The version of the stored workflow `id` the run was started from (5.7); "
         "`null` for a run of a template or of a spec sent with it.",
+    )
+
+
+class RerunFromRef(BaseModel):
+    """Where a rerun from a step (12.4) started: the top-level step `node_id` of `run_id`."""
+
+    run_id: UUID
+    node_id: str
+    use_wip: bool = Field(
+        default=False, description="Whether it started from the uncommitted work that step left."
+    )
+    edited: list[str] = Field(
+        default_factory=list[str],
+        description="The parameters of that step changed for the rerun, by path.",
     )
 
 
@@ -373,6 +418,11 @@ class RunSummary(BaseModel):
         description='True for a run cancelled because its gate expired: shown as "Expired".'
     )
     rerun_of: UUID | None = Field(description="The run this one repeats.")
+    rerun_from: RerunFromRef | None = Field(
+        default=None,
+        description="Set for a rerun from a step of `rerun_of` (12.4): the steps before it were "
+        "not run again.",
+    )
     trigger: RunTrigger = Field(
         description="What started the run: a person in the web app (`manual`), another client "
         "(`api`), or a rerun of `rerun_of` (`rerun`)."

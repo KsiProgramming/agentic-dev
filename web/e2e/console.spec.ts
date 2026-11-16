@@ -8,6 +8,7 @@ import {
   FINDINGS_INPUT,
   REPO_READER,
   startRun,
+  TYPED_READER,
   TYPED_WRITER,
   WRITER,
 } from "./runs";
@@ -47,21 +48,23 @@ test("a failed run names its failing step and reason; Go to step selects it", as
   await expect(page.getByTestId("step-panel")).toHaveAttribute("data-key", "broken");
 });
 
-/** Done when (4.2): a wrong-shaped output fails at the edge with a clear error. */
-test("a typed output that is not JSON fails at its port; a JSON one passes", async ({
+/** Done when (4.2): a wrong-shaped value fails at the edge with a clear error. The stack's fake
+ * agents fit their answers to a typed output (6.8), so the failing case is the run's prose input
+ * at a typed input port; the passing one is a typed output. */
+test("a typed input that is not JSON fails at its port; a JSON output passes", async ({
   page,
   request,
 }) => {
-  const runId = await startRun(request, [TYPED_WRITER], "E2E typed port");
+  const runId = await startRun(request, [TYPED_READER], "E2E typed port");
   await page.goto(`/runs/${runId}`);
 
   const banner = page.getByTestId("run-banner");
   await expect(banner).toHaveAttribute("data-kind", "failed", { timeout: 30_000 });
   await expect(banner).toContainText("Failed at writer");
-  await expect(banner).toContainText("output of 'writer' is not JSON");
+  await expect(banner).toContainText("input of 'writer' is not JSON");
   const port = page.getByTestId("step-panel").getByTestId("port-errors");
   await expect(port).toContainText("Wrong shape");
-  await expect(port).toContainText("The output of writer does not match its output schema.");
+  await expect(port).toContainText("The input of writer does not match its input schema.");
 
   const passing = await startRun(
     request,

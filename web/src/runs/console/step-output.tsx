@@ -402,12 +402,7 @@ export function StepOutput({
   if (files.length > 0) parts.push(<WrittenFiles key="files" files={files} />);
   if (step.savedBranches.length > 0) {
     parts.push(
-      <SavedBranches
-        key="saved"
-        branches={step.savedBranches}
-        runId={runId}
-        baseUrl={baseUrl}
-      />,
+      <SavedBranches key="saved" branches={step.savedBranches} runId={runId} baseUrl={baseUrl} />,
     );
   }
   if (step.artifactsWritten.length > 0) {

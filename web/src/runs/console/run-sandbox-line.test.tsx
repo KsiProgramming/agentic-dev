@@ -124,7 +124,9 @@ describe("what the writers changed (12.3)", () => {
 
     const sheet = await screen.findByTestId("gate-review");
     const picker = await within(sheet).findByLabelText("Writer");
-    const options = within(picker).getAllByRole("option").map((o) => o.textContent);
+    const options = within(picker)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
     expect(options).toEqual(["fix · integration branch", "writer · includes uncommitted work"]);
     expect(within(sheet).getAllByText("a.py")).not.toHaveLength(0);
 

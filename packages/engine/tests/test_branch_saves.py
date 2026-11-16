@@ -26,7 +26,7 @@ class Recorder:
         self._answers = list(answers)
         self.after: list[tuple[str, str | None]] = []
 
-    async def save(self) -> BranchSaves:
+    async def save(self, *, step: str | None = None) -> BranchSaves:
         last = self._sink.events[-1]
         self.after.append((last.type, last.node_id))
         answer = self._answers.pop(0) if self._answers else BranchSaves()
@@ -75,10 +75,10 @@ async def test_a_step_s_branches_are_saved_before_it_is_checkpointed() -> None:
     seen: list[list[str]] = []
 
     class Checking(Recorder):
-        async def save(self) -> BranchSaves:
+        async def save(self, *, step: str | None = None) -> BranchSaves:
             state = await reader.aget_state(thread_config(RUN))
             seen.append(list(state.values.get("order", [])))
-            return await super().save()
+            return await super().save(step=step)
 
     await run_workflow(
         flow, FakeRuntime(), "go", run_id=RUN, sink=sink, checkpointer=checkpointer,

@@ -12,6 +12,7 @@ import {
   SCANS,
   startReviewRun,
   startRun,
+  TYPED_READER,
   TYPED_WRITER,
   WRITER,
 } from "./runs";
@@ -232,7 +233,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     test("a run failed at a typed port has no serious a11y issues", async ({ page, request }) => {
-      const runId = await startRun(request, [TYPED_WRITER], "E2E typed port a11y");
+      const runId = await startRun(request, [TYPED_READER], "E2E typed port a11y");
       await open(page, `/runs/${runId}?step=writer`);
       await expect(page.getByTestId("step-panel").getByTestId("port-errors")).toBeVisible({
         timeout: 30_000,
@@ -338,7 +339,9 @@ for (const colorScheme of ["light", "dark"] as const) {
     }) => {
       const runId = await startRun(request, [WRITER]);
       await open(page, `/runs/${runId}`);
-      await expect(page.getByRole("button", { name: "Rerun" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("button", { name: "Rerun", exact: true })).toBeVisible({
+        timeout: 30_000,
+      });
       await expectNoSeriousIssues(page);
       await open(page, "/runs");
       const row = page.locator(`[data-run-id="${runId}"]`).filter({ visible: true });

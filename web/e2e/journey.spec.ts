@@ -72,7 +72,7 @@ test("connect, start a docs run, reject, rerun and approve, rerun from the list"
   await expect(page.getByText(/Rejected: Not this time\./)).toBeVisible();
 
   // 4. Rerun it from the console: the rerun links back, waits at its gate, and is approved.
-  await page.getByRole("button", { name: "Rerun" }).click();
+  await page.getByRole("button", { name: "Rerun", exact: true }).click();
   await expect(page).not.toHaveURL(new RegExp(first));
   const second = runIdOf(page);
   await expect(page.getByRole("link", { name: first.slice(0, 8) })).toHaveAttribute(

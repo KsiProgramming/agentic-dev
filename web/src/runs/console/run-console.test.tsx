@@ -874,6 +874,45 @@ test("a rerun links back to the run it repeats", async () => {
   expect(link.parentElement?.textContent).toBe(`Rerun of ${ORIGINAL.slice(0, 8)}`);
 });
 
+test("12.4: a rerun from a step names the step and the steps it did not run again", async () => {
+  const ORIGINAL = "00000000-0000-0000-0000-0000000000c3";
+  api(
+    detail({
+      status: "running",
+      rerun_of: ORIGINAL,
+      rerun_from: { run_id: ORIGINAL, node_id: "approve", use_wip: false, edited: [] },
+    }),
+  );
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started", { carried: ["list_modules", "document"] }));
+    source.emit({ ...runEvent(2, "node_started"), node_id: "approve" });
+  });
+
+  const [header, inList] = await screen.findAllByRole("link", {
+    name: `Run ${ORIGINAL.slice(0, 8)}`,
+  });
+  expect(header?.parentElement?.textContent).toBe(`Rerun of ${ORIGINAL.slice(0, 8)} from approve`);
+  expect(inList?.getAttribute("href")).toBe(`/runs/${ORIGINAL}`);
+  const carried = await screen.findByTestId("carried-steps");
+  expect(carried.textContent).toContain("list_modules, document");
+  const step = within(carried).getByRole("link", { name: "document" });
+  expect(step.getAttribute("href")).toBe(`/runs/${ORIGINAL}?step=document`);
+});
+
+test("12.4: an ended run offers Rerun from here on a top-level step", async () => {
+  api(detail({ status: "failed", failure_reason: "boom" }), async () => json([]));
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({ ...runEvent(2, "node_started"), node_id: "list_modules" });
+    source.emit({ ...runEvent(3, "node_failed", { error: "boom" }), node_id: "list_modules" });
+    source.emit(runEvent(4, "run_failed", { error: "boom" }));
+  });
+
+  expect(await screen.findByRole("button", { name: "Rerun from here" })).toBeTruthy();
+});
+
 test("a run of a stored workflow version links back to that version", async () => {
   api(detail({ workflow: { id: "docs", name: "Generate docs", version: 3 } }));
   show();

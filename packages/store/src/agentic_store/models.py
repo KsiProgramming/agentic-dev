@@ -205,6 +205,10 @@ class Run(Base):
     # When that gate expires: the worker then cancels the run (`agentic_store.expiry`).
     gate_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rerun_of: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
+    # A rerun from a step (12.4): `{node_id, use_wip, edited}`, the top-level step of `rerun_of`
+    # it starts from, whether that step's uncommitted work is restored, and the parameter paths
+    # changed (never their values). Null for a run that starts from the beginning.
+    rerun_from: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     # What started the run: `manual` (a person, from the web), `api` or `rerun`.
     trigger: Mapped[str] = mapped_column(String(32), server_default="api")
     # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
@@ -312,6 +316,9 @@ class RunBranch(Base):
     data: Mapped[bytes | None] = mapped_column(LargeBinary)
     changes: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     changes_error: Mapped[str | None] = mapped_column(Text)
+    # The top-level step the version was saved in (12.4): a rerun from a step restores the
+    # versions saved before it. Null for versions saved before 12.4.
+    step: Mapped[str | None] = mapped_column(String(128))
     bundle_removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
