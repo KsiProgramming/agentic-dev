@@ -105,7 +105,12 @@ from agentic_store.pricing import (
     workspace_price_table,
 )
 from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run, requeue_stale_runs
-from agentic_store.rerun import RunNotEndedError, create_rerun
+from agentic_store.rerun import (
+    RerunFromStep,
+    RunNotEndedError,
+    StepNotRerunnableError,
+    create_rerun,
+)
 from agentic_store.runs import RerunFrom, StoredRun, create_run, get_run
 from agentic_store.sandboxes import (
     SandboxInfo,
@@ -192,6 +197,7 @@ __all__ = [
     "PostgresEventSink",
     "RerunBranchesError",
     "RerunFrom",
+    "RerunFromStep",
     "Run",
     "RunArtifact",
     "RunBranch",
@@ -209,6 +215,7 @@ __all__ = [
     "SandboxState",
     "SavedBranch",
     "SavedChanges",
+    "StepNotRerunnableError",
     "StoredArtifact",
     "StoredComposite",
     "StoredRun",

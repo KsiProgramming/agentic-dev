@@ -48,6 +48,8 @@ class RunSummaryRow:
     # `{node_id, title, expires_at}` of the gate the run is paused at.
     waiting_gate: dict[str, Any] | None
     rerun_of: UUID | None
+    # `{node_id, use_wip, edited}` of a rerun from a step (12.4).
+    rerun_from: dict[str, Any] | None
     # What started the run: `manual`, `api` or `rerun`.
     trigger: str
     # The branch the run works on, if known.
@@ -138,6 +140,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.lease_expires_at,
         Run.waiting_gate,
         Run.rerun_of,
+        Run.rerun_from,
         Run.trigger,
         Run.branch,
         Run.input,
@@ -179,6 +182,7 @@ def _summary(
         lease_expires_at=row.lease_expires_at,
         waiting_gate=row.waiting_gate,
         rerun_of=row.rerun_of,
+        rerun_from=row.rerun_from,
         trigger=row.trigger,
         branch=row.branch,
         input=row.input,

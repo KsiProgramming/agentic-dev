@@ -24,6 +24,8 @@ from agentic_api.runs.models import (
     EditErrorDetail,
     GateBranch,
     PolicyErrorDetail,
+    RerunFrom,
+    RerunFromRef,
     RerunRequest,
     RunArtifact,
     RunArtifactContent,
@@ -44,6 +46,7 @@ from agentic_api.runs.models import (
 from agentic_api.workspaces.models import to_usd
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
+from agentic_engine.graph import StepNotFoundError
 from agentic_engine.spec import (
     ValidationIssue,
     WorkflowSpec,
@@ -52,6 +55,7 @@ from agentic_engine.spec import (
     messages,
     task_writer_orchestrator,
 )
+from agentic_engine.spec.ops import OpError
 from agentic_engine.templates import wrap_with_create_repo
 from agentic_github import GithubApiError, github_remote
 from agentic_sandbox import ARTIFACT_NAME, RepoSource, branch_name
@@ -63,12 +67,14 @@ from agentic_store import (
     InvalidEditsError,
     InvalidSelectionError,
     PolicyViolationError,
+    RerunFromStep,
     RunEndedError,
     RunNotEndedError,
     RunNotFoundError,
     RunSummaryRow,
     SandboxInfo,
     SandboxNotKeptError,
+    StepNotRerunnableError,
     StoredArtifact,
     WorkflowNotFoundError,
     WorkspaceNotFoundError,
@@ -185,6 +191,11 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "cancel_reason": cancel_reason,
         "expired": cancel_reason == APPROVAL_EXPIRED_REASON,
         "rerun_of": row.rerun_of,
+        "rerun_from": (
+            RerunFromRef(run_id=row.rerun_of, **row.rerun_from)
+            if row.rerun_from is not None and row.rerun_of is not None
+            else None
+        ),
         "trigger": row.trigger,
         "branch": row.branch,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
@@ -584,9 +595,13 @@ _NO_GITHUB = (
         409: {
             "description": "The run has not ended yet, its workflow uses `github.*` tools and "
             "the workspace no longer has a GitHub connection, or it created its repo "
-            "(`repo_exists`)"
+            "(`repo_exists`); with `from`, the run never reached the step, its code before it "
+            "can no longer be restored, or the step left no uncommitted work for `use_wip`"
         },
-        422: {"description": "The workflow is above the workspace's limits as they are now"},
+        422: {
+            "description": "The workflow is above the workspace's limits as they are now; with "
+            "`from`, the node is not a top-level step or a parameter cannot be set"
+        },
     },
 )
 async def rerun(
@@ -598,7 +613,11 @@ async def rerun(
     the limits are the workspace's as they are now, and a spec above them is refused with
     `422`. The budget is `budget_usd` if given, else the workflow's own, else the workspace's
     default as it is now; the original run's spend does not count. A run that created its repo
-    is not rerun: the repo exists now, so start a run on it instead."""
+    is not rerun: the repo exists now, so start a run on it instead.
+
+    With `from` (12.4) the new run starts at that top-level step, from the original's checkpoint
+    before it and with the code the original's writers had then; the steps before it are
+    neither run nor charged again. `set_params` change that step's parameters only."""
     sessions = _sessions(request)
     original = await get_run(sessions, run_id)
     if original is None:
@@ -611,16 +630,31 @@ async def rerun(
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
     try:
-        new_id = await create_rerun(sessions, run_id, to_usd(body.budget_usd) if body else None)
+        new_id = await create_rerun(
+            sessions,
+            run_id,
+            to_usd(body.budget_usd) if body else None,
+            _from_step(body.from_) if body and body.from_ else None,
+        )
     except RunNotFoundError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
-    except RunNotEndedError as e:
+    except (RunNotEndedError, StepNotRerunnableError) as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    except (StepNotFoundError, OpError) as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     except PolicyViolationError as e:
         raise _over_policy(e) from e
     await enqueue_run(request.app.state.redis, new_id)
     return CreateRunResponse(
         run_id=new_id, events_url=str(request.url_for("stream_run_events", run_id=new_id))
+    )
+
+
+def _from_step(body: RerunFrom) -> RerunFromStep:
+    return RerunFromStep(
+        node_id=body.node_id,
+        set_params=[(p.path, p.value) for p in body.set_params],
+        use_wip=body.use_wip,
     )
 
 

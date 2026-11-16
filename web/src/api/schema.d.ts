@@ -216,6 +216,10 @@ export interface paths {
          *     `422`. The budget is `budget_usd` if given, else the workflow's own, else the workspace's
          *     default as it is now; the original run's spend does not count. A run that created its repo
          *     is not rerun: the repo exists now, so start a run on it instead.
+         *
+         *     With `from` (12.4) the new run starts at that top-level step, from the original's checkpoint
+         *     before it and with the code the original's writers had then; the steps before it are
+         *     neither run nor charged again. `set_params` change that step's parameters only.
          */
         post: operations["rerunRun"];
         delete?: never;
@@ -2041,6 +2045,59 @@ export interface components {
         };
         /** @enum {string} */
         Requirement: "claude" | "github";
+        /** RerunFrom */
+        RerunFrom: {
+            /**
+             * Node Id
+             * @description A top-level step of the run, which it reached.
+             */
+            node_id: string;
+            /**
+             * Set Params
+             * @description Parameters of that step to change for the rerun; no other node changes.
+             */
+            set_params?: components["schemas"]["RerunParam"][];
+            /**
+             * Use Wip
+             * @description Start from the uncommitted work the step left when the run ended in it.
+             * @default false
+             */
+            use_wip: boolean;
+        };
+        /**
+         * RerunFromRef
+         * @description Where a rerun from a step (12.4) started: the top-level step `node_id` of `run_id`.
+         */
+        RerunFromRef: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Use Wip
+             * @description Whether it started from the uncommitted work that step left.
+             * @default false
+             */
+            use_wip: boolean;
+            /**
+             * Edited
+             * @description The parameters of that step changed for the rerun, by path.
+             */
+            edited?: string[];
+        };
+        /** RerunParam */
+        RerunParam: {
+            /**
+             * Path
+             * @description The step's parameter, by its JSON field names, as `setParam` takes it.
+             * @example instructions
+             */
+            path: string;
+            value: components["schemas"]["JsonValue"];
+        };
         /** RerunRequest */
         RerunRequest: {
             /**
@@ -2048,6 +2105,8 @@ export interface components {
              * @description USD the new run may spend. Unset: the workspace's default budget as it is now. From $0.01 to $1,000,000; unset is no budget.
              */
             budget_usd?: number | null;
+            /** @description Rerun from this step (12.4) instead of from the beginning: the steps before it are neither run nor charged again, and the code is restored as it was before it. */
+            from?: components["schemas"]["RerunFrom"] | null;
         };
         /** RestoreWorkflowRequest */
         RestoreWorkflowRequest: {
@@ -2341,6 +2400,8 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            /** @description Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again. */
+            rerun_from?: components["schemas"]["RerunFromRef"] | null;
             /** @description What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`). */
             trigger: components["schemas"]["RunTrigger"];
             /**
@@ -2647,6 +2708,8 @@ export interface components {
              * @description The run this one repeats.
              */
             rerun_of: string | null;
+            /** @description Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again. */
+            rerun_from?: components["schemas"]["RerunFromRef"] | null;
             /** @description What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`). */
             trigger: components["schemas"]["RunTrigger"];
             /**
@@ -3909,14 +3972,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The run has not ended yet, its workflow uses `github.*` tools and the workspace no longer has a GitHub connection, or it created its repo (`repo_exists`) */
+            /** @description The run has not ended yet, its workflow uses `github.*` tools and the workspace no longer has a GitHub connection, or it created its repo (`repo_exists`); with `from`, the run never reached the step, its code before it can no longer be restored, or the step left no uncommitted work for `use_wip` */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The workflow is above the workspace's limits as they are now */
+            /** @description The workflow is above the workspace's limits as they are now; with `from`, the node is not a top-level step or a parameter cannot be set */
             422: {
                 headers: {
                     [name: string]: unknown;
