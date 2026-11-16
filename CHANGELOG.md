@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 12.4 rerun from a step:
+  - **Rerun from a step, not from scratch.** A new run starts at one of an ended run's top-level steps, from the original's checkpoint before it: the steps before it are neither run nor charged again, and its writers' branches are restored as they were before the step (from the bundles saved in 12.2, under the new run's names). A container step (loop, map, parallel, orchestrator, router, subflow) runs whole again. The original run is not changed.
+  - **Edit the step first.** Its parameters (instructions, model, tools…) can be changed for the rerun, as `setParam` on that node only; the stored workflow is untouched. The step the run ended in can start from the uncommitted work it left (12.3), as one commit.
+  - **API.** `POST /runs/{id}/rerun` takes `from` `{node_id, set_params, use_wip}` (`422` for a node that is not a top-level step, `409` when the run never reached it or its code before it is gone); summaries have `rerun_from`; `run_started` carries `rerun_from` and `carried`; `run.rerun` audit entries name the step and the edited paths. Each saved branch version records the top-level step it was saved in (Alembic `0032_rerun_from_step`).
+  - **Console.** "Rerun from here" on a top-level step of an ended run opens a sheet with the step's parameters and, when it applies, "Start from its uncommitted work"; a rerun's header reads "Rerun of <id> from <step>", and its Steps tab lists the steps it carried over, linking to them in the original run.
+  - Specs: tech-stack (Run history and rerun, Saved branches, Run console, Audit log, five decisions) and the 12.4 plan (`specs/2026-11-16-rerun-from-step/`).
 - Phase 12.3 a failed, cancelled or expired run keeps its code ([#235](https://github.com/KsiProgramming/agentic-dev/pull/235)):
   - **A failed or cancelled run keeps its sandbox** for the workspace's sandbox time to live (24 h by default, up to 72 h), then a sweep in every worker removes it (`SANDBOX_SWEEP_S`, 60 s). The run's end event says until when (`sandbox_kept_until`); an expired approval and a policy stop keep it too. A starting worker spares kept sandboxes.
   - **Uncommitted work is saved.** When a run fails or is cancelled, each writer's uncommitted changes are recorded on `wip/<run>/<key>` without touching its worktree or branch, and saved with the run's other branches. Nothing restores, merges or pushes it.
