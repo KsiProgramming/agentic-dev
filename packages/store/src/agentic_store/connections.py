@@ -5,7 +5,8 @@ secret is encrypted under that DEK, bound to its workspace, connection and provi
 `load_secret` ever decrypts; the listings carry the hint, never the secret.
 
 A GitHub connection is the workspace's App installation, which is not a secret: it is stored in
-the clear (`put_github_connection`) and survives a lost master key."""
+the clear (`put_github_connection`) and survives a lost master key. A Jira connection is an OAuth
+grant with its sites and projects (`agentic_store.jira`)."""
 
 import logging
 from dataclasses import dataclass
@@ -57,6 +58,8 @@ class ConnectionInfo:
     account_type: str | None
     # Set for GitHub: the App installation.
     installation_id: int | None
+    # Set for Jira: why the connection cannot be used until its account connects again.
+    needs_attention: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -117,7 +120,7 @@ async def put_connection(
         workspace = await session.get(Workspace, workspace_id, with_for_update=True)
         if workspace is None:
             raise WorkspaceNotFoundError(workspace_id)
-        dek = await _workspace_dek(session, keys, workspace, now)
+        dek = await workspace_dek(session, keys, workspace, now)
         connection = await session.scalar(
             select(Connection).where(
                 Connection.workspace_id == workspace_id, Connection.provider == provider
@@ -129,7 +132,7 @@ async def put_connection(
                 id=uuid4(), workspace_id=workspace_id, provider=provider, created_at=now
             )
             session.add(connection)
-        nonce, ciphertext = encrypt(dek, secret, _secret_aad(connection))
+        nonce, ciphertext = encrypt(dek, secret, secret_aad(connection))
         connection.secret_nonce = nonce
         connection.secret_ciphertext = ciphertext
         connection.key_hint = hint(secret)
@@ -245,19 +248,19 @@ async def load_secret(
         return None
     if workspace.wrapped_dek is None or workspace.key_id is None:
         raise SecretDecryptError("the workspace has no data key")
-    dek = keys.unwrap(WrappedKey(workspace.key_id, workspace.wrapped_dek), _dek_context(workspace))
+    dek = keys.unwrap(WrappedKey(workspace.key_id, workspace.wrapped_dek), dek_context(workspace))
     return decrypt(
-        dek, connection.secret_nonce, connection.secret_ciphertext, _secret_aad(connection)
+        dek, connection.secret_nonce, connection.secret_ciphertext, secret_aad(connection)
     )
 
 
-async def _workspace_dek(
+async def workspace_dek(
     session: AsyncSession, keys: KeyProvider, workspace: Workspace, now: datetime
 ) -> bytes:
     if workspace.wrapped_dek is not None and workspace.key_id is not None:
         try:
             return keys.unwrap(
-                WrappedKey(workspace.key_id, workspace.wrapped_dek), _dek_context(workspace)
+                WrappedKey(workspace.key_id, workspace.wrapped_dek), dek_context(workspace)
             )
         except SecretDecryptError:
             log.warning(
@@ -273,18 +276,18 @@ async def _workspace_dek(
                 )
             )
     dek = new_dek()
-    wrapped = keys.wrap(dek, _dek_context(workspace))
+    wrapped = keys.wrap(dek, dek_context(workspace))
     workspace.wrapped_dek = wrapped.blob
     workspace.key_id = wrapped.key_id
     workspace.updated_at = now
     return dek
 
 
-def _dek_context(workspace: Workspace) -> bytes:
+def dek_context(workspace: Workspace) -> bytes:
     return f"agentic-dek:{workspace.id}".encode()
 
 
-def _secret_aad(connection: Connection) -> bytes:
+def secret_aad(connection: Connection) -> bytes:
     return (
         f"agentic-secret:{connection.workspace_id}:{connection.id}:{connection.provider}".encode()
     )
@@ -303,6 +306,7 @@ def _connection_info(connection: Connection) -> ConnectionInfo:
         account_login=connection.account_login,
         account_type=connection.account_type,
         installation_id=connection.external_id if connection.provider == GITHUB else None,
+        needs_attention=connection.needs_attention,
         created_at=connection.created_at,
         updated_at=connection.updated_at,
     )

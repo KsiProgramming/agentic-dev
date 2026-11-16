@@ -7,6 +7,7 @@ dependencies = [
     "agentic-api",
     "agentic-engine",
     "agentic-github",
+    "agentic-jira",
     "agentic-runtime",
     "agentic-sandbox",
     "agentic-secrets",
@@ -40,6 +41,7 @@ exclude = ["packages/egress-proxy"]
 agentic-api = { workspace = true }
 agentic-engine = { workspace = true }
 agentic-github = { workspace = true }
+agentic-jira = { workspace = true }
 agentic-runtime = { workspace = true }
 agentic-sandbox = { workspace = true }
 agentic-secrets = { workspace = true }
@@ -56,7 +58,7 @@ extend-exclude = ["web"]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agentic_api", "agentic_engine", "agentic_github", "agentic_runtime", "agentic_sandbox", "agentic_secrets", "agentic_store", "agentic_tools", "agentic_worker"]
+known-first-party = ["agentic_api", "agentic_engine", "agentic_github", "agentic_jira", "agentic_runtime", "agentic_sandbox", "agentic_secrets", "agentic_store", "agentic_tools", "agentic_worker"]
 
 [tool.pyright]
 pythonVersion = "3.12"

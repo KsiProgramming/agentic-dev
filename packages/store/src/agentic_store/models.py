@@ -37,11 +37,14 @@ metadata = Base.metadata
 # The workspace every run belongs to until users and workspace membership exist.
 DEFAULT_WORKSPACE_ID = UUID("00000000-0000-0000-0000-000000000001")
 
-# A GitHub connection is an App installation and has no secret; every other provider has one.
+# A GitHub connection is an App installation and has no secret; a Jira connection (7.1) is an
+# OAuth grant, a secret with no hint (its tokens rotate); every other provider has a secret and
+# its hint.
 CONNECTION_COLUMNS_CHECK = (
     "(provider = 'github' AND external_id IS NOT NULL) OR "
-    "(provider <> 'github' AND secret_nonce IS NOT NULL AND secret_ciphertext IS NOT NULL "
-    "AND key_hint IS NOT NULL)"
+    "(provider = 'jira' AND secret_nonce IS NOT NULL AND secret_ciphertext IS NOT NULL) OR "
+    "(provider NOT IN ('github', 'jira') AND secret_nonce IS NOT NULL "
+    "AND secret_ciphertext IS NOT NULL AND key_hint IS NOT NULL)"
 )
 
 
@@ -84,8 +87,45 @@ class Connection(Base):
     account_login: Mapped[str | None] = mapped_column(String(255))
     # `User` or `Organization` for GitHub; unset for connections made before it was recorded.
     account_type: Mapped[str | None] = mapped_column(String(32))
+    # Jira (7.1): the scopes the grant holds, and why the connection cannot be used (a fixed
+    # reason: `invalid_grant`, `scopes`) until its account connects again.
+    scopes: Mapped[list[str] | None] = mapped_column(JSONB)
+    needs_attention: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JiraSite(Base):
+    """A Jira Cloud site a workspace's Jira connection reaches (7.1). `enabled` is the
+    workspace's choice; nothing on a site is usable until projects are picked (`JiraProject`)."""
+
+    __tablename__ = "jira_sites"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "cloud_id", name="uq_jira_sites_connection_id_cloud_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    connection_id: Mapped[UUID] = mapped_column(ForeignKey("connections.id", ondelete="CASCADE"))
+    cloud_id: Mapped[str] = mapped_column(String(64))
+    url: Mapped[str] = mapped_column(String(512))
+    name: Mapped[str] = mapped_column(String(255))
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default=true())
+
+
+class JiraProject(Base):
+    """A project of a site the workspace may use (7.1): the platform's own allowlist, since
+    Atlassian's consent is per site. `key` and `name` are as they were when picked."""
+
+    __tablename__ = "jira_projects"
+    __table_args__ = (
+        UniqueConstraint("site_id", "project_id", name="uq_jira_projects_site_id_project_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("jira_sites.id", ondelete="CASCADE"))
+    project_id: Mapped[str] = mapped_column(String(32))
+    key: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(255))
 
 
 class WorkspaceModelPrice(Base):

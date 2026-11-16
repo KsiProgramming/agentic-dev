@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from agentic_api.github.routes import router as github_router
 from agentic_api.health import router as health_router
+from agentic_api.jira.routes import router as jira_router
 from agentic_api.node_types.routes import router as node_types_router
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.routes import router as runs_router
@@ -36,6 +37,13 @@ from agentic_github import (
     GithubAppConfig,
     GithubConfigError,
     GithubPlatform,
+)
+from agentic_jira import (
+    AtlassianApp,
+    AtlassianAppConfig,
+    FakeAtlassian,
+    JiraConfigError,
+    JiraPlatform,
 )
 from agentic_secrets import LocalKeyProvider, install_redaction
 
@@ -80,6 +88,8 @@ def create_app(
             await db.dispose()
             if app.state.github is not None:
                 app.state.github.close()
+            if app.state.jira is not None:
+                await app.state.jira.aclose()
 
     app = FastAPI(title="Agentic Dev Platform API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
@@ -88,6 +98,7 @@ def create_app(
         LocalKeyProvider.from_file(settings.master_key_file) if settings.master_key_file else None
     )
     app.state.github = _github_app(settings)
+    app.state.jira = _jira_app(settings)
     app.state.claude_keys = claude_keys or (
         FakeKeyVerifier() if settings.claude_key_check == "fake" else AnthropicKeyVerifier()
     )
@@ -101,6 +112,7 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(workspaces_router)
     app.include_router(github_router)
+    app.include_router(jira_router)
     app.include_router(templates_router)
     app.include_router(workflows_router)
     app.include_router(node_types_router)
@@ -114,6 +126,7 @@ def _refuse_fakes_in_production(settings: Settings) -> None:
         return
     for name, fake in (
         ("AGENTIC_GITHUB", settings.github == "fake"),
+        ("AGENTIC_JIRA", settings.jira == "fake"),
         ("CLAUDE_KEY_CHECK", settings.claude_key_check == "fake"),
     ):
         if fake:
@@ -132,6 +145,24 @@ def _github_app(settings: Settings) -> GithubPlatform | None:
     return GithubApp(
         GithubAppConfig.from_file(
             settings.github_app_id, settings.github_app_slug, settings.github_app_private_key_file
+        )
+    )
+
+
+def _jira_app(settings: Settings) -> JiraPlatform | None:
+    """The Atlassian OAuth app, if its client id is set (or the fake one). A missing or
+    unreadable client secret then fails here, at startup."""
+    if settings.jira == "fake":
+        return FakeAtlassian(settings.api_base_url)
+    if settings.atlassian_client_id is None:
+        return None
+    if settings.atlassian_client_secret_file is None:
+        raise JiraConfigError("ATLASSIAN_CLIENT_SECRET_FILE must be set with ATLASSIAN_CLIENT_ID")
+    return AtlassianApp(
+        AtlassianAppConfig.from_file(
+            settings.atlassian_client_id,
+            settings.atlassian_client_secret_file,
+            f"{settings.api_base_url.rstrip('/')}/jira/callback",
         )
     )
 

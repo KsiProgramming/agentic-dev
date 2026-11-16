@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0032_rerun_from_step"
+    assert version == "0033_jira_connection"
     assert {
         "runs",
         "run_events",
@@ -687,3 +687,45 @@ async def test_the_kept_sandboxes_revision_downgrades_and_upgrades(postgres_url:
     await engine.dispose()
 
     assert kept == ["agent/r/writer"]
+
+
+async def test_the_jira_connection_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    engine = create_async_engine(postgres_url)
+    workspace = "00000000-0000-0000-0000-000000000001"
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM connections WHERE provider = 'jira'"))
+        connection = (
+            await conn.execute(
+                text(
+                    "INSERT INTO connections (id, workspace_id, provider, secret_nonce, "
+                    "secret_ciphertext, account_login) VALUES (gen_random_uuid(), :workspace, "
+                    "'jira', 'n', 'c', 'Ada') RETURNING id"
+                ),
+                {"workspace": workspace},
+            )
+        ).scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO jira_sites (id, connection_id, cloud_id, url, name) VALUES "
+                "(gen_random_uuid(), :connection, 'cloud-1', 'https://a.atlassian.net', 'A')"
+            ),
+            {"connection": connection},
+        )
+
+    # The downgrade drops Jira rows, which have no key hint for the restored check.
+    await asyncio.to_thread(command.downgrade, config, "0032_rerun_from_step")
+    assert "jira_sites" not in await table_names(postgres_url)
+    assert not {"scopes", "needs_attention"} & await connection_columns(postgres_url)
+    async with engine.connect() as conn:
+        left = (
+            await conn.execute(text("SELECT count(*) FROM connections WHERE provider = 'jira'"))
+        ).scalar_one()
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await engine.dispose()
+
+    assert left == 0
+    assert {"jira_sites", "jira_projects"} <= await table_names(postgres_url)
+    assert {"scopes", "needs_attention"} <= await connection_columns(postgres_url)

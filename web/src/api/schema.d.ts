@@ -621,6 +621,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/connections/jira/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Authorize
+         * @description Atlassian's consent URL for the workspace. Consenting stores the grant, then sends the
+         *     browser to `return_to` (the Integrations settings page by default).
+         */
+        post: operations["startJiraAuthorize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jira/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Complete Authorize
+         * @description Atlassian's redirect after the consent (the OAuth app's callback URL). Sends the browser
+         *     back to the page that started it (the Integrations settings page by default) with
+         *     `jira=connected`, or `jira=error` and a `reason`: `state` (unknown, used or expired),
+         *     `denied` (the person refused), `exchange` (Atlassian refused the code), `no_sites` (the
+         *     account reaches no Jira site), `scopes` (stored, but a scope is missing), `atlassian`
+         *     (Atlassian could not be reached) or `not_configured`.
+         */
+        get: operations["completeJiraAuthorize"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/jira": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jira Connection
+         * @description The workspace's Jira connection: its account, the sites it reaches and the projects
+         *     picked on each. Reads only what is stored; it never calls Atlassian.
+         */
+        get: operations["getJiraConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Site
+         * @description Turn a site on or off for the workspace. Its picked projects are kept.
+         */
+        patch: operations["patchJiraSite"];
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Projects
+         * @description The site's projects the connected account can see, by name, read live from Jira, to
+         *     pick from. `q` filters by key or name.
+         */
+        get: operations["searchJiraProjects"];
+        /**
+         * Put Projects
+         * @description Replace the projects the workspace may use on the site. Each id is checked with Jira,
+         *     and its key and name are stored as Jira gives them.
+         */
+        put: operations["putJiraProjects"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/connections/jira": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Jira
+         * @description Remove the workspace's grant, its sites and its picked projects. The app's access stays
+         *     listed in the person's Atlassian account until they remove it there.
+         */
+        delete: operations["deleteJiraConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/templates": {
         parameters: {
             query?: never;
@@ -1000,7 +1134,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1033,6 +1167,14 @@ export interface components {
             repo_url: string | null;
             /** Status */
             status: string;
+        };
+        /**
+         * AuthorizeUrlOut
+         * @description Where to send the browser to connect Jira. The URL is valid for 10 minutes.
+         */
+        AuthorizeUrlOut: {
+            /** Authorize Url */
+            authorize_url: string;
         };
         /**
          * BlankWorkflow
@@ -1122,6 +1264,8 @@ export interface components {
          * @description A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.
          *
          *     A GitHub connection has no secret: it shows the account the App is installed on instead.
+         *     A Jira connection shows the Atlassian account that consented; its sites and projects are
+         *     in `GET /workspaces/{id}/jira`.
          */
         ConnectionOut: {
             /**
@@ -1133,7 +1277,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "claude" | "github";
+            provider: "claude" | "github" | "jira";
             /** Key Hint */
             key_hint?: string | null;
             /** Account Login */
@@ -1143,6 +1287,11 @@ export interface components {
              * @description GitHub: the installation's settings page, where its owner picks the repos it reaches. Unset for connections made before the account type was recorded.
              */
             manage_url?: string | null;
+            /**
+             * Needs Attention
+             * @description Jira: why the connection cannot be used until its account connects again (`invalid_grant`, `unauthorized`, `scopes`).
+             */
+            needs_attention?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1508,6 +1657,96 @@ export interface components {
         };
         /** @enum {string} */
         IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate";
+        /**
+         * JiraConnectionOut
+         * @description The workspace's Jira connection. Its tokens are never returned.
+         */
+        JiraConnectionOut: {
+            /**
+             * Configured
+             * @description Whether the API has an Atlassian OAuth app. Without one nothing can connect.
+             */
+            configured: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_connected" | "connected" | "needs_attention";
+            /**
+             * Reason
+             * @description Why it needs attention; connecting again clears it.
+             */
+            reason?: ("invalid_grant" | "unauthorized" | "scopes") | null;
+            /**
+             * Account
+             * @description The Atlassian account that consented; Jira acts as it.
+             */
+            account?: string | null;
+            /**
+             * Scopes
+             * @description The scopes granted.
+             */
+            scopes?: string[];
+            /**
+             * Missing Scopes
+             * @description Scopes the platform asks for that it lacks.
+             */
+            missing_scopes?: string[];
+            /** Sites */
+            sites?: components["schemas"]["JiraSiteOut"][];
+            /** Connected At */
+            connected_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * JiraErrorDetail
+         * @description The `detail` of a refused Jira request: `code` says what went wrong (`no_connection`,
+         *     `needs_attention`, `unknown_project`), `message` says it for people.
+         */
+        JiraErrorDetail: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /** JiraProjectOut */
+        JiraProjectOut: {
+            /** Id */
+            id: string;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * JiraProjectPage
+         * @description A page of a site's projects, read live from Jira. Pass `next_cursor` as `cursor` for the
+         *     next one.
+         */
+        JiraProjectPage: {
+            /** Projects */
+            projects: components["schemas"]["JiraProjectOut"][];
+            /** Next Cursor */
+            next_cursor?: number | null;
+        };
+        /**
+         * JiraSiteOut
+         * @description A Jira site the connection reaches. `projects` are the ones the workspace may use
+         *     there: nothing on a site is usable until some are picked, or while it is not `enabled`.
+         */
+        JiraSiteOut: {
+            /** Cloud Id */
+            cloud_id: string;
+            /** Url */
+            url: string;
+            /** Name */
+            name: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Projects */
+            projects: components["schemas"]["JiraProjectOut"][];
+        };
         JsonValue: unknown;
         /** LongContextPrice */
         LongContextPrice: {
@@ -1856,6 +2095,11 @@ export interface components {
              */
             quorum?: number | null;
         };
+        /** PatchJiraSite */
+        PatchJiraSite: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /** @enum {string} */
         PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "approval_ttl_s" | "budget_usd";
         /**
@@ -1907,6 +2151,14 @@ export interface components {
              * @description The Anthropic API key. Stored encrypted; it is never returned.
              */
             api_key: string;
+        };
+        /**
+         * PutJiraProjects
+         * @description The whole list of projects the workspace may use on the site, by Jira project id.
+         */
+        PutJiraProjects: {
+            /** Project Ids */
+            project_ids: string[];
         };
         /** PutPricing */
         PutPricing: {
@@ -2916,6 +3168,14 @@ export interface components {
              */
             path: string;
             value: components["schemas"]["JsonValue"];
+        };
+        /** StartAuthorize */
+        StartAuthorize: {
+            /**
+             * Return To
+             * @description Where the web app lands after the consent. Defaults to the Integrations settings page.
+             */
+            return_to?: string | null;
         };
         /** StartInstall */
         StartInstall: {
@@ -4641,7 +4901,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -4897,6 +5157,334 @@ export interface operations {
                 content?: never;
             };
             /** @description No such workspace, or it has no GitHub connection */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    startJiraAuthorize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartAuthorize"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizeUrlOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description No Atlassian OAuth app, or no master key, is configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    completeJiraAuthorize: {
+        parameters: {
+            query?: {
+                code?: string | null;
+                state?: string | null;
+                error?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getJiraConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraConnectionOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patchJiraSite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                cloud_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchJiraSite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraSiteOut"];
+                };
+            };
+            /** @description No such workspace, or its Jira connection has no such site */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    searchJiraProjects: {
+        parameters: {
+            query?: {
+                q?: string;
+                cursor?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                cloud_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraProjectPage"];
+                };
+            };
+            /** @description No such workspace, or its Jira connection has no such site */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Atlassian answered with an error or could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No Atlassian OAuth app, or no master key, is configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    putJiraProjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                cloud_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutJiraProjects"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraSiteOut"];
+                };
+            };
+            /** @description No such workspace, or its Jira connection has no such site */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+            /** @description `unknown_project`: an id is not a project the connected account can see on the site; nothing was stored. (Or the body is invalid.) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+            /** @description Atlassian answered with an error or could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No Atlassian OAuth app, or no master key, is configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteJiraConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such workspace, or it has no Jira connection */
             404: {
                 headers: {
                     [name: string]: unknown;

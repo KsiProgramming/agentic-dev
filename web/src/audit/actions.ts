@@ -10,11 +10,14 @@ import {
   HistoryIcon,
   FolderPlusIcon,
   GaugeIcon,
+  ListChecksIcon,
   PackageXIcon,
   PlayIcon,
   PlugIcon,
+  PlugZapIcon,
   RotateCcwIcon,
   TimerOffIcon,
+  ToggleLeftIcon,
   Trash2Icon,
   UnplugIcon,
   type LucideIcon,
@@ -65,6 +68,17 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   },
   "connection.added": { label: "Connection added", icon: PlugIcon, category: "settings" },
   "connection.removed": { label: "Connection removed", icon: UnplugIcon, category: "settings" },
+  "connection.needs_attention": {
+    label: "Connection needs attention",
+    icon: PlugZapIcon,
+    category: "settings",
+  },
+  "jira.site_updated": { label: "Jira site changed", icon: ToggleLeftIcon, category: "settings" },
+  "jira.projects_changed": {
+    label: "Jira projects changed",
+    icon: ListChecksIcon,
+    category: "settings",
+  },
   "policy.updated": { label: "Run limits changed", icon: GaugeIcon, category: "settings" },
   "pricing.updated": { label: "Prices changed", icon: CoinsIcon, category: "settings" },
 };
@@ -112,7 +126,14 @@ function record(details: Details, key: string): Details {
     : {};
 }
 
-const PROVIDERS: Record<string, string> = { claude: "Claude", github: "GitHub" };
+const PROVIDERS: Record<string, string> = { claude: "Claude", github: "GitHub", jira: "Jira" };
+
+/** Why a connection needs attention, from the API's fixed reasons. */
+const ATTENTION: Record<string, string> = {
+  invalid_grant: "Atlassian refused to renew its access",
+  unauthorized: "Atlassian no longer accepts its access",
+  scopes: "a permission is missing",
+};
 
 const LIMITS: [key: string, label: string][] = [
   ["agents_alive", "agents alive"],
@@ -255,6 +276,27 @@ export function describe(event: AuditEvent): string {
       const what = hint ? `${name} key ····${hint}` : account ? `${name} (${account})` : name;
       if (event.action === "connection.removed") return `Removed ${what}`;
       return `${d.replaced === true ? "Replaced" : "Added"} ${what}`;
+    }
+    case "connection.needs_attention": {
+      const provider = text(d, "provider");
+      const name = (provider && PROVIDERS[provider]) ?? provider ?? "A connection";
+      const reason = text(d, "reason");
+      return join(`${name} needs reconnecting`, reason && (ATTENTION[reason] ?? reason));
+    }
+    case "jira.site_updated": {
+      const site = text(d, "site") ?? "a site";
+      return `${d.enabled === false ? "Turned off" : "Turned on"} ${site}`;
+    }
+    case "jira.projects_changed": {
+      const site = text(d, "site") ?? "a site";
+      const total = count(d, "count");
+      const keys = strings(d, "keys");
+      if (total === 0) return `No project of ${site} may be used`;
+      const more = total - keys.length;
+      return join(
+        `${plural(total, "project")} of ${site}`,
+        keys.length > 0 && `${keys.join(", ")}${more > 0 ? ` and ${more} more` : ""}`,
+      );
     }
     case "policy.updated": {
       const before = record(d, "before");

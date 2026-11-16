@@ -13,10 +13,12 @@ x-master-key: &master-key
 # Fakes for local dev and the e2e tests (CI turns them on), refused with AGENTIC_ENV=production.
 # AGENTIC_GITHUB=fake stands in a GitHub App with repos e2e-org/docs-demo and e2e-org/private-lib,
 # kept as bare repos in the `fixtures` volume, where the repos runs create go too;
-# CLAUDE_KEY_CHECK=fake accepts keys starting `sk-ant-test-` without calling Anthropic.
+# CLAUDE_KEY_CHECK=fake accepts keys starting `sk-ant-test-` without calling Anthropic;
+# AGENTIC_JIRA=fake stands in an Atlassian account that reaches two Jira sites (7.1).
 x-fakes: &fakes
   AGENTIC_ENV: ${AGENTIC_ENV:-development}
   AGENTIC_GITHUB: ${AGENTIC_GITHUB:-app}
+  AGENTIC_JIRA: ${AGENTIC_JIRA:-app}
 
 services:
   postgres:
@@ -88,6 +90,11 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_APP_PRIVATE_KEY_FILE: /github/github-app.pem
+      # The deployment's Atlassian OAuth 2.0 (3LO) app, for Jira (7.1). Its callback URL is
+      # <API_BASE_URL>/jira/callback. Left blank, the Jira card says it is not configured. Its
+      # client secret is read from ./.secrets/atlassian-client-secret.
+      ATLASSIAN_CLIENT_ID: ${ATLASSIAN_CLIENT_ID:-}
+      ATLASSIAN_CLIENT_SECRET_FILE: /github/atlassian-client-secret
       # GitHub's install redirect comes back to the API, which sends the browser on to the web app.
       WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
       # With AGENTIC_GITHUB=fake, the fake App's bare repos (shared with the worker), so the API

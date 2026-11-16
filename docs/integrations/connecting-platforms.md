@@ -61,7 +61,27 @@ GitHub Copilot as a second provider is roadmap Milestone 8; the start screen alr
 - **Settings → Models and pricing:** list prices (dated) are built in; override them with your negotiated rates. Cost is priced when each call is logged and never recomputed.
 - **Settings → Limits and budgets:** lower any platform ceiling and set a default budget for the workspace's runs.
 
-### 4. Calling the platform from your systems
+### 4. Jira: register your own Atlassian OAuth app
+
+Each deployment uses its own Atlassian OAuth 2.0 (3LO) app; a workspace then connects one Atlassian account and picks the Jira projects its runs may use. Jira Cloud only.
+
+1. In the [Atlassian developer console](https://developer.atlassian.com/console/myapps/), create an **OAuth 2.0 integration**.
+2. **Permissions:** add the Jira API with the scopes `read:jira-work`, `write:jira-work`, `manage:jira-webhook` and `read:jira-user`, and the User identity API with `read:me`. The platform also asks for `offline_access`, which needs no setup.
+3. **Authorization:** set the callback URL to `<your API's public URL>/jira/callback` (`API_BASE_URL` + `/jira/callback`).
+4. **Settings:** copy the client id into `ATLASSIAN_CLIENT_ID` and save the secret in a file the API can read, named by `ATLASSIAN_CLIENT_SECRET_FILE` (with compose: `.secrets/atlassian-client-secret`). Only the API needs them.
+5. In the web app, open **Settings → Integrations → Jira → Connect Jira**, consent on Atlassian, then use **Choose projects** on each site. Nothing on a site is usable until projects are picked; a site can be turned off without losing its list.
+
+What to know:
+
+- **Jira acts as the account that consented.** Comments and transitions a run makes (from the Jira tools, always after an approval) carry that person's name. Connect with a dedicated Jira account that has access to the projects you want, not with a personal one.
+- **Consent is per site, project scoping is the platform's.** Atlassian cannot limit a grant to some projects, so the platform keeps the list you pick and checks it on every call.
+- **Tokens** are stored encrypted with the workspace's data key and renewed automatically. If Atlassian refuses to renew them (the access was removed, or unused for 90 days), the card shows **Needs attention** with **Reconnect**; the picked projects are kept.
+- **Disconnect** forgets the tokens and the picked projects. To remove the app's access as well, open the Atlassian account's [connected apps](https://id.atlassian.com/manage-profile/apps).
+- To try the screens without Atlassian, set `AGENTIC_JIRA=fake` (refused with `AGENTIC_ENV=production`).
+
+Agents get Jira tools, and issues start runs, in the next phases of roadmap Milestone 7.
+
+### 5. Calling the platform from your systems
 
 The API is described by OpenAPI at `/docs` (Swagger UI) and `/openapi.json`. Typical integrations are CI jobs, chat bots or internal portals that start runs and wait for the result.
 
@@ -84,7 +104,7 @@ curl -s https://api.example.com/runs/<id>
 curl -s https://api.example.com/runs/<id>/artifacts/report.md
 ```
 
-Check the exact request shapes in `/docs`: the snippets above show the flow, the OpenAPI document is the contract. Your proxy must authenticate these calls too (for example with a service account at the identity-aware proxy). Inbound webhooks (Jira, GitHub PR comments) are roadmap Milestone 7.
+Check the exact request shapes in `/docs`: the snippets above show the flow, the OpenAPI document is the contract. Your proxy must authenticate these calls too (for example with a service account at the identity-aware proxy). Inbound webhooks (Jira, GitHub PR comments) come later in roadmap Milestone 7.
 
 ---
 
@@ -112,7 +132,7 @@ flowchart LR
     TP --- p7["new one-click workflow"]
 ```
 
-### 5. Adding a model provider
+### 6. Adding a model provider
 
 Implement `AgentRuntime` ([`packages/runtime/src/agentic_runtime/protocol.py`](../../packages/runtime/src/agentic_runtime/protocol.py)):
 
@@ -137,13 +157,13 @@ Rules every adapter must follow (checked by `agentic_runtime.contract.check_even
 
 Then wire it in: add the provider name to the worker's `AGENTIC_RUNTIME` choices and its factory in `agentic_worker.main.run_runtimes` (the Claude branch shows how a per-run client is built from the workspace's stored key, registered for redaction while held). Add the provider to the agent manifest's `provider` enum (`agentic_engine.nodes`) so the builder offers it, add its list prices to `agentic_runtime.pricing`, and add a connection type with key verification in `agentic_api.workspaces`. Reference: [`claude.py`](../../packages/runtime/src/agentic_runtime/claude.py) and [`fake.py`](../../packages/runtime/src/agentic_runtime/fake.py).
 
-### 6. Adding a sandbox backend
+### 7. Adding a sandbox backend
 
 Implement `Sandbox` and its manager ([`packages/sandbox/src/agentic_sandbox/protocol.py`](../../packages/sandbox/src/agentic_sandbox/protocol.py)): `open(run_id, source, reuse=…)`, `keep`, `discard`, and on the sandbox `exec`, `put_file`, `take_file`, `put_artifact`, `workdir`, `worktrees_dir`, `staging_dir`, `artifacts_dir`, and `run_job` with `job_networks` (a short-lived container on the same files with its own limits, network `none` or `nuget`; return no `nuget` network if the backend cannot route to the egress proxy). A Kubernetes backend would create one pod per run with a `RuntimeClass` (gVisor or Kata), no service account token, a `NetworkPolicy` denying all egress, and a volume holding the clone; `exec` maps to the pod exec API.
 
 Keep the guarantees of the Docker backend ([`docker_backend.py`](../../packages/sandbox/src/agentic_sandbox/docker_backend.py)): no network, no credentials, non-root, read-only root, resource limits, a root-owned checkout, writer worktrees owned by the sandbox user, and a label with the run id so leftovers can be swept. Run the backend through the sandbox test suite.
 
-### 7. Adding a tool or integration
+### 8. Adding a tool or integration
 
 Tools are MCP servers built with the official Python SDK and connected in memory.
 
@@ -155,7 +175,7 @@ Tools are MCP servers built with the official Python SDK and connected in memory
 
 Integrations that need code or network of their own (an internal API, a proprietary linter) are what **plugin nodes** (roadmap 10.1) are for: a manifest plus a container or HTTP endpoint with its own sandbox.
 
-### 8. Adding a Git host (GitLab, Azure DevOps, Bitbucket)
+### 9. Adding a Git host (GitLab, Azure DevOps, Bitbucket)
 
 Today the platform is GitHub-only, by design for v1. The seam is `GithubPlatform` ([`platform.py`](../../packages/github/src/agentic_github/platform.py)): install URL, installations, repos, installation tokens, repo creation and pull requests. Supporting another host means:
 
@@ -165,7 +185,7 @@ Today the platform is GitHub-only, by design for v1. The seam is `GithubPlatform
 
 This is a substantial change: plan it as a roadmap phase.
 
-### 9. Using your own key-management service
+### 10. Using your own key-management service
 
 Implement `KeyProvider` ([`keys.py`](../../packages/secrets/src/agentic_secrets/keys.py)):
 
@@ -178,10 +198,10 @@ class KeyProvider(Protocol):
 
 Map `wrap`/`unwrap` to your KMS's encrypt/decrypt (AWS KMS, Azure Key Vault, Google Cloud KMS, HashiCorp Vault Transit), passing `context` as the encryption context or associated data. Only wrapped data keys are stored, so moving providers means re-wrapping each workspace's `wrapped_dek`; secrets themselves need no re-encryption.
 
-### 10. Adding a primitive
+### 11. Adding a primitive
 
 A primitive needs: a Pydantic model in `agentic_engine.spec.models` (it then appears in the exported JSON Schema; regenerate with `scripts/export_workflow_schema.py`), validation rules in `spec/validate.py`, compilation to LangGraph in `graph/compile.py`, and a manifest in `agentic_engine.nodes.NODE_MANIFESTS` (a test enforces one per primitive). The palette, the side panel and the canvas pick it up from `GET /node-types` with no web change. Prefer composing existing primitives: most new behaviour is a template or (soon) a composite node, not a primitive.
 
-### 11. Adding a template
+### 12. Adding a template
 
 A template is a typed parameter model plus a function that builds a `WorkflowSpec`. Add it to `TEMPLATES` in [`agentic_engine/templates/__init__.py`](../../packages/engine/src/agentic_engine/templates/__init__.py), with the connections it `requires`. The start screen renders its options from the parameter schema. Use [`docs.py`](../../packages/engine/src/agentic_engine/templates/docs.py) and [`audit.py`](../../packages/engine/src/agentic_engine/templates/audit.py) as models: put a gate before every write, keep user text out of instructions except in its own block, and stay within the platform's policy ceilings.
