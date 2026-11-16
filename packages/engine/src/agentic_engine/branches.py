@@ -55,10 +55,11 @@ class BranchSaves(BaseModel):
 class BranchSaver(Protocol):
     """Saves a run's branches outside its sandbox."""
 
-    async def save(self) -> BranchSaves:
+    async def save(self, *, step: str | None = None) -> BranchSaves:
         """Save every writer and integration branch of the run whose tip moved since it was
-        last saved. A branch that cannot be saved is reported in `failed` and not tried again at
-        the same tip; nothing raises."""
+        last saved, recording `step`, the top-level step the save ran in (12.4: a rerun from a
+        step restores the versions saved before it). A branch that cannot be saved is reported
+        in `failed` and not tried again at the same tip; nothing raises."""
         ...
 
 

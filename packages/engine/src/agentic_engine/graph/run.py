@@ -2,7 +2,7 @@
 paused at a gate."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
@@ -13,7 +13,7 @@ from langgraph.types import Command
 from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, RunContext, sum_usage
-from agentic_engine.artifacts import ArtifactStore, GateArtifact
+from agentic_engine.artifacts import ArtifactRef, ArtifactStore, GateArtifact
 from agentic_engine.branches import BranchSaver
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
@@ -37,6 +37,7 @@ from agentic_engine.graph.compile import (
     is_repo_ready,
     recursion_limit,
 )
+from agentic_engine.graph.fork import seed_rerun
 from agentic_engine.graph.state import (
     RunState,
     WorkflowRunResult,
@@ -201,6 +202,84 @@ async def resume_workflow(
         resume = decision.model_dump(mode="json")
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
     return await _finish(log, lambda: graph, start, config, budget, review)
+
+
+async def rerun_workflow(
+    spec: WorkflowSpec,
+    runtime: AgentRuntime,
+    input: str = "",
+    *,
+    run_id: UUID,
+    source_run: UUID,
+    from_node: str,
+    sink: EventSink,
+    checkpointer: Checkpointer,
+    tools: ToolExecutor | None = None,
+    policy: Policy = PLATFORM_POLICY,
+    spent: Decimal = Decimal(0),
+    review: GateReview | None = None,
+    artifacts: ArtifactStore | None = None,
+    integrator: BranchIntegrator | None = None,
+    context: RunContext | None = None,
+    saver: BranchSaver | None = None,
+    on_seeded: Callable[[dict[str, int]], Awaitable[None]] | None = None,
+) -> WorkflowRunResult:
+    """Start `run_id`, a rerun of `source_run` from its top-level step `from_node` (12.4), as
+    `run_workflow` would, but from `source_run`'s checkpoint taken before that step
+    (`fork.seed_rerun`): the steps before it are neither run nor charged again. `spec` is the
+    new run's spec, the original's with that step's parameters edited at most. Before the
+    graph runs, `on_seeded` is given the run artifacts the carried state refers to (name →
+    latest version), for the caller to copy into the new run's store.
+
+    `run_started` carries `rerun_from` (`run_id`, `node_id`) and `carried`, the steps the new
+    run did not run again. A rerun from the first step carries nothing and starts from `input`.
+    A thread already seeded (an attempt cut off before `run_started`) is not seeded again.
+    Raises `StepNotFoundError` or `StepNotReachedError` before any event is written."""
+    log = RunEventLog(run_id, sink)
+    budget = budget_meter(policy, spent)
+    graph = compile_workflow(
+        spec,
+        runtime,
+        log,
+        checkpointer,
+        tools,
+        policy,
+        budget,
+        review,
+        artifacts,
+        integrator=integrator,
+        context=context,
+        saver=saver,
+    )
+    config = _config(spec, run_id)
+    carried = await seed_rerun(
+        spec, graph, checkpointer, source_run=source_run, target_run=run_id, node_id=from_node
+    )
+    if carried is not None and on_seeded is not None:
+        await on_seeded(artifact_versions(carried))
+    seeded = (await graph.aget_state(config)).values
+    await log.emit(
+        RUN_STARTED,
+        payload={
+            "workflow_id": spec.id,
+            "workflow_name": spec.name,
+            "input": input,
+            "rerun_from": {"run_id": str(source_run), "node_id": from_node},
+            "carried": list(dict.fromkeys(seeded.get("order", []))),
+        },
+    )
+    start = None if seeded else initial_state(input)
+    return await _finish(log, lambda: graph, start, config, budget, review)
+
+
+def artifact_versions(values: Mapping[str, Any]) -> dict[str, int]:
+    """The latest version of each run artifact a carried state refers to, by name."""
+    versions: dict[str, int] = {}
+    refs: list[ArtifactRef] = list(values.get("artifacts", {}).values())
+    refs += [r.artifact for r in values.get("results", {}).values() if r.artifact is not None]
+    for ref in refs:
+        versions[ref.name] = max(versions.get(ref.name, 0), ref.version)
+    return versions
 
 
 def _config(spec: WorkflowSpec, run_id: UUID) -> RunnableConfig:

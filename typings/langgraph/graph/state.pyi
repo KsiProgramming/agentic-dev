@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any, Self, overload
 
 from langchain_core.runnables import RunnableConfig
@@ -14,6 +14,7 @@ class CompiledStateGraph[StateT]:
         self, input: StateT | Command[Any] | None, config: RunnableConfig | None = None
     ) -> StateT: ...
     async def aget_state(self, config: RunnableConfig) -> StateSnapshot: ...
+    def aget_state_history(self, config: RunnableConfig) -> AsyncIterator[StateSnapshot]: ...
     def get_graph(self) -> DrawableGraph: ...
 
 class StateGraph[StateT]:
