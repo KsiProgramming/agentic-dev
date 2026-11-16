@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 7.1 Atlassian OAuth 3LO per workspace, project scoping:
+- Phase 7.1 Atlassian OAuth 3LO per workspace, project scoping ([#237](https://github.com/KsiProgramming/agentic-dev/pull/237)):
   - **Connect Jira.** A workspace connects one Atlassian account through the deployment's own OAuth 2.0 (3LO) app (`ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET_FILE`; callback `<API>/jira/callback`). The grant is stored encrypted under the workspace's data key and renewed under a row lock, since Atlassian's refresh tokens rotate. No token is returned, logged or put in a redirect.
   - **Several sites, picked projects.** Every Jira site the grant reaches is listed and can be turned on or off; on each, the workspace picks the projects its runs may use. Atlassian's consent is per site, so this allowlist is the platform's own (`jira_project_allowed`), the one check the Jira tools make from 7.2.
   - **Needs attention.** A grant Atlassian refuses to renew, whose access was removed, or that lacks a scope shows "Needs attention" with Reconnect, and is an audit entry; reconnecting keeps the picked projects.
