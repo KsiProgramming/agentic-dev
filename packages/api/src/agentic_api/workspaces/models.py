@@ -18,7 +18,7 @@ from agentic_github import installation_settings_url
 from agentic_runtime import ModelPrice
 from agentic_store import AuditAction, AuditEventRow, ConnectionInfo, WorkspaceInfo
 
-Provider = Literal["claude", "github"]
+Provider = Literal["claude", "github", "jira"]
 
 
 class NewWorkspace(BaseModel):
@@ -40,7 +40,9 @@ class WorkspaceOut(BaseModel):
 class ConnectionOut(BaseModel):
     """A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.
 
-    A GitHub connection has no secret: it shows the account the App is installed on instead."""
+    A GitHub connection has no secret: it shows the account the App is installed on instead.
+    A Jira connection shows the Atlassian account that consented; its sites and projects are
+    in `GET /workspaces/{id}/jira`."""
 
     id: UUID
     provider: Provider
@@ -50,6 +52,11 @@ class ConnectionOut(BaseModel):
         default=None,
         description="GitHub: the installation's settings page, where its owner picks the repos "
         "it reaches. Unset for connections made before the account type was recorded.",
+    )
+    needs_attention: str | None = Field(
+        default=None,
+        description="Jira: why the connection cannot be used until its account connects again "
+        "(`invalid_grant`, `unauthorized`, `scopes`).",
     )
     created_at: datetime
     updated_at: datetime
@@ -65,7 +72,8 @@ class ConnectionOut(BaseModel):
         )
         return cls(
             id=info.id,
-            provider="github" if info.provider == "github" else "claude",
+            provider=cast(Provider, info.provider),
+            needs_attention=info.needs_attention,
             key_hint=info.key_hint,
             account_login=info.account_login,
             manage_url=manage_url,

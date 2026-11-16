@@ -1561,6 +1561,9 @@
                       "sandbox.removed",
                       "connection.added",
                       "connection.removed",
+                      "connection.needs_attention",
+                      "jira.site_updated",
+                      "jira.projects_changed",
                       "policy.updated",
                       "pricing.updated",
                       "workflow.created",
@@ -1976,6 +1979,485 @@
           },
           "404": {
             "description": "No such workspace, or it has no GitHub connection"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/connections/jira/authorize": {
+      "post": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Start Authorize",
+        "description": "Atlassian's consent URL for the workspace. Consenting stores the grant, then sends the\nbrowser to `return_to` (the Integrations settings page by default).",
+        "operationId": "startJiraAuthorize",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StartAuthorize"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizeUrlOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "503": {
+            "description": "No Atlassian OAuth app, or no master key, is configured on the API"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jira/callback": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Complete Authorize",
+        "description": "Atlassian's redirect after the consent (the OAuth app's callback URL). Sends the browser\nback to the page that started it (the Integrations settings page by default) with\n`jira=connected`, or `jira=error` and a `reason`: `state` (unknown, used or expired),\n`denied` (the person refused), `exchange` (Atlassian refused the code), `no_sites` (the\naccount reaches no Jira site), `scopes` (stored, but a scope is missing), `atlassian`\n(Atlassian could not be reached) or `not_configured`.",
+        "operationId": "completeJiraAuthorize",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Jira Connection",
+        "description": "The workspace's Jira connection: its account, the sites it reaches and the projects\npicked on each. Reads only what is stored; it never calls Atlassian.",
+        "operationId": "getJiraConnection",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraConnectionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}": {
+      "patch": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Patch Site",
+        "description": "Turn a site on or off for the workspace. Its picked projects are kept.",
+        "operationId": "patchJiraSite",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "cloud_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$",
+              "title": "Cloud Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchJiraSite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraSiteOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or its Jira connection has no such site"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Search Projects",
+        "description": "The site's projects the connected account can see, by name, read live from Jira, to\npick from. `q` filters by key or name.",
+        "operationId": "searchJiraProjects",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "cloud_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$",
+              "title": "Cloud Id"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraProjectPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or its Jira connection has no such site"
+          },
+          "409": {
+            "description": "`no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Atlassian answered with an error or could not be reached"
+          },
+          "503": {
+            "description": "No Atlassian OAuth app, or no master key, is configured on the API"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Put Projects",
+        "description": "Replace the projects the workspace may use on the site. Each id is checked with Jira,\nand its key and name are stored as Jira gives them.",
+        "operationId": "putJiraProjects",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "cloud_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$",
+              "title": "Cloud Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutJiraProjects"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraSiteOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or its Jira connection has no such site"
+          },
+          "409": {
+            "description": "`no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Atlassian answered with an error or could not be reached"
+          },
+          "503": {
+            "description": "No Atlassian OAuth app, or no master key, is configured on the API"
+          },
+          "422": {
+            "description": "`unknown_project`: an id is not a project the connected account can see on the site; nothing was stored. (Or the body is invalid.)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/connections/jira": {
+      "delete": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Delete Jira",
+        "description": "Remove the workspace's grant, its sites and its picked projects. The app's access stays\nlisted in the person's Atlassian account until they remove it there.",
+        "operationId": "deleteJiraConnection",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such workspace, or it has no Jira connection"
           },
           "422": {
             "description": "Validation Error",
@@ -3136,6 +3618,9 @@
               "sandbox.removed",
               "connection.added",
               "connection.removed",
+              "connection.needs_attention",
+              "jira.site_updated",
+              "jira.projects_changed",
               "policy.updated",
               "pricing.updated",
               "workflow.created",
@@ -3265,6 +3750,20 @@
         ],
         "title": "AuditRunRef",
         "description": "The entry's run as it is now."
+      },
+      "AuthorizeUrlOut": {
+        "properties": {
+          "authorize_url": {
+            "type": "string",
+            "title": "Authorize Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorize_url"
+        ],
+        "title": "AuthorizeUrlOut",
+        "description": "Where to send the browser to connect Jira. The URL is valid for 10 minutes."
       },
       "BlankWorkflow": {
         "properties": {
@@ -3451,7 +3950,8 @@
             "type": "string",
             "enum": [
               "claude",
-              "github"
+              "github",
+              "jira"
             ],
             "title": "Provider"
           },
@@ -3489,6 +3989,18 @@
             "title": "Manage Url",
             "description": "GitHub: the installation's settings page, where its owner picks the repos it reaches. Unset for connections made before the account type was recorded."
           },
+          "needs_attention": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Attention",
+            "description": "Jira: why the connection cannot be used until its account connects again (`invalid_grant`, `unauthorized`, `scopes`)."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -3508,7 +4020,7 @@
           "updated_at"
         ],
         "title": "ConnectionOut",
-        "description": "A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.\n\nA GitHub connection has no secret: it shows the account the App is installed on instead."
+        "description": "A stored connection. Its secret is never returned; `key_hint` is its last 4 characters.\n\nA GitHub connection has no secret: it shows the account the App is installed on instead.\nA Jira connection shows the Atlassian account that consented; its sites and projects are\nin `GET /workspaces/{id}/jira`."
       },
       "CreateRunRequest": {
         "properties": {
@@ -4295,6 +4807,214 @@
           "subflow_unpublished",
           "invalid_gate"
         ]
+      },
+      "JiraConnectionOut": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "description": "Whether the API has an Atlassian OAuth app. Without one nothing can connect."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_attention"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "invalid_grant",
+                  "unauthorized",
+                  "scopes"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why it needs attention; connecting again clears it."
+          },
+          "account": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account",
+            "description": "The Atlassian account that consented; Jira acts as it."
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "description": "The scopes granted."
+          },
+          "missing_scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Scopes",
+            "description": "Scopes the platform asks for that it lacks."
+          },
+          "sites": {
+            "items": {
+              "$ref": "#/components/schemas/JiraSiteOut"
+            },
+            "type": "array",
+            "title": "Sites"
+          },
+          "connected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "status"
+        ],
+        "title": "JiraConnectionOut",
+        "description": "The workspace's Jira connection. Its tokens are never returned."
+      },
+      "JiraErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "JiraErrorDetail",
+        "description": "The `detail` of a refused Jira request: `code` says what went wrong (`no_connection`,\n`needs_attention`, `unknown_project`), `message` says it for people."
+      },
+      "JiraProjectOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "key",
+          "name"
+        ],
+        "title": "JiraProjectOut"
+      },
+      "JiraProjectPage": {
+        "properties": {
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/JiraProjectOut"
+            },
+            "type": "array",
+            "title": "Projects"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "projects"
+        ],
+        "title": "JiraProjectPage",
+        "description": "A page of a site's projects, read live from Jira. Pass `next_cursor` as `cursor` for the\nnext one."
+      },
+      "JiraSiteOut": {
+        "properties": {
+          "cloud_id": {
+            "type": "string",
+            "title": "Cloud Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/JiraProjectOut"
+            },
+            "type": "array",
+            "title": "Projects"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cloud_id",
+          "url",
+          "name",
+          "enabled",
+          "projects"
+        ],
+        "title": "JiraSiteOut",
+        "description": "A Jira site the connection reaches. `projects` are the ones the workspace may use\nthere: nothing on a site is usable until some are picked, or while it is not `enabled`."
       },
       "JsonValue": {},
       "LongContextPrice": {
@@ -5192,6 +5912,20 @@
         "title": "ParallelNode",
         "description": "Runs its branches at the same time, each on the parallel's input, and joins them.\n\n`join` says when the parallel is done: `all` once every branch completed, `any` once one\ndid, `quorum` once `quorum` did. It decides as soon as the outcome is known (`all` fails on\nthe first branch that does not complete, the others once the join can no longer be met) and\nthe branches still running end `node_cancelled`. `settled` (4.6) never decides early: it\nwaits for every branch to end and completes if at least one completed, so one failed branch\ndoes not cancel the others. Its output is the completed branches' outputs in branch order.\nA branch is one `agent`, `tool` or `sequence` node (4.6: or a `parallel` or a router, and a\nreduce that writes nothing), its id names the branch, and it holds no gate, writer or\npublisher. Every agent in the branches counts toward the run's `agents_spawned` limit when\nthe parallel starts."
       },
+      "PatchJiraSite": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "PatchJiraSite"
+      },
       "PolicyLimit": {
         "type": "string",
         "enum": [
@@ -5309,6 +6043,28 @@
           "api_key"
         ],
         "title": "PutClaudeConnection"
+      },
+      "PutJiraProjects": {
+        "properties": {
+          "project_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 32,
+              "minLength": 1,
+              "pattern": "^[0-9]+$"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Project Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "project_ids"
+        ],
+        "title": "PutJiraProjects",
+        "description": "The whole list of projects the workspace may use on the site, by Jira project id."
       },
       "PutPricing": {
         "properties": {
@@ -7507,6 +8263,27 @@
         ],
         "title": "SetParam",
         "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets\nit. Ids, types and the slots that hold nodes change through the other ops."
+      },
+      "StartAuthorize": {
+        "properties": {
+          "return_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^/([^/\\\\\\s]\\S*)?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return To",
+            "description": "Where the web app lands after the consent. Defaults to the Integrations settings page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StartAuthorize"
       },
       "StartInstall": {
         "properties": {

@@ -28,11 +28,15 @@ class Settings(BaseSettings):
     github_app_id: int | None = None
     github_app_slug: str | None = None
     github_app_private_key_file: Path | None = None
+    # The deployment's Atlassian OAuth 2.0 (3LO) app, for Jira (7.1). Its callback URL is
+    # `<API_BASE_URL>/jira/callback`. With no client id, the Jira endpoints answer 503.
+    atlassian_client_id: str | None = None
+    atlassian_client_secret_file: Path | None = None
     # Where the web app is served: GitHub's install redirect sends the browser back there.
     web_base_url: str = "http://localhost:3000"
     # Where the browser reaches this API; the fake GitHub install flow redirects back to it.
     api_base_url: str = "http://localhost:8000"
-    # `production` refuses the fakes (`claude_key_check`, `github`) (env `AGENTIC_ENV`).
+    # `production` refuses the fakes (`claude_key_check`, `github`, `jira`) (env `AGENTIC_ENV`).
     env: Literal["development", "production"] = Field(
         default="development", validation_alias="agentic_env"
     )
@@ -41,6 +45,8 @@ class Settings(BaseSettings):
     claude_key_check: Literal["anthropic", "fake"] = "anthropic"
     # `fake` stands in a local GitHub App for dev and e2e tests (env `AGENTIC_GITHUB`).
     github: Literal["app", "fake"] = Field(default="app", validation_alias="agentic_github")
+    # `fake` stands in a local Atlassian for dev and e2e tests (env `AGENTIC_JIRA`).
+    jira: Literal["app", "fake"] = Field(default="app", validation_alias="agentic_jira")
     # Where the fake GitHub App keeps its bare repos (the worker's `SANDBOX_LOCAL_ROOT`), so the
     # API sees the repos it creates. Unset, it knows only its fixed repos.
     fake_github_root: Path | None = None
