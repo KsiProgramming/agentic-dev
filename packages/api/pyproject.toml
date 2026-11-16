@@ -5,6 +5,7 @@ description = "HTTP API (FastAPI) for the Agentic Dev Platform"
 requires-python = ">=3.12"
 dependencies = [
     "agentic-github",
+    "agentic-jira",
     "agentic-sandbox",
     "agentic-secrets",
     "agentic-store",

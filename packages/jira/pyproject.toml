@@ -1,0 +1,15 @@
+[project]
+name = "agentic-jira"
+version = "0.1.0"
+description = "Atlassian OAuth 2.0 (3LO) client for Jira Cloud (grants, sites and projects) for the Agentic Dev Platform"
+requires-python = ">=3.12"
+dependencies = [
+    "agentic-secrets",
+    "agentic-store",
+    "httpx2>=2.0,<3",
+    "pydantic>=2.11",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.14"]
+build-backend = "uv_build"

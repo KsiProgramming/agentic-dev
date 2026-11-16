@@ -12,6 +12,7 @@ COPY pyproject.toml uv.lock ./
 COPY packages/api/pyproject.toml packages/api/
 COPY packages/engine/pyproject.toml packages/engine/
 COPY packages/github/pyproject.toml packages/github/
+COPY packages/jira/pyproject.toml packages/jira/
 COPY packages/runtime/pyproject.toml packages/runtime/
 COPY packages/sandbox/pyproject.toml packages/sandbox/
 COPY packages/secrets/pyproject.toml packages/secrets/
