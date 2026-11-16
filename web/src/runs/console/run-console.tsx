@@ -55,12 +55,7 @@ import { RunSandboxLine } from "./run-sandbox-line";
 import { RunHeader, type HeaderFacts } from "./run-header";
 import { stepsProgress } from "./run-stats";
 import { RunTiles } from "./run-tiles";
-import {
-  CarriedSteps,
-  carriedSteps,
-  lastTopLevelStep,
-  StepRerunAction,
-} from "./rerun-from-step";
+import { CarriedSteps, carriedSteps, lastTopLevelStep, StepRerunAction } from "./rerun-from-step";
 import {
   defaultEntry,
   failingEntry,

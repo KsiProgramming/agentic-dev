@@ -12,6 +12,7 @@ import {
   GATE,
   MAP,
   SCANS,
+  TYPED_READER,
   TYPED_WRITER,
   WRITER,
 } from "./runs";
@@ -242,7 +243,7 @@ test("a finished run", async ({ page, request }) => {
       timeout: 30_000,
     },
   );
-  await expect(page.getByRole("button", { name: "Rerun" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rerun", exact: true })).toBeVisible();
   await checkPage(page, "run-finished");
 });
 
@@ -273,7 +274,7 @@ test("a failed run", async ({ page, request }) => {
 });
 
 test("a run failed at a typed port", async ({ page, request }) => {
-  const runId = await startRun(request, [TYPED_WRITER], "E2E typed port layout");
+  const runId = await startRun(request, [TYPED_READER], "E2E typed port layout");
   await page.goto(`/runs/${runId}`);
   const banner = page.getByTestId("run-banner");
   await expect(banner).toHaveAttribute("data-kind", "failed", { timeout: 30_000 });
@@ -310,7 +311,9 @@ test("a scan step's findings", async ({ page, request }) => {
   await expect(page.getByTestId("step-panel").getByTestId("findings-view")).toBeVisible({
     timeout: 60_000,
   });
-  await checkPage(page, "run-scan-findings");
+  // On a phone a link to a step opens it in a sheet over the page.
+  if (test.info().project.name === "mobile-375") await checkSheetOpen(page, "run-scan-findings");
+  else await checkPage(page, "run-scan-findings");
 });
 
 test("runs, with a run's menu open", async ({ page, request }) => {
@@ -349,9 +352,13 @@ test("a run waiting at a gate", async ({ page, request }) => {
     await expect(dock.getByRole("button", { name })).toBeInViewport({ ratio: 1 });
   }
 
-  // Scrolled to the end, the selected step is above the dock, not under it.
+  // Scrolled to the end, the selected step is above the dock, not under it: on a phone, where
+  // a step opens in a sheet, the last row of the step list.
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  const last = page.getByTestId("step-panel");
+  const last =
+    test.info().project.name === "mobile-375"
+      ? page.getByTestId("step-row").filter({ visible: true }).last()
+      : page.getByTestId("step-panel");
   const lastBox = (await last.boundingBox())!;
   const dockTop = (await dock.boundingBox())!.y;
   expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(dockTop + 1);

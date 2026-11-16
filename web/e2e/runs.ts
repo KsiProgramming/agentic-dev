@@ -53,6 +53,18 @@ export const TYPED_WRITER = {
   },
 };
 
+/** A writer whose input port is typed (4.2): the run's prose input fails at that port before its
+ * agent starts. (A typed output cannot fail on the stack: its fake agents fit what they answer to
+ * the node's output schema, 6.8.) */
+export const TYPED_READER = {
+  ...WRITER,
+  input_schema: {
+    type: "object",
+    required: ["findings"],
+    properties: { findings: { type: "array" } },
+  },
+};
+
 /** Run artifacts (4.3): a typed scanner writes `findings.json` (the fake runtime echoes the run's
  * JSON input), an unrelated step runs, then a gate, then a reporter that reads `findings.json`,
  * may look it up with the artifact tools, and writes `report.md`. */

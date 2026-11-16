@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 12.4 rerun from a step:
+- Phase 12.4 rerun from a step ([#236](https://github.com/KsiProgramming/agentic-dev/pull/236)):
   - **Rerun from a step, not from scratch.** A new run starts at one of an ended run's top-level steps, from the original's checkpoint before it: the steps before it are neither run nor charged again, and its writers' branches are restored as they were before the step (from the bundles saved in 12.2, under the new run's names). A container step (loop, map, parallel, orchestrator, router, subflow) runs whole again. The original run is not changed.
   - **Edit the step first.** Its parameters (instructions, model, tools…) can be changed for the rerun, as `setParam` on that node only; the stored workflow is untouched. The step the run ended in can start from the uncommitted work it left (12.3), as one commit.
   - **API.** `POST /runs/{id}/rerun` takes `from` `{node_id, set_params, use_wip}` (`422` for a node that is not a top-level step, `409` when the run never reached it or its code before it is gone); summaries have `rerun_from`; `run_started` carries `rerun_from` and `carried`; `run.rerun` audit entries name the step and the edited paths. Each saved branch version records the top-level step it was saved in (Alembic `0032_rerun_from_step`).
@@ -457,6 +457,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 - `agentic_sandbox.SandboxTools` and `LIST_FILES`: the repo tools moved to the `repo` MCP server in `agentic_tools`, and `agentic_sandbox` no longer depends on `agentic_runtime`.
 
 ### Fixed
+- A toast no longer covers the approval dock: toasts sit above it while it is open (`--dock-height`), so Approve and Reject stay reachable ([#236](https://github.com/KsiProgramming/agentic-dev/pull/236)).
+- End-to-end checks that had gone stale on `main` pass again ([#236](https://github.com/KsiProgramming/agentic-dev/pull/236)): the typed-port tests fail the run at a typed **input** port (since 6.8 the stack's fake agents fit their answers to a typed output, so an output port could no longer fail); the kept-sandbox axe check waits for the diff editors to be named; at 375 px a link to a step is checked as the sheet it opens, and the step above the dock is the step list's last row; Prettier formatting of five console files; and the header's "Rerun" is matched exactly, next to the new "Rerun from here".
 - The live run console now receives an orchestrator's and a router's own events (`plan_made`, `task_started`, `task_completed`, `replan_started`, `branch_integrated`, `route_chosen`): the browser's event stream only delivers the event names it listens for, and these were missing from its list ([#234](https://github.com/KsiProgramming/agentic-dev/pull/234)).
 - Run map cards' accessible name now holds their visible line ("each, Done, 2 of 2 items, map"): an `aria-label` left it out, which axe reports as a WCAG 2.5.3 failure ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).
 - About 40 end-to-end tests that went stale when phases 11.6 and 11.9 merged without CI now pass: the run map's `map-node` cards, the "Step" filter, the console's time tiles and pull request link, the artifact sheet's JSON groups, the pricing table's container query, and page checks made while a modal sheet is open ([#155](https://github.com/KsiProgramming/agentic-dev/pull/155)).

@@ -84,8 +84,8 @@ describe("the AC-2 run on the run map (6.8)", () => {
 
     render(<RunMap spec={spec} steps={steps} onOpen={() => {}} now={0} layout="flow" />);
     const tasks = screen.getAllByTestId("map-task");
-    expect(tasks.map((t) => [t.getAttribute("data-task"), t.getAttribute("data-status")])).toEqual(
-      [["tests", "completed"]],
-    );
+    expect(tasks.map((t) => [t.getAttribute("data-task"), t.getAttribute("data-status")])).toEqual([
+      ["tests", "completed"],
+    ]);
   });
 });

@@ -34,7 +34,9 @@ export function useRunChanges(
         throw err instanceof TypeError ? new Error("Could not reach the API.") : err;
       }
       if (!result.data) {
-        throw new Error(`Could not load what the writers changed (HTTP ${result.response.status}).`);
+        throw new Error(
+          `Could not load what the writers changed (HTTP ${result.response.status}).`,
+        );
       }
       return result.data;
     },

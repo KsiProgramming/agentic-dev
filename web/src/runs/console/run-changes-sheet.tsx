@@ -122,8 +122,8 @@ export function RunChangesSheet({
             </p>
             {current.bundleRemovedAt ? (
               <p className="text-meta text-foreground-secondary">
-                Its saved commits were removed <RelativeTime iso={current.bundleRemovedAt} />;
-                the files they changed are kept.
+                Its saved commits were removed <RelativeTime iso={current.bundleRemovedAt} />; the
+                files they changed are kept.
               </p>
             ) : null}
           </div>

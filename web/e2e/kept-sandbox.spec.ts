@@ -27,6 +27,10 @@ test("a failed run keeps its sandbox, shows its writer's changes, and keeps them
   const sheet = page.getByTestId("gate-review");
   await expect(sheet.getByRole("heading", { name: "What the writers changed" })).toBeVisible();
   await expect(sheet.getByText("NOTES.md").first()).toBeVisible();
+  // Scan once both editors are set up with their names, not while Monaco is still mounting.
+  await expect(sheet.locator(".monaco-diff-editor")).toBeVisible({ timeout: 30_000 });
+  await expect(sheet.getByRole("textbox", { name: /, before$/ })).toBeAttached();
+  await expect(sheet.getByRole("textbox", { name: /, after/ })).toBeAttached();
   expect(
     (await new AxeBuilder({ page }).include("[data-testid=gate-review]").analyze()).violations,
   ).toEqual([]);

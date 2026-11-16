@@ -51,9 +51,9 @@ describe("rerun from a step (12.4)", () => {
   });
 
   it("knows the step an ended run ended in: the last top-level step it started", () => {
-    expect(lastTopLevelStep(SPEC, ["list_modules", "document", "writer", "revise", "reviewer"])).toBe(
-      "revise",
-    );
+    expect(
+      lastTopLevelStep(SPEC, ["list_modules", "document", "writer", "revise", "reviewer"]),
+    ).toBe("revise");
     expect(lastTopLevelStep(SPEC, [])).toBeNull();
   });
 
