@@ -29,6 +29,16 @@ Atlassian facts this plan relies on, checked against the docs on 2026-11-17 ("We
 - **For a non-public OAuth app, webhooks are delivered only when the app's owner is the account that registered them.** On a self-hosted deployment, the Jira account that connects (7.1) must own the deployment's Atlassian app, or the app must be shared.
 - `jqlFilter` accepts only a subset of JQL. Which clauses it accepts, and how a delivery is signed (a JWT signed with the app's client secret), are both confirmed in the spike.
 
+**Spike findings (2026-11-17, on a real Jira Cloud site with the deployment's own app).** These changed three decisions below:
+
+- **Signature.** A delivery has `Authorization: Bearer <JWT>`, signed HS256 with the app's client secret (verified). Its claims are `iss` (the app's client id), `sub` (the account that registered the webhook), `context.cloudId` (the site), `iat`, `exp` (15 minutes after `iat`) and `jti`. There is no `aud` and no `qsh`.
+- **Dedupe.** `X-Atlassian-Webhook-Identifier` is unique per tenant, and Atlassian documents it as the same across retries. The payload has `webhookEvent`, `issue_event_type_name`, `timestamp`, `user.accountId`, `issue` (`id`, `key`, `fields.project`, `fields.status`, `fields.labels`), `changelog` (`id`, `items` with `fieldId`, `fromString`, `toString`) and `matchedWebhookIds`. A delivery that matches several webhooks arrives **once**, listing them all.
+- **Labels in the changelog.** A label change has `fieldId: "labels"`, with `fromString` and `toString` holding the space-separated label lists, so "added" means in `toString` but not in `fromString`. A created issue's changelog does not list its labels, so they are read from `issue.fields.labels`.
+- **One URL per user.** Jira refuses a second registration URL for the same account: "Only a single URL per user is allowed to be registered via REST API". There may also be **at most 5 webhooks per app, per user, per site**. So the receiver's URL **cannot carry the workspace**. It is one fixed `/jira/webhooks`, and the workspace is found from the verified `context.cloudId` and `matchedWebhookIds`.
+- **Filters.** `jqlFilter: "project in (KAN)"` works. Jira accepted `labels = …` too, but `labels` is not on the documented list of clauses, so we do not rely on it. `fieldIdsFilter: ["status", "labels"]` works: summary edits are not delivered, while status moves and created issues are. So each webhook uses `project in (…)` and that field filter.
+- **Refresh and delete.** `PUT /webhook/refresh` answers `200` with the new `expirationDate`, even for an unknown id, so renewing cannot detect a missing webhook. The sweep lists `GET /webhook` instead. `DELETE /webhook` answers `202`.
+- **Who made the change.** `user.accountId` is the account that made the change. On a site where the connected account is also the person moving issues, as on the spike's site, "ignore the connected account's changes" would drop every real event. So the loop guard records the moves a run's own `jira.transition` makes instead.
+
 This phase does not change what agents receive: the request is an issue key, as in 7.2. As chosen in the interview, the "Done when" is still proven with a real Jira Cloud site, and that run is read in the console.
 
 ## Scope
@@ -56,21 +66,21 @@ This phase does not change what agents receive: the request is an issue key, as 
   - `GET …/sites/{cloud_id}/projects/{key}/statuses`, read live from Jira, for the status picker;
   - `GET /workspaces/{id}/jira` gains `webhooks`, the listening state of each site (`listening` / `not_needed` / `failed` with a reason, `expires_at`, `renewed_at`).
 - **Webhook registration** (`jira_webhooks`). For each enabled site that has at least one enabled rule:
-  - the platform registers one webhook for `jira:issue_updated` and `jira:issue_created`, filtered to the projects its rules use, pointing at `<JIRA_WEBHOOK_BASE_URL or API_BASE_URL>/jira/webhooks/{workspace_id}`;
+  - the platform registers one webhook for `jira:issue_updated` and `jira:issue_created`, with `jqlFilter: project in (…)` (the projects its rules use) and `fieldIdsFilter: ["status", "labels"]`, pointing at `<JIRA_WEBHOOK_BASE_URL or API_BASE_URL>/jira/webhooks`;
   - it registers it again when the set of projects changes, and deletes it once no rule needs it;
   - a worker sweep renews webhooks that are within 10 days of their expiry, and registers again any webhook that has gone missing. A failure is stored on the site and audited, and shown in the UI.
   - Disconnecting Jira (7.1) deletes the workspace's webhooks, on a best-effort basis.
-- **Receiver**: `POST /jira/webhooks/{workspace_id}`. It returns `202` fast and holds no lock while it calls Jira. In order, it:
+- **Receiver**: `POST /jira/webhooks` (one URL for every workspace: Jira allows one per account). It returns `202` fast and holds no lock while it calls Jira. In order, it:
   1. caps the body at 1 MB;
-  2. verifies the JWT against the app's client secret (signature, expiry, claims from the spike), and refuses a failed check with `401` and no further work;
-  3. checks that `matchedWebhookIds` belong to this workspace's registrations;
-  4. drops duplicate deliveries by a unique key (`jira_deliveries`);
+  2. verifies the JWT against the app's client secret (HS256 only, signature, `iss` equal to the client id, `exp`, `context.cloudId`), and refuses a failed check with `401` and no further work;
+  3. finds the workspaces whose registrations (`jira_webhooks`: cloud id and webhook id) are among `matchedWebhookIds`. A delivery that matches none is acknowledged and dropped (`unknown_webhook`). Each workspace found is handled on its own from here;
+  4. drops duplicate deliveries by a unique key (`jira_deliveries`: workspace, cloud id, `X-Atlassian-Webhook-Identifier`);
   5. drops the event when its project is not allowed (`jira_project_allowed`);
-  6. drops the event when the change was made by the connected account itself, so a run's own `jira.transition` cannot start another run;
+  6. drops a status move that a run's own `jira.transition` made, recorded by the tool (`jira_own_moves`: site, issue id, status, within 10 minutes), so a run cannot start another run by moving its issue;
   7. matches the enabled rules against the changelog. Status names and labels are compared without regard to case, and a label must be newly added, not merely present;
   8. creates one run per matching rule, unless a run from the same rule on the same issue is still queued, running or waiting.
 
-  Every delivery records an outcome (`started`, `duplicate`, `no_match`, `project_not_allowed`, `own_change`, `already_running`, `start_failed` with a reason) and the run it started.
+  Every delivery that passes the signature check records an outcome per workspace (`started`, `duplicate`, `no_match`, `project_not_allowed`, `own_change`, `already_running`, `start_failed` with a reason) and the run it started.
 - **The run** is created through the same path as `POST /runs`, including its connection checks: `jira_not_connected`, and GitHub's for a repo. On the runs row:
   - `trigger` is `jira`, and the request (`input`) is the issue key;
   - `jira_trigger_id` and `jira_issue` (`{site, key, url}`) are set, and each summary returns `jira_issue`;
@@ -106,12 +116,12 @@ This phase does not change what agents receive: the request is an issue key, as 
 | Decision | Choice | Rationale |
 |---|---|---|
 | How Jira reaches us | Dynamic webhooks registered through the 7.1 OAuth app, renewed by a worker sweep | Chosen in the interview. No Jira admin is needed and no secret has to be copied by hand, and the scope was already granted in 7.1. The cost is the 30-day renewal and the app-owner rule, both documented. |
-| How a delivery is trusted | The JWT signed with the app's client secret is checked before anything else; the workspace comes from the URL and is checked against `matchedWebhookIds` | The URL alone is guessable. The client secret is already on the API (7.1). The spike confirms the claims. |
-| One webhook per site | Each webhook covers the projects its rules use, and is registered again when that set changes | It keeps the number of webhooks per site small, and Atlassian's `jqlFilter` keeps other projects' events away. Our own allowlist and rule matching still decide, so the filter is not trusted. |
-| What a rule matches | One status ("moves to") or one label ("added"), on one project, compared without regard to case | This is what the roadmap row names. Matching is done on the changelog, because the filter's JQL subset may not cover labels. |
+| How a delivery is trusted | The JWT (HS256, signed with the app's client secret) is checked before anything else; the workspace comes from the verified `context.cloudId` and `matchedWebhookIds` | The spike found that a delivery is signed this way and that Jira allows one URL per account, so the URL cannot name the workspace. The client secret is already on the API (7.1). |
+| One webhook per workspace and site | `jqlFilter: project in (…)` (the projects its rules use) plus `fieldIdsFilter: ["status", "labels"]`; registered again when that set changes | Atlassian allows 5 webhooks per app, per user, per site (spike). The field filter keeps summary and description edits away. Our own allowlist and rule matching still decide, so the filter is not trusted. |
+| What a rule matches | One status ("moves to") or one label ("added"), on one project, compared without regard to case | This is what the roadmap row names. Matching is done on the changelog, because `labels` is not a documented `jqlFilter` clause. |
 | What the run receives | The issue key as its request, nothing from the issue's text | Principle 5. It is the seam 7.2 built (`issue_from: "request"`), and the run reads the issue through `jira.getIssue`. |
-| Loop guard | Ignore changes made by the connected account; at most one queued, running or waiting run per rule and issue | A run's own gated `jira.transition` must not start a run, and Jira's retries or rapid edits must not stack runs. The connected account's `accountId` is stored on the connection, and a migration fills it on the next token use. |
-| Dedupe | A unique delivery key in `jira_deliveries`, kept 30 days | Jira retries deliveries. A second insert of the same key does nothing. |
+| Loop guard | `jira.transition` records each move it makes (`jira_own_moves`), and the receiver drops the matching status event within 10 minutes; at most one queued, running or waiting run per rule and issue | The spike showed that the connected account is often the person moving issues, so ignoring that account would drop real events. Recording our own moves is exact. `jira.transition` is the only Jira write that changes a status or a label. |
+| Dedupe | `X-Atlassian-Webhook-Identifier` per workspace and site, unique in `jira_deliveries`, kept 30 days | Atlassian documents it as the same across retries. A second insert of the same key does nothing. |
 | Where a rule points | A template, or a stored workflow (latest or a pinned version) that declares a required input | It reuses the run targets that exist (2.6, 5.7). A workflow with no input could not receive the issue. |
 | Public URL | `JIRA_WEBHOOK_BASE_URL`, falling back to `API_BASE_URL` | A deployment behind a proxy, or a developer on a tunnel, can point Jira elsewhere without moving the OAuth callback. |
 | Where rules are managed | Settings › Triggers, its own sub-page | Chosen in the interview. Rules span sites, workflows and repos, and they do not belong on the Integrations card, which manages the connection. |
@@ -119,6 +129,5 @@ This phase does not change what agents receive: the request is an issue key, as 
 
 ## Open questions
 
-- The exact JWT claims of a delivery, and whether Atlassian sends a delivery id. The spike answers both. If there is no delivery id, the dedupe key becomes the webhook id plus the issue id plus the changelog id.
-- Whether the `jqlFilter` accepts `labels`. If it does not, the filter stays `project in (…)` and only our matching narrows the events. That is correct either way, but it means more deliveries.
-- How many webhooks an app may register per site. If the limit is tight, the plan falls back to one webhook per workspace and site, which it already uses.
+- Several workspaces connected with the same Atlassian account to the same site share that account's 5 webhooks and its one URL. A sixth fails with `limit`, shown on the site's line. This is acceptable until users and roles exist.
+- When the deployment's public URL changes, Jira refuses the new URL until the account's old webhooks are gone. The sync deletes the registrations it stored with another URL before it registers again. A webhook registered outside the platform with the same account blocks it, and the site's line shows `url_conflict`.

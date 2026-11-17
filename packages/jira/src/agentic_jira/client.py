@@ -25,10 +25,14 @@ from agentic_jira.errors import (
     JiraNotFoundError,
     JiraRateLimitedError,
     JiraUnauthorizedError,
+    JiraWebhookError,
 )
 from agentic_jira.models import (
     SCOPES,
+    WEBHOOK_EVENTS,
+    WEBHOOK_FIELDS,
     Account,
+    DeliveryClaims,
     Grant,
     Issue,
     IssueComment,
@@ -38,7 +42,9 @@ from agentic_jira.models import (
     SearchPage,
     Site,
     Transition,
+    Webhook,
 )
+from agentic_jira.webhooks import verify_delivery
 
 AUTH_URL = "https://auth.atlassian.com"
 API_URL = "https://api.atlassian.com"
@@ -55,6 +61,7 @@ ISSUE_FIELDS = (
     "description,project"
 )
 SEARCH_FIELDS = "summary,status,issuetype,assignee,updated,project"
+WEBHOOK_PAGE = 100
 
 type _Json = dict[str, Any]
 
@@ -250,6 +257,109 @@ class AtlassianApp:
             json={"transition": {"id": transition_id}},
         )
 
+    def verify_delivery(self, authorization: str | None) -> DeliveryClaims:
+        """A webhook delivery's claims, checked against this app's client id and secret (7.3)."""
+        return verify_delivery(
+            authorization,
+            client_id=self._config.client_id,
+            client_secret=self._config.client_secret.get_secret_value(),
+        )
+
+    async def register_webhook(
+        self, token: SecretStr, cloud_id: str, url: str, project_keys: Sequence[str]
+    ) -> int:
+        """Registers one webhook for `WEBHOOK_EVENTS` on the projects, filtered to
+        `WEBHOOK_FIELDS`; its id. `JiraWebhookError` when Jira refuses it."""
+        body = _object(
+            await self._send(
+                "POST",
+                token,
+                f"{_site_api(cloud_id)}/webhook",
+                json={
+                    "url": url,
+                    "webhooks": [
+                        {
+                            "events": list(WEBHOOK_EVENTS),
+                            "jqlFilter": project_filter(project_keys),
+                            "fieldIdsFilter": list(WEBHOOK_FIELDS),
+                        }
+                    ],
+                },
+            )
+        )
+        results = body.get("webhookRegistrationResult")
+        if not isinstance(results, list) or not results:
+            raise JiraApiError("Atlassian answered with an unexpected body")
+        result = _object(cast(list[Any], results)[0])
+        created = result.get("createdWebhookId")
+        if isinstance(created, int) and not isinstance(created, bool):
+            return created
+        raise JiraWebhookError(_webhook_refusal(result.get("errors")))
+
+    async def list_webhooks(self, token: SecretStr, cloud_id: str) -> list[Webhook]:
+        """The webhooks this app registered on the site with this account."""
+        found: list[Webhook] = []
+        start = 0
+        while True:
+            params = [("startAt", str(start)), ("maxResults", str(WEBHOOK_PAGE))]
+            body = _object(await self._get(token, f"{_site_api(cloud_id)}/webhook", params))
+            values = body.get("values")
+            if not isinstance(values, list):
+                raise JiraApiError("Atlassian answered with an unexpected body")
+            for raw in cast(list[Any], values):
+                entry = _object(raw)
+                webhook_id = entry.get("id")
+                if isinstance(webhook_id, int) and not isinstance(webhook_id, bool):
+                    found.append(
+                        Webhook(
+                            id=webhook_id,
+                            url=str(entry.get("url", "")),
+                            jql_filter=str(entry.get("jqlFilter", "")),
+                            expires_at=_when(entry.get("expirationDate")),
+                        )
+                    )
+            if body.get("isLast") is not False or not values:
+                return found
+            start += len(cast(list[Any], values))
+
+    async def refresh_webhooks(
+        self, token: SecretStr, cloud_id: str, ids: Sequence[int]
+    ) -> datetime | None:
+        """Extends the webhooks' life by 30 days; their new expiry. Jira answers the same for an
+        id it does not know, so this cannot tell that one is gone (`list_webhooks` can)."""
+        body = _object(
+            await self._send(
+                "PUT",
+                token,
+                f"{_site_api(cloud_id)}/webhook/refresh",
+                json={"webhookIds": list(ids)},
+            )
+        )
+        return _when(body.get("expirationDate"))
+
+    async def delete_webhooks(self, token: SecretStr, cloud_id: str, ids: Sequence[int]) -> None:
+        await self._send(
+            "DELETE", token, f"{_site_api(cloud_id)}/webhook", json={"webhookIds": list(ids)}
+        )
+
+    async def project_statuses(self, token: SecretStr, cloud_id: str, key: str) -> list[str]:
+        """The names of the statuses the project's issue types use, each once, in Jira's
+        order."""
+        body = await self._get(
+            token, f"{_site_api(cloud_id)}/project/{quote(key, safe='')}/statuses"
+        )
+        if not isinstance(body, list):
+            raise JiraApiError("Atlassian answered with an unexpected body")
+        names: dict[str, None] = {}
+        for raw in cast(list[Any], body):
+            statuses = _object(raw).get("statuses")
+            if isinstance(statuses, list):
+                for status in cast(list[Any], statuses):
+                    name = _name(status)
+                    if name:
+                        names.setdefault(name, None)
+        return list(names)
+
     async def aclose(self) -> None:
         await self._http.aclose()
 
@@ -285,7 +395,7 @@ class AtlassianApp:
         json: object = None,
     ) -> object:
         """One call with the bearer token. A `429` is retried once after its `Retry-After`
-        (at most `MAX_RETRY_AFTER_S`); a `204` is `None`."""
+        (at most `MAX_RETRY_AFTER_S`); a `204`, or a `202` with no body, is `None`."""
         headers = {
             "Authorization": f"Bearer {token.get_secret_value()}",
             "Accept": "application/json",
@@ -309,8 +419,10 @@ class AtlassianApp:
                 retried = True
                 await self._sleep(wait)
                 continue
-            if response.status_code == 204:
-                return None
+            if response.status_code == 204 or (
+                response.status_code == 202 and not response.content
+            ):
+                return None  # `DELETE /webhook` answers 202 with no body
             return _json(response)
 
 
@@ -377,6 +489,35 @@ def _retry_after(response: httpx2.Response) -> float | None:
     except ValueError:
         return None
     return max(wait, 0.0) if wait <= MAX_RETRY_AFTER_S else None
+
+
+def project_filter(project_keys: Sequence[str]) -> str:
+    """A webhook's `jqlFilter`: the projects, sorted and quoted (`project in ("API", "OPS")`)."""
+    keys = ", ".join(f'"{key}"' for key in sorted(set(project_keys)))
+    return f"project in ({keys})"
+
+
+def _webhook_refusal(errors: object) -> str:
+    """The fixed kind for Jira's reasons for refusing a webhook; its words are not kept."""
+    text = " ".join(str(e) for e in cast(list[Any], errors)) if isinstance(errors, list) else ""
+    lowered = text.lower()
+    if "single url" in lowered:
+        return "url_conflict"
+    if "limit" in lowered or "maximum" in lowered or "exceed" in lowered:
+        return "limit"
+    return "refused"
+
+
+def _when(value: object) -> datetime | None:
+    """A Jira timestamp (`2026-12-17T11:36:25.653+0100`) or epoch milliseconds, in UTC."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return datetime.fromtimestamp(value / 1000, UTC)
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value).astimezone(UTC)
+        except ValueError:
+            return None
+    return None
 
 
 def _site_api(cloud_id: str) -> str:

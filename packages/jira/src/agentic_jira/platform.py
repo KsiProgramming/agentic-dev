@@ -2,12 +2,14 @@
 or `FakeAtlassian` in local dev and end-to-end tests."""
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from pydantic import SecretStr
 
 from agentic_jira.models import (
     Account,
+    DeliveryClaims,
     Grant,
     Issue,
     Project,
@@ -15,13 +17,15 @@ from agentic_jira.models import (
     SearchPage,
     Site,
     Transition,
+    Webhook,
 )
 
 
 class JiraPlatform(Protocol):
     """Each call that takes a token raises `JiraUnauthorizedError` when Atlassian refuses it
     (`agentic_jira.call` refreshes and retries), `JiraNotFoundError` for a missing issue,
-    `JiraBadRequestError` for a request Jira refuses, `JiraRateLimitedError`, or `JiraApiError`."""
+    `JiraBadRequestError` for a request Jira refuses, `JiraRateLimitedError`, or `JiraApiError`;
+    `register_webhook` raises `JiraWebhookError` when Jira refuses the webhook."""
 
     def authorize_url(self, state: str) -> str: ...
 
@@ -60,5 +64,25 @@ class JiraPlatform(Protocol):
     async def transition(
         self, token: SecretStr, cloud_id: str, key: str, transition_id: str
     ) -> None: ...
+
+    def verify_delivery(self, authorization: str | None) -> DeliveryClaims:
+        """A webhook delivery's claims, or `JiraDeliveryError` (7.3)."""
+        ...
+
+    async def register_webhook(
+        self, token: SecretStr, cloud_id: str, url: str, project_keys: Sequence[str]
+    ) -> int: ...
+
+    async def list_webhooks(self, token: SecretStr, cloud_id: str) -> list[Webhook]: ...
+
+    async def refresh_webhooks(
+        self, token: SecretStr, cloud_id: str, ids: Sequence[int]
+    ) -> datetime | None: ...
+
+    async def delete_webhooks(
+        self, token: SecretStr, cloud_id: str, ids: Sequence[int]
+    ) -> None: ...
+
+    async def project_statuses(self, token: SecretStr, cloud_id: str, key: str) -> list[str]: ...
 
     async def aclose(self) -> None: ...

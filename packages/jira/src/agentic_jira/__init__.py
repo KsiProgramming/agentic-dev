@@ -1,77 +1,103 @@
 """The deployment's Atlassian OAuth 2.0 (3LO) app for Jira Cloud (7.1): the consent flow, the
 grant and its refresh, the sites it reaches and their projects; and (7.2) the issues, comments
-and transitions the platform's `jira` tools use. Agents never see a token."""
+and transitions the platform's `jira` tools use; and (7.3) the webhooks that trigger runs and
+the deliveries they send. Agents never see a token."""
 
 from agentic_jira.access import WorkspaceJira
 from agentic_jira.adf import from_markdown, to_markdown
-from agentic_jira.client import API_URL, AUTH_URL, AtlassianApp
+from agentic_jira.client import API_URL, AUTH_URL, AtlassianApp, project_filter
 from agentic_jira.config import AtlassianAppConfig
 from agentic_jira.errors import (
     JiraApiError,
     JiraAuthError,
     JiraBadRequestError,
     JiraConfigError,
+    JiraDeliveryError,
     JiraNotFoundError,
     JiraRateLimitedError,
     JiraUnauthorizedError,
+    JiraWebhookError,
 )
 from agentic_jira.fake import (
     FAKE_ACCOUNT,
+    FAKE_CLIENT_ID,
+    FAKE_CLIENT_SECRET,
     FAKE_CODE,
     FAKE_ISSUES,
     FAKE_MOVED,
     FAKE_PROJECTS,
     FAKE_SITES,
+    WEBHOOK_LIMIT,
     FakeAtlassian,
+    FakeDelivery,
     MadeTransition,
     PostedComment,
+    sign_delivery,
 )
 from agentic_jira.models import (
     SCOPES,
+    WEBHOOK_EVENTS,
+    WEBHOOK_FIELDS,
     Account,
+    DeliveryClaims,
     Grant,
     Issue,
     IssueComment,
+    IssueEvent,
     IssueSummary,
     Project,
     ProjectPage,
     SearchPage,
     Site,
     Transition,
+    Webhook,
     missing_scopes,
 )
 from agentic_jira.platform import JiraPlatform
 from agentic_jira.tokens import INVALID_GRANT, REFRESH_MARGIN, UNAUTHORIZED, access_token, call
+from agentic_jira.webhooks import DELIVERY_HEADER, MAX_BODY_BYTES, parse_event, verify_delivery
 
 __all__ = [
     "API_URL",
     "AUTH_URL",
+    "DELIVERY_HEADER",
     "FAKE_ACCOUNT",
+    "FAKE_CLIENT_ID",
+    "FAKE_CLIENT_SECRET",
     "FAKE_CODE",
     "FAKE_ISSUES",
     "FAKE_MOVED",
     "FAKE_PROJECTS",
     "FAKE_SITES",
     "INVALID_GRANT",
+    "MAX_BODY_BYTES",
     "REFRESH_MARGIN",
     "SCOPES",
     "UNAUTHORIZED",
+    "WEBHOOK_EVENTS",
+    "WEBHOOK_FIELDS",
+    "WEBHOOK_LIMIT",
     "Account",
     "AtlassianApp",
     "AtlassianAppConfig",
+    "DeliveryClaims",
     "FakeAtlassian",
+    "FakeDelivery",
     "Grant",
     "Issue",
     "IssueComment",
+    "IssueEvent",
     "IssueSummary",
     "JiraApiError",
     "JiraAuthError",
     "JiraBadRequestError",
     "JiraConfigError",
+    "JiraDeliveryError",
     "JiraNotFoundError",
     "JiraPlatform",
     "JiraRateLimitedError",
     "JiraUnauthorizedError",
+    "JiraWebhookError",
     "MadeTransition",
     "PostedComment",
     "Project",
@@ -79,10 +105,15 @@ __all__ = [
     "SearchPage",
     "Site",
     "Transition",
+    "Webhook",
     "WorkspaceJira",
     "access_token",
     "call",
     "from_markdown",
     "missing_scopes",
+    "parse_event",
+    "project_filter",
+    "sign_delivery",
     "to_markdown",
+    "verify_delivery",
 ]

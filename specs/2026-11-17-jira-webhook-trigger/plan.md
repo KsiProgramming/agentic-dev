@@ -21,12 +21,12 @@ Order chosen in the interview: a spike on a real Jira Cloud site, then the contr
   - `jira_triggers` (workspace, cloud_id, project_key/id, `on` `status` | `label`, `value`, `template` or `workflow_id` + `workflow_version`, repo, ref, enabled, timestamps);
   - `jira_webhooks` (workspace, cloud_id, webhook ids, projects, `expires_at`, `renewed_at`, `error`);
   - `jira_deliveries` (a unique `delivery_key`, workspace, received_at, issue key, outcome, reason, trigger_id, run_id).
-- [ ] Add to `runs`: `jira_trigger_id` and `jira_issue` (JSON). Add `trigger = 'jira'` to the allowed values. Add `account_id` to the Jira connection, filled when the token is next used (`/me`).
+- [ ] Add to `runs`: `jira_trigger_id` and `jira_issue` (JSON). Add `trigger = 'jira'` to the allowed values. Add `jira_own_moves` (workspace, cloud_id, issue id, status, run_id, at), written by `jira.transition` when it moves an issue (spike: the connected account is often the person moving issues, so the guard cannot be by account).
 - [ ] Add the store functions: rule CRUD; `match_triggers(workspace, event)`; `record_delivery` (insert-or-skip on the key); `active_run_for(trigger, issue)`; `webhooks_due(now)`; and pruning deliveries older than 30 days.
 - [ ] Add store tests for matching (case-insensitive status, label added versus already present, disabled rule, disabled site, unpicked project) and for dedupe under a concurrent insert.
 
 ## 4. Receiver and run creation (`packages/api`)
-- [ ] Add `POST /jira/webhooks/{workspace_id}`. It caps the body, then runs `verify_delivery` (`401`), the webhook id check, dedupe, `jira_project_allowed`, the own-change check, matching, and the active-run check. Then it creates the run and records the outcome. It answers `202`, and writes no payload text to any log.
+- [ ] Add `POST /jira/webhooks` (one URL: Jira allows one per account). It caps the body, then runs `verify_delivery` (`401`), finds the workspaces from `context.cloudId` and `matchedWebhookIds`, and for each runs dedupe, `jira_project_allowed`, the own-change check, matching, and the active-run check. Then it creates the run and records the outcome. It answers `202`, and writes no payload text to any log.
 - [ ] Move the run-creation path behind `POST /runs` into a function the receiver calls with `trigger="jira"`, `input=<key>`, the rule's target, repo and ref, so every connection and validation check is the same.
 - [ ] Add the rule routes (`GET`/`POST`/`PATCH`/`DELETE /workspaces/{id}/jira/triggers`) and the statuses route. A rule is validated on save: its project is picked, its workflow declares a required input, and it passes the same checks as a runnable workflow. Write the audit entries.
 - [ ] `GET /workspaces/{id}/jira` gains `webhooks`, and `GET /runs` and `GET /runs/{id}` gain `jira_issue`.
@@ -34,7 +34,7 @@ Order chosen in the interview: a spike on a real Jira Cloud site, then the contr
 
 ## 5. Registration and renewal (`packages/worker`, API on rule change)
 - [ ] Add `sync_jira_webhooks(workspace, cloud_id)`, which works out the needed project set and then registers, registers again or deletes. It is called after a rule is saved or deleted, after a site is turned on or off or its projects change, and on disconnect (best effort).
-- [ ] Add a worker sweep every `JIRA_WEBHOOK_SWEEP_S` (default 6 h) that renews webhooks expiring within 10 days and registers again any that are missing. Each run is locked (`SKIP LOCKED`) so that two workers never renew the same site. A failure is stored on `jira_webhooks.error`, and the `jira.webhook_failed` audit entry is written once per failure.
+- [ ] Add a worker sweep every `JIRA_WEBHOOK_SWEEP_S` (default 6 h) that renews webhooks expiring within 10 days and registers again any that are missing. Missing ones are found by listing `GET /webhook`, since a refresh of an unknown id still answers `200` (spike). Each run is locked (`SKIP LOCKED`) so that two workers never renew the same site. A failure is stored on `jira_webhooks.error`, and the `jira.webhook_failed` audit entry is written once per failure.
 - [ ] Add `JIRA_WEBHOOK_BASE_URL` to settings and to `.env.example`.
 - [ ] Add tests on the fake for: registration after the first rule, a new registration when the projects change, deletion after the last rule, renewal near expiry, and an error stored and then cleared.
 
