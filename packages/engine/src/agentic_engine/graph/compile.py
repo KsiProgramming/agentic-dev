@@ -80,6 +80,7 @@ import asyncio
 import functools
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TypedDict, cast
@@ -163,9 +164,11 @@ from agentic_engine.integrate import (
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
 from agentic_engine.spec import (
+    BODY_FROM_TOOLS,
     CREATE_TOOLS,
     DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
+    JIRA_WRITE_TOOLS,
     PUBLISH_TOOLS,
     READ_TOOLS,
     WRITE_TOOLS,
@@ -230,6 +233,7 @@ class _Limits:
     views: dict[str, dict[str, str]] = field(default_factory=dict[str, dict[str, str]])
     context: str = ""
     saver: BranchSaver | None = None
+    request: str | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -424,6 +428,7 @@ def compile_workflow(
         expression_views(spec.root),
         context.text() if context is not None else "",
         saver,
+        context.request if context is not None else None,
     )
 
     loops: list[LoopNode] = []  # the loops `add` is inside
@@ -742,7 +747,8 @@ async def _run_step(
             case ToolNode():
                 try:
                     called = await _with_body_from(node, limits.artifacts, refs)
-                except ArtifactError as e:
+                    called = _with_issue_from(called, limits.request)
+                except (ArtifactError, ToolArgsError) as e:
                     return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
                 return await run_tool_node(called, tools, on_event, route_as)
             case GateNode():
@@ -815,22 +821,49 @@ async def _run_step(
 MAX_BODY_FROM_CHARS = 60_000
 """The most of a `body_from` artifact a pull request's body takes (GitHub allows 65,536)."""
 
+MAX_JIRA_BODY_FROM_CHARS = 30_000
+"""The most of a `body_from` artifact a Jira comment takes (the tool posts at most 32,000)."""
+
+ISSUE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-[1-9][0-9]{0,9}$")
+"""A Jira issue key, as `issue_from: "request"` must find it in the run's request (7.2)."""
+
+
+class ToolArgsError(Exception):
+    """A tool node's arguments could not be resolved from the run (`issue_from`)."""
+
+
+def _with_issue_from(node: ToolNode, request: str | None) -> ToolNode:
+    """`node` with its `issue_from: "request"` (7.2, a Jira write's argument) put in place as
+    `issue`: the run's request, trimmed, which must be one issue key. The tool never sees
+    `issue_from`. Raises `ToolArgsError` otherwise, before Jira is called."""
+    if node.tool not in JIRA_WRITE_TOOLS or node.args.get("issue_from") != "request":
+        return node
+    key = (request or "").strip()
+    if not ISSUE_KEY.match(key):
+        raise ToolArgsError(
+            "the run's request must be one Jira issue key, such as PROJ-12, for "
+            f"{node.tool}; it is {key[:40]!r}"
+        )
+    args = {k: v for k, v in node.args.items() if k != "issue_from"} | {"issue": key.upper()}
+    return node.model_copy(update={"args": args})
+
 
 async def _with_body_from(
     node: ToolNode, artifacts: ArtifactStore, refs: Mapping[str, ArtifactRef]
 ) -> ToolNode:
-    """`node` with its `body_from` (6.7, a `github.openPR` argument naming a run artifact) put in
-    place: that artifact's text, as the run has it, under the static `body`, cut at
-    `MAX_BODY_FROM_CHARS`. The tool never sees `body_from`. Raises `ArtifactError` when the run
-    has not written the artifact."""
+    """`node` with its `body_from` (6.7 `github.openPR`, 7.2 `jira.comment`: an argument naming a
+    run artifact) put in place: that artifact's text, as the run has it, under the static `body`,
+    cut at `MAX_BODY_FROM_CHARS` (`MAX_JIRA_BODY_FROM_CHARS` for a comment). The tool never sees
+    `body_from`. Raises `ArtifactError` when the run has not written the artifact."""
     name = node.args.get("body_from")
-    if node.tool != "github.openPR" or not isinstance(name, str):
+    if node.tool not in BODY_FROM_TOOLS or not isinstance(name, str):
         return node
     ref = refs.get(name)
     stored = await artifacts.get(name, ref.version) if ref is not None else None
     if stored is None:
         raise ArtifactError(f"artifact {name!r} was not written")
-    text = stored.content[:MAX_BODY_FROM_CHARS]
+    cap = MAX_JIRA_BODY_FROM_CHARS if node.tool in JIRA_WRITE_TOOLS else MAX_BODY_FROM_CHARS
+    text = stored.content[:cap]
     static = node.args.get("body")
     body = f"{static}\n\n{text}" if isinstance(static, str) and static else text
     args = {k: v for k, v in node.args.items() if k != "body_from"} | {"body": body}
