@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 7.4 Per-project field mapping (acceptance criteria, components):
+- Phase 7.4 Per-project field mapping (acceptance criteria, components) ([#240](https://github.com/KsiProgramming/agentic-dev/pull/240)):
   - **Map a project's fields.** Each picked Jira project says which of its fields holds its acceptance criteria (a paragraph or short text) and its story points (a number), picked from the site's fields read live from Jira, the usual names first. A mapping is checked with Jira, kept with its project and removed with it.
   - **Agents are told the issue.** A run a Jira trigger started reads its issue once, before its first step, and tells every agent: key, status, type, labels, components, story points, the acceptance criteria and the description, between `<jira-issue>` tags as data, cut at 16,000 characters. Resumes and a rerun from a step reuse it; an issue that cannot be read ends the run before any step with a fixed reason.
   - **Settings and the console.** The Jira card's "Map fields" opens a sheet per site (a project, then a field per role, suggested first), and each picked project reads "Fields mapped" or "No fields mapped". An agent step's Input tab ends with "Run context": the repository, the request and the Jira issue as the agents were told it (`jira_brief` on `GET /runs/{id}`).
