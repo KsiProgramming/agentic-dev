@@ -89,3 +89,68 @@ class ProjectPage:
 
     projects: tuple[Project, ...]
     next_start_at: int | None
+
+
+@dataclass(frozen=True)
+class IssueComment:
+    """A comment on an issue, its body as Markdown (`agentic_jira.adf`)."""
+
+    id: str
+    author: str
+    created: str
+    body: str
+
+
+@dataclass(frozen=True)
+class Issue:
+    """The standard fields of an issue (7.2; custom fields are mapped in 7.4). Text is Markdown;
+    names are display names. `project_key` is the project the issue is in now, which an issue
+    moved from another project does not show in its key. `comments` are the latest, oldest
+    first; `comment_count` is how many the issue has."""
+
+    id: str
+    key: str
+    project_key: str
+    summary: str
+    status: str
+    type: str
+    priority: str | None
+    labels: tuple[str, ...]
+    components: tuple[str, ...]
+    assignee: str | None
+    reporter: str | None
+    created: str
+    updated: str
+    description: str
+    comments: tuple[IssueComment, ...]
+    comment_count: int
+
+
+@dataclass(frozen=True)
+class IssueSummary:
+    """An issue as a search lists it."""
+
+    key: str
+    project_key: str
+    summary: str
+    status: str
+    type: str
+    assignee: str | None
+    updated: str
+
+
+@dataclass(frozen=True)
+class SearchPage:
+    """A page of a JQL search; `next_page_token` fetches the next one, if any."""
+
+    issues: tuple[IssueSummary, ...]
+    next_page_token: str | None
+
+
+@dataclass(frozen=True)
+class Transition:
+    """A move the issue's workflow offers from its current status."""
+
+    id: str
+    name: str
+    to_status: str
