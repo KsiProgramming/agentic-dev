@@ -151,7 +151,7 @@ Principle 9 says nothing is lost, and AC-8 holds for the graph but not yet for t
 | 7.1 | Atlassian OAuth 3LO per workspace, project scoping | Jira connection stored encrypted | ✅ Done ([#237](https://github.com/KsiProgramming/agentic-dev/pull/237)) |
 | 7.2 | `jira` MCP server: read issue, comment, transition (reads for agents, writes only from a tool node after a gate, scoped to the picked projects). [Plan](2026-11-17-jira-mcp-server/requirements.md) | Agent reads an issue and posts a comment | ✅ Done ([#238](https://github.com/KsiProgramming/agentic-dev/pull/238)) |
 | 7.3 | Jira webhook trigger on configured status/label | Moving an issue starts a run | ✅ Done ([#239](https://github.com/KsiProgramming/agentic-dev/pull/239)) |
-| 7.4 | Per-project field mapping (acceptance criteria, components). [Plan](2026-11-17-jira-field-mapping/requirements.md) | Spec-writer receives mapped fields | — |
+| 7.4 | Per-project field mapping (acceptance criteria, components). [Plan](2026-11-17-jira-field-mapping/requirements.md) | Spec-writer receives mapped fields | ✅ Done ([#240](https://github.com/KsiProgramming/agentic-dev/pull/240)) |
 | 7.5 | SDD template: spec → gate → plan/tasks → orchestrator implement → review loop → gate → PR → Jira update (Spec Kit compatible) | AC-5 | — |
 | 7.6 | GitHub webhooks: PR review comments feed a new loop iteration; `@platform fix this` | Review comment resumes the run | — |
 | 7.7 | Spec from a Markdown file: a run's input may be an uploaded `.md` file or a path in the repo (`docs/spec.md`), kept as a run artifact (4.3) and given to agents as data (principle 5); the SDD template runs from it without Jira | An SDD run started from an uploaded spec file, with no Jira connection, opens a PR that implements it | — |
