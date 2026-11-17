@@ -1,10 +1,12 @@
 import json
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import SecretStr
+
+from agentic_jira.adf import to_markdown
 
 # Asked for once, for all of Milestone 7 (7.1): reading issues and projects, commenting and
 # transitioning (7.2, behind gates), registering webhooks (7.3), reading users (7.4), the
@@ -103,7 +105,8 @@ class IssueComment:
 
 @dataclass(frozen=True)
 class Issue:
-    """The standard fields of an issue (7.2; custom fields are mapped in 7.4). Text is Markdown;
+    """The standard fields of an issue (7.2), and the raw values of any extra fields asked for
+    (`extra`, the mapped custom fields of 7.4). Text is Markdown;
     names are display names. `project_key` is the project the issue is in now, which an issue
     moved from another project does not show in its key. `comments` are the latest, oldest
     first; `comment_count` is how many the issue has."""
@@ -124,6 +127,84 @@ class Issue:
     description: str
     comments: tuple[IssueComment, ...]
     comment_count: int
+    extra: Mapping[str, object] = field(default_factory=dict[str, object])
+    """The raw values of the extra fields asked for (`get_issue(extra_fields=…)`, 7.4), by field
+    id; a field the issue does not have is absent. Read them with `mapped_value`."""
+
+
+type FieldRole = Literal["acceptance_criteria", "story_points"]
+"""What a mapped field holds (7.4). The roles are fixed, so agents read the same names in every
+project."""
+ROLES: tuple[FieldRole, ...] = ("acceptance_criteria", "story_points")
+
+_TEXT_KINDS = frozenset({"textarea", "textfield"})
+"""The custom field kinds that hold acceptance criteria: a paragraph (rich text, ADF on REST
+API v3) or a short text."""
+
+ROLE_SUGGESTED_NAMES: dict[FieldRole, tuple[str, ...]] = {
+    "acceptance_criteria": ("acceptance criteria",),
+    "story_points": ("story points", "story point estimate"),
+}
+"""The names a role's field usually has, compared without regard to case: such a field is
+offered first."""
+
+
+@dataclass(frozen=True)
+class JiraField:
+    """A field of a site (`GET /rest/api/3/field`). `type` is Jira's schema type (`string`,
+    `number`, …); `kind` the custom field type's last part (`textarea`, `float`, …), empty for
+    a system field. A team-managed project's own field has that project's id in `project_id`."""
+
+    id: str
+    name: str
+    type: str
+    kind: str
+    custom: bool
+    project_id: str | None = None
+
+    def fits(self, role: FieldRole) -> bool:
+        """Whether the field can hold `role`: a custom paragraph or short text for acceptance
+        criteria, a custom number for story points."""
+        if not self.custom:
+            return False
+        if role == "acceptance_criteria":
+            return self.type == "string" and self.kind in _TEXT_KINDS
+        return self.type == "number"
+
+    def suggested(self, role: FieldRole) -> bool:
+        return self.name.strip().lower() in ROLE_SUGGESTED_NAMES[role]
+
+    def in_project(self, project_id: str) -> bool:
+        """Whether a project can use the field: a site-wide field, or the project's own."""
+        return self.project_id is None or self.project_id == project_id
+
+    @property
+    def label(self) -> str:
+        """The field's type as a person reads it."""
+        if self.kind == "textarea":
+            return "Paragraph"
+        if self.kind == "textfield":
+            return "Short text"
+        if self.type == "number":
+            return "Number"
+        return self.type.capitalize() if self.type else "Unknown"
+
+
+def mapped_value(role: FieldRole, raw: object) -> str | float | None:
+    """A mapped field's value as agents read it: acceptance criteria as Markdown (rich text is
+    converted, `agentic_jira.adf`), story points as a number. An empty value, or one of the
+    wrong type (the field was changed in Jira), is `None`."""
+    if role == "story_points":
+        if isinstance(raw, bool) or not isinstance(raw, int | float):
+            return None
+        return float(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+    elif isinstance(raw, dict):
+        text = to_markdown(cast(dict[str, object], raw)).strip()
+    else:
+        return None
+    return text or None
 
 
 @dataclass(frozen=True)

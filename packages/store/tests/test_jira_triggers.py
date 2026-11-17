@@ -21,9 +21,11 @@ from agentic_store import (
     TriggerRunActiveError,
     Workspace,
     create_jira_trigger,
+    create_rerun,
     create_run,
     delete_jira_trigger,
     get_jira_trigger,
+    get_run,
     is_jira_own_move,
     jira_trigger_projects,
     list_jira_triggers,
@@ -32,6 +34,7 @@ from agentic_store import (
     record_jira_delivery,
     record_jira_own_move,
     record_jira_trigger_fire,
+    set_run_jira_brief,
     trigger_matches,
     update_jira_trigger,
 )
@@ -310,3 +313,38 @@ async def test_old_deliveries_are_pruned(sessions: Sessions) -> None:
     assert pruned >= 1
     # Once pruned, the same delivery id is new again.
     assert await record_jira_delivery(sessions, workspace_id, "cloud-acme", "7009", "API-1")
+
+
+async def test_a_run_keeps_the_first_issue_brief_stored(sessions: Sessions) -> None:
+    workspace_id = await new_workspace(sessions)
+    rule = await create_jira_trigger(sessions, workspace_id, STATUS_RULE)
+    run_id = await create_run(
+        sessions, single_agent(), "API-1", workspace_id=workspace_id, jira_origin=origin(rule.id)
+    )
+    before = await get_run(sessions, run_id)
+    assert before is not None and before.jira_brief is None
+    assert before.jira_issue is not None and before.jira_issue["key"] == "API-1"
+
+    first = await set_run_jira_brief(sessions, run_id, {"key": "API-1", "summary": "first"})
+    second = await set_run_jira_brief(sessions, run_id, {"key": "API-1", "summary": "second"})
+
+    assert first == second == {"key": "API-1", "summary": "first"}
+    after = await get_run(sessions, run_id)
+    assert after is not None and after.jira_brief == first
+
+
+async def test_a_rerun_from_the_beginning_reads_the_issue_again(sessions: Sessions) -> None:
+    workspace_id = await new_workspace(sessions)
+    rule = await create_jira_trigger(sessions, workspace_id, STATUS_RULE)
+    run_id = await create_run(
+        sessions, single_agent(), "API-1", workspace_id=workspace_id, jira_origin=origin(rule.id)
+    )
+    await set_run_jira_brief(sessions, run_id, {"key": "API-1"})
+    async with sessions.begin() as session:
+        await session.execute(update(Run).where(Run.id == run_id).values(status="completed"))
+
+    rerun = await get_run(sessions, await create_rerun(sessions, run_id))
+
+    assert rerun is not None
+    assert rerun.jira_issue is not None and rerun.jira_issue["key"] == "API-1"
+    assert rerun.jira_brief is None

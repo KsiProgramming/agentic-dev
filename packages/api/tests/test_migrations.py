@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0034_jira_triggers"
+    assert version == "0035_jira_field_mappings"
     assert {
         "runs",
         "run_events",
@@ -79,6 +79,19 @@ async def test_the_workflow_version_revision_downgrades_and_upgrades(postgres_ur
     assert not {"workflow_id", "workflow_version"} & await run_columns(postgres_url)
     await asyncio.to_thread(command.upgrade, config, "head")
     assert {"workflow_id", "workflow_version"} <= await run_columns(postgres_url)
+
+
+async def test_the_jira_field_mapping_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+
+    await asyncio.to_thread(command.downgrade, config, "0034_jira_triggers")
+    assert "jira_brief" not in await run_columns(postgres_url)
+    assert "jira_field_mappings" not in await table_names(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert "jira_brief" in await run_columns(postgres_url)
+    assert "jira_field_mappings" in await table_names(postgres_url)
 
 
 async def run_columns(postgres_url: str) -> set[str]:

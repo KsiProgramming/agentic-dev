@@ -2,10 +2,10 @@
 
 All JSON: the authorization-code exchange and the refresh (`auth.atlassian.com`), the
 consenting account and the sites the grant reaches (`api.atlassian.com`), and, on a site's REST
-API v3 (`api.atlassian.com/ex/jira/<cloud id>`), its projects (7.1) and its issues, their
-comments and transitions (7.2). No token, code or response body is ever put in a log line or an
-exception message: errors carry a status code or a kind. Rich text is converted to and from
-Markdown here (`agentic_jira.adf`), so nothing above the client sees ADF."""
+API v3 (`api.atlassian.com/ex/jira/<cloud id>`), its projects (7.1), its issues, their
+comments and transitions (7.2), and its fields (7.4). No token, code or response body is ever
+put in a log line or an exception message: errors carry a status code or a kind. Rich text is
+converted to and from Markdown here (`agentic_jira.adf`), so nothing above the client sees ADF."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -37,6 +37,7 @@ from agentic_jira.models import (
     Issue,
     IssueComment,
     IssueSummary,
+    JiraField,
     Project,
     ProjectPage,
     SearchPage,
@@ -179,11 +180,15 @@ class AtlassianApp:
             )
         return found
 
-    async def get_issue(self, token: SecretStr, cloud_id: str, key: str) -> Issue:
-        """The issue's standard fields and its latest `ISSUE_COMMENTS` comments, oldest first.
-        `JiraNotFoundError` when it does not exist or the account cannot see it."""
+    async def get_issue(
+        self, token: SecretStr, cloud_id: str, key: str, *, extra_fields: Sequence[str] = ()
+    ) -> Issue:
+        """The issue's standard fields, the raw values of `extra_fields` (field ids, 7.4) and
+        its latest `ISSUE_COMMENTS` comments, oldest first. `JiraNotFoundError` when it does not
+        exist or the account cannot see it."""
         url = _issue_url(cloud_id, key)
-        body = _object(await self._get(token, url, [("fields", ISSUE_FIELDS)]))
+        fields = ",".join((ISSUE_FIELDS, *sorted(set(extra_fields))))
+        body = _object(await self._get(token, url, [("fields", fields)]))
         page = _object(
             await self._get(
                 token,
@@ -191,7 +196,16 @@ class AtlassianApp:
                 [("orderBy", "-created"), ("maxResults", str(ISSUE_COMMENTS))],
             )
         )
-        return _issue(body, page)
+        return _issue(body, page, extra_fields)
+
+    async def list_fields(self, token: SecretStr, cloud_id: str) -> list[JiraField]:
+        """The site's fields (`/rest/api/3/field`), system and custom, team-managed projects'
+        own fields among them, by name."""
+        body = await self._get(token, f"{_site_api(cloud_id)}/field")
+        if not isinstance(body, list):
+            raise JiraApiError("Atlassian answered with an unexpected body")
+        found = [_field(_object(raw)) for raw in cast(list[Any], body)]
+        return sorted((f for f in found if f.id), key=lambda f: (f.name.lower(), f.id))
 
     async def search(
         self,
@@ -561,7 +575,23 @@ def _project_key(key: str, fields: _Json) -> str:
     return _name(fields.get("project"), "key") or key.rsplit("-", 1)[0]
 
 
-def _issue(body: _Json, comments: _Json) -> Issue:
+def _field(entry: _Json) -> JiraField:
+    schema = entry.get("schema")
+    schema = cast(_Json, schema) if isinstance(schema, dict) else {}
+    custom = schema.get("custom")
+    scope = entry.get("scope")
+    project = _name(cast(_Json, scope).get("project"), "id") if isinstance(scope, dict) else None
+    return JiraField(
+        id=str(entry.get("id", "")),
+        name=str(entry.get("name") or entry.get("id") or ""),
+        type=str(schema.get("type") or ""),
+        kind=custom.rsplit(":", 1)[-1] if isinstance(custom, str) else "",
+        custom=entry.get("custom") is True,
+        project_id=project,
+    )
+
+
+def _issue(body: _Json, comments: _Json, extra_fields: Sequence[str] = ()) -> Issue:
     key = str(body.get("key", ""))
     fields = _fields(body)
     raw = comments.get("comments")
@@ -596,6 +626,7 @@ def _issue(body: _Json, comments: _Json) -> Issue:
         description=to_markdown(fields.get("description")),
         comments=tuple(found),
         comment_count=total if isinstance(total, int) else len(found),
+        extra={f: fields[f] for f in extra_fields if fields.get(f) is not None},
     )
 
 

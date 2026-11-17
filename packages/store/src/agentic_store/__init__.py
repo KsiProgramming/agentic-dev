@@ -66,6 +66,7 @@ from agentic_store.expiry import APPROVAL_EXPIRED_REASON, expire_gates
 from agentic_store.jira import (
     JIRA,
     JiraConnectionInfo,
+    JiraMappedField,
     JiraNeedsAttentionError,
     JiraNotConnectedError,
     JiraProjectRef,
@@ -73,9 +74,11 @@ from agentic_store.jira import (
     JiraSiteRef,
     get_jira_connection,
     jira_project_allowed,
+    jira_site_field_mappings,
     mark_jira_needs_attention,
     put_jira_connection,
     refresh_jira_secret,
+    set_jira_project_fields,
     set_jira_site_enabled,
     set_jira_site_projects,
 )
@@ -131,6 +134,7 @@ from agentic_store.models import (
     Base,
     Connection,
     JiraDelivery,
+    JiraFieldMapping,
     JiraOwnMove,
     JiraProject,
     JiraSite,
@@ -168,7 +172,7 @@ from agentic_store.rerun import (
     StepNotRerunnableError,
     create_rerun,
 )
-from agentic_store.runs import RerunFrom, StoredRun, create_run, get_run
+from agentic_store.runs import RerunFrom, StoredRun, create_run, get_run, set_run_jira_brief
 from agentic_store.sandboxes import (
     SandboxInfo,
     SandboxNotKeptError,
@@ -253,6 +257,8 @@ __all__ = [
     "InvalidSelectionError",
     "JiraConnectionInfo",
     "JiraDelivery",
+    "JiraFieldMapping",
+    "JiraMappedField",
     "JiraNeedsAttentionError",
     "JiraNotConnectedError",
     "JiraOrigin",
@@ -347,6 +353,7 @@ __all__ = [
     "has_uncommitted",
     "is_jira_own_move",
     "jira_project_allowed",
+    "jira_site_field_mappings",
     "jira_trigger_projects",
     "jira_webhook_sites",
     "jira_webhook_workspaces",
@@ -413,9 +420,11 @@ __all__ = [
     "save_jira_webhook",
     "saved_changes",
     "set_jira_delivery_outcome",
+    "set_jira_project_fields",
     "set_jira_site_enabled",
     "set_jira_site_projects",
     "set_jira_webhook_error",
+    "set_run_jira_brief",
     "trigger_matches",
     "update_jira_trigger",
     "update_workflow",

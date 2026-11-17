@@ -12,6 +12,11 @@ search understands only the `project in (…)` clause the Jira tools put first; 
 makes it return every issue of the site, to test that the tools filter. What runs post is kept
 in `posted` and `moved`, and shows on the issue afterwards.
 
+Fields (7.4): each site has a few (`FAKE_FIELDS`): an "Acceptance criteria" paragraph
+(`FAKE_AC_FIELD`), a short-text one, a "Story point estimate" number (`FAKE_POINTS_FIELD`), one
+field of the wrong type for each role, and a team-managed project's own paragraph. `API-1` and
+`OPS-2` carry values in them.
+
 Webhooks (7.3): registrations are kept per site with a 30-day expiry, and refused as Jira
 refuses them (one URL per account, `WEBHOOK_LIMIT` per site; `refuse_webhooks` forces a kind).
 A refresh answers for unknown ids too, as Jira does. `delivery` builds a delivery signed with
@@ -46,6 +51,7 @@ from agentic_jira.models import (
     Issue,
     IssueComment,
     IssueSummary,
+    JiraField,
     Project,
     ProjectPage,
     SearchPage,
@@ -97,6 +103,8 @@ def _issue(
     type: str = "Task",
     comments: tuple[IssueComment, ...] = (),
     labels: tuple[str, ...] = (),
+    components: tuple[str, ...] = (),
+    extra: dict[str, object] | None = None,
 ) -> Issue:
     return Issue(
         id=id,
@@ -107,7 +115,7 @@ def _issue(
         type=type,
         priority="Medium",
         labels=labels,
-        components=(),
+        components=components,
         assignee=None,
         reporter=FAKE_ACCOUNT.name,
         created="2026-11-01T09:00:00.000+0000",
@@ -115,7 +123,76 @@ def _issue(
         description=description,
         comments=comments,
         comment_count=len(comments),
+        extra=extra or {},
     )
+
+
+FAKE_AC_FIELD = "customfield_10100"
+"""The fake sites' "Acceptance criteria" paragraph field."""
+FAKE_AC_TEXT_FIELD = "customfield_10101"
+FAKE_POINTS_FIELD = "customfield_10016"
+"""The fake sites' "Story point estimate" field."""
+
+
+def _custom(id: str, name: str, type: str, kind: str, project_id: str | None = None) -> JiraField:
+    return JiraField(id=id, name=name, type=type, kind=kind, custom=True, project_id=project_id)
+
+
+_SYSTEM_FIELDS = (
+    JiraField("summary", "Summary", "string", "", False),
+    JiraField("description", "Description", "string", "", False),
+    JiraField("timeestimate", "Remaining Estimate", "number", "", False),
+)
+FAKE_FIELDS: dict[str, tuple[JiraField, ...]] = {
+    "fake-cloud-acme": (
+        *_SYSTEM_FIELDS,
+        _custom(FAKE_AC_FIELD, "Acceptance criteria", "string", "textarea"),
+        _custom(FAKE_AC_TEXT_FIELD, "Acceptance notes", "string", "textfield"),
+        _custom(FAKE_POINTS_FIELD, "Story point estimate", "number", "jsw-story-points"),
+        _custom("customfield_10200", "Story points", "option", "select"),
+        _custom("customfield_10201", "Acceptance date", "date", "datepicker"),
+        _custom("customfield_10300", "Definition of done", "string", "textarea", "10004"),
+    ),
+    "fake-cloud-labs": (
+        *_SYSTEM_FIELDS,
+        _custom("customfield_20100", "Acceptance criteria", "string", "textarea"),
+    ),
+}
+_STRONG = {"type": "strong"}
+_AC_DOC: dict[str, object] = {
+    "type": "doc",
+    "version": 1,
+    "content": [
+        {
+            "type": "bulletList",
+            "content": [
+                {
+                    "type": "listItem",
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {"type": "text", "text": "A client over 100 requests a minute "},
+                                {"type": "text", "text": "gets 429.", "marks": [_STRONG]},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": "listItem",
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {"type": "text", "text": "The limit is per API key."},
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+    ],
+}
 
 
 FAKE_ISSUES: dict[str, tuple[Issue, ...]] = {
@@ -129,6 +206,8 @@ FAKE_ISSUES: dict[str, tuple[Issue, ...]] = {
             "## Acceptance criteria\n\n- A client over 100 requests a minute gets `429`.",
             type="Story",
             labels=("backend",),
+            components=("gateway",),
+            extra={FAKE_AC_FIELD: _AC_DOC, FAKE_POINTS_FIELD: 5, FAKE_AC_TEXT_FIELD: "  "},
             comments=(
                 IssueComment(
                     "40001", FAKE_ACCOUNT.name, "2026-11-02T09:00:00.000+0000", "Per API key?"
@@ -162,6 +241,7 @@ FAKE_ISSUES: dict[str, tuple[Issue, ...]] = {
             "Archive the old docs server",
             "To Do",
             "Moved from DOCS: the server is ours to retire.",
+            extra={FAKE_AC_TEXT_FIELD: "The old server answers 410.", FAKE_POINTS_FIELD: 2},
         ),
     ),
     "fake-cloud-labs": (
@@ -227,6 +307,10 @@ class FakeAtlassian:
             for cloud_id, issues in FAKE_ISSUES.items()
         }
         self.searches: list[str] = []
+        self.issue_reads: list[tuple[str, str]] = []
+        """Each `get_issue` call's site and key."""
+        self.fields: dict[str, tuple[JiraField, ...]] = dict(FAKE_FIELDS)
+        """The sites' fields; tests remove one to see a mapping outlive it."""
         self.posted: list[PostedComment] = []
         self.moved: list[MadeTransition] = []
         self.webhooks: dict[str, dict[int, Webhook]] = {}
@@ -283,9 +367,20 @@ class FakeAtlassian:
         wanted = set(ids)
         return [project for project in self._site_projects(cloud_id) if project.id in wanted]
 
-    async def get_issue(self, token: SecretStr, cloud_id: str, key: str) -> Issue:
+    async def get_issue(
+        self, token: SecretStr, cloud_id: str, key: str, *, extra_fields: Sequence[str] = ()
+    ) -> Issue:
         self._accepted(token)
-        return self._find(cloud_id, key)
+        found = self._find(cloud_id, key)
+        self.issue_reads.append((cloud_id, key))
+        wanted = set(extra_fields)
+        return replace(found, extra={k: v for k, v in found.extra.items() if k in wanted})
+
+    async def list_fields(self, token: SecretStr, cloud_id: str) -> list[JiraField]:
+        self._accepted(token)
+        self._site_projects(cloud_id)
+        fields = self.fields.get(cloud_id, ())
+        return sorted(fields, key=lambda f: (f.name.lower(), f.id))
 
     async def search(
         self,

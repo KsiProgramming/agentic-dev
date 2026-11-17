@@ -1,7 +1,7 @@
 """The deployment's Atlassian OAuth 2.0 (3LO) app for Jira Cloud (7.1): the consent flow, the
 grant and its refresh, the sites it reaches and their projects; and (7.2) the issues, comments
-and transitions the platform's `jira` tools use; and (7.3) the webhooks that trigger runs and
-the deliveries they send. Agents never see a token."""
+and transitions the platform's `jira` tools use; (7.3) the webhooks that trigger runs and
+the deliveries they send; and (7.4) the site's fields a project maps. Agents never see a token."""
 
 from agentic_jira.access import WorkspaceJira
 from agentic_jira.adf import from_markdown, to_markdown
@@ -19,12 +19,15 @@ from agentic_jira.errors import (
     JiraWebhookError,
 )
 from agentic_jira.fake import (
+    FAKE_AC_FIELD,
     FAKE_ACCOUNT,
     FAKE_CLIENT_ID,
     FAKE_CLIENT_SECRET,
     FAKE_CODE,
+    FAKE_FIELDS,
     FAKE_ISSUES,
     FAKE_MOVED,
+    FAKE_POINTS_FIELD,
     FAKE_PROJECTS,
     FAKE_SITES,
     WEBHOOK_LIMIT,
@@ -35,22 +38,27 @@ from agentic_jira.fake import (
     sign_delivery,
 )
 from agentic_jira.models import (
+    ROLE_SUGGESTED_NAMES,
+    ROLES,
     SCOPES,
     WEBHOOK_EVENTS,
     WEBHOOK_FIELDS,
     Account,
     DeliveryClaims,
+    FieldRole,
     Grant,
     Issue,
     IssueComment,
     IssueEvent,
     IssueSummary,
+    JiraField,
     Project,
     ProjectPage,
     SearchPage,
     Site,
     Transition,
     Webhook,
+    mapped_value,
     missing_scopes,
 )
 from agentic_jira.platform import JiraPlatform
@@ -71,17 +79,22 @@ __all__ = [
     "AUTH_URL",
     "DELIVERY_HEADER",
     "FAKE_ACCOUNT",
+    "FAKE_AC_FIELD",
     "FAKE_CLIENT_ID",
     "FAKE_CLIENT_SECRET",
     "FAKE_CODE",
+    "FAKE_FIELDS",
     "FAKE_ISSUES",
     "FAKE_MOVED",
+    "FAKE_POINTS_FIELD",
     "FAKE_PROJECTS",
     "FAKE_SITES",
     "INVALID_GRANT",
     "MAX_BODY_BYTES",
     "REFRESH_MARGIN",
     "RENEW_WITHIN",
+    "ROLES",
+    "ROLE_SUGGESTED_NAMES",
     "SCOPES",
     "UNAUTHORIZED",
     "WEBHOOK_EVENTS",
@@ -94,6 +107,7 @@ __all__ = [
     "DeliveryClaims",
     "FakeAtlassian",
     "FakeDelivery",
+    "FieldRole",
     "Grant",
     "Issue",
     "IssueComment",
@@ -104,6 +118,7 @@ __all__ = [
     "JiraBadRequestError",
     "JiraConfigError",
     "JiraDeliveryError",
+    "JiraField",
     "JiraNotFoundError",
     "JiraPlatform",
     "JiraRateLimitedError",
@@ -122,6 +137,7 @@ __all__ = [
     "access_token",
     "call",
     "from_markdown",
+    "mapped_value",
     "missing_scopes",
     "parse_event",
     "project_filter",

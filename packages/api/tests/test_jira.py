@@ -235,7 +235,9 @@ async def test_projects_are_searched_live_and_picked_per_site(
 
     assert [p["key"] for p in everything["projects"]] == ["DOCS", "OPS", "API", "WEB"]
     assert everything["next_cursor"] is None
-    assert matching["projects"] == [{"id": "10004", "key": "WEB", "name": "Web shop"}]
+    assert [(p["id"], p["key"], p["name"]) for p in matching["projects"]] == [
+        ("10004", "WEB", "Web shop")
+    ]
     assert saved.status_code == 200
     assert [p["key"] for p in saved.json()["projects"]] == ["API", "WEB"]
     assert [len(s["projects"]) for s in jira["sites"]] == [2, 0]

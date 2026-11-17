@@ -8,7 +8,11 @@ the picked projects are the platform's own allowlist: `jira_project_allowed` is 
 
 Refresh tokens rotate, so two refreshes must not race: `refresh_jira_secret` holds a row lock
 on the connection while the caller's `refresh` runs, and stores what it returns before the lock
-is released."""
+is released.
+
+Each picked project may map its Jira fields to fixed roles (7.4, `jira_field_mappings`): the
+mapping lives and dies with the picked project, so saving a site's projects keeps the rows of
+those still picked."""
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -27,7 +31,7 @@ from agentic_store.connections import (
     secret_aad,
     workspace_dek,
 )
-from agentic_store.models import Connection, JiraProject, JiraSite, Workspace
+from agentic_store.models import Connection, JiraFieldMapping, JiraProject, JiraSite, Workspace
 
 JIRA = "jira"
 
@@ -58,10 +62,21 @@ class JiraSiteRef:
 
 
 @dataclass(frozen=True)
+class JiraMappedField:
+    """A project's field mapped to a role (7.4); `field_name` as it was when mapped."""
+
+    role: str
+    field_id: str
+    field_name: str
+
+
+@dataclass(frozen=True)
 class JiraProjectRef:
     project_id: str
     key: str
     name: str
+    fields: tuple[JiraMappedField, ...] = ()
+    """Its mapped fields, by role (7.4)."""
 
 
 @dataclass(frozen=True)
@@ -207,18 +222,31 @@ async def set_jira_site_projects(
         site = await _site(session, workspace_id, cloud_id, lock=True)
         if site is None:
             return None
-        await session.execute(delete(JiraProject).where(JiraProject.site_id == site.id))
         unique = {p.project_id: p for p in projects}
-        for project in unique.values():
-            session.add(
-                JiraProject(
-                    id=uuid4(),
-                    site_id=site.id,
-                    project_id=project.project_id,
-                    key=project.key,
-                    name=project.name,
-                )
+        existing = {
+            row.project_id: row
+            for row in await session.scalars(
+                select(JiraProject).where(JiraProject.site_id == site.id)
             )
+        }
+        gone = [row.id for pid, row in existing.items() if pid not in unique]
+        if gone:
+            # Their field mappings go with them (`ON DELETE CASCADE`).
+            await session.execute(delete(JiraProject).where(JiraProject.id.in_(gone)))
+        for project in unique.values():
+            row = existing.get(project.project_id)
+            if row is None:
+                session.add(
+                    JiraProject(
+                        id=uuid4(),
+                        site_id=site.id,
+                        project_id=project.project_id,
+                        key=project.key,
+                        name=project.name,
+                    )
+                )
+            else:
+                row.key, row.name = project.key, project.name
         keys = sorted(p.key for p in unique.values())
         audit(
             session,
@@ -256,6 +284,84 @@ async def jira_project_allowed(
             .limit(1)
         )
         return found is not None
+
+
+async def set_jira_project_fields(
+    sessions: async_sessionmaker[AsyncSession],
+    workspace_id: UUID,
+    cloud_id: str,
+    key: str,
+    fields: Sequence[JiraMappedField],
+) -> JiraProjectRef | None:
+    """Replace a picked project's field mapping (7.4): one field per role, a role left out is
+    unmapped. `None` if the workspace has not picked the project `key` on that site. The caller
+    checks the fields with Jira."""
+    async with sessions.begin() as session:
+        site = await _site(session, workspace_id, cloud_id, lock=True)
+        if site is None:
+            return None
+        project = await session.scalar(
+            select(JiraProject).where(
+                JiraProject.site_id == site.id, JiraProject.key == key.upper()
+            )
+        )
+        if project is None:
+            return None
+        await session.execute(
+            delete(JiraFieldMapping).where(JiraFieldMapping.project_id == project.id)
+        )
+        by_role = {f.role: f for f in fields}
+        for mapped in by_role.values():
+            session.add(
+                JiraFieldMapping(
+                    id=uuid4(),
+                    project_id=project.id,
+                    role=mapped.role,
+                    field_id=mapped.field_id,
+                    field_name=mapped.field_name,
+                )
+            )
+        audit(
+            session,
+            workspace_id,
+            "jira.fields_mapped",
+            details={
+                "site": site.name,
+                "cloud_id": cloud_id,
+                "project": project.key,
+                "fields": {role: f.field_id for role, f in sorted(by_role.items())},
+            },
+        )
+        await session.flush()
+        return JiraProjectRef(
+            project_id=project.project_id,
+            key=project.key,
+            name=project.name,
+            fields=tuple(by_role[role] for role in sorted(by_role)),
+        )
+
+
+async def jira_site_field_mappings(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, cloud_id: str
+) -> dict[str, dict[str, str]]:
+    """The field mappings of the workspace's picked projects on a site (7.4): project key →
+    role → field id. A project with nothing mapped is absent."""
+    async with sessions() as session:
+        rows = await session.execute(
+            select(JiraProject.key, JiraFieldMapping.role, JiraFieldMapping.field_id)
+            .join(JiraFieldMapping, JiraFieldMapping.project_id == JiraProject.id)
+            .join(JiraSite, JiraSite.id == JiraProject.site_id)
+            .join(Connection, Connection.id == JiraSite.connection_id)
+            .where(
+                Connection.workspace_id == workspace_id,
+                Connection.provider == JIRA,
+                JiraSite.cloud_id == cloud_id,
+            )
+        )
+        found: dict[str, dict[str, str]] = {}
+        for key, role, field_id in rows:
+            found.setdefault(key, {})[role] = field_id
+        return found
 
 
 async def mark_jira_needs_attention(
@@ -341,16 +447,35 @@ async def _site(
 
 
 async def _site_info(session: AsyncSession, site: JiraSite) -> JiraSiteInfo:
-    projects = await session.scalars(
-        select(JiraProject).where(JiraProject.site_id == site.id).order_by(JiraProject.key)
+    projects = list(
+        await session.scalars(
+            select(JiraProject).where(JiraProject.site_id == site.id).order_by(JiraProject.key)
+        )
     )
+    mapped: dict[UUID, list[JiraMappedField]] = {}
+    if projects:
+        rows = await session.scalars(
+            select(JiraFieldMapping)
+            .where(JiraFieldMapping.project_id.in_([p.id for p in projects]))
+            .order_by(JiraFieldMapping.role)
+        )
+        for row in rows:
+            mapped.setdefault(row.project_id, []).append(
+                JiraMappedField(role=row.role, field_id=row.field_id, field_name=row.field_name)
+            )
     return JiraSiteInfo(
         cloud_id=site.cloud_id,
         url=site.url,
         name=site.name,
         enabled=site.enabled,
         projects=tuple(
-            JiraProjectRef(project_id=p.project_id, key=p.key, name=p.name) for p in projects
+            JiraProjectRef(
+                project_id=p.project_id,
+                key=p.key,
+                name=p.name,
+                fields=tuple(mapped.get(p.id, ())),
+            )
+            for p in projects
         ),
     )
 
