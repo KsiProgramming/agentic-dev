@@ -16,6 +16,7 @@ Files referenced below (master key, GitHub App key) should be mounted read-only 
 | `GITHUB_APP_ID` | unset | Your GitHub App's numeric id. Unset: GitHub endpoints answer `503`, everything else works. |
 | `GITHUB_APP_SLUG` | unset | The App's URL slug (`github.com/apps/<slug>`). |
 | `GITHUB_APP_PRIVATE_KEY_FILE` | unset | Path to the App's private key (`.pem`). |
+| `GITHUB_WEBHOOK_SECRET` | unset | The App's webhook secret, which signs the pull request comments that start review follow-ups (`/github/webhooks`, 7.6). Unset: that endpoint answers `503`. GitHub must reach it from the internet. |
 | `ATLASSIAN_CLIENT_ID` | unset | Your Atlassian OAuth 2.0 (3LO) app's client id, for Jira. Unset: Jira endpoints answer `503` and the Jira card says it is not configured. |
 | `ATLASSIAN_CLIENT_SECRET_FILE` | unset | Path to a file holding the app's client secret. Required with the client id. |
 | `WEB_BASE_URL` | `http://localhost:3000` | Public URL of the web app; the GitHub install flow and the Jira consent redirect the browser there. |

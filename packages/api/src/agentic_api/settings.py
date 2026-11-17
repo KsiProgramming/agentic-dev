@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     github_app_id: int | None = None
     github_app_slug: str | None = None
     github_app_private_key_file: Path | None = None
+    # The secret the GitHub App signs its webhook deliveries with (7.6). Unset,
+    # `POST /github/webhooks` answers 503.
+    github_webhook_secret: SecretStr | None = None
     # The deployment's Atlassian OAuth 2.0 (3LO) app, for Jira (7.1). Its callback URL is
     # `<API_BASE_URL>/jira/callback`. With no client id, the Jira endpoints answer 503.
     atlassian_client_id: str | None = None

@@ -887,6 +887,7 @@ type IssueCode = Literal[
     "jira_write_not_tool_node",
     "jira_write_without_gate",
     "jira_write_not_shown",
+    "on_review_invalid",
 ]
 
 
@@ -2338,6 +2339,86 @@ class WorkflowInput(_Base):
     )
 
 
+class OnReview(_Base):
+    """What a review comment on the workflow's pull request does (7.6): `@<app> fix this` from
+    someone with write access starts a follow-up run, a rerun from the top-level step `from` of
+    the latest run on the pull request, which pushes to the same pull request after its gate."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_mode_override="validation",
+        validate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+    from_: NodeId = Field(
+        alias="from",
+        description="The top-level step a follow-up starts at, before the gate and the "
+        "`github.openPR` that publishes (a review loop, say).",
+    )
+
+
+def top_steps(root: Node) -> list[Node]:
+    """The run's top-level steps: the root sequence's steps, nested sequences flattened, or the
+    root alone (`agentic_engine.graph.steps.top_level_steps` on a spec)."""
+
+    def flatten(node: Node) -> Iterator[Node]:
+        if isinstance(node, SequenceNode):
+            for step in node.steps:
+                yield from flatten(step)
+        else:
+            yield node
+
+    return list(flatten(root))
+
+
+def on_review_issues(root: Node, on_review: OnReview | None) -> list[ValidationIssue]:
+    """Why `on_review` cannot start a follow-up of the workflow under `root` (7.6): `from` is
+    not a node (`reference`) or not a top-level step, the workflow has no `github.openPR` or
+    more than one, the publish does not come after `from`, or no gate is between them
+    (`on_review_invalid`). Empty without `on_review`."""
+    if on_review is None:
+        return []
+    path = "on_review.from"
+    source = on_review.from_
+
+    def invalid(message: str, code: IssueCode = "on_review_invalid") -> list[ValidationIssue]:
+        return [ValidationIssue(code=code, path=path, node_id=None, message=message)]
+
+    ordered = [node for _, node in iter_nodes(root)]
+    ids = [node.id for node in ordered]
+    if source not in ids:
+        return invalid(f"on_review: `from` {source!r} is not a node of the workflow", "reference")
+    if source not in {step.id for step in top_steps(root)}:
+        return invalid(
+            f"on_review: `from` {source!r} must be a top-level step (a step of the root "
+            "sequence), where a follow-up can start"
+        )
+    publishers = [
+        i
+        for i, node in enumerate(ordered)
+        if isinstance(node, ToolNode) and node.tool in PUBLISH_TOOLS
+    ]
+    if len(publishers) != 1:
+        return invalid(
+            "on_review: a follow-up pushes to the pull request the workflow opened, so it needs "
+            f"exactly one github.openPR (it has {len(publishers)})"
+        )
+    start, publish = ids.index(source), publishers[0]
+    if publish <= start:
+        return invalid(
+            f"on_review: `from` {source!r} must come before the github.openPR "
+            f"{ids[publish]!r}, so the follow-up publishes its work"
+        )
+    if not any(isinstance(node, GateNode) for node in ordered[start + 1 : publish]):
+        return invalid(
+            f"on_review: a gate must come between `from` {source!r} and the github.openPR "
+            f"{ids[publish]!r}, so a human approves what a follow-up pushes"
+        )
+    return []
+
+
 class WorkflowSpec(_Base):
     """A versioned workflow document with a single root node."""
 
@@ -2367,6 +2448,11 @@ class WorkflowSpec(_Base):
         description="The workflow's typed output (6.6): a subflow that calls it checks the called "
         "workflow's output against this, and the step after it reads it as typed.",
     )
+    on_review: OnReview | None = Field(
+        default=None,
+        description="Lets a review comment on the pull request the workflow opened "
+        "(`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing.",
+    )
     root: Node
 
     @model_validator(mode="after")
@@ -2375,6 +2461,6 @@ class WorkflowSpec(_Base):
         # expanded tree (`expand_workflow`): what it reads or publishes may come from them.
         if any(isinstance(node, SubflowNode) for _, node in iter_nodes(self.root)):
             return self
-        if issues := structure_issues(self.root):
+        if issues := structure_issues(self.root) + on_review_issues(self.root, self.on_review):
             raise ValueError("; ".join(messages(issues)))
         return self

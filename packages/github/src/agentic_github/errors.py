@@ -28,3 +28,11 @@ class RepoExistsError(RuntimeError):
 class RepoCreationNotAllowedError(RuntimeError):
     """GitHub refused to create the repo: the App lacks the Administration (write) permission,
     or the organisation does not let it create repos (or private ones)."""
+
+
+class GithubDeliveryError(ValueError):
+    """A webhook delivery that cannot be read (`reason`); never holds the payload."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason

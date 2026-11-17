@@ -13,7 +13,7 @@ from pydantic import (
 )
 
 from agentic_api.workspaces.models import budget_field
-from agentic_engine.agent import IssueBrief
+from agentic_engine.agent import IssueBrief, ReviewBrief
 from agentic_engine.artifacts import GateArtifact
 from agentic_engine.gate import (
     MAX_REVIEW_FILES,
@@ -296,7 +296,20 @@ class CancelResponse(BaseModel):
 
 type RunStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled"]
 
-type RunTrigger = Literal["manual", "api", "rerun", "jira"]
+type RunTrigger = Literal["manual", "api", "rerun", "jira", "github"]
+
+
+class PrReviewRef(BaseModel):
+    """The pull request review a follow-up run works from (7.6): references, never the text."""
+
+    pr_url: str = Field(description="The pull request the follow-up pushes to.")
+    number: int
+    kind: Literal["issue_comment", "review", "review_comment"] = Field(
+        description="Where the `@<app> fix this` comment was: in the conversation, a review's "
+        "body, or inline on the diff."
+    )
+    comment_url: str = Field(description="The comment on GitHub; empty if it had no link.")
+    author: str = Field(description="The GitHub login of the person who asked.")
 
 
 class JiraIssueRef(BaseModel):
@@ -441,7 +454,13 @@ class RunSummary(BaseModel):
     )
     trigger: RunTrigger = Field(
         description="What started the run: a person in the web app (`manual`), another client "
-        "(`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3)."
+        "(`api`), a rerun of `rerun_of` (`rerun`), a Jira trigger (`jira`, 7.3), or a review "
+        "comment on the pull request of `rerun_of` (`github`, 7.6)."
+    )
+    pr_review: PrReviewRef | None = Field(
+        default=None,
+        description="For a follow-up (`trigger: github`, 7.6): the pull request and the comment "
+        "that started it.",
     )
     jira_issue: JiraIssueRef | None = Field(
         default=None,
@@ -562,6 +581,12 @@ class RunDetail(RunSummary):
         description="The Jira issue as every agent of the run was told it (7.4), read before "
         "its first step; `null` for a run no Jira trigger started, or before it is read. With "
         "the repo and the input, it is the run context the console shows.",
+    )
+    pr_review_brief: ReviewBrief | None = Field(
+        default=None,
+        description="For a follow-up of a pull request review (7.6): the review as every agent "
+        "of the run was told it, read before its first step; `null` for any other run, or before "
+        "it is read. Its comments are what people wrote on GitHub: data.",
     )
 
 

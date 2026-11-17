@@ -38,7 +38,12 @@ const PURPOSE =
 
 type CountKey = Exclude<
   keyof RunLimits,
-  "wall_time_s" | "approval_ttl_s" | "budget_usd" | "sandbox_ttl_s" | "branch_retention_days"
+  | "wall_time_s"
+  | "approval_ttl_s"
+  | "budget_usd"
+  | "sandbox_ttl_s"
+  | "branch_retention_days"
+  | "review_rounds"
 >;
 
 const COUNT_FIELDS = [
@@ -105,6 +110,7 @@ function schemaFor(defaults: RunLimits, ceilings: RunLimits) {
       approval_ttl_hours: hours(defaults.approval_ttl_s),
       sandbox_ttl_hours: hours(ceilings.sandbox_ttl_s),
       branch_retention_days: count(ceilings.branch_retention_days),
+      review_rounds: count(ceilings.review_rounds),
       budget_usd: budgetSchema(),
     })
     .superRefine((v, ctx) => {
@@ -160,6 +166,7 @@ function valuesOf(overrides: RunLimitOverrides): Values {
         ? ""
         : String(Math.round((overrides.sandbox_ttl_s / 3600) * 100) / 100),
     branch_retention_days: overrides.branch_retention_days?.toString() ?? "",
+    review_rounds: overrides.review_rounds?.toString() ?? "",
     budget_usd: overrides.budget_usd?.toString() ?? "",
   };
 }
@@ -176,6 +183,7 @@ function overridesOf(values: Values): RunLimitOverrides {
     budget_usd: parseBudget(values.budget_usd),
     sandbox_ttl_s: ttlSeconds(values.sandbox_ttl_hours),
     branch_retention_days: number(values.branch_retention_days),
+    review_rounds: number(values.review_rounds),
   };
 }
 
@@ -253,6 +261,7 @@ function LimitsForm({
         if (field === "branch_retention_days") {
           form.setError("branch_retention_days", { message: issue.msg });
         }
+        if (field === "review_rounds") form.setError("review_rounds", { message: issue.msg });
         const known = COUNT_FIELDS.find((f) => f.key === field);
         if (known) form.setError(known.key, { message: issue.msg });
       }
@@ -323,6 +332,15 @@ function LimitsForm({
           disabled={pending}
         />
       </div>
+      <LimitInput
+        label="Follow-ups per pull request"
+        help={`How many follow-up runs "@<app> fix this" comments on one pull request may start. Default ${defaults.review_rounds}, at most ${ceilings.review_rounds}.`}
+        placeholder={String(defaults.review_rounds)}
+        unit="runs"
+        error={errors.review_rounds?.message}
+        registration={form.register("review_rounds")}
+        disabled={pending}
+      />
       <LimitInput
         label="Budget (USD)"
         help="The most a run may spend; it stops once its cost reaches this. Empty: no budget, and runs are not capped. A run may set its own when it starts."

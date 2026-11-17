@@ -29,6 +29,8 @@ AuditAction = Literal[
     "connection.added",
     "connection.removed",
     "connection.needs_attention",
+    "github.review_received",
+    "github.review_ignored",
     "jira.site_updated",
     "jira.projects_changed",
     "jira.fields_mapped",

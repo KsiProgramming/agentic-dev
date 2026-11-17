@@ -14,7 +14,7 @@ from pydantic import JsonValue
 from agentic_github import GithubApiError, InstallationNotFoundError, PullRequestError
 from agentic_runtime import ToolOutput
 from agentic_sandbox import Sandbox
-from agentic_tools.github import GithubTarget, open_github_tools
+from agentic_tools.github import GithubTarget, PullRequestTarget, open_github_tools
 from agentic_tools.repo import open_repo_tools
 from agentic_tools.routing import RunTools
 from agentic_tools.testing import FakeGithub, bare_remote
@@ -99,7 +99,7 @@ async def test_open_pr_pushes_the_branch_and_opens_a_pull_request(
         assert output.data["base"] == "main"  # the branch the run cloned
         assert output.data["commit"] == git(remote, "rev-parse", f"refs/heads/{branch}")
         assert git(remote, "show", f"{branch}:NOTES.md") == "notes"
-        assert github.pulls == [
+        assert github.opened == [
             {
                 "repo": "acme/hello",
                 "head": branch,
@@ -118,7 +118,7 @@ async def test_the_base_can_be_chosen(open_tools: OpenTools, github: FakeGithub)
         output = await open_pr(tools, base="develop")
 
         assert not output.is_error, output.text
-        assert github.pulls[0]["base"] == "develop"
+        assert github.opened[0]["base"] == "develop"
 
 
 async def test_opening_it_again_pushes_nothing_new(open_tools: OpenTools) -> None:
@@ -142,7 +142,7 @@ async def test_a_writer_without_commits_has_nothing_to_publish(
         assert output.is_error
         assert "nothing to publish" in output.text
         assert github.tokens_issued == 0
-        assert github.pulls == []
+        assert github.opened == []
 
 
 async def test_only_writers_of_the_run_can_be_published(open_tools: OpenTools) -> None:
@@ -217,3 +217,113 @@ async def test_run_tools_route_by_tool_and_refuse_unknown_ones(open_tools: OpenT
 
         assert {"github.openPR", "repo.read_file", "repo.commit"} <= names
         assert (unknown.is_error, unknown.text) == (True, "unknown tool: github.mergePR")
+
+
+# --- A follow-up of a pull request review (7.6) ------------------------------------------------
+
+
+@pytest.fixture
+def open_follow_up(
+    sandbox: Sandbox, run_id: UUID, remote_url: str, github: FakeGithub
+) -> Callable[[PullRequestTarget], AbstractAsyncContextManager[RunTools]]:
+    """Opens the tools of a follow-up that publishes onto `review`'s pull request."""
+
+    @asynccontextmanager
+    async def open_(review: PullRequestTarget) -> AsyncGenerator[RunTools]:
+        target = GithubTarget(
+            installation_id=42, full_name="acme/hello", remote_url=remote_url, review=review
+        )
+        async with (
+            open_repo_tools(sandbox, run_id=run_id, writers={"writer"}) as repo,
+            open_github_tools(github, target, sandbox, run_id=run_id, writers={"writer"}) as gh,
+        ):
+            yield RunTools([repo, gh])
+
+    return open_
+
+
+async def commit_more(tools: RunTools) -> None:
+    calls: list[tuple[str, dict[str, JsonValue]]] = [
+        ("repo.write_file", {"path": "NOTES.md", "content": "notes, as reviewed\n"}),
+        ("repo.commit", {"message": "Address the review"}),
+    ]
+    for name, args in calls:
+        output = await tools.call(name, args, node_id="writer")
+        assert not output.is_error, output.text
+
+
+async def test_a_follow_up_pushes_onto_the_pull_request_and_replies_once(
+    open_tools: OpenTools,
+    open_follow_up: Callable[[PullRequestTarget], AbstractAsyncContextManager[RunTools]],
+    run_id: UUID,
+    remote: Path,
+    github: FakeGithub,
+) -> None:
+    branch = f"agent/{run_id}/writer"
+    async with open_tools() as tools:
+        await write_and_commit(tools)
+        first = await open_pr(tools)
+    assert first.data is not None
+    review = PullRequestTarget(
+        number=1,
+        url="https://github.com/acme/hello/pull/1",
+        head_branch=branch,
+        after_sha=str(first.data["commit"]),
+        author="alice",
+        run_url=f"https://agentic.example/runs/{run_id}",
+    )
+
+    async with open_follow_up(review) as tools:
+        await commit_more(tools)
+        output = await open_pr(tools)
+        again = await open_pr(tools)  # the step run again
+
+    assert not output.is_error, output.text
+    assert output.data is not None
+    assert output.data["updated"] is True
+    assert (output.data["url"], output.data["number"]) == (review.url, 1)
+    pushed = git(remote, "rev-parse", f"refs/heads/{branch}")
+    assert output.data["commit"] == pushed != review.after_sha
+    assert git(remote, "merge-base", "--is-ancestor", review.after_sha, pushed) == ""
+    assert git(remote, "show", f"{branch}:NOTES.md") == "notes, as reviewed"
+    assert len(github.opened) == 1  # no new pull request
+    assert not again.is_error, again.text
+    assert github.posted == [
+        (
+            "acme/hello",
+            1,
+            f"Pushed `{pushed[:7]}` for @alice's review, run "
+            f"[{str(run_id)[:8]}](https://agentic.example/runs/{run_id}).",
+        )
+    ]
+    assert TOKEN not in output.text
+
+
+async def test_a_follow_up_whose_pull_request_moved_pushes_nothing(
+    open_tools: OpenTools,
+    open_follow_up: Callable[[PullRequestTarget], AbstractAsyncContextManager[RunTools]],
+    run_id: UUID,
+    remote: Path,
+    github: FakeGithub,
+) -> None:
+    branch = f"agent/{run_id}/writer"
+    async with open_tools() as tools:
+        await write_and_commit(tools)
+        first = await open_pr(tools)
+    assert first.data is not None
+    review = PullRequestTarget(
+        number=1,
+        url="https://github.com/acme/hello/pull/1",
+        head_branch=branch,
+        after_sha="b" * 40,  # someone else pushed since: the run expected another commit
+        author="alice",
+    )
+
+    async with open_follow_up(review) as tools:
+        await commit_more(tools)
+        output = await open_pr(tools)
+
+    assert output.is_error
+    assert output.text.startswith("pr_head_moved:") or "pr_head_moved:" in output.text
+    assert git(remote, "rev-parse", f"refs/heads/{branch}") == first.data["commit"]
+    assert github.posted == []

@@ -28,6 +28,7 @@ from agentic_store.branches import (
 from agentic_store.cancel import ENDED_STATUSES
 from agentic_store.models import Run
 from agentic_store.policy import run_policy
+from agentic_store.pr_review import FollowUp, check_follow_up
 from agentic_store.subflows import run_spec
 
 
@@ -57,6 +58,7 @@ async def create_rerun(
     run_id: UUID,
     budget_usd: Decimal | None = None,
     from_step: RerunFromStep | None = None,
+    follow_up: FollowUp | None = None,
 ) -> UUID:
     """Insert a `queued` copy of the ended run `run_id` (its spec, input, repo, workspace,
     template and template options, the workflow version it ran and the copies of the workflows it
@@ -71,7 +73,14 @@ async def create_rerun(
     `rerun_from` records the step, `use_wip` and the paths edited (never their values). Raises
     `StepNotFoundError` for a node that is not a top-level step, `OpError` for a parameter that
     cannot be set, and `StepNotRerunnableError` when the run never reached the step, its code
-    before it cannot be restored, or `use_wip` finds no uncommitted work there."""
+    before it cannot be restored, or `use_wip` finds no uncommitted work there.
+
+    With `follow_up` (7.6, which needs `from_step`) the new run follows up a review of the pull
+    request the original published: it keeps `pr_review`, its trigger is `github`, it restores
+    the latest version of the original's branches (`rerun_branches(latest=True)`), and
+    `github.review_received` is audited with it. Under a lock on the pull request it raises
+    `ReviewBusyError` or `ReviewLimitError` (`check_follow_up`) instead."""
+    assert follow_up is None or from_step is not None, "a follow-up starts from a step"
     new_id = uuid4()
     async with sessions.begin() as session:
         # An ended run never changes again, so it needs no lock while it is copied.
@@ -84,13 +93,15 @@ async def create_rerun(
         rerun_from: dict[str, JsonValue] | None = None
         if from_step is not None:
             spec = _edited(original.spec, from_step)
-            await _check_step(sessions, original, from_step)
+            await _check_step(sessions, original, from_step, latest=follow_up is not None)
             edited: list[JsonValue] = [path for path, _ in from_step.set_params]
             rerun_from = {
                 "node_id": from_step.node_id,
                 "use_wip": from_step.use_wip,
                 "edited": edited,
             }
+        if follow_up is not None:
+            await check_follow_up(session, follow_up)
         policy = await run_policy(
             session,
             original.workspace_id,
@@ -115,14 +126,29 @@ async def create_rerun(
                 rerun_of=original.id,
                 rerun_from=rerun_from,
                 base_sha=original.base_sha if from_step is not None else None,
-                trigger="rerun",
+                trigger="github" if follow_up is not None else "rerun",
                 jira_issue=original.jira_issue,
                 # A rerun from a step reuses the issue as its run was told it, as it reuses its
                 # code; a rerun from the beginning reads it again (7.4).
                 jira_brief=original.jira_brief if from_step is not None else None,
                 branch=original.repo.get("ref") if original.repo else None,
+                pr_review=follow_up.pr_review if follow_up is not None else None,
             )
         )
+        if follow_up is not None:
+            audit(
+                session,
+                original.workspace_id,
+                "github.review_received",
+                actor_type="system",
+                run_id=new_id,
+                details={
+                    "delivery_id": follow_up.pr_review.get("delivery_id"),
+                    "pr_url": follow_up.pr_url,
+                    "author": follow_up.pr_review.get("author"),
+                    "follows": str(original.id),
+                },
+            )
         audit(
             session,
             original.workspace_id,
@@ -152,10 +178,15 @@ def _edited(spec: dict[str, JsonValue], step: RerunFromStep) -> dict[str, JsonVa
 
 
 async def _check_step(
-    sessions: async_sessionmaker[AsyncSession], original: Run, step: RerunFromStep
+    sessions: async_sessionmaker[AsyncSession],
+    original: Run,
+    step: RerunFromStep,
+    *,
+    latest: bool = False,
 ) -> None:
-    """Raise `StepNotRerunnableError` unless the run reached the step, its code before it can
-    be restored and, with `use_wip`, the step left uncommitted work."""
+    """Raise `StepNotRerunnableError` unless the run reached the step, its code before it (or,
+    with `latest`, its latest code) can be restored and, with `use_wip`, the step left
+    uncommitted work."""
     spec = run_spec(original.spec, original.subflows)
     if await last_started_step(sessions, original.id, [step.node_id]) is None:
         raise StepNotRerunnableError(f"the run never reached step {step.node_id!r}")
@@ -169,6 +200,7 @@ async def _check_step(
             steps_before(spec, step.node_id),
             step.node_id if step.use_wip else None,
             with_data=False,
+            latest=latest,
         )
     except RerunBranchesError as e:
         raise StepNotRerunnableError(str(e)) from e

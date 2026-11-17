@@ -3,7 +3,8 @@
 `PLATFORM_POLICY` holds the tech-stack defaults, which are also the ceilings: a workspace may
 lower each limit, never raise it. Two retention limits (12.3) have a ceiling above their default,
 in `CEILINGS`: how long a failed or cancelled run's sandbox is kept, and how long its saved
-commits are. A run gets its effective policy when it is created and keeps it,
+commits are; so does `review_rounds`, how many follow-ups a pull request review may start (7.6).
+A run gets its effective policy when it is created and keeps it,
 resumes included. Specs are checked against it before the run starts (`policy_errors` in
 `agentic_engine.spec`), and the engine and worker enforce it while the run executes.
 
@@ -44,6 +45,9 @@ BRANCH_RETENTION_DAYS: Final = 30
 """How long a finished run's saved commits (its branches' bundles) are kept by default: 30 days.
 Their changed files are kept for good."""
 BRANCH_RETENTION_MAX_DAYS: Final = 90
+REVIEW_ROUNDS: Final = 3
+"""How many follow-up runs a pull request review may start by default (7.6)."""
+REVIEW_ROUNDS_MAX: Final = 10
 
 
 class Policy(BaseModel):
@@ -77,6 +81,12 @@ class Policy(BaseModel):
         default=BRANCH_RETENTION_DAYS,
         description="Days a finished run's saved commits are kept; their changed files stay.",
     )
+    # A default, so the policy frozen on a run created before phase 7.6 still loads.
+    review_rounds: Limit = Field(
+        default=REVIEW_ROUNDS,
+        description="Follow-up runs that review comments on one pull request may start "
+        "(`@<app> fix this`).",
+    )
 
 
 PLATFORM_POLICY: Final = Policy(
@@ -88,6 +98,7 @@ PLATFORM_POLICY: Final = Policy(
     approval_ttl_s=APPROVAL_TTL_S,
     sandbox_ttl_s=SANDBOX_TTL_S,
     branch_retention_days=BRANCH_RETENTION_DAYS,
+    review_rounds=REVIEW_ROUNDS,
 )
 """The tech-stack defaults, and the ceilings a workspace policy cannot go above, except those in
 `CEILINGS`."""
@@ -95,6 +106,7 @@ PLATFORM_POLICY: Final = Policy(
 CEILINGS: Final[dict[str, int]] = {
     "sandbox_ttl_s": SANDBOX_TTL_MAX_S,
     "branch_retention_days": BRANCH_RETENTION_MAX_DAYS,
+    "review_rounds": REVIEW_ROUNDS_MAX,
 }
 """The limits a workspace may set above their default, up to these values."""
 
@@ -120,6 +132,7 @@ class PolicyOverrides(BaseModel):
     budget_usd: Usd | None = None
     sandbox_ttl_s: Limit | None = None
     branch_retention_days: Limit | None = None
+    review_rounds: Limit | None = None
 
 
 def effective_policy(overrides: PolicyOverrides | None = None) -> Policy:

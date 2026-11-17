@@ -16,12 +16,14 @@ from agentic_engine.spec.models import (
     JIRA_WRITE_TOOLS,
     PLATFORM_TOOLS,
     Node,
+    OnReview,
     ToolNode,
     ValidationIssue,
     WorkflowSpec,
     budget_issues,
     in_run_order,
     iter_nodes,
+    on_review_issues,
     policy_issues,
     structure_issues,
     tool_issues,
@@ -63,6 +65,7 @@ def validate_workflow(
         root, resolve, workflow_id if isinstance(workflow_id, str) else None, drafts
     )
     issues = document_port_issues(document) + issues + issue_from_issues(document, root)
+    issues += document_on_review_issues(document, root)
     issues += structure_issues(root) + tool_issues(root, known_tools)
     issues += policy_issues(root, policy)
     issues += budget_issues(root, policy, priced, default_model)
@@ -86,6 +89,14 @@ def document_port_issues(document: Mapping[str, object]) -> list[ValidationIssue
                 )
             )
     return issues
+
+
+def document_on_review_issues(document: Mapping[str, object], root: Node) -> list[ValidationIssue]:
+    """`on_review_issues` for the document's `on_review` (7.6), checked on the expanded tree."""
+    raw = document.get("on_review")
+    if raw is None:
+        return []
+    return on_review_issues(root, OnReview.model_validate(raw))
 
 
 def issue_from_issues(document: Mapping[str, object], root: Node) -> list[ValidationIssue]:

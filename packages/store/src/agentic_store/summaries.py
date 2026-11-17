@@ -71,6 +71,10 @@ class RunSummaryRow:
     subflows: dict[str, Any] | None = None
     # The Jira issue as the run's agents were told it (7.4); with `spec`.
     jira_brief: dict[str, Any] | None = None
+    # The pull request review a follow-up works from (7.6): `runs.pr_review`, references only,
+    # and, with `spec`, the review as its agents were told it.
+    pr_review: dict[str, Any] | None = None
+    pr_review_brief: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +151,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.rerun_of,
         Run.rerun_from,
         Run.jira_issue,
+        Run.pr_review,
         Run.trigger,
         Run.branch,
         Run.input,
@@ -174,6 +179,7 @@ def _summary(
     spec: dict[str, Any] | None = None,
     subflows: dict[str, Any] | None = None,
     jira_brief: dict[str, Any] | None = None,
+    pr_review_brief: dict[str, Any] | None = None,
 ) -> RunSummaryRow:
     return RunSummaryRow(
         id=row.id,
@@ -223,6 +229,8 @@ def _summary(
         spec=spec,
         subflows=subflows,
         jira_brief=jira_brief,
+        pr_review=row.pr_review,
+        pr_review_brief=pr_review_brief,
     )
 
 
@@ -356,9 +364,17 @@ async def get_run_summary(
 ) -> RunSummaryRow | None:
     async with sessions() as session:
         query = (
-            _select().add_columns(Run.spec, Run.subflows, Run.jira_brief).where(Run.id == run_id)
+            _select()
+            .add_columns(Run.spec, Run.subflows, Run.jira_brief, Run.pr_review_brief)
+            .where(Run.id == run_id)
         )
         row = (await session.execute(query)).one_or_none()
     if row is None:
         return None
-    return _summary(row, spec=row.spec, subflows=row.subflows, jira_brief=row.jira_brief)
+    return _summary(
+        row,
+        spec=row.spec,
+        subflows=row.subflows,
+        jira_brief=row.jira_brief,
+        pr_review_brief=row.pr_review_brief,
+    )

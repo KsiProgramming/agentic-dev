@@ -160,3 +160,37 @@ async def test_a_rerun_copies_the_artifact_versions_it_carries(
             )
         ).all()
     assert copied == [1, 2]
+
+
+async def test_a_follow_up_restores_the_latest_code_gate_edits_included_and_no_task_branch(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """7.6: a follow-up of a pull request review starts from what the pull request holds: the
+    latest version of each branch whatever step saved it (the PR gate's edit commit after the
+    loop), not the version before the step; task writers' branches are left out, its tasks start
+    from the integration branch."""
+    source, target = await new_run(sessions), uuid4()
+    await save_branch(
+        sessions, source, "implement", "integration",
+        bundle(source, "implement", "1" * 40, b"loop"), step="review_loop",
+    )  # fmt: skip
+    await save_branch(
+        sessions, source, "implement.t1", "writer",
+        bundle(source, "implement.t1", "2" * 40), step="review_loop",
+    )  # fmt: skip
+    await save_branch(
+        sessions, source, "implement", "integration",
+        bundle(source, "implement", "3" * 40, b"edited at the gate"), step="approve_pr",
+    )  # fmt: skip
+    await save_branch(
+        sessions, source, "implement", "wip", bundle(source, "implement", "4" * 40, wip=True),
+        step="publish",
+    )  # fmt: skip
+
+    latest = await rerun_branches(sessions, source, target, ["spec_writer"], latest=True)
+    before = await rerun_branches(sessions, source, target, ["spec_writer"])
+
+    assert [(b.branch, b.head_sha, b.data) for b in latest] == [
+        (f"agent/{target}/implement", "3" * 40, b"edited at the gate")
+    ]
+    assert before == []

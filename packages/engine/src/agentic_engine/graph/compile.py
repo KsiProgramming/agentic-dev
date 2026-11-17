@@ -51,7 +51,9 @@ after each round (6.3, `<id>.integrate`): `branch_integrated`; a task that confl
 failed. An orchestrator in a loop's body (6.9) plans afresh each iteration (its plan kept under
 `<id>#<iteration>`), its hub given the loop body's input and every earlier iteration's tasks as
 data; its tasks from the second iteration on start from its one integration branch, and its
-`plan_made`, `task_*`, `replan_started` and `branch_integrated` carry `iteration`.
+`plan_made`, `task_*`, `replan_started` and `branch_integrated` carry `iteration`. A task starts
+from the integration branch whenever it exists: a follow-up of a pull request review (7.6)
+restores it, so even its first pass builds on what the pull request holds.
 
 An agent or tool node with typed ports (4.2) has its input checked before it starts and its
 output once it completes: a value that does not match fails the node, whose `node_failed` carries
@@ -2691,11 +2693,11 @@ def _orchestrator_task(
         return rounds[key, round]
 
     async def start(sent: OrchestratorTask, scope: _Scope) -> tuple[str, AgentNodeResult]:
-        """The task's body, its branch first started from the integration branch for a
-        replan's task or a later iteration's (nothing if that branch was not made yet)."""
+        """The task's body, its branch first started from the integration branch (nothing if
+        that branch was not made yet: a first round, unless the run restored it, 7.6), so a
+        replan's task or a later iteration's builds on the work merged so far."""
         integrator = limits.integrator
-        later = sent.get("iteration", 1) > 1 or task_round(sent["task"]) > 1
-        if writes and integrator is not None and later:
+        if writes and integrator is not None:
             key = task_writer_key(orchestrator.id, _task_id(sent["task"]))
             try:
                 await integrator.start_tasks(orchestrator.id, [key])
@@ -2957,7 +2959,9 @@ def _results_of(results: Mapping[str, AgentNodeResult]) -> dict[str, JsonValue]:
     }
 
 
-_PULL_REQUEST_FIELDS = ("url", "number", "head", "base", "commit")
+_PULL_REQUEST_FIELDS = ("url", "number", "head", "base", "commit", "updated")
+"""What `pr_opened` says of a publish; `updated` when a follow-up pushed to an open pull request
+(7.6) instead of opening one."""
 
 
 def _pull_request(node: StepNode, result: AgentNodeResult) -> dict[str, JsonValue] | None:

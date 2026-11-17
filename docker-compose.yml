@@ -90,6 +90,9 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_APP_PRIVATE_KEY_FILE: /github/github-app.pem
+      # The secret the App signs its webhook deliveries with (7.6): review comments on a run's
+      # pull request reach <API_BASE_URL>/github/webhooks. Blank: that endpoint answers 503.
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       # The deployment's Atlassian OAuth 2.0 (3LO) app, for Jira (7.1). Its callback URL is
       # <API_BASE_URL>/jira/callback. Left blank, the Jira card says it is not configured. Its
       # client secret is read from ./.secrets/atlassian-client-secret.

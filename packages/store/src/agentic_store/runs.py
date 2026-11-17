@@ -51,6 +51,10 @@ class StoredRun:
     # issue as its agents are told it, once read (7.4).
     jira_issue: dict[str, JsonValue] | None = None
     jira_brief: dict[str, JsonValue] | None = None
+    # A follow-up of a pull request review (7.6): the pull request and the comment, references
+    # only, and the review as its agents are told it, once read.
+    pr_review: dict[str, JsonValue] | None = None
+    pr_review_brief: dict[str, JsonValue] | None = None
 
 
 async def create_run(
@@ -150,6 +154,8 @@ def stored_run(run: Run) -> StoredRun:
         rerun_from=_rerun_from(run),
         jira_issue=run.jira_issue,
         jira_brief=run.jira_brief,
+        pr_review=run.pr_review,
+        pr_review_brief=run.pr_review_brief,
     )
 
 

@@ -10,7 +10,7 @@ from typing import Any
 from mcp import Client
 from pydantic import SecretStr
 
-from agentic_github import PullRequestInfo, RepoExistsError, RepoInfo
+from agentic_github import FakeReviews, PullRequestInfo, RepoExistsError, RepoInfo
 from agentic_sandbox import Sandbox
 from agentic_tools.repo import RepoLimits, build_repo_server
 
@@ -35,15 +35,17 @@ async def call_tool(
     return result.is_error, text
 
 
-class FakeGithub:
+class FakeGithub(FakeReviews):
     """Implements `GithubPublisher` without GitHub: hands out `token`, records the pull requests
-    it is asked to open (numbered from 1) and the repos it creates (`repos`, by full name; a test
-    may add one). Set `refuse` to make it raise instead."""
+    it is asked to open (numbered from 1, in `opened`) and the repos it creates (`repos`, by full
+    name; a test may add one). Set `refuse` to make it raise instead. Pull requests and their
+    comments are kept as `FakeReviews` keeps them (7.6)."""
 
     def __init__(self, token: str = "ghs_faketoken0000") -> None:
+        super().__init__(default_permission="write")
         self.token = SecretStr(token)
         self.tokens_issued = 0
-        self.pulls: list[dict[str, str]] = []
+        self.opened: list[dict[str, str]] = []
         self.repos: dict[str, RepoInfo] = {}
         self.created: list[dict[str, Any]] = []
         self.refuse: Exception | None = None
@@ -100,10 +102,11 @@ class FakeGithub:
     ) -> PullRequestInfo:
         if self.refuse is not None:
             raise self.refuse
-        self.pulls.append(
+        self.opened.append(
             {"repo": full_name, "head": head, "base": base, "title": title, "body": body}
         )
-        number = len(self.pulls)
+        number = len(self.opened)
+        self.register_pull(full_name, number, head, base)
         return PullRequestInfo(
             number=number,
             url=f"https://github.com/{full_name}/pull/{number}",

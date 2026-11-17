@@ -181,6 +181,23 @@ describe("describe", () => {
       "API-12 · GitHub is not connected",
     ],
     [
+      "a follow-up a review comment started",
+      {
+        action: "github.review_received",
+        details: { pr_url: "https://github.com/acme/hello/pull/42", author: "alice" },
+      },
+      "PR #42 · by @alice",
+    ],
+    [
+      "a review comment that started nothing",
+      {
+        action: "github.review_ignored",
+        run_id: null,
+        details: { pr_url: "https://github.com/acme/hello/pull/42", reason: "not_allowed" },
+      },
+      "PR #42 · the author has no write access",
+    ],
+    [
       "a Jira webhook refused",
       {
         action: "jira.webhook_failed",
@@ -286,6 +303,8 @@ test("each category has its actions", () => {
     "repo.created",
     "sandbox.remove_requested",
     "sandbox.removed",
+    "github.review_received",
+    "github.review_ignored",
     "jira.trigger_fired",
     "jira.trigger_failed",
   ]);

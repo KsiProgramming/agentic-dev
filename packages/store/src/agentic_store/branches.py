@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import NODE_STARTED
 from agentic_engine.gate import FileChange
+from agentic_engine.spec import task_writer_orchestrator
 from agentic_sandbox import COMMIT_ID, MAX_TAKE_FILE_BYTES, BranchBundle, branch_name
 from agentic_store.models import Run, RunBranch, RunEventRow
 
@@ -187,6 +188,7 @@ async def rerun_branches(
     wip_step: str | None = None,
     *,
     with_data: bool = True,
+    latest: bool = False,
 ) -> list[BranchBundle]:
     """The code of `source_run` as it was before a top-level step (12.4), for its rerun
     `target_run` to restore: the latest version of each writer and integration branch saved in
@@ -195,6 +197,11 @@ async def rerun_branches(
     and one more with the work). Each comes under the new run's name (`agent/<target>/<key>`),
     fetched from the original's (`source`). Without `with_data` the bundles are left empty, to
     check a rerun can start before it is created.
+
+    With `latest` (a follow-up of a pull request review, 7.6) it takes the latest saved version
+    of each branch whatever step saved it, a gate's edits included: the code the pull request
+    holds, not the code before the step. Task writers' branches are left out: the follow-up's
+    tasks start from their orchestrator's integration branch, which holds their work.
 
     Raises `RerunBranchesError` when a version it needs was saved before 12.4 (no step to tell
     which versions it had), or its bundle was dropped past the run's retention (12.3)."""
@@ -207,20 +214,24 @@ async def rerun_branches(
                 .order_by(RunBranch.branch, RunBranch.version)
             )
         ).all()
-    if any(r.step is None and r.kind != "wip" for r in rows):
+    if not latest and any(r.step is None and r.kind != "wip" for r in rows):
         raise RerunBranchesError(
             "its code was saved before rerunning from a step existed; rerun it from the start"
         )
-    latest: dict[str, Any] = {}  # by node key: the version to restore
+    chosen: dict[str, Any] = {}  # by node key: the version to restore
     for r in rows:
-        if r.kind != "wip" and r.step in before:
-            latest[r.node_key] = r
+        if r.kind == "wip":
+            continue
+        if latest and task_writer_orchestrator(r.node_key) is None:
+            chosen[r.node_key] = r  # rows come oldest first: the last one wins
+        elif not latest and r.step in before:
+            chosen[r.node_key] = r
     if wip_step is not None:
         for r in rows:
             if r.kind == "wip" and r.step == wip_step:
-                latest[r.node_key] = r
+                chosen[r.node_key] = r
     bundles: list[BranchBundle] = []
-    for key, r in sorted(latest.items()):
+    for key, r in sorted(chosen.items()):
         if r.dropped:
             raise RerunBranchesError(
                 f"the saved code of {key} was removed after the run's retention"

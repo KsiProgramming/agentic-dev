@@ -24,9 +24,10 @@ DEFAULTS = {
     "budget_usd": None,
     "sandbox_ttl_s": 86_400,
     "branch_retention_days": 30,
+    "review_rounds": 3,
 }
 UNSET = dict.fromkeys(DEFAULTS)
-CEILINGS = {**DEFAULTS, "sandbox_ttl_s": 259_200, "branch_retention_days": 90}
+CEILINGS = {**DEFAULTS, "sandbox_ttl_s": 259_200, "branch_retention_days": 90, "review_rounds": 10}
 
 
 @pytest.fixture
@@ -68,9 +69,9 @@ async def test_a_new_workspace_has_the_platform_limits(
 async def test_the_retention_limits_may_go_above_their_default(
     client: AsyncClient, workspace: UUID
 ) -> None:
-    """12.3: a kept sandbox's time to live and the saved commits' retention may be raised, up to
-    their ceiling; the other limits only go down."""
-    raised = {"sandbox_ttl_s": 259_200, "branch_retention_days": 90}
+    """12.3: a kept sandbox's time to live and the saved commits' retention (and 7.6, the review
+    rounds) may be raised, up to their ceiling; the other limits only go down."""
+    raised = {"sandbox_ttl_s": 259_200, "branch_retention_days": 90, "review_rounds": 10}
     put = await client.put(f"/workspaces/{workspace}/policy", json=raised)
 
     assert put.status_code == 200, put.text
@@ -100,6 +101,8 @@ async def test_lowered_limits_round_trip_and_reset(client: AsyncClient, workspac
         {"sandbox_ttl_s": 259_201},
         {"sandbox_ttl_s": 0},
         {"branch_retention_days": 91},
+        {"review_rounds": 11},
+        {"review_rounds": 0},
         {"loop_iterations": 0},
         {"max_depth": -1},
         {"budget_usd": 0},

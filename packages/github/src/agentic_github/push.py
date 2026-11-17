@@ -5,6 +5,10 @@ push happens in a throwaway repo on the worker: a depth-1 fetch of the base comm
 prerequisite), a fetch of the bundle, a check that the branch grows from the base, then a push
 that may only create the branch, or find it already at the same commit (a retried node).
 
+A follow-up of a pull request review (7.6) pushes onto the pull request's branch instead
+(`onto`): only as a fast-forward from the commit the run expects there, which a lease makes
+atomic. If anyone else pushed to it, nothing is pushed (`PR_HEAD_MOVED`).
+
 The installation token reaches git through the environment (`GIT_CONFIG_*`, as an HTTP header),
 never through argv, a remote URL or a config file. git reads no system or user config, runs no
 hooks and never prompts. Error messages carry git's reason, never the token.
@@ -17,6 +21,7 @@ import os
 import re
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -30,7 +35,13 @@ _GITHUB_URL = re.compile(
     r"^https://github\.com/(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/"
     r"(?P<name>[A-Za-z0-9._-]{1,100}?)(?:\.git)?/?$"
 )
+_PR_URL = re.compile(
+    r"^https://github\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}/pull/"
+    r"(?P<number>[1-9][0-9]{0,9})$"
+)
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+PR_HEAD_MOVED = "pr_head_moved"
+"""The code of a push onto a pull request's branch that someone else moved (7.6)."""
 # A branch git accepts and we can pass as an argument: no leading `-`, no `..`, no spaces.
 _BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
 
@@ -42,6 +53,21 @@ def repo_full_name(url: str) -> str | None:
     if match is None or match["name"] in {".", ".."}:
         return None
     return f"{match['owner']}/{match['name']}"
+
+
+def pr_number(url: str) -> int | None:
+    """The number of a pull request URL on github.com, else `None`."""
+    match = _PR_URL.match(url)
+    return int(match["number"]) if match else None
+
+
+@dataclass(frozen=True)
+class PushOnto:
+    """Push onto an existing branch (a pull request's head, 7.6) as a fast-forward from
+    `expected`, the commit the run last pushed there."""
+
+    branch: str
+    expected: str
 
 
 def github_remote(full_name: str) -> str:
@@ -66,15 +92,22 @@ async def push_bundle(
     branch: str,
     token: SecretStr | None,
     timeout_s: float = PUSH_TIMEOUT_S,
+    onto: PushOnto | None = None,
 ) -> str:
     """Push `branch` from `bundle` to `remote_url` and return the commit it points at.
 
-    The branch must not exist on the remote yet, or already point at that commit. Only https
-    remotes are allowed, and `file://` ones for tests. Raises `PushError`."""
+    The branch must not exist on the remote yet, or already point at that commit. With `onto`,
+    it is pushed as `onto.branch` instead, which must be at `onto.expected` (or already at the
+    commit), and the commit must grow from it: else `PushError` starting `pr_head_moved:`. Only
+    https remotes are allowed, and `file://` ones for tests. Raises `PushError`."""
     if not _SHA.match(base_sha):
         raise PushError("the base commit is not a full commit id")
     if not _BRANCH.match(branch) or ".." in branch:
         raise PushError("not a branch name we push")
+    if onto is not None and (
+        not _BRANCH.match(onto.branch) or ".." in onto.branch or not _SHA.match(onto.expected)
+    ):
+        raise PushError("not a pull request branch we push onto")
     if not (remote_url.startswith("https://") or remote_url.startswith("file://")):
         raise PushError("only https remotes are supported")
     ref = f"refs/heads/{branch}"
@@ -91,6 +124,8 @@ async def push_bundle(
             await git.run("merge-base", "--is-ancestor", base_sha, ref)
         except PushError:
             raise PushError("the branch does not grow from the run's base commit") from None
+        if onto is not None:
+            return await _push_onto(git, remote_url, ref, head, onto)
         # An empty lease: the push may only create the ref (or find it at `head` already).
         await git.run(
             "push", "--porcelain", f"--force-with-lease={ref}:", remote_url, f"{ref}:{ref}"
@@ -98,6 +133,35 @@ async def push_bundle(
         return head
     finally:
         await asyncio.to_thread(shutil.rmtree, work, ignore_errors=True)
+
+
+async def _push_onto(git: "_Git", remote_url: str, ref: str, head: str, onto: PushOnto) -> str:
+    target = f"refs/heads/{onto.branch}"
+    listed = (await git.run("ls-remote", remote_url, target)).split()
+    current = listed[0] if listed else None
+    if current == head:
+        return head  # a retried node pushed it already
+    if current != onto.expected:
+        raise PushError(
+            f"{PR_HEAD_MOVED}: the pull request's branch {onto.branch} is no longer at the commit "
+            "this run started from; someone else pushed to it"
+        )
+    try:
+        await git.run("merge-base", "--is-ancestor", onto.expected, ref)
+    except PushError:
+        raise PushError(
+            f"{PR_HEAD_MOVED}: the run's branch does not grow from the pull request's head"
+        ) from None
+    try:
+        await git.run(
+            "push", "--porcelain", f"--force-with-lease={target}:{onto.expected}", remote_url,
+            f"{ref}:{target}",
+        )  # fmt: skip
+    except PushError:
+        raise PushError(
+            f"{PR_HEAD_MOVED}: the pull request's branch {onto.branch} moved while pushing"
+        ) from None
+    return head
 
 
 class _Git:

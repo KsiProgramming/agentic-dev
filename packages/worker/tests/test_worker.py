@@ -1224,7 +1224,7 @@ async def test_done_when_a_run_opens_a_pr_after_approval(
     ):
         run_id = await submit_publishing_run(sessions, redis_url, workspace_id)
         await wait_for_status(sessions, run_id, "waiting")
-        assert github.pulls == []
+        assert github.opened == []
         assert remote_branches(tmp_path / "remote.git") == []
 
         await record_approval(sessions, run_id, "gate", GateDecision(decision="approve"))
@@ -1243,7 +1243,7 @@ async def test_done_when_a_run_opens_a_pr_after_approval(
     assert opened.payload["head"] == branch
     assert opened.payload["base"] == "main"
     assert remote_branches(tmp_path / "remote.git") == [branch]
-    assert github.pulls[0]["title"] == "Add NOTES.md"
+    assert github.opened[0]["title"] == "Add NOTES.md"
     # Both attempts cloned (or reopened) with the token as a header, never in an event.
     assert all(env is not None and "GIT_CONFIG_VALUE_0" in env for env in sandboxes.git_envs)
     assert not any(GITHUB_TOKEN in json.dumps(e.payload) for e in events)
@@ -1365,7 +1365,7 @@ async def test_done_when_a_docs_run_opens_a_pr(
         try:
             await enqueue_run(redis, run_id)
             await wait_for_status(sessions, run_id, "waiting")
-            assert github.pulls == []
+            assert github.opened == []
             assert remote_branches(tmp_path / "remote.git") == []
 
             await record_approval(
@@ -1391,12 +1391,12 @@ async def test_done_when_a_docs_run_opens_a_pr(
 
     branch = f"agent/{run_id}/writer"
     if decision == "reject":
-        assert github.pulls == []
+        assert github.opened == []
         assert remote_branches(tmp_path / "remote.git") == []
         return
     (opened,) = [e for e in events if e.type == "pr_opened"]
     assert opened.payload["head"] == branch
-    assert github.pulls[0]["title"] == "docs: generate module documentation"
+    assert github.opened[0]["title"] == "docs: generate module documentation"
     assert set(remote_files(tmp_path / "remote.git", branch)) >= {
         "docs/README.md",
         "docs/packages-api.md",
@@ -2560,14 +2560,15 @@ class ByRole:
         return FakeRuntime({request.node_id: script}, tools=self._tools).start(request)
 
 
-def sdd_team(tools: ToolExecutor | None) -> AgentRuntime:
-    """Every agent of the SDD template, scripted by role: one engineer task writes and commits."""
+def sdd_team(tools: ToolExecutor | None, limit: int = 100) -> AgentRuntime:
+    """Every agent of the SDD template, scripted by role: one engineer task writes and commits
+    `LIMIT = <limit>`."""
     plan = {
         "tasks": [{"id": "limits", "title": "Rate limit", "instructions": "Do T001."}],
         "reason": "One task.",
     }
     verdict = {"verdict": "ok", "feedback": "FR-001 is met and tested."}
-    write: dict[str, JsonValue] = {"path": "gateway/limits.py", "content": "LIMIT = 100\n"}
+    write: dict[str, JsonValue] = {"path": "gateway/limits.py", "content": f"LIMIT = {limit}\n"}
     return ByRole(
         {
             "Product engineer writing a specification": [Message(text=SDD_SPEC), ECHO_USAGE],
@@ -2660,7 +2661,7 @@ async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
             for gate in ("approve_spec", "post_questions", "approve_pr"):
                 await wait_for_gate(sessions, run_id, gate)
                 if gate == "approve_pr":
-                    assert github.pulls == [] and len(atlassian.posted) == 1
+                    assert github.opened == [] and len(atlassian.posted) == 1
                 await record_approval(sessions, run_id, gate, GateDecision(decision="approve"))
                 await enqueue_run(redis, run_id)
         finally:
@@ -2671,7 +2672,7 @@ async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
     files = remote_files(tmp_path / "remote.git", branch)
     assert "gateway/limits.py" in files
     assert {f"{SDD_FOLDER}/{name}" for name in ("spec.md", "plan.md", "tasks.md")} <= set(files)
-    [pull] = github.pulls
+    [pull] = github.opened
     assert pull["title"] == "Spec-driven change from a Jira issue"
     pr_url = "https://github.com/acme/hello/pull/1"
     asked, linked = atlassian.posted

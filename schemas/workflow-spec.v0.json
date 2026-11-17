@@ -506,6 +506,23 @@
       "title": "MapNode",
       "type": "object"
     },
+    "OnReview": {
+      "additionalProperties": false,
+      "description": "What a review comment on the workflow's pull request does (7.6): `@<app> fix this` from\nsomeone with write access starts a follow-up run, a rerun from the top-level step `from` of\nthe latest run on the pull request, which pushes to the same pull request after its gate.",
+      "properties": {
+        "from": {
+          "description": "The top-level step a follow-up starts at, before the gate and the `github.openPR` that publishes (a review loop, say).",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "From",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "title": "OnReview",
+      "type": "object"
+    },
     "OrchestratorHub": {
       "additionalProperties": false,
       "description": "The agent that plans an orchestrator's tasks, as for an `agent` node. It answers with the\ntasks through a typed output the engine makes (`orchestrator_plan_schema`). With `tools`, it\nmay read the repo first, to plan from the code (6.9): read tools only, as it never writes;\nin a loop's later iteration, or a replan, it reads the integration branch once there is one.",
@@ -1646,6 +1663,18 @@
       "minLength": 1,
       "title": "Name",
       "type": "string"
+    },
+    "on_review": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OnReview"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Lets a review comment on the pull request the workflow opened (`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing."
     },
     "output_schema": {
       "anyOf": [

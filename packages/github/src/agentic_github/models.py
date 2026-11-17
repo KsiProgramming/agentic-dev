@@ -37,3 +37,46 @@ GITIGNORE_TEMPLATES = ("Python", "Node", "Go", "Rust", "Java", "VisualStudio")
 
 LICENSE_TEMPLATES = ("mit", "apache-2.0")
 """The licenses a new repo may start with (GitHub's license keys)."""
+
+
+@dataclass(frozen=True)
+class PullRequestState:
+    """A pull request as a follow-up checks it (7.6): open or not, and where its head is."""
+
+    number: int
+    url: str
+    state: str  # `open` or `closed`
+    merged: bool
+    head: str
+    head_sha: str
+    base: str
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == "open" and not self.merged
+
+
+@dataclass(frozen=True)
+class ReviewItem:
+    """One comment on a pull request (7.6): a PR comment (`issue_comment`), a review's body
+    (`review`) or an inline comment (`review_comment`, with its file, line and diff hunk). Its
+    `body` is text people wrote on GitHub: data, never instructions."""
+
+    kind: str
+    id: int
+    author: str
+    author_type: str
+    body: str
+    created_at: datetime
+    url: str
+    path: str | None = None
+    line: int | None = None
+    diff_hunk: str | None = None
+
+    @property
+    def from_bot(self) -> bool:
+        return self.author_type == "Bot" or self.author.endswith("[bot]")
+
+
+WRITE_PERMISSIONS = frozenset({"admin", "maintain", "write"})
+"""The repo roles that may ask for a follow-up (7.6)."""

@@ -21,6 +21,13 @@ in GitHub Spec Kit's stages (spec, plan, tasks, implement), as one sequence:
 9. `jira_update`: a comment on the issue with links the platform makes (the pull request and the
    Spec Kit files in it, `links_from`), and `move`, a transition to `move_to` when it is set.
 
+`on_review: {from: "review_loop"}` (7.6): `@<app> fix this` on the pull request, from someone
+with write access, starts a follow-up run at `review_loop`, with the pull request's code and its
+review (`<pr-review>` in every agent's context). The lead plans only what the review asks, the
+reviewer checks each comment, the synthesizer says what changed for it, and after `approve_pr`
+the work is pushed to the same pull request; the Jira steps run again (a comment with the same
+links, a transition that changes nothing).
+
 Only `engineer` and `commit_specs` write; only `publish` publishes, and every Jira write comes
 after a gate (tests). The issue's text is data: it reaches agents in their run context and in
 tool results, never in their instructions.
@@ -127,7 +134,13 @@ _LEAD = (
     "In a later pass, your input is the reviewer's answer (`input`: its `verdict` and "
     "`feedback`) and the tasks of the earlier passes (`previous`). Their work is already in the "
     "code you read: plan only what the feedback asks to change, with the feedback written into "
-    "each task's instructions so the engineer fixes exactly what was asked."
+    "each task's instructions so the engineer fixes exactly what was asked.\n\n"
+    "When the run's context has a <pr-review>, this run follows up the pull request an earlier "
+    "run opened, and a person asked for changes on it. The tasks in your input are done: their "
+    "code is in what you read, as the pull request holds it. Plan only what the review asks: "
+    "read the code at each comment's file and line, and plan tasks that make the changes the "
+    "comments ask for (grouped by file as above), each task's instructions quoting the comment "
+    "it answers with its author, file and line. Plan nothing else."
 )
 _ENGINEER = (
     "Your input is your task (`task.instructions`) and the lead's input. Your tools read the "
@@ -135,7 +148,10 @@ _ENGINEER = (
     "and `plan.md` if your task needs the full requirements. Read the code you need, change "
     "only the files your task names, write the tests it asks for, and commit your work with a "
     "clear message. End your answer with a short report: the task ids you did, every file you "
-    "changed and what you changed in it."
+    "changed and what you changed in it.\n\n"
+    "When the run's context has a <pr-review>, your task answers comments of that review on an "
+    "open pull request: read the code at the file and line each comment names, make the change "
+    "it asks for, and say in your report which comment each change answers."
 )
 _SYNTHESIZER = (
     "Your input is the engineers' reports, one per task, for all the work done so far (every "
@@ -144,7 +160,11 @@ _SYNTHESIZER = (
     "write one pull request description for the whole change: a first line naming the Jira "
     "issue (from the run's context), a short summary, the requirements it meets (by `FR-` "
     "number), what changed per file and why, and how to check it. Plain Markdown, no greeting; "
-    "your answer is the description itself, never a tool call written out as text."
+    "your answer is the description itself, never a tool call written out as text.\n\n"
+    "When the run's context has a <pr-review>, the pull request is open already and this run "
+    "adds to it: start the description with a `## Changes for the review` section that lists "
+    "each review comment (its author, and its file and line if it has one) and what changed for "
+    "it, or why nothing did; then describe the whole change as above."
 )
 _REVIEWER = (
     "Your input is the approved specification (`spec.md`) and the pull request description "
@@ -153,7 +173,12 @@ _REVIEWER = (
     "code and the tests that should meet it. Is every requirement met and tested, does the "
     "change stay within scope, does it fit the code around it, is anything risky? Answer "
     '`verdict` "ok" if it can be opened as a pull request, else "changes", and in `feedback` '
-    "name each requirement that is not met and exactly what to change, in a few sentences."
+    "name each requirement that is not met and exactly what to change, in a few sentences.\n\n"
+    "When the run's context has a <pr-review>, a person reviewed the pull request and asked "
+    "for changes: check each of its comments too. Read the code at its file and line: is what "
+    'it asks done? Answer "ok" only when every comment is addressed and every requirement '
+    "still met, and in `feedback` name each comment that is not addressed (its author, file and "
+    "line) and what is missing."
 )
 
 VERDICT_SCHEMA: Final[dict[str, JsonValue]] = {
@@ -442,6 +467,7 @@ def build_sdd_spec(params: SddParams) -> WorkflowSpec:
                 "example": "PROJ-12",
                 "kind": "jira_issue",
             },
+            "on_review": {"from": "review_loop"},
             "root": {"type": "sequence", "id": "main", "steps": steps},
         }
     )

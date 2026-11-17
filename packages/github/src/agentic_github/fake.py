@@ -14,6 +14,8 @@ import asyncio
 import itertools
 import subprocess
 import tempfile
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
@@ -21,7 +23,14 @@ from urllib.parse import urlencode
 from pydantic import SecretStr
 
 from agentic_github.errors import InstallationNotFoundError, RepoExistsError
-from agentic_github.models import InstallationInfo, PullRequestInfo, RepoInfo
+from agentic_github.models import (
+    InstallationInfo,
+    PullRequestInfo,
+    PullRequestState,
+    RepoInfo,
+    ReviewItem,
+)
+from agentic_github.webhooks import ReviewKind
 
 FAKE_INSTALLATION_ID = 1
 FAKE_ACCOUNT = "e2e-org"
@@ -52,20 +61,125 @@ _PRIVATE = "agentic.private"
 _ID = "agentic.id"
 
 
+APP_BOT = "agentic-dev[bot]"
+"""Who the fake's own comments are from."""
+
+
+class FakeReviews:
+    """Pull requests and their comments in memory (7.6), for `FakeGithubApp` and test fakes.
+
+    `open_pull_request` registers a pull request with `register_pull`; a test adds comments
+    (`add_item`), sets roles (`permissions`, else `default_permission`), closes or moves a pull
+    request (`pulls`). The head commit of a branch is read with `head_of` when set (the bare
+    repo standing in for GitHub), else the one registered. Reactions and the comments the App
+    posts are recorded (`reactions`, `posted`); a posted comment is also listed, as the App's."""
+
+    def __init__(self, default_permission: str = "none") -> None:
+        self.default_permission = default_permission
+        self.permissions: dict[str, str] = {}
+        self.pulls: dict[tuple[str, int], PullRequestState] = {}
+        self.items: dict[tuple[str, int], list[ReviewItem]] = {}
+        self.reactions: list[tuple[str, ReviewKind, int, str]] = []
+        self.posted: list[tuple[str, int, str]] = []
+        self.head_of: Callable[[str, str], str | None] | None = None
+        self._ids = itertools.count(9000)
+
+    def register_pull(self, full_name: str, number: int, head: str, base: str) -> None:
+        key = (full_name, number)
+        if key not in self.pulls:
+            self.pulls[key] = PullRequestState(
+                number=number,
+                url=f"https://github.com/{full_name}/pull/{number}",
+                state="open",
+                merged=False,
+                head=head,
+                head_sha="",
+                base=base,
+            )
+
+    def add_item(
+        self,
+        full_name: str,
+        number: int,
+        kind: str,
+        author: str,
+        body: str,
+        *,
+        author_type: str = "User",
+        created_at: datetime | None = None,
+        path: str | None = None,
+        line: int | None = None,
+        diff_hunk: str | None = None,
+    ) -> ReviewItem:
+        item_id = next(self._ids)
+        item = ReviewItem(
+            kind=kind,
+            id=item_id,
+            author=author,
+            author_type=author_type,
+            body=body,
+            created_at=created_at or datetime.now(UTC),
+            url=f"https://github.com/{full_name}/pull/{number}#comment-{item_id}",
+            path=path,
+            line=line,
+            diff_hunk=diff_hunk,
+        )
+        self.items.setdefault((full_name, number), []).append(item)
+        return item
+
+    async def repo_permission(self, installation_id: int, full_name: str, login: str) -> str:
+        return self.permissions.get(login, self.default_permission)
+
+    async def pull_request(
+        self, installation_id: int, full_name: str, number: int
+    ) -> PullRequestState | None:
+        pull = self.pulls.get((full_name, number))
+        if pull is None:
+            return None
+        head_sha = self.head_of(full_name, pull.head) if self.head_of is not None else None
+        return replace(pull, head_sha=head_sha) if head_sha else pull
+
+    async def review_items(
+        self, installation_id: int, full_name: str, number: int
+    ) -> list[ReviewItem]:
+        items = self.items.get((full_name, number), [])
+        return sorted(items, key=lambda item: (item.created_at, item.id))
+
+    async def add_reaction(
+        self, installation_id: int, full_name: str, kind: ReviewKind, comment_id: int, content: str
+    ) -> bool:
+        if kind == "review":
+            return False
+        self.reactions.append((full_name, kind, comment_id, content))
+        return True
+
+    async def comment_on_pull_request(
+        self, installation_id: int, full_name: str, number: int, body: str
+    ) -> None:
+        self.posted.append((full_name, number, body))
+        self.add_item(full_name, number, "issue_comment", APP_BOT, body, author_type="Bot")
+
+
 def fixture_path(fixtures_root: Path, full_name: str) -> Path:
     """The bare repo standing in for `full_name` (`<root>/<owner>/<name>.git`)."""
     return fixtures_root / f"{full_name}.git"
 
 
-class FakeGithubApp:
+class FakeGithubApp(FakeReviews):
     """Has `GithubApp`'s interface. `api_base_url` is where the browser reaches the API, which
     the fake install flow sends it back to; `fixtures_root` is where its bare repos are (without
-    it, it cannot create repos)."""
+    it, it cannot create repos). Everyone may ask for a follow-up (`write`), and pull requests
+    and comments live in memory, so a follow-up works only within one process."""
 
     def __init__(self, api_base_url: str, fixtures_root: Path | None = None) -> None:
+        super().__init__(default_permission="write")
         self._api_base_url = api_base_url.rstrip("/")
         self._fixtures_root = fixtures_root
         self._numbers = itertools.count(1)
+        if fixtures_root is not None:
+            self.head_of = lambda full_name, branch: branch_sha(
+                fixture_path(fixtures_root, full_name), branch
+            )
 
     def install_url(self, state: str) -> str:
         query = urlencode(
@@ -123,6 +237,7 @@ class FakeGithubApp:
     ) -> PullRequestInfo:
         self._check(installation_id)
         number = next(self._numbers)
+        self.register_pull(full_name, number, head, base)
         return PullRequestInfo(
             number=number, url=f"https://github.com/{full_name}/pull/{number}", head=head, base=base
         )
@@ -203,6 +318,20 @@ def _create_bare_repo(bare: Path, files: dict[str, str], *, private: bool) -> No
     _git(bare, "config", _ID, str(2000 + sum(1 for _ in bare.parent.glob("*.git"))))
     # Last: a bare repo with this mark is a complete one.
     _git(bare, "config", _CREATED_AT, datetime.now(UTC).isoformat())
+
+
+def branch_sha(bare: Path, branch: str) -> str | None:
+    """The commit `branch` points at in the bare repo `bare`, or `None`."""
+    if not bare.is_dir():
+        return None
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}^{{commit}}"],
+        cwd=bare,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip() or None if result.returncode == 0 else None
 
 
 def _config(bare: Path, key: str) -> str | None:
