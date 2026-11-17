@@ -210,6 +210,7 @@
             "jira.search",
             "jira.transition",
             "repo.commit",
+            "repo.commitArtifacts",
             "repo.list_files",
             "repo.list_modules",
             "repo.read_file",

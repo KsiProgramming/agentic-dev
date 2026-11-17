@@ -833,9 +833,20 @@ JIRA_ISSUE_FROM = frozenset({"request"})
 BODY_FROM_TOOLS = frozenset({"github.openPR", "jira.comment"})
 """Tool nodes that may take their `body` from a run artifact (`body_from`, 6.7 and 7.2)."""
 
+COMMIT_TOOLS = frozenset({"repo.commitArtifacts"})
+"""Run by the engine itself, not a tool server (7.5): `repo.commitArtifacts {into, dir}` commits
+the run artifacts its tool node reads onto the branch of an earlier writer (`into`, an
+orchestrator's integration branch), as `<dir>/<name>`, so they are in the pull request a gate
+then shows. Only a tool node of the root sequence may call it, before the gate that shows the
+branch (`commit_artifacts_issues`)."""
+
+COMMIT_DIR_PLACEHOLDER = "{issue}"
+"""What `repo.commitArtifacts`'s `dir` may name: the run's Jira issue, as `<KEY>-<slug>` (7.5)."""
+
 PLATFORM_TOOLS = (
     READ_TOOLS
     | WRITE_TOOLS
+    | COMMIT_TOOLS
     | PUBLISH_TOOLS
     | CREATE_TOOLS
     | ARTIFACT_TOOLS
@@ -999,7 +1010,9 @@ def _publish_issue(
     writer = earlier[ids.index(source)]
     if not _writes(writer):
         return "reference", f"node {node.id!r}: `from_node` {source!r} is not a writer"
-    between = earlier[ids.index(source) + 1 :]
+    # A step that commits onto the writer's branch (7.5) changes what is published, too.
+    last = max(i for i, n in enumerate(earlier) if n.id == source or commits_into(n) == source)
+    between = earlier[last + 1 :]
     if not any(isinstance(n, GateNode) for n in between):
         return (
             "publish_without_gate",
@@ -1156,6 +1169,75 @@ def create_repo_issues(root: Node) -> list[ValidationIssue]:
             created = True
         earlier.append(node)
     return issues
+
+
+def commit_artifacts_issues(root: Node) -> list[ValidationIssue]:
+    """Why the nodes under `root` that commit run artifacts onto a branch (`repo.commitArtifacts`,
+    7.5) cannot run, in run order; empty if they can. Each must be a tool node and a step of the
+    root sequence, read at least one artifact (`reads`: what it commits), name in `into` an
+    earlier root step whose branch it commits to (a writer, or an orchestrator whose tasks
+    write), and give `dir`, a relative folder of the repo (`reference` otherwise). That a gate
+    comes between it and a publish of `into` is `publish_gate_issues`'s check."""
+    issues: list[ValidationIssue] = []
+    top: list[Node] = list(root.steps) if isinstance(root, SequenceNode) else [root]
+    for path, node in iter_nodes(root):
+        for tool in sorted(COMMIT_TOOLS.intersection(node_tools(node))):
+            found = _commit_issue(node, tool, top)
+            if found is not None:
+                issues.append(
+                    ValidationIssue(code="reference", path=path, node_id=node.id, message=found)
+                )
+    return issues
+
+
+def _commit_issue(node: Node, tool: str, top: list[Node]) -> str | None:
+    if not isinstance(node, ToolNode):
+        return f"node {node.id!r}: {tool} can only be called by a tool node"
+    if not any(step is node for step in top):
+        return f"node {node.id!r}: {tool} must be a step of the root sequence"
+    if not node.reads:
+        return f"node {node.id!r}: {tool} commits the artifacts it reads; give it `reads`"
+    if extra := sorted(set(node.args) - {"into", "dir"}):
+        return f"node {node.id!r}: {tool} takes `into` and `dir` only, not {extra[0]!r}"
+    into = node.args.get("into")
+    earlier = top[: next(i for i, step in enumerate(top) if step is node)]
+    writer = next((step for step in earlier if step.id == into), None)
+    if not isinstance(into, str) or writer is None:
+        return (
+            f"node {node.id!r}: `into` must name an earlier step of the root sequence whose "
+            "branch it commits to"
+        )
+    if not _writes(writer):
+        return f"node {node.id!r}: `into` {into!r} is not a writer"
+    folder = node.args.get("dir")
+    if not isinstance(folder, str) or commit_dir_problem(folder) is not None:
+        why = commit_dir_problem(folder) if isinstance(folder, str) else "it is missing"
+        return f"node {node.id!r}: `dir` must be a relative folder of the repo: {why}"
+    return None
+
+
+def commit_dir_problem(folder: str) -> str | None:
+    """Why `folder` cannot be `repo.commitArtifacts`'s `dir`, or `None`: a relative path of
+    plain segments (no `..`, no `.git`, no backslash), whose only placeholder is
+    `COMMIT_DIR_PLACEHOLDER`."""
+    plain = folder.replace(COMMIT_DIR_PLACEHOLDER, "issue")
+    if not plain.strip() or plain.startswith("/") or "\\" in plain:
+        return f"{folder!r} is not a relative path"
+    if "{" in plain or "}" in plain:
+        return f"{folder!r} names a placeholder other than {COMMIT_DIR_PLACEHOLDER}"
+    parts = plain.strip("/").split("/")
+    if any(part in {"", ".", ".."} or part.lower() == ".git" for part in parts):
+        return f"{folder!r} has an empty, '.', '..' or '.git' segment"
+    return None
+
+
+def commits_into(node: Node) -> str | None:
+    """The writer whose branch `node` commits run artifacts onto (`repo.commitArtifacts`'s
+    `into`), if it does."""
+    if not (isinstance(node, ToolNode) and node.tool in COMMIT_TOOLS):
+        return None
+    into = node.args.get("into")
+    return into if isinstance(into, str) else None
 
 
 def creates_repo(root: Node) -> bool:
@@ -2084,6 +2166,7 @@ def structure_issues(root: Node) -> list[ValidationIssue]:
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
+    issues += commit_artifacts_issues(root)
     issues += port_issues(root) + artifact_issues(root) + subflow_issues(root)
     issues += gate_issues(root)
     return in_run_order(root, issues)

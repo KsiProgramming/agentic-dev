@@ -94,6 +94,7 @@ from pydantic import JsonValue
 from agentic_engine.agent import (
     AgentNodeResult,
     AgentNodeStatus,
+    IssueBrief,
     RunContext,
     run_agent_node,
     sum_usage,
@@ -110,6 +111,7 @@ from agentic_engine.artifacts import (
 )
 from agentic_engine.branches import BranchSaver, owner_node
 from agentic_engine.budget import BudgetMeter
+from agentic_engine.commit import run_commit_node
 from agentic_engine.events import (
     ARTIFACT_WRITTEN,
     BRANCH_INTEGRATED,
@@ -165,6 +167,7 @@ from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
 from agentic_engine.spec import (
     BODY_FROM_TOOLS,
+    COMMIT_TOOLS,
     CREATE_TOOLS,
     DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
@@ -234,6 +237,7 @@ class _Limits:
     context: str = ""
     saver: BranchSaver | None = None
     request: str | None = None
+    issue: IssueBrief | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -429,6 +433,7 @@ def compile_workflow(
         context.text() if context is not None else "",
         saver,
         context.request if context is not None else None,
+        context.issue if context is not None else None,
     )
 
     loops: list[LoopNode] = []  # the loops `add` is inside
@@ -745,6 +750,16 @@ async def _run_step(
 
     async def run() -> AgentNodeResult:
         match node:
+            case ToolNode() if node.tool in COMMIT_TOOLS:
+                return await run_commit_node(
+                    node,
+                    limits.review,
+                    limits.artifacts,
+                    refs,
+                    limits.issue,
+                    limits.request,
+                    on_event,
+                )
             case ToolNode():
                 try:
                     called = await _with_body_from(node, limits.artifacts, refs)
@@ -1789,9 +1804,7 @@ async def _router_inline(
         scope.ran[router.id] = choice
         return router.id, choice
     if route_id == SKIPPED_ROUTE:
-        await scope.log.emit(
-            NODE_COMPLETED, node_id=router.id, payload=_SKIPPED_END, **scope.tag()
-        )
+        await scope.log.emit(NODE_COMPLETED, node_id=router.id, payload=_SKIPPED_END, **scope.tag())
         skipped = AgentNodeResult(status="completed", text=input, usage=None)
         scope.ran[router.id] = skipped
         return router.id, skipped

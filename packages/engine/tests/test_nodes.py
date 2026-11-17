@@ -115,7 +115,7 @@ def test_agent_parameters() -> None:
 
 def test_router_routes_keep_their_fields_but_not_their_node() -> None:
     parameters = MANIFESTS["router"].parameters
-    assert set(parameters["properties"]) == {"routes", "classifier"}
+    assert set(parameters["properties"]) == {"routes", "classifier", "otherwise"}
     route = parameters["$defs"]["Route"]
     assert set(route["properties"]) == {"id", "when", "description"}
     assert "then" not in route.get("required", [])
