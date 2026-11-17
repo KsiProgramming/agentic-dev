@@ -12,6 +12,7 @@ from agentic_engine.policy import PLATFORM_POLICY, Policy
 from agentic_engine.spec import WorkflowSpec
 from agentic_sandbox import RepoSource
 from agentic_store.audit import audit, usd
+from agentic_store.jira_triggers import JiraOrigin, add_trigger_run, lock_trigger_issue
 from agentic_store.models import DEFAULT_WORKSPACE_ID, Run
 from agentic_store.policy import run_policy
 from agentic_store.subflows import run_spec
@@ -60,6 +61,7 @@ async def create_run(
     trigger: str = "api",
     workflow_version: tuple[str, int] | None = None,
     subflows: dict[str, JsonValue] | None = None,
+    jira_origin: JiraOrigin | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) or the stored workflow version it was read
@@ -68,29 +70,34 @@ async def create_run(
     with `budget_usd` in place of its budget, if given (`run_policy`), which raises
     `PolicyViolationError` if the spec is above it. A spec that calls other workflows is given
     expanded (`agentic_store.subflows.resolve_workflow`) with the copies of what it calls
-    (`subflows`), which the run keeps; its stored spec is the one written, without them."""
+    (`subflows`), which the run keeps; its stored spec is the one written, without them.
+
+    With `jira_origin` (7.3) the run is a Jira trigger's: its trigger is `jira`, it keeps the rule
+    and the issue, and the rule's fire and audit entry are committed with it. It raises
+    `TriggerRunActiveError` when the rule already has a run going on the issue."""
     run_id = uuid4()
     async with sessions.begin() as session:
+        if jira_origin is not None:
+            await lock_trigger_issue(session, jira_origin)
         policy = await run_policy(session, workspace_id, spec, budget_usd)
-        session.add(
-            Run(
-                id=run_id,
-                workspace_id=workspace_id,
-                status="queued",
-                spec=spec.model_dump(mode="json"),
-                policy=policy.model_dump(mode="json"),
-                input=input,
-                repo=repo.model_dump(mode="json") if repo else None,
-                repo_url=repo.url if repo else None,
-                template_id=template_id,
-                template_parameters=template_parameters,
-                workflow_id=workflow_version[0] if workflow_version else None,
-                workflow_version=workflow_version[1] if workflow_version else None,
-                subflows=subflows or None,
-                trigger=trigger,
-                branch=repo.ref if repo else None,
-            )
+        run = Run(
+            id=run_id,
+            workspace_id=workspace_id,
+            status="queued",
+            spec=spec.model_dump(mode="json"),
+            policy=policy.model_dump(mode="json"),
+            input=input,
+            repo=repo.model_dump(mode="json") if repo else None,
+            repo_url=repo.url if repo else None,
+            template_id=template_id,
+            template_parameters=template_parameters,
+            workflow_id=workflow_version[0] if workflow_version else None,
+            workflow_version=workflow_version[1] if workflow_version else None,
+            subflows=subflows or None,
+            trigger=trigger,
+            branch=repo.ref if repo else None,
         )
+        session.add(run)
         audit(
             session,
             workspace_id,
@@ -107,6 +114,9 @@ async def create_run(
                 "budget_usd": usd(policy.budget_usd),
             },
         )
+        if jira_origin is not None:
+            await session.flush()  # the fire refers to the run; no relationship orders them
+            add_trigger_run(session, workspace_id, run, jira_origin)
     return run_id
 
 
