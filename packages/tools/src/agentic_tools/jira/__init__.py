@@ -1,5 +1,5 @@
-"""The `jira` MCP server over one workspace's Jira (7.2), and `open_jira_tools`, which connects
-a run to it."""
+"""The `jira` MCP server over one workspace's Jira (7.2), `open_jira_tools`, which connects a
+run to it, and `read_issue`, the same issue read for the worker's issue brief (7.4)."""
 
 import contextlib
 from collections.abc import AsyncGenerator
@@ -15,9 +15,13 @@ from agentic_tools.jira.server import (
     READ_TOOLS,
     SERVER_NAME,
     WRITE_TOOLS,
+    IssueOut,
+    IssueReadError,
     JiraAccess,
+    MappedOut,
     balanced,
     build_jira_server,
+    read_issue,
     tool_names,
 )
 from agentic_tools.mcp_bridge import McpToolExecutor
@@ -48,8 +52,12 @@ __all__ = [
     "READ_TOOLS",
     "SERVER_NAME",
     "WRITE_TOOLS",
+    "IssueOut",
+    "IssueReadError",
     "JiraAccess",
+    "MappedOut",
     "balanced",
     "build_jira_server",
     "open_jira_tools",
+    "read_issue",
 ]

@@ -47,6 +47,10 @@ class StoredRun:
     base_sha: str | None = None
     # A rerun from a step (12.4) starts there instead of from the beginning.
     rerun_from: RerunFrom | None = None
+    # The Jira issue a trigger started the run on (7.3, `{cloud_id, site, key, url}`), and the
+    # issue as its agents are told it, once read (7.4).
+    jira_issue: dict[str, JsonValue] | None = None
+    jira_brief: dict[str, JsonValue] | None = None
 
 
 async def create_run(
@@ -140,7 +144,21 @@ def stored_run(run: Run) -> StoredRun:
         created_at=run.created_at,
         base_sha=run.base_sha,
         rerun_from=_rerun_from(run),
+        jira_issue=run.jira_issue,
+        jira_brief=run.jira_brief,
     )
+
+
+async def set_run_jira_brief(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID, brief: dict[str, JsonValue]
+) -> dict[str, JsonValue]:
+    """Store the issue brief of a run (7.4), unless one is already stored; the stored one.
+    Two attempts that both read the issue keep the first, so every agent is told the same."""
+    async with sessions.begin() as session:
+        run = await session.get_one(Run, run_id, with_for_update=True)
+        if run.jira_brief is None:
+            run.jira_brief = brief
+        return run.jira_brief
 
 
 def _rerun_from(run: Run) -> RerunFrom | None:

@@ -69,6 +69,8 @@ class RunSummaryRow:
     spec: dict[str, Any] | None = None
     # The copies of the workflows the spec calls (6.5), by `<id>@<version>`; with `spec`.
     subflows: dict[str, Any] | None = None
+    # The Jira issue as the run's agents were told it (7.4); with `spec`.
+    jira_brief: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -167,7 +169,11 @@ def _select() -> Select[*tuple[Any, ...]]:
 
 
 def _summary(
-    row: Any, *, spec: dict[str, Any] | None = None, subflows: dict[str, Any] | None = None
+    row: Any,
+    *,
+    spec: dict[str, Any] | None = None,
+    subflows: dict[str, Any] | None = None,
+    jira_brief: dict[str, Any] | None = None,
 ) -> RunSummaryRow:
     return RunSummaryRow(
         id=row.id,
@@ -216,6 +222,7 @@ def _summary(
         ),
         spec=spec,
         subflows=subflows,
+        jira_brief=jira_brief,
     )
 
 
@@ -348,6 +355,10 @@ async def get_run_summary(
     sessions: async_sessionmaker[AsyncSession], run_id: UUID
 ) -> RunSummaryRow | None:
     async with sessions() as session:
-        query = _select().add_columns(Run.spec, Run.subflows).where(Run.id == run_id)
+        query = (
+            _select().add_columns(Run.spec, Run.subflows, Run.jira_brief).where(Run.id == run_id)
+        )
         row = (await session.execute(query)).one_or_none()
-    return None if row is None else _summary(row, spec=row.spec, subflows=row.subflows)
+    if row is None:
+        return None
+    return _summary(row, spec=row.spec, subflows=row.subflows, jira_brief=row.jira_brief)

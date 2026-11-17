@@ -36,7 +36,15 @@ const CONNECTED: JiraConnectionData = {
       name: "Acme",
       enabled: true,
       projects: [
-        { id: "10001", key: "API", name: "Public API" },
+        {
+          id: "10001",
+          key: "API",
+          name: "Public API",
+          fields: {
+            acceptance_criteria: { id: "cf_100", name: "Acceptance criteria" },
+            story_points: null,
+          },
+        },
         { id: "10004", key: "WEB", name: "Web shop" },
       ],
     },
@@ -91,7 +99,10 @@ test("connected, it shows the account, each site with its projects and the permi
 
   expect(await card().findByText("Connected")).toBeDefined();
   expect(screen.getByTestId("jira-status").textContent).toContain("Connected as Ada Example");
-  const sites = within(screen.getByRole("list", { name: "Jira sites" })).getAllByRole("listitem");
+  const list = screen.getByRole("list", { name: "Jira sites" });
+  const sites = within(list)
+    .getAllByRole("listitem")
+    .filter((li) => li.parentElement === list);
   expect(sites.map((li) => within(li).getByTestId("jira-site-projects").textContent)).toEqual([
     "2 projects",
     "Off · no projects picked",
@@ -99,6 +110,12 @@ test("connected, it shows the account, each site with its projects and the permi
   expect(within(sites[0]!).getByText("acme.atlassian.net")).toBeDefined();
   expect(screen.getByRole("button", { name: "Choose projects of Acme" })).toBeDefined();
   expect(screen.getByRole("button", { name: "Turn on Acme Labs" })).toBeDefined();
+  const projects = within(screen.getByRole("list", { name: "Projects of Acme" })).getAllByRole(
+    "listitem",
+  );
+  expect(projects.map((li) => li.textContent)).toEqual(["APIFields mapped", "WEBNo fields mapped"]);
+  expect(screen.getByRole("button", { name: "Map fields of Acme" })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Map fields of Acme Labs" })).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "3 permissions granted" }));
   const scopes = within(screen.getByRole("list", { name: "Permissions" })).getAllByRole("listitem");

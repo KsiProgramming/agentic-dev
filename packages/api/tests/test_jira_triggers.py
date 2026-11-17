@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import JsonValue
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -24,6 +25,7 @@ from agentic_store import (
     Run,
     create_jira_trigger,
     record_jira_own_move,
+    set_run_jira_brief,
 )
 
 pytestmark = pytest.mark.integration
@@ -332,6 +334,29 @@ async def test_the_issue_text_never_reaches_the_run(
     [run] = await runs_of(sessions, workspace)
     assert run.input == "API-1"
     assert "Rate limit" not in str(run.jira_issue)  # the seeded issue's summary
+    assert run.jira_brief is None, "the receiver reads no content; the worker reads it (7.4)"
+
+
+async def test_a_run_shows_the_issue_its_agents_were_told(
+    client: AsyncClient, workspace: str, atlassian: FakeAtlassian, sessions: Sessions
+) -> None:
+    await connected(client, workspace)
+    await rule(client, workspace)
+    await deliver(client, atlassian.delivery(ACME, "API-1", status_to="In Progress"))
+    [run] = await runs_of(sessions, workspace)
+    unread = (await client.get(f"/runs/{run.id}")).json()
+
+    brief: dict[str, JsonValue] = {
+        "key": "API-1",
+        "url": "https://acme.atlassian.net/browse/API-1",
+        "project": "API",
+    }
+    await set_run_jira_brief(sessions, run.id, brief)
+    read = (await client.get(f"/runs/{run.id}")).json()
+
+    assert unread["jira_brief"] is None
+    assert read["jira_brief"]["key"] == "API-1"
+    assert read["jira_brief"]["acceptance_criteria"] is None
 
 
 async def test_a_retried_delivery_starts_nothing_more(

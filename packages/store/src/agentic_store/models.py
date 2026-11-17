@@ -128,6 +128,26 @@ class JiraProject(Base):
     name: Mapped[str] = mapped_column(String(255))
 
 
+class JiraFieldMapping(Base):
+    """Which of a picked project's Jira fields holds a role (7.4): `acceptance_criteria` or
+    `story_points`. Kept with its picked project, and removed with it (unpicked, its site no
+    longer reached, or the connection removed). `field_name` is as it was when mapped."""
+
+    __tablename__ = "jira_field_mappings"
+    __table_args__ = (
+        UniqueConstraint("project_id", "role", name="uq_jira_field_mappings_project_id_role"),
+        CheckConstraint(
+            "role IN ('acceptance_criteria', 'story_points')", name="ck_jira_field_mappings_role"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("jira_projects.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String(32))
+    field_id: Mapped[str] = mapped_column(String(255))
+    field_name: Mapped[str] = mapped_column(String(255))
+
+
 class JiraTrigger(Base):
     """A rule that starts a run when an issue of a picked project moves to a status (`on =
     'status'`) or gets a label (`on = 'label'`) (7.3). What runs is a template or a stored
@@ -380,6 +400,10 @@ class Run(Base):
         ForeignKey("jira_triggers.id", ondelete="SET NULL")
     )
     jira_issue: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    # The issue as every agent of the run is told it (7.4, `agentic_engine.IssueBrief`): read
+    # from Jira once, on the run's first attempt, and reused by its resumes and by a rerun from a
+    # step. Null until read, and for a run with no `jira_issue`.
+    jira_brief: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
     branch: Mapped[str | None] = mapped_column(Text)
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):

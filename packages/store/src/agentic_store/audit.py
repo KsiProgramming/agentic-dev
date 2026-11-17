@@ -31,6 +31,7 @@ AuditAction = Literal[
     "connection.needs_attention",
     "jira.site_updated",
     "jira.projects_changed",
+    "jira.fields_mapped",
     "jira.trigger_created",
     "jira.trigger_updated",
     "jira.trigger_deleted",

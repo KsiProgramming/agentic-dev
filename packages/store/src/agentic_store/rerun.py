@@ -117,6 +117,9 @@ async def create_rerun(
                 base_sha=original.base_sha if from_step is not None else None,
                 trigger="rerun",
                 jira_issue=original.jira_issue,
+                # A rerun from a step reuses the issue as its run was told it, as it reuses its
+                # code; a rerun from the beginning reads it again (7.4).
+                jira_brief=original.jira_brief if from_step is not None else None,
                 branch=original.repo.get("ref") if original.repo else None,
             )
         )

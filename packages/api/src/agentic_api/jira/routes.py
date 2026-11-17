@@ -95,7 +95,7 @@ _SITE_ERRORS: dict[int | str, dict[str, Any]] = {
 }
 
 
-def _sessions(request: Request) -> async_sessionmaker[AsyncSession]:
+def sessions_of(request: Request) -> async_sessionmaker[AsyncSession]:
     return request.app.state.sessions
 
 
@@ -124,7 +124,7 @@ def master_keys(request: Request) -> KeyProvider:
     return keys
 
 
-def _not_found(workspace_id: UUID) -> HTTPException:
+def workspace_not_found(workspace_id: UUID) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, f"workspace {workspace_id} not found")
 
 
@@ -134,7 +134,7 @@ def _no_site(cloud_id: str) -> HTTPException:
     )
 
 
-def _refused(status_code: int, code: str, message: str) -> HTTPException:
+def refused(status_code: int, code: str, message: str) -> HTTPException:
     return HTTPException(status_code, JiraErrorDetail(code=code, message=message).model_dump())
 
 
@@ -152,8 +152,8 @@ async def start_authorize(
 ) -> AuthorizeUrlOut:
     """Atlassian's consent URL for the workspace. Consenting stores the grant, then sends the
     browser to `return_to` (the Integrations settings page by default)."""
-    if await get_workspace(_sessions(request), workspace_id) is None:
-        raise _not_found(workspace_id)
+    if await get_workspace(sessions_of(request), workspace_id) is None:
+        raise workspace_not_found(workspace_id)
     state = secrets.token_urlsafe(32)
     pending = _PendingAuthorize(
         workspace_id=workspace_id, return_to=body.return_to if body else None
@@ -218,7 +218,7 @@ async def complete_authorize(
                 return back(jira="error", reason="no_sites")
             missing = missing_scopes(grant.scopes)
             await put_jira_connection(
-                _sessions(request),
+                sessions_of(request),
                 keys,
                 pending.workspace_id,
                 grant.to_secret(),
@@ -245,14 +245,14 @@ async def jira_connection(workspace_id: UUID, request: Request) -> JiraConnectio
     """The workspace's Jira connection: its account, the sites it reaches and the projects
     picked on each. Reads only what is stored; it never calls Atlassian."""
     try:
-        info = await get_jira_connection(_sessions(request), workspace_id)
+        info = await get_jira_connection(sessions_of(request), workspace_id)
     except WorkspaceNotFoundError:
-        raise _not_found(workspace_id) from None
+        raise workspace_not_found(workspace_id) from None
     return JiraConnectionOut.of(
         info,
         configured=request.app.state.jira is not None,
         missing=() if info is None else missing_scopes(info.scopes),
-        webhooks=await list_jira_webhooks(_sessions(request), workspace_id),
+        webhooks=await list_jira_webhooks(sessions_of(request), workspace_id),
     )
 
 
@@ -265,9 +265,9 @@ async def patch_site(
     workspace_id: UUID, cloud_id: CloudId, body: PatchJiraSite, request: Request
 ) -> JiraSiteOut:
     """Turn a site on or off for the workspace. Its picked projects are kept."""
-    if await get_workspace(_sessions(request), workspace_id) is None:
-        raise _not_found(workspace_id)
-    site = await set_jira_site_enabled(_sessions(request), workspace_id, cloud_id, body.enabled)
+    if await get_workspace(sessions_of(request), workspace_id) is None:
+        raise workspace_not_found(workspace_id)
+    site = await set_jira_site_enabled(sessions_of(request), workspace_id, cloud_id, body.enabled)
     if site is None:
         raise _no_site(cloud_id)
     await sync_webhooks(request, workspace_id)  # 7.3: a site turned off stops its triggers
@@ -278,11 +278,11 @@ async def known_site(request: Request, workspace_id: UUID, cloud_id: str) -> Non
     """Raises unless the workspace's Jira connection reaches the site: a cloud id is only ever
     sent to Atlassian when the connection's own grant listed it."""
     try:
-        info = await get_jira_connection(_sessions(request), workspace_id)
+        info = await get_jira_connection(sessions_of(request), workspace_id)
     except WorkspaceNotFoundError:
-        raise _not_found(workspace_id) from None
+        raise workspace_not_found(workspace_id) from None
     if info is None:
-        raise _refused(
+        raise refused(
             status.HTTP_409_CONFLICT, "no_connection", "the workspace has no Jira connection"
         )
     if all(site.cloud_id != cloud_id for site in info.sites):
@@ -298,19 +298,19 @@ async def from_jira[T](
 ) -> T:
     """`fetch(token)` with the workspace's access token, its failures as HTTP errors."""
     try:
-        return await call(_sessions(request), keys, jira, workspace_id, fetch)
+        return await call(sessions_of(request), keys, jira, workspace_id, fetch)
     except JiraNotConnectedError:
-        raise _refused(
+        raise refused(
             status.HTTP_409_CONFLICT, "no_connection", "the workspace has no Jira connection"
         ) from None
     except JiraNeedsAttentionError:
-        raise _refused(
+        raise refused(
             status.HTTP_409_CONFLICT,
             "needs_attention",
             "Atlassian no longer accepts the workspace's Jira connection; connect it again",
         ) from None
     except SecretDecryptError:
-        raise _refused(
+        raise refused(
             status.HTTP_409_CONFLICT,
             "needs_attention",
             "the stored Jira connection cannot be read with this master key; connect it again",
@@ -378,13 +378,13 @@ async def put_projects(
     by_id = {project.id: project for project in found}
     unknown = [project_id for project_id in ids if project_id not in by_id]
     if unknown:
-        raise _refused(
+        raise refused(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "unknown_project",
             f"not a project the connected account can see on this site: {', '.join(unknown[:10])}",
         )
     site = await set_jira_site_projects(
-        _sessions(request),
+        sessions_of(request),
         workspace_id,
         cloud_id,
         [JiraProjectRef(p.id, p.key.upper(), p.name) for p in (by_id[i] for i in ids)],
@@ -409,10 +409,10 @@ async def delete_jira(workspace_id: UUID, request: Request) -> None:
     jira: JiraPlatform | None = request.app.state.jira
     keys: KeyProvider | None = request.app.state.keys
     if jira is not None and keys is not None:
-        await remove_jira_webhooks(_sessions(request), keys, jira, workspace_id)
+        await remove_jira_webhooks(sessions_of(request), keys, jira, workspace_id)
     try:
-        deleted = await delete_connection(_sessions(request), workspace_id, JIRA)
+        deleted = await delete_connection(sessions_of(request), workspace_id, JIRA)
     except WorkspaceNotFoundError:
-        raise _not_found(workspace_id) from None
+        raise workspace_not_found(workspace_id) from None
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "the workspace has no Jira connection")

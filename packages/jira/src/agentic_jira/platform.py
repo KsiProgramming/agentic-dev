@@ -12,6 +12,7 @@ from agentic_jira.models import (
     DeliveryClaims,
     Grant,
     Issue,
+    JiraField,
     Project,
     ProjectPage,
     SearchPage,
@@ -45,7 +46,13 @@ class JiraPlatform(Protocol):
         self, token: SecretStr, cloud_id: str, ids: Sequence[str]
     ) -> list[Project]: ...
 
-    async def get_issue(self, token: SecretStr, cloud_id: str, key: str) -> Issue: ...
+    async def get_issue(
+        self, token: SecretStr, cloud_id: str, key: str, *, extra_fields: Sequence[str] = ()
+    ) -> Issue: ...
+
+    async def list_fields(self, token: SecretStr, cloud_id: str) -> list[JiraField]:
+        """The site's fields, for mapping a project's (7.4)."""
+        ...
 
     async def search(
         self,

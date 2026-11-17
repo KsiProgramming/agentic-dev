@@ -1,7 +1,8 @@
 """The `jira` MCP server (7.2): reads scoped to the picked projects, gated writes, fixed errors."""
 
 import json
-from collections.abc import Awaitable, Callable
+import logging
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -11,7 +12,7 @@ import pytest
 from mcp import Client
 from pydantic import SecretStr
 
-from agentic_jira import FakeAtlassian, JiraUnauthorizedError
+from agentic_jira import FAKE_AC_FIELD, FAKE_POINTS_FIELD, FakeAtlassian, JiraUnauthorizedError
 from agentic_store import (
     JiraConnectionInfo,
     JiraNeedsAttentionError,
@@ -21,9 +22,11 @@ from agentic_store import (
 from agentic_tools.jira import (
     JIRA_READ_TOOL_NAMES,
     JIRA_WRITE_TOOL_NAMES,
+    IssueReadError,
     balanced,
     build_jira_server,
     open_jira_tools,
+    read_issue,
 )
 
 RUN = UUID("12345678-0000-0000-0000-000000000000")
@@ -63,6 +66,8 @@ class Access:
         )
         self.tokens_used: list[str] = []
         self.moves: list[tuple[str, str, str]] = []
+        self.mappings: dict[str, dict[str, dict[str, str]]] = {}
+        """Field mappings by site, then project key, then role (7.4)."""
 
     async def connection(self) -> JiraConnectionInfo | None:
         return self.info
@@ -79,6 +84,9 @@ class Access:
 
     async def moving(self, cloud_id: str, key: str, status: str, run_id: UUID) -> None:
         self.moves.append((cloud_id, key, status))
+
+    async def field_mappings(self, cloud_id: str) -> Mapping[str, Mapping[str, str]]:
+        return self.mappings.get(cloud_id, {})
 
     async def call[T](self, request: Callable[[SecretStr], Awaitable[T]]) -> T:
         if self.info is not None and self.info.needs_attention:
@@ -304,3 +312,93 @@ async def test_rate_limits_and_outages_are_fixed_errors() -> None:
     access.platform.unavailable = True
 
     assert "jira_unavailable" in await call(access, "getIssue", issue="API-1")
+
+
+AC_TEXT_FIELD = "customfield_10101"
+MAPPED = {"acceptance_criteria": FAKE_AC_FIELD, "story_points": FAKE_POINTS_FIELD}
+API_AC = "- A client over 100 requests a minute **gets 429.**\n- The limit is per API key."
+
+
+async def test_an_issue_returns_its_projects_mapped_fields() -> None:
+    access = Access()
+    access.mappings = {"fake-cloud-acme": {"API": MAPPED}}
+
+    issue = await call(access, "getIssue", issue="API-1")
+
+    assert issue["mapped"] == {
+        "acceptance_criteria": API_AC,
+        "acceptance_criteria_truncated": False,
+        "story_points": 5.0,
+    }
+    assert issue["components"] == ["gateway"]
+
+
+async def test_an_unmapped_project_or_an_empty_field_reads_as_null() -> None:
+    access = Access()
+    unmapped = await call(access, "getIssue", issue="API-1")
+    access.mappings = {"fake-cloud-acme": {"API": {"acceptance_criteria": AC_TEXT_FIELD}}}
+    empty = await call(access, "getIssue", issue="API-1")
+    access.mappings = {"fake-cloud-acme": {"API": {"story_points": "customfield_gone"}}}
+    gone = await call(access, "getIssue", issue="API-1")
+
+    nothing = {"acceptance_criteria": None, "acceptance_criteria_truncated": False}
+    assert (
+        unmapped["mapped"] == empty["mapped"] == gone["mapped"] == nothing | {"story_points": None}
+    )
+
+
+async def test_a_moved_issue_reads_its_new_projects_mapping() -> None:
+    ops = JiraProjectRef("10003", "OPS", "Operations")
+    access = Access(replace(ACME, projects=(*ACME.projects, ops)))
+    access.mappings = {
+        "fake-cloud-acme": {
+            "DOCS": {"acceptance_criteria": FAKE_AC_FIELD},
+            "OPS": {"acceptance_criteria": AC_TEXT_FIELD, "story_points": FAKE_POINTS_FIELD},
+        }
+    }
+
+    issue = await call(access, "getIssue", issue="DOCS-9")
+
+    assert (issue["key"], issue["project"]) == ("OPS-2", "OPS")
+    assert issue["mapped"]["acceptance_criteria"] == "The old server answers 410."
+    assert issue["mapped"]["story_points"] == 2.0
+
+
+async def test_long_acceptance_criteria_are_cut() -> None:
+    access = Access()
+    access.mappings = {"fake-cloud-acme": {"API": {"acceptance_criteria": AC_TEXT_FIELD}}}
+    api1 = access.platform.issues["fake-cloud-acme"]["API-1"]
+    access.platform.issues["fake-cloud-acme"]["API-1"] = replace(
+        api1, extra={AC_TEXT_FIELD: "x" * 40_000}
+    )
+
+    mapped = (await call(access, "getIssue", issue="API-1"))["mapped"]
+
+    assert len(mapped["acceptance_criteria"]) == 32_000
+    assert mapped["acceptance_criteria_truncated"] is True
+
+
+async def test_the_platform_reads_an_issue_as_the_tool_does(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    access = Access()
+    access.mappings = {"fake-cloud-acme": {"API": MAPPED}}
+
+    read = await read_issue(access, "API-1")
+    tool = await call(access, "getIssue", issue="API-1")
+
+    assert read.model_dump(mode="json") == tool
+    assert "100 requests" not in caplog.text, "field content is never logged"
+
+
+async def test_read_issue_fails_with_the_tools_codes() -> None:
+    access = Access()
+
+    with pytest.raises(IssueReadError, match=r"^project_not_allowed: "):
+        await read_issue(access, "OPS-1")
+    with pytest.raises(IssueReadError, match=r"^issue_not_found: "):
+        await read_issue(access, "API-404")
+    access.info = None
+    with pytest.raises(IssueReadError, match=r"^jira_not_connected: "):
+        await read_issue(access, "API-1")

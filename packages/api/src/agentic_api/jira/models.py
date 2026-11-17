@@ -3,8 +3,14 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentic_jira import Project
-from agentic_store import JiraConnectionInfo, JiraProjectRef, JiraSiteInfo, JiraWebhookInfo
+from agentic_jira import FieldRole, JiraField, Project
+from agentic_store import (
+    JiraConnectionInfo,
+    JiraMappedField,
+    JiraProjectRef,
+    JiraSiteInfo,
+    JiraWebhookInfo,
+)
 
 JiraStatus = Literal["not_connected", "connected", "needs_attention"]
 # Why a connection needs attention: the refresh token was refused, the access token was (the
@@ -39,15 +45,80 @@ class AuthorizeUrlOut(BaseModel):
     authorize_url: str
 
 
+FieldId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_.:-]+$")]
+
+
+class JiraMappedFieldOut(BaseModel):
+    """A Jira field mapped to a role; `name` as it was when mapped."""
+
+    id: str
+    name: str
+
+
+class JiraProjectFieldsOut(BaseModel):
+    """Which of the project's Jira fields holds each role (7.4); `null` when unmapped."""
+
+    acceptance_criteria: JiraMappedFieldOut | None = None
+    story_points: JiraMappedFieldOut | None = None
+
+    @classmethod
+    def of(cls, fields: tuple[JiraMappedField, ...]) -> "JiraProjectFieldsOut":
+        by_role = {f.role: JiraMappedFieldOut(id=f.field_id, name=f.field_name) for f in fields}
+        return cls(
+            acceptance_criteria=by_role.get("acceptance_criteria"),
+            story_points=by_role.get("story_points"),
+        )
+
+
 class JiraProjectOut(BaseModel):
     id: str
     key: str
     name: str
+    fields: JiraProjectFieldsOut = Field(
+        default_factory=JiraProjectFieldsOut,
+        description="The project's mapped fields (7.4); all `null` in a project search.",
+    )
 
     @classmethod
     def of(cls, project: JiraProjectRef | Project) -> "JiraProjectOut":
-        project_id = project.id if isinstance(project, Project) else project.project_id
-        return cls(id=project_id, key=project.key, name=project.name)
+        if isinstance(project, Project):
+            return cls(id=project.id, key=project.key, name=project.name)
+        return cls(
+            id=project.project_id,
+            key=project.key,
+            name=project.name,
+            fields=JiraProjectFieldsOut.of(project.fields),
+        )
+
+
+class JiraFieldOut(BaseModel):
+    """A field of the site that can hold the role asked for. `type` says what it is, as a person
+    reads it (`Paragraph`, `Short text`, `Number`); `suggested` when its name is the role's
+    usual one."""
+
+    id: str
+    name: str
+    type: str
+    suggested: bool
+
+    @classmethod
+    def of(cls, field: JiraField, role: FieldRole) -> "JiraFieldOut":
+        return cls(id=field.id, name=field.name, type=field.label, suggested=field.suggested(role))
+
+
+class JiraFieldList(BaseModel):
+    """The site's fields that fit the role, suggested ones first, read live from Jira."""
+
+    fields: list[JiraFieldOut]
+
+
+class PutJiraProjectFields(BaseModel):
+    """The project's whole mapping: a field id per role, `null` to leave it unmapped."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    acceptance_criteria: FieldId | None = None
+    story_points: FieldId | None = None
 
 
 class JiraSiteOut(BaseModel):
@@ -181,7 +252,8 @@ class PutJiraProjects(BaseModel):
 
 class JiraErrorDetail(BaseModel):
     """The `detail` of a refused Jira request: `code` says what went wrong (`no_connection`,
-    `needs_attention`, `unknown_project`), `message` says it for people."""
+    `needs_attention`, `unknown_project`, `project_not_allowed`, `unknown_field`,
+    `field_type_mismatch`), `message` says it for people."""
 
     code: str
     message: str

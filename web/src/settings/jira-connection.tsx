@@ -26,6 +26,7 @@ import { useWorkspaceId } from "@/workspace";
 
 import { ConfirmButton } from "./confirm-dialog";
 import { ConnectionCard } from "./connection-card";
+import { hasMappedFields, JiraFieldsSheet } from "./jira-fields-sheet";
 import { JiraProjectsSheet } from "./jira-projects-sheet";
 
 const PURPOSE = "Runs read Jira issues and, after an approval, comment on them and move them.";
@@ -85,10 +86,12 @@ function SiteList({
   baseUrl?: string;
 }) {
   const [choosing, setChoosing] = useState<string | null>(null);
+  const [mapping, setMapping] = useState<string | null>(null);
   const setEnabled = useSetJiraSiteEnabled({ workspaceId, baseUrl });
   const usable = jira.status === "connected";
   const sites = jira.sites ?? [];
   const site = sites.find((s) => s.cloud_id === choosing) ?? null;
+  const mapped = sites.find((s) => s.cloud_id === mapping) ?? null;
   return (
     <>
       <ul
@@ -112,6 +115,24 @@ function SiteList({
               >
                 {s.enabled ? projectCount(s) : `Off · ${projectCount(s).toLowerCase()}`}
               </span>
+              {s.projects.length > 0 ? (
+                <ul
+                  className="mt-1 flex flex-col gap-0.5"
+                  aria-label={`Projects of ${s.name}`}
+                  data-testid="jira-site-project-fields"
+                >
+                  {s.projects.map((p) => (
+                    <li key={p.id} className="flex min-w-0 items-baseline gap-2 text-meta">
+                      <span className="shrink-0 font-mono text-caption text-foreground-secondary">
+                        {p.key}
+                      </span>
+                      <span className="truncate text-foreground-secondary">
+                        {hasMappedFields(p) ? "Fields mapped" : "No fields mapped"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             {usable ? (
               <div className="flex flex-wrap gap-2 sm:shrink-0">
@@ -124,6 +145,17 @@ function SiteList({
                 >
                   Choose projects
                 </Button>
+                {s.projects.length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Map fields of ${s.name}`}
+                    onClick={() => setMapping(s.cloud_id)}
+                  >
+                    Map fields
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -152,6 +184,15 @@ function SiteList({
           workspaceId={workspaceId}
           baseUrl={baseUrl}
           onOpenChange={(open) => !open && setChoosing(null)}
+        />
+      ) : null}
+      {mapped ? (
+        <JiraFieldsSheet
+          open
+          site={mapped}
+          workspaceId={workspaceId}
+          baseUrl={baseUrl}
+          onOpenChange={(open) => !open && setMapping(null)}
         />
       ) : null}
     </>

@@ -11,6 +11,8 @@ from agentic_store import (
     JIRA,
     AuditEvent,
     Connection,
+    JiraFieldMapping,
+    JiraMappedField,
     JiraNeedsAttentionError,
     JiraNotConnectedError,
     JiraProject,
@@ -21,10 +23,12 @@ from agentic_store import (
     delete_connection,
     get_jira_connection,
     jira_project_allowed,
+    jira_site_field_mappings,
     list_connections,
     mark_jira_needs_attention,
     put_jira_connection,
     refresh_jira_secret,
+    set_jira_project_fields,
     set_jira_site_enabled,
     set_jira_site_projects,
 )
@@ -223,3 +227,106 @@ async def test_deleting_the_connection_deletes_its_sites_and_projects(
         "jira.projects_changed",
         "connection.removed",
     ]
+
+
+AC = JiraMappedField("acceptance_criteria", "customfield_10100", "Acceptance criteria")
+POINTS = JiraMappedField("story_points", "customfield_10016", "Story point estimate")
+
+
+async def test_a_project_maps_its_fields_and_lists_them(sessions: Sessions) -> None:
+    workspace_id = await connected(sessions)
+    await set_jira_site_projects(sessions, workspace_id, ACME.cloud_id, [WEB, API])
+
+    saved = await set_jira_project_fields(
+        sessions, workspace_id, ACME.cloud_id, "web", [POINTS, AC]
+    )
+
+    assert saved is not None and saved.fields == (AC, POINTS)
+    info = await get_jira_connection(sessions, workspace_id)
+    assert info is not None
+    by_key = {p.key: p for p in info.sites[0].projects}
+    assert by_key["WEB"].fields == (AC, POINTS)
+    assert by_key["API"].fields == ()
+    assert await jira_site_field_mappings(sessions, workspace_id, ACME.cloud_id) == {
+        "WEB": {"acceptance_criteria": "customfield_10100", "story_points": "customfield_10016"}
+    }
+    assert (await audit_actions(sessions, workspace_id))[-1] == "jira.fields_mapped"
+
+
+async def test_a_mapping_is_replaced_whole(sessions: Sessions) -> None:
+    workspace_id = await connected(sessions)
+    await set_jira_site_projects(sessions, workspace_id, ACME.cloud_id, [WEB])
+    await set_jira_project_fields(sessions, workspace_id, ACME.cloud_id, "WEB", [AC, POINTS])
+
+    saved = await set_jira_project_fields(sessions, workspace_id, ACME.cloud_id, "WEB", [POINTS])
+
+    assert saved is not None and saved.fields == (POINTS,)
+    assert await jira_site_field_mappings(sessions, workspace_id, ACME.cloud_id) == {
+        "WEB": {"story_points": "customfield_10016"}
+    }
+
+
+async def test_only_a_picked_project_maps_fields(sessions: Sessions) -> None:
+    workspace_id = await connected(sessions, ACME, LABS)
+    await set_jira_site_projects(sessions, workspace_id, ACME.cloud_id, [WEB])
+
+    assert await set_jira_project_fields(sessions, workspace_id, ACME.cloud_id, "API", [AC]) is None
+    assert await set_jira_project_fields(sessions, workspace_id, LABS.cloud_id, "WEB", [AC]) is None
+    assert await set_jira_project_fields(sessions, workspace_id, "cloud-x", "WEB", [AC]) is None
+    other = await connected(sessions)
+    assert await jira_site_field_mappings(sessions, other, ACME.cloud_id) == {}
+
+
+async def test_saving_projects_keeps_the_mappings_of_those_still_picked(sessions: Sessions) -> None:
+    workspace_id = await connected(sessions)
+    await set_jira_site_projects(sessions, workspace_id, ACME.cloud_id, [WEB, API])
+    await set_jira_project_fields(sessions, workspace_id, ACME.cloud_id, "WEB", [AC])
+    await set_jira_project_fields(sessions, workspace_id, ACME.cloud_id, "API", [POINTS])
+    renamed = JiraProjectRef(WEB.project_id, "SHOP", "Shop")
+
+    info = await set_jira_site_projects(sessions, workspace_id, ACME.cloud_id, [renamed])
+
+    assert info is not None
+    assert info.projects == (JiraProjectRef(WEB.project_id, "SHOP", "Shop", (AC,)),)
+    assert await jira_site_field_mappings(sessions, workspace_id, ACME.cloud_id) == {
+        "SHOP": {"acceptance_criteria": "customfield_10100"}
+    }
+    await set_jira_site_projects(sessions, workspace_id, ACME.cloud_id, [API])
+    assert await jira_site_field_mappings(sessions, workspace_id, ACME.cloud_id) == {}
+
+
+async def test_mappings_go_with_the_connection_and_with_a_site_no_longer_reached(
+    sessions: Sessions,
+) -> None:
+    workspace_id = await connected(sessions, ACME, LABS)
+    await set_jira_site_projects(sessions, workspace_id, ACME.cloud_id, [WEB])
+    await set_jira_site_projects(sessions, workspace_id, LABS.cloud_id, [WEB])
+    await set_jira_project_fields(sessions, workspace_id, ACME.cloud_id, "WEB", [AC])
+    await set_jira_project_fields(sessions, workspace_id, LABS.cloud_id, "WEB", [AC])
+
+    await put_jira_connection(
+        sessions, KEYS, workspace_id, GRANT, account="Ada", scopes=SCOPES, sites=(ACME,)
+    )
+    assert await jira_site_field_mappings(sessions, workspace_id, ACME.cloud_id) == {
+        "WEB": {"acceptance_criteria": "customfield_10100"}
+    }
+    assert await jira_site_field_mappings(sessions, workspace_id, LABS.cloud_id) == {}
+    async with sessions() as session:
+        ids = list(
+            await session.scalars(
+                select(JiraFieldMapping.id)
+                .join(JiraProject, JiraProject.id == JiraFieldMapping.project_id)
+                .join(JiraSite, JiraSite.id == JiraProject.site_id)
+                .join(Connection, Connection.id == JiraSite.connection_id)
+                .where(Connection.workspace_id == workspace_id)
+            )
+        )
+    assert len(ids) == 1
+
+    assert await delete_connection(sessions, workspace_id, JIRA)
+
+    async with sessions() as session:
+        left = await session.scalar(
+            select(func.count()).select_from(JiraFieldMapping).where(JiraFieldMapping.id.in_(ids))
+        )
+    assert left == 0

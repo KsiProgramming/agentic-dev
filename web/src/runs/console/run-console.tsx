@@ -43,6 +43,7 @@ import { PHONE, useMediaQuery } from "@/lib/use-media-query";
 import { useFollowScroll } from "../use-follow-scroll";
 import { useNow } from "../use-now";
 import { runDetailKey, useRunDetail, type RunDetail } from "../use-run-detail";
+import type { RunContextView } from "./step-input";
 import { useRunEvents } from "../use-run-events";
 import { currentActivity } from "./activity";
 import { ActivityLine } from "./activity-line";
@@ -521,6 +522,7 @@ function Console({
                     entries={entries}
                     spec={spec}
                     runInput={run?.input ?? null}
+                    runContext={runContext(run)}
                     first={rows[0]?.key === selected.key}
                     events={events}
                     now={now}
@@ -549,6 +551,7 @@ function Console({
                 entries={entries}
                 spec={spec}
                 runInput={run?.input ?? null}
+                runContext={runContext(run)}
                 first={rows[0]?.key === selected.key}
                 events={events}
                 now={now}
@@ -588,4 +591,14 @@ function Console({
       ) : null}
     </section>
   );
+}
+
+/** What every agent of `run` was told about it (the Input tab's "Run context"). */
+function runContext(run: RunDetail | null | undefined): RunContextView | null {
+  if (!run) return null;
+  return {
+    repoUrl: run.repo?.url ?? null,
+    request: run.input.trim() ? run.input : null,
+    issue: run.jira_brief ?? null,
+  };
 }

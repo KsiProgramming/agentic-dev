@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from agentic_api.workspaces.models import budget_field
+from agentic_engine.agent import IssueBrief
 from agentic_engine.artifacts import GateArtifact
 from agentic_engine.gate import (
     MAX_REVIEW_FILES,
@@ -555,6 +556,12 @@ class RunDetail(RunSummary):
         description="Each `subflow` of the run (6.5), by its node id: the workflow it calls and "
         "that workflow's root as it runs in this run, a subflow inside it having an entry of its "
         "own. Empty when the run calls no workflow.",
+    )
+    jira_brief: IssueBrief | None = Field(
+        default=None,
+        description="The Jira issue as every agent of the run was told it (7.4), read before "
+        "its first step; `null` for a run no Jira trigger started, or before it is read. With "
+        "the repo and the input, it is the run context the console shows.",
     )
 
 

@@ -168,6 +168,16 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Escape");
     });
 
+    test("the Jira fields sheet has no serious a11y issues", async ({ page, request }) => {
+      await ensureJiraTrigger(request);
+      await open(page, "/settings/integrations");
+      await page.getByRole("button", { name: "Map fields of Acme" }).click();
+      const sheet = page.getByTestId("jira-fields-sheet");
+      await expect(sheet.getByLabel("Story points")).toBeEnabled();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+    });
+
     test("the command palette and the user menu have no serious a11y issues", async ({ page }) => {
       await open(page, "/runs");
       await page.keyboard.press("ControlOrMeta+k");

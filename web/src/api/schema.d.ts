@@ -756,6 +756,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Fields
+         * @description The site's fields that can hold `role`, read live from Jira: a custom paragraph or short
+         *     text for acceptance criteria, a custom number for story points. With `project` (a picked
+         *     project's key), that team-managed project's own fields are listed too. Fields named as the
+         *     role usually is come first.
+         */
+        get: operations["listJiraFields"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects/{project_key}/fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Project Fields
+         * @description The project's mapped fields, as stored.
+         */
+        get: operations["getJiraProjectFields"];
+        /**
+         * Put Project Fields
+         * @description Replace the project's mapping. Each field is checked with Jira, and its name is stored
+         *     as Jira gives it.
+         */
+        put: operations["putJiraProjectFields"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/jira/triggers": {
         parameters: {
             query?: never;
@@ -1227,7 +1275,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1748,6 +1796,54 @@ export interface components {
              */
             route?: string | null;
         };
+        /**
+         * IssueBrief
+         * @description The Jira issue a run was started from (7.4), as the platform read it once, on the run's
+         *     first attempt: what every agent of the run is told about it. Its text is Markdown written in
+         *     Jira; it is data, never instructions.
+         */
+        IssueBrief: {
+            /** Key */
+            key: string;
+            /** Url */
+            url: string;
+            /** Project */
+            project: string;
+            /**
+             * Type
+             * @default
+             */
+            type: string;
+            /**
+             * Status
+             * @default
+             */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Labels
+             * @default []
+             */
+            labels: string[];
+            /**
+             * Components
+             * @default []
+             */
+            components: string[];
+            /** Acceptance Criteria */
+            acceptance_criteria?: string | null;
+            /** Story Points */
+            story_points?: number | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
         /** @enum {string} */
         IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown";
         /**
@@ -1800,13 +1896,38 @@ export interface components {
         /**
          * JiraErrorDetail
          * @description The `detail` of a refused Jira request: `code` says what went wrong (`no_connection`,
-         *     `needs_attention`, `unknown_project`), `message` says it for people.
+         *     `needs_attention`, `unknown_project`, `project_not_allowed`, `unknown_field`,
+         *     `field_type_mismatch`), `message` says it for people.
          */
         JiraErrorDetail: {
             /** Code */
             code: string;
             /** Message */
             message: string;
+        };
+        /**
+         * JiraFieldList
+         * @description The site's fields that fit the role, suggested ones first, read live from Jira.
+         */
+        JiraFieldList: {
+            /** Fields */
+            fields: components["schemas"]["JiraFieldOut"][];
+        };
+        /**
+         * JiraFieldOut
+         * @description A field of the site that can hold the role asked for. `type` says what it is, as a person
+         *     reads it (`Paragraph`, `Short text`, `Number`); `suggested` when its name is the role's
+         *     usual one.
+         */
+        JiraFieldOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+            /** Suggested */
+            suggested: boolean;
         };
         /**
          * JiraIssueRef
@@ -1826,6 +1947,24 @@ export interface components {
              */
             url: string;
         };
+        /**
+         * JiraMappedFieldOut
+         * @description A Jira field mapped to a role; `name` as it was when mapped.
+         */
+        JiraMappedFieldOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * JiraProjectFieldsOut
+         * @description Which of the project's Jira fields holds each role (7.4); `null` when unmapped.
+         */
+        JiraProjectFieldsOut: {
+            acceptance_criteria?: components["schemas"]["JiraMappedFieldOut"] | null;
+            story_points?: components["schemas"]["JiraMappedFieldOut"] | null;
+        };
         /** JiraProjectOut */
         JiraProjectOut: {
             /** Id */
@@ -1834,6 +1973,8 @@ export interface components {
             key: string;
             /** Name */
             name: string;
+            /** @description The project's mapped fields (7.4); all `null` in a project search. */
+            fields?: components["schemas"]["JiraProjectFieldsOut"];
         };
         /**
          * JiraProjectPage
@@ -2413,6 +2554,16 @@ export interface components {
             api_key: string;
         };
         /**
+         * PutJiraProjectFields
+         * @description The project's whole mapping: a field id per role, `null` to leave it unmapped.
+         */
+        PutJiraProjectFields: {
+            /** Acceptance Criteria */
+            acceptance_criteria?: string | null;
+            /** Story Points */
+            story_points?: string | null;
+        };
+        /**
          * PutJiraProjects
          * @description The whole list of projects the workspace may use on the site, by Jira project id.
          */
@@ -2958,6 +3109,8 @@ export interface components {
             calls?: {
                 [key: string]: components["schemas"]["RunCall"];
             };
+            /** @description The Jira issue as every agent of the run was told it (7.4), read before its first step; `null` for a run no Jira trigger started, or before it is read. With the repo and the input, it is the run context the console shows. */
+            jira_brief?: components["schemas"]["IssueBrief"] | null;
             /**
              * Duration Ms
              * @deprecated
@@ -5165,7 +5318,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -5763,6 +5916,178 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    listJiraFields: {
+        parameters: {
+            query: {
+                role: "acceptance_criteria" | "story_points";
+                project?: string | null;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                cloud_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraFieldList"];
+                };
+            };
+            /** @description No such workspace, or its Jira connection has no such site */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+            /** @description `project_not_allowed`: `project` is not picked on the site. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+            /** @description Atlassian answered with an error or could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No Atlassian OAuth app, or no master key, is configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getJiraProjectFields: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                cloud_id: string;
+                project_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraProjectFieldsOut"];
+                };
+            };
+            /** @description No such workspace, or no such picked project on the site */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    putJiraProjectFields: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                cloud_id: string;
+                project_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutJiraProjectFields"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraProjectFieldsOut"];
+                };
+            };
+            /** @description No such workspace, or its Jira connection has no such site */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+            /** @description `project_not_allowed`: the project is not picked on the site. `unknown_field`: a field id is not one of the site's fields the project can use. `field_type_mismatch`: a field cannot hold its role. Nothing was stored. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+            /** @description Atlassian answered with an error or could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No Atlassian OAuth app, or no master key, is configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

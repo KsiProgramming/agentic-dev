@@ -1,0 +1,47 @@
+{
+  "spec_version": "0",
+  "id": "spec-writer",
+  "name": "Spec from a Jira issue",
+  "description": "A spec writer turns the Jira issue the run was started from into spec.md while a code reader maps the code it touches; a reviewer checks the spec against the issue's acceptance criteria.",
+  "input": {
+    "required": true,
+    "label": "Jira issue key",
+    "description": "The issue to write a spec for. A Jira trigger fills it in; the issue itself is in every agent's run context.",
+    "example": "PROJ-12"
+  },
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "parallel",
+        "id": "draft",
+        "join": "all",
+        "branches": [
+          {
+            "type": "agent",
+            "id": "spec_writer",
+            "role": "Spec writer",
+            "instructions": "Your input is the key of the Jira issue this run was started from. The issue itself, with its acceptance criteria, story points and components, is in the run context, between the <jira-issue> tags. Write a product spec for it in Markdown: the problem, who it is for, what is in and out of scope, and the acceptance criteria, one testable line each, taken from the issue's own criteria and never invented. Your tools read the repository: use them to name the parts of the code the issue touches. Call jira.getIssue only for what the context does not hold, such as the issue's comments.",
+            "tools": ["repo.list_files", "repo.read_file", "repo.search", "jira.getIssue"],
+            "writes": "spec.md"
+          },
+          {
+            "type": "agent",
+            "id": "code_reader",
+            "role": "Code reader",
+            "instructions": "Your input is the key of the Jira issue this run was started from; the issue is in the run context. Your tools read the repository: list the files and modules the issue touches, and say in one line each what changes there.",
+            "tools": ["repo.list_files", "repo.read_file", "repo.search"]
+          }
+        ]
+      },
+      {
+        "type": "agent",
+        "id": "reviewer",
+        "role": "Spec reviewer",
+        "instructions": "Your input is the spec writer's spec and the code reader's notes. Check the spec against the Jira issue in the run context: every acceptance criterion of the issue is in the spec, testable, and none was added. Answer the spec with your corrections made, then a list of what you changed.",
+        "tools": ["repo.list_files", "repo.read_file", "repo.search"]
+      }
+    ]
+  }
+}

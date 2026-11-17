@@ -1055,6 +1055,43 @@ test("a step's Input shows what the spec and the run gave it", async () => {
   await within(panel).findByText("Technical writer");
   expect(within(panel).getByText("Document the API")).toBeTruthy();
   expect(within(panel).getByText("repo.write_file")).toBeTruthy();
+  expect(within(panel).getByRole("heading", { name: "Run context" })).toBeTruthy();
+  expect(within(panel).getByText("The run input above.")).toBeTruthy();
+});
+
+test("a Jira run's Input shows the issue its agents were told, as text", async () => {
+  nav.search = "tab=input";
+  api(
+    detail({
+      ...WRITER_RUN,
+      input: "API-1",
+      jira_brief: {
+        key: "API-1",
+        url: "https://acme.atlassian.net/browse/API-1",
+        project: "API",
+        type: "Story",
+        status: "Ready",
+        summary: "Rate limit the public endpoints",
+        labels: [],
+        components: ["gateway"],
+        acceptance_criteria: "- Over 100 a minute gets **429**\n<img src=x onerror=alert(1)>",
+        story_points: 5,
+        description: "<script>alert(1)</script>No limit today.",
+      },
+    }),
+  );
+  longAnswer(show());
+  const panel = await screen.findByTestId("step-panel");
+  const issue = await within(panel).findByTestId("run-context-issue");
+
+  expect(
+    within(issue).getByRole("heading", { name: "API-1: Rate limit the public endpoints" }),
+  ).toBeTruthy();
+  expect(within(issue).getByText("Acceptance criteria")).toBeTruthy();
+  expect(issue.textContent).toContain("Story points: 5");
+  expect(issue.textContent).toContain("Components: gateway");
+  expect(within(issue).getByText("429").tagName).toBe("STRONG");
+  expect(issue.querySelector("img, script")).toBeNull();
 });
 
 test("a step's Usage shows its tokens and cost", async () => {
