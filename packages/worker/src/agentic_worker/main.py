@@ -93,7 +93,7 @@ import sys
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
 from types import FrameType
@@ -106,7 +106,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from agentic_engine.agent import RunContext
+from agentic_engine.agent import IssueBrief, RunContext
 from agentic_engine.artifacts import ArtifactStore
 from agentic_engine.branches import BranchSaver
 from agentic_engine.events import (
@@ -223,13 +223,14 @@ from agentic_store import (
     requeue_stale_runs,
     rerun_branches,
     run_ended,
+    set_run_jira_brief,
     waiting_run_ids,
     workspace_price_table,
 )
 from agentic_store.sink import SANDBOX_KEPT_UNTIL
 from agentic_tools.artifacts import open_artifact_tools
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
-from agentic_tools.jira import open_jira_tools
+from agentic_tools.jira import IssueOut, IssueReadError, open_jira_tools, read_issue
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
 from agentic_tools.scan import open_scan_tools
@@ -883,6 +884,8 @@ async def _attempt(
     try:
         target = await _github_target(worker, run)
         jira = await _jira_access(worker, run)
+        if first:
+            run = await _with_issue_brief(worker, run)
     except RunSetupError as e:
         log.warning("run %s cannot start: %s", run.id, e)
         await _fail(run, sink, last_seq, str(e))
@@ -1076,6 +1079,53 @@ async def _jira_access(worker: Worker, run: StoredRun) -> WorkspaceJira | None:
     return access
 
 
+async def _with_issue_brief(worker: Worker, run: StoredRun) -> StoredRun:
+    """`run` with the brief of the Jira issue a trigger started it on (7.4), read through the
+    same reader as `jira.getIssue` and stored on the run, so its resumes, and a rerun from one of
+    its steps, tell every agent the same issue. Read once, before the run's first step; a run
+    with no issue, or whose brief is already stored, is returned as it is. Raises
+    `RunSetupError` with the tool's fixed code (`jira_not_connected`, `needs_attention`,
+    `project_not_allowed`, `issue_not_found`, `jira_unavailable`, ...)."""
+    issue = run.jira_issue
+    if issue is None or run.jira_brief is not None:
+        return run
+    if worker.jira is None or worker.keys is None:
+        raise RunSetupError(
+            "jira_unavailable: Jira is not configured on this worker (ATLASSIAN_CLIENT_ID and "
+            "MASTER_KEY_FILE)"
+        )
+    access = WorkspaceJira(worker.sessions, worker.keys, worker.jira, run.workspace_id)
+    cloud_id = issue.get("cloud_id")
+    try:
+        read = await read_issue(
+            access, str(issue.get("key", "")), str(cloud_id) if cloud_id else None
+        )
+    except IssueReadError as e:
+        raise RunSetupError(str(e)) from None
+    stored = await set_run_jira_brief(
+        worker.sessions, run.id, issue_brief(read).model_dump(mode="json")
+    )
+    log.info("run %s: read its Jira issue %s", run.id, read.key)
+    return replace(run, jira_brief=stored)
+
+
+def issue_brief(issue: IssueOut) -> IssueBrief:
+    """What every agent of a Jira-triggered run is told about its issue (7.4)."""
+    return IssueBrief(
+        key=issue.key,
+        url=issue.url,
+        project=issue.project,
+        type=issue.type,
+        status=issue.status,
+        summary=issue.summary,
+        labels=tuple(issue.labels),
+        components=tuple(issue.components),
+        acceptance_criteria=issue.mapped.acceptance_criteria,
+        story_points=issue.mapped.story_points,
+        description=issue.description,
+    )
+
+
 async def _github_target(worker: Worker, run: StoredRun) -> GithubTarget | None:
     """Where the run's repo is on GitHub and through which installation, if it is on GitHub and
     its workspace is linked to the platform's GitHub App. Raises `RunSetupError` if the run uses
@@ -1120,13 +1170,17 @@ async def _clone_token(
 
 def run_context(run: StoredRun) -> RunContext | None:
     """What every agent of `run` is told about it: the repository it works on, by its
-    `owner/name` when it is on GitHub, else its URL, and what the person who started it asked
-    for (its input, 6.8)."""
+    `owner/name` when it is on GitHub, else its URL, what the person who started it asked for
+    (its input, 6.8) and the Jira issue a trigger started it on, once read (7.4)."""
     request = run.input if run.input.strip() else None
+    issue = IssueBrief.model_validate(run.jira_brief) if run.jira_brief is not None else None
     if run.repo is None:
-        return RunContext(request=request) if request else None
+        return RunContext(request=request, issue=issue) if request or issue else None
     return RunContext(
-        repo=repo_full_name(run.repo.url) or run.repo.url, repo_url=run.repo.url, request=request
+        repo=repo_full_name(run.repo.url) or run.repo.url,
+        repo_url=run.repo.url,
+        request=request,
+        issue=issue,
     )
 
 

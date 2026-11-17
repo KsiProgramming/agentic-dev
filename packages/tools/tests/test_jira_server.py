@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from mcp import Client
-from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import SecretStr
 
 from agentic_jira import FAKE_AC_FIELD, FAKE_POINTS_FIELD, FakeAtlassian, JiraUnauthorizedError
@@ -23,6 +22,7 @@ from agentic_store import (
 from agentic_tools.jira import (
     JIRA_READ_TOOL_NAMES,
     JIRA_WRITE_TOOL_NAMES,
+    IssueReadError,
     balanced,
     build_jira_server,
     open_jira_tools,
@@ -395,10 +395,10 @@ async def test_the_platform_reads_an_issue_as_the_tool_does(
 async def test_read_issue_fails_with_the_tools_codes() -> None:
     access = Access()
 
-    with pytest.raises(ToolError, match=r"^project_not_allowed: "):
+    with pytest.raises(IssueReadError, match=r"^project_not_allowed: "):
         await read_issue(access, "OPS-1")
-    with pytest.raises(ToolError, match=r"^issue_not_found: "):
+    with pytest.raises(IssueReadError, match=r"^issue_not_found: "):
         await read_issue(access, "API-404")
     access.info = None
-    with pytest.raises(ToolError, match=r"^jira_not_connected: "):
+    with pytest.raises(IssueReadError, match=r"^jira_not_connected: "):
         await read_issue(access, "API-1")

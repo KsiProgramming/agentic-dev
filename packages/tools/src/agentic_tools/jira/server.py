@@ -589,10 +589,18 @@ def _mapped(found: Issue, mapping: Mapping[str, str]) -> MappedOut:
     )
 
 
+class IssueReadError(RuntimeError):
+    """`read_issue` failed; the message starts with the tool's fixed code
+    (`issue_not_found: …`)."""
+
+
 async def read_issue(access: JiraAccess, issue: str, site: str | None = None) -> IssueOut:
     """`jira.getIssue` as the platform calls it: the worker reads a triggered run's issue
-    through it (7.4). Raises `ToolError` with the tool's fixed codes."""
-    return await _JiraReader(access).get_issue(issue, site)
+    through it (7.4). Raises `IssueReadError` with the tool's fixed codes."""
+    try:
+        return await _JiraReader(access).get_issue(issue, site)
+    except ToolError as e:
+        raise IssueReadError(str(e)) from None
 
 
 def build_jira_server(access: JiraAccess, *, run_id: UUID, run_url: str | None = None) -> MCPServer:
