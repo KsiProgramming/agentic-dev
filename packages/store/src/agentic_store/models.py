@@ -228,6 +228,22 @@ class JiraDelivery(Base):
     )
 
 
+class GithubDelivery(Base):
+    """One GitHub webhook delivery the API received (7.6), by its `X-GitHub-Delivery`, kept 30
+    days, so a redelivery is dropped. `outcome` is what came of it: `ignored` (not a command),
+    `started`, or why a command started nothing (`not_allowed`, `no_run`, ...)."""
+
+    __tablename__ = "github_deliveries"
+    __table_args__ = (Index("ix_github_deliveries_received_at", "received_at"),)
+
+    delivery_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    event: Mapped[str] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(32), server_default="received")
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class JiraTriggerFire(Base):
     """What a rule did with a delivery that matched it (7.3): `started` (with the run),
     `already_running` (with the run still going) or `start_failed` (with the reason)."""
@@ -295,6 +311,7 @@ class WorkspacePolicy(Base):
     budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(16, 8))
     sandbox_ttl_s: Mapped[int | None] = mapped_column(Integer)
     branch_retention_days: Mapped[int | None] = mapped_column(Integer)
+    review_rounds: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -348,6 +365,13 @@ class Run(Base):
         Index(
             "ix_runs_workspace_created", "workspace_id", text("created_at DESC"), text("id DESC")
         ),
+        # The runs on a pull request (7.6, `agentic_store.pr_review`).
+        Index("ix_runs_pr_url", "pr_url", postgresql_where=text("pr_url IS NOT NULL")),
+        Index(
+            "ix_runs_pr_review_url",
+            text("(pr_review ->> 'pr_url')"),
+            postgresql_where=text("pr_review IS NOT NULL"),
+        ),
         # A trigger's active run on an issue (`agentic_store.jira_triggers`).
         Index(
             "ix_runs_jira_trigger_active",
@@ -392,7 +416,8 @@ class Run(Base):
     # it starts from, whether that step's uncommitted work is restored, and the parameter paths
     # changed (never their values). Null for a run that starts from the beginning.
     rerun_from: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
-    # What started the run: `manual` (a person, from the web), `api`, `rerun` or `jira` (7.3).
+    # What started the run: `manual` (a person, from the web), `api`, `rerun`, `jira` (7.3) or
+    # `github` (7.6, a review comment on its pull request).
     trigger: Mapped[str] = mapped_column(String(32), server_default="api")
     # A run a Jira trigger started (7.3): the rule, and the issue `{cloud_id, site, key, url}`;
     # a rerun keeps the issue.
@@ -404,6 +429,12 @@ class Run(Base):
     # from Jira once, on the run's first attempt, and reused by its resumes and by a rerun from a
     # step. Null until read, and for a run with no `jira_issue`.
     jira_brief: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    # A follow-up of a pull request review (7.6): `{pr_url, full_name, number, head_branch,
+    # after_sha, after_at, kind, comment_id, comment_url, author, delivery_id}`, references only,
+    # and the review its agents are told (`agentic_engine.ReviewBrief`), read once before its
+    # first step. Null for every other run.
+    pr_review: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    pr_review_brief: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
     branch: Mapped[str | None] = mapped_column(Text)
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):

@@ -23,11 +23,20 @@ from agentic_github.errors import (
     RepoCreationNotAllowedError,
     RepoExistsError,
 )
-from agentic_github.models import InstallationInfo, PullRequestInfo, RepoInfo
+from agentic_github.models import (
+    InstallationInfo,
+    PullRequestInfo,
+    PullRequestState,
+    RepoInfo,
+    ReviewItem,
+)
+from agentic_github.webhooks import ReviewKind
 from agentic_secrets import registered
 
 GITHUB_API_URL = "https://api.github.com/"
 _PER_PAGE = 100
+MAX_REVIEW_ITEMS = 300
+"""The most comments of each kind read from one pull request."""
 
 
 class GithubApp:
@@ -160,6 +169,103 @@ class GithubApp:
             raise GithubApiError(f"GitHub refused the repo: {e.reason}") from None
         return _full_repo_info(response.json())
 
+    async def repo_permission(self, installation_id: int, full_name: str, login: str) -> str:
+        """`login`'s role on `full_name` (`admin`, `maintain`, `write`, `triage`, `read`), or
+        `none` when GitHub does not know them as a collaborator."""
+        owner, repo = full_name.split("/", 1)
+        github = self._installation(installation_id)
+        with _github_errors(installation_id, not_found=f"repo {full_name} not found"):
+            try:
+                response = await github.rest.repos.async_get_collaborator_permission_level(
+                    owner, repo, login
+                )
+            except RequestFailed as e:
+                if e.response.status_code == 404:
+                    return "none"
+                raise
+        data = cast(dict[str, Any], response.json())
+        # `role_name` tells `maintain` from `write`; `permission` is the older, coarser field.
+        role = data.get("role_name") or data.get("permission") or "none"
+        return str(role)
+
+    async def pull_request(
+        self, installation_id: int, full_name: str, number: int
+    ) -> PullRequestState | None:
+        """The pull request's state and head, or `None` if there is no such pull request."""
+        owner, repo = full_name.split("/", 1)
+        github = self._installation(installation_id)
+        with _github_errors(installation_id, not_found=f"repo {full_name} not found"):
+            try:
+                response = await github.rest.pulls.async_get(owner, repo, number)
+            except RequestFailed as e:
+                if e.response.status_code == 404:
+                    return None
+                raise
+        pull = cast(dict[str, Any], response.json())
+        return PullRequestState(
+            number=int(pull["number"]),
+            url=str(pull["html_url"]),
+            state=str(pull.get("state") or "open"),
+            merged=bool(pull.get("merged")),
+            head=str(pull["head"]["ref"]),
+            head_sha=str(pull["head"]["sha"]),
+            base=str(pull["base"]["ref"]),
+        )
+
+    async def review_items(
+        self, installation_id: int, full_name: str, number: int
+    ) -> list[ReviewItem]:
+        """Every comment on the pull request: its conversation comments, its reviews' bodies and
+        its inline comments, oldest first, at most `MAX_REVIEW_ITEMS` of each kind."""
+        owner, repo = full_name.split("/", 1)
+        github = self._installation(installation_id)
+        items: list[ReviewItem] = []
+        with _github_errors(installation_id, not_found=f"pull request {number} not found"):
+            for kind, call in (
+                ("issue_comment", github.rest.issues.async_list_comments),
+                ("review", github.rest.pulls.async_list_reviews),
+                ("review_comment", github.rest.pulls.async_list_review_comments),
+            ):
+                for page in range(1, MAX_REVIEW_ITEMS // _PER_PAGE + 1):
+                    response = await call(owner, repo, number, per_page=_PER_PAGE, page=page)
+                    found = cast(list[Any], response.json())
+                    items.extend(
+                        item for raw in found if (item := _review_item(kind, raw)) is not None
+                    )
+                    if len(found) < _PER_PAGE:
+                        break
+        return sorted(items, key=lambda item: (item.created_at, item.id))
+
+    async def add_reaction(
+        self, installation_id: int, full_name: str, kind: ReviewKind, comment_id: int, content: str
+    ) -> bool:
+        """React to a comment (`eyes`, `confused`, ...). GitHub has no reactions on a review's
+        body, so `review` reacts to nothing and returns `False`."""
+        if kind == "review":
+            return False
+        owner, repo = full_name.split("/", 1)
+        github = self._installation(installation_id)
+        data: Any = {"content": content}
+        with _github_errors(installation_id, not_found=f"comment {comment_id} not found"):
+            if kind == "issue_comment":
+                await github.rest.reactions.async_create_for_issue_comment(
+                    owner, repo, comment_id, data=data
+                )
+            else:
+                await github.rest.reactions.async_create_for_pull_request_review_comment(
+                    owner, repo, comment_id, data=data
+                )
+        return True
+
+    async def comment_on_pull_request(
+        self, installation_id: int, full_name: str, number: int, body: str
+    ) -> None:
+        """Post `body` in the pull request's conversation, as the App."""
+        owner, repo = full_name.split("/", 1)
+        github = self._installation(installation_id)
+        with _github_errors(installation_id, not_found=f"pull request {number} not found"):
+            await github.rest.issues.async_create_comment(owner, repo, number, data={"body": body})
+
     async def _open_pull_request(
         self, github: GitHub[Any], installation_id: int, owner: str, repo: str, head: str
     ) -> PullRequestInfo | None:
@@ -240,6 +346,34 @@ def _pull_request_info(data: Any) -> PullRequestInfo:
         url=str(pull["html_url"]),
         head=str(pull["head"]["ref"]),
         base=str(pull["base"]["ref"]),
+    )
+
+
+def _review_item(kind: str, data: Any) -> ReviewItem | None:
+    """One comment from GitHub's JSON; `None` for one we cannot read, or a review with no body
+    (an approval or a review that only holds inline comments)."""
+    if not isinstance(data, dict):
+        return None
+    raw = cast(dict[str, Any], data)
+    user = cast(dict[str, Any], raw.get("user") or {})
+    when = raw.get("submitted_at") if kind == "review" else raw.get("created_at")
+    body = raw.get("body")
+    if not isinstance(when, str) or not isinstance(raw.get("id"), int):
+        return None
+    if kind == "review" and not (isinstance(body, str) and body.strip()):
+        return None
+    line = raw.get("line") if raw.get("line") is not None else raw.get("original_line")
+    return ReviewItem(
+        kind=kind,
+        id=int(raw["id"]),
+        author=str(user.get("login") or ""),
+        author_type=str(user.get("type") or "User"),
+        body=body if isinstance(body, str) else "",
+        created_at=datetime.fromisoformat(when),
+        url=str(raw.get("html_url") or ""),
+        path=raw.get("path") if isinstance(raw.get("path"), str) else None,
+        line=line if isinstance(line, int) else None,
+        diff_hunk=raw.get("diff_hunk") if isinstance(raw.get("diff_hunk"), str) else None,
     )
 
 

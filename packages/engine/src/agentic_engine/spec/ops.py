@@ -96,7 +96,7 @@ class Disconnect(_Op):
 
 class SetParam(_Op):
     """Set one parameter of a node, or of the document without `node_id` (`name`,
-    `description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets
+    `description`, `budget_usd`, `input`, `input_schema`, `output_schema`, `on_review`). `null` unsets
     it. Ids, types and the slots that hold nodes change through the other ops."""
 
     op: Literal["setParam"]
@@ -210,7 +210,7 @@ _SINGLE_SLOTS = ("body", "default")
 _LIST_SLOTS = {"sequence": "steps", "parallel": "branches"}
 _NODE_SLOTS = frozenset({"steps", "branches", "body", "default"})
 _DOCUMENT_PARAMS = frozenset(
-    {"name", "description", "budget_usd", "input", "input_schema", "output_schema"}
+    {"name", "description", "budget_usd", "input", "input_schema", "output_schema", "on_review"}
 )
 
 

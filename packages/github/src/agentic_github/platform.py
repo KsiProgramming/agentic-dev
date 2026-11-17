@@ -5,10 +5,42 @@ from typing import Protocol
 
 from pydantic import SecretStr
 
-from agentic_github.models import InstallationInfo, PullRequestInfo, RepoInfo
+from agentic_github.models import (
+    InstallationInfo,
+    PullRequestInfo,
+    PullRequestState,
+    RepoInfo,
+    ReviewItem,
+)
+from agentic_github.webhooks import ReviewKind
 
 
-class GithubPlatform(Protocol):
+class GithubReviews(Protocol):
+    """What a follow-up on a pull request review needs (7.6): who may ask, the pull request's
+    state, its comments, and the platform's two short answers (a reaction, one comment)."""
+
+    async def repo_permission(self, installation_id: int, full_name: str, login: str) -> str:
+        """`admin`, `maintain`, `write`, `triage`, `read` or `none`."""
+        ...
+
+    async def pull_request(
+        self, installation_id: int, full_name: str, number: int
+    ) -> PullRequestState | None: ...
+
+    async def review_items(
+        self, installation_id: int, full_name: str, number: int
+    ) -> list[ReviewItem]: ...
+
+    async def add_reaction(
+        self, installation_id: int, full_name: str, kind: ReviewKind, comment_id: int, content: str
+    ) -> bool: ...
+
+    async def comment_on_pull_request(
+        self, installation_id: int, full_name: str, number: int, body: str
+    ) -> None: ...
+
+
+class GithubPlatform(GithubReviews, Protocol):
     def install_url(self, state: str) -> str: ...
 
     async def get_installation(self, installation_id: int) -> InstallationInfo: ...

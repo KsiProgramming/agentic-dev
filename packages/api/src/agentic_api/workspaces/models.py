@@ -203,6 +203,10 @@ class RunLimits(BaseModel):
     branch_retention_days: int = Field(
         description="Days a finished run's saved commits are kept; the files they changed stay."
     )
+    review_rounds: int = Field(
+        description="Follow-up runs that review comments (`@<app> fix this`) on one pull "
+        "request may start (7.6)."
+    )
 
     @classmethod
     def of(cls, policy: Policy) -> "RunLimits":
@@ -277,6 +281,11 @@ class RunLimitOverrides(BaseModel):
         ceiling("branch_retention_days"),
         "Days a finished run's saved commits are kept; the files they changed stay.",
     )
+    review_rounds: int | None = _limit(
+        ceiling("review_rounds"),
+        "Follow-up runs that review comments (`@<app> fix this`) on one pull request may start "
+        "(7.6).",
+    )
     budget_usd: float | None = budget_field(
         "The default budget of the workspace's runs, which a run may replace. It has no "
         "platform ceiling."
@@ -299,7 +308,8 @@ class WorkspacePolicyOut(BaseModel):
     defaults: RunLimits = Field(description="The platform's limits.")
     ceilings: RunLimits = Field(
         description="The most a workspace may set each limit to: the platform's limit, except "
-        "`sandbox_ttl_s` and `branch_retention_days`, which may go above their default."
+        "`sandbox_ttl_s`, `branch_retention_days` and `review_rounds`, which may go above "
+        "their default."
     )
     overrides: RunLimitOverrides
     effective: RunLimits

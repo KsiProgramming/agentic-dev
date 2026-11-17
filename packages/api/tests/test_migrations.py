@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0035_jira_field_mappings"
+    assert version == "0036_github_review"
     assert {
         "runs",
         "run_events",
@@ -54,6 +54,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         "workflows",
         "workflow_versions",
         "workflow_publications",
+        "github_deliveries",
     } | CHECKPOINT_TABLES <= set(table_names)
     # The migrations match the `agentic_store` models.
     await asyncio.to_thread(command.check, config)
