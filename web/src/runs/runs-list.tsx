@@ -26,7 +26,8 @@ import { cn } from "@/lib/utils";
 
 import { usageOfRun } from "./cost";
 import { groupRuns } from "./date-groups";
-import { canRerun, RerunOf, useRerun } from "./rerun";
+import { canRerun, useRerun } from "./rerun";
+import { RunTrigger } from "./trigger";
 import {
   badgeStatus,
   expiredLabel,
@@ -75,16 +76,6 @@ function RunStatusBadge({ run }: { run: RunSummary }) {
   );
 }
 
-/** What started the run: "Manual", "API" or "Rerun of <id>". */
-function Trigger({ run }: { run: RunSummary }) {
-  if (run.rerun_of) {
-    return <RerunOf runId={run.rerun_of} fromStep={run.rerun_from?.node_id} />;
-  }
-  return (
-    <span>{run.trigger === "manual" ? "Manual" : run.trigger === "api" ? "API" : "Rerun"}</span>
-  );
-}
-
 /** The workflow's name, opening the run; under it the run's short id and what started it. */
 function RunName({ run, className }: { run: RunSummary; className?: string }) {
   return (
@@ -95,7 +86,7 @@ function RunName({ run, className }: { run: RunSummary; className?: string }) {
       <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
         <IdChip id={run.id} label="run id" focusable={false} className={IN_ROW} />
         <span aria-hidden="true">·</span>
-        <Trigger run={run} />
+        <RunTrigger run={run} />
       </span>
     </div>
   );

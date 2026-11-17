@@ -22,6 +22,10 @@ export type JiraConnection = components["schemas"]["JiraConnectionOut"];
 export type JiraSite = components["schemas"]["JiraSiteOut"];
 export type JiraProject = components["schemas"]["JiraProjectOut"];
 export type JiraProjectPage = components["schemas"]["JiraProjectPage"];
+export type JiraWebhook = components["schemas"]["JiraWebhookOut"];
+export type JiraTrigger = components["schemas"]["JiraTriggerOut"];
+export type JiraTriggerIn = components["schemas"]["JiraTriggerIn"];
+export type JiraTriggerPatch = components["schemas"]["JiraTriggerPatch"];
 
 /** What the API says about the workspace's GitHub repos. */
 export type GithubRepos =
@@ -51,6 +55,10 @@ export function reposKey(workspaceId: string) {
 
 export function jiraKey(workspaceId: string) {
   return ["workspace", workspaceId, "jira"] as const;
+}
+
+export function jiraTriggersKey(workspaceId: string) {
+  return ["workspace", workspaceId, "jira-triggers"] as const;
 }
 
 export function newRepoOptionsKey(workspaceId: string) {
@@ -506,5 +514,141 @@ export function usePutJiraProjects({
     },
     onSuccess: () =>
       void queries.invalidateQueries({ queryKey: jiraKey(workspaceId), exact: true }),
+  });
+}
+
+/** The workspace's Jira trigger rules (7.3), oldest first, each with the last thing it did. */
+export function useJiraTriggers({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+  enabled = true,
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+  enabled?: boolean;
+}) {
+  return useQuery({
+    queryKey: jiraTriggersKey(workspaceId),
+    enabled,
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/jira/triggers", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the triggers");
+      return data.triggers;
+    },
+  });
+}
+
+/** A rule's changes reach the site's webhook on Jira, which the connection lists: both reload. */
+function useTriggerChanged(workspaceId: string) {
+  const queries = useQueryClient();
+  return () => {
+    void queries.invalidateQueries({ queryKey: jiraTriggersKey(workspaceId) });
+    void queries.invalidateQueries({ queryKey: jiraKey(workspaceId), exact: true });
+  };
+}
+
+export function useCreateJiraTrigger({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const changed = useTriggerChanged(workspaceId);
+  return useMutation({
+    mutationFn: async (rule: JiraTriggerIn) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).POST("/workspaces/{workspace_id}/jira/triggers", {
+          params: { path: { workspace_id: workspaceId } },
+          body: rule,
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not save the trigger");
+      return data;
+    },
+    onSuccess: changed,
+  });
+}
+
+export function usePatchJiraTrigger({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const changed = useTriggerChanged(workspaceId);
+  return useMutation({
+    mutationFn: async ({ triggerId, patch }: { triggerId: string; patch: JiraTriggerPatch }) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).PATCH("/workspaces/{workspace_id}/jira/triggers/{trigger_id}", {
+          params: { path: { workspace_id: workspaceId, trigger_id: triggerId } },
+          body: patch,
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not change the trigger");
+      return data;
+    },
+    onSuccess: changed,
+  });
+}
+
+export function useDeleteJiraTrigger({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const changed = useTriggerChanged(workspaceId);
+  return useMutation({
+    mutationFn: async (triggerId: string) => {
+      const { error, response } = await call(() =>
+        createApiClient(baseUrl).DELETE("/workspaces/{workspace_id}/jira/triggers/{trigger_id}", {
+          params: { path: { workspace_id: workspaceId, trigger_id: triggerId } },
+        }),
+      );
+      if (!response.ok && response.status !== 404) {
+        throw new ApiError(response.status, error, "Could not delete the trigger");
+      }
+    },
+    onSuccess: changed,
+  });
+}
+
+/** A project's status names, read live from Jira, for a rule's "moves to" field. */
+export function useJiraStatuses({
+  workspaceId,
+  cloudId,
+  projectKey,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  cloudId: string;
+  projectKey: string;
+  baseUrl?: string;
+}) {
+  return useQuery({
+    queryKey: [...jiraKey(workspaceId), "statuses", cloudId, projectKey] as const,
+    enabled: Boolean(cloudId && projectKey),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET(
+          "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects/{project_key}/statuses",
+          {
+            params: {
+              path: { workspace_id: workspaceId, cloud_id: cloudId, project_key: projectKey },
+            },
+          },
+        ),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the statuses");
+      return data.statuses;
+    },
+    staleTime: 5 * 60_000,
   });
 }

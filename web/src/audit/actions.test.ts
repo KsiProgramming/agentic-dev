@@ -126,6 +126,47 @@ describe("describe", () => {
       "3 projects of Acme · API, WEB and 1 more",
     ],
     [
+      "a Jira trigger added",
+      {
+        action: "jira.trigger_created",
+        run_id: null,
+        details: { project_key: "API", on: "status", value: "In Progress", enabled: true },
+      },
+      "When an issue in API moves to In Progress",
+    ],
+    [
+      "a Jira trigger turned off",
+      {
+        action: "jira.trigger_updated",
+        run_id: null,
+        details: { project_key: "API", on: "label", value: "agent", enabled: false },
+      },
+      "When an issue in API gets the label agent · off",
+    ],
+    [
+      "a run started from Jira",
+      { action: "jira.trigger_fired", details: { issue_key: "API-12", trigger_id: "t" } },
+      "API-12",
+    ],
+    [
+      "a Jira trigger that could not start",
+      {
+        action: "jira.trigger_failed",
+        run_id: null,
+        details: { issue_key: "API-12", reason: "GitHub is not connected" },
+      },
+      "API-12 · GitHub is not connected",
+    ],
+    [
+      "a Jira webhook refused",
+      {
+        action: "jira.webhook_failed",
+        run_id: null,
+        details: { cloud_id: "c1", error: "url_conflict" },
+      },
+      "c1 · url_conflict",
+    ],
+    [
       "lowered limits and a budget",
       {
         action: "policy.updated",
@@ -222,6 +263,8 @@ test("each category has its actions", () => {
     "repo.created",
     "sandbox.remove_requested",
     "sandbox.removed",
+    "jira.trigger_fired",
+    "jira.trigger_failed",
   ]);
   expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
   expect(actionsOf("workflows")).toEqual([
@@ -236,6 +279,12 @@ test("each category has its actions", () => {
     "connection.needs_attention",
     "jira.site_updated",
     "jira.projects_changed",
+    "jira.trigger_created",
+    "jira.trigger_updated",
+    "jira.trigger_deleted",
+    "jira.webhook_registered",
+    "jira.webhook_deleted",
+    "jira.webhook_failed",
     "policy.updated",
     "pricing.updated",
   ]);

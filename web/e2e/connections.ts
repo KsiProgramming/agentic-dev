@@ -38,6 +38,68 @@ export async function connectGithub(request: APIRequestContext, workspaceId = e2
   expect(setup.headers().location, FAKES_NEEDED).toContain("github=connected");
 }
 
+/** The fake Atlassian's first site and a project on it (`AGENTIC_JIRA=fake`). */
+export const JIRA_SITE = "fake-cloud-acme";
+export const JIRA_PROJECT = { id: "10001", key: "API" };
+
+/** Connects the workspace to the fake Atlassian (its consent leads straight back to the API's
+ * callback) and picks the API project on its first site, as a trigger needs (7.3). */
+export async function connectJira(request: APIRequestContext, workspaceId = e2eWorkspaceId()) {
+  const needed = "The Jira e2e tests need AGENTIC_JIRA=fake (see .env.example).";
+  const started = await request.post(`${connectionsURL(workspaceId)}/jira/authorize`);
+  expect(started.status(), needed).toBe(200);
+  const { authorize_url } = (await started.json()) as { authorize_url: string };
+  const back = await request.get(authorize_url, { maxRedirects: 0 });
+  expect(back.headers().location, needed).toContain("jira=connected");
+  const picked = await request.put(
+    `${apiURL}/workspaces/${workspaceId}/jira/sites/${JIRA_SITE}/projects`,
+    { data: { project_ids: [JIRA_PROJECT.id] } },
+  );
+  expect(picked.status(), await picked.text()).toBe(200);
+}
+
+/** Deletes the workspace's Jira triggers, so each test starts with none. */
+export async function clearJiraTriggers(
+  request: APIRequestContext,
+  workspaceId = e2eWorkspaceId(),
+) {
+  const base = `${apiURL}/workspaces/${workspaceId}/jira/triggers`;
+  const listed = await request.get(base);
+  expect(listed.status()).toBe(200);
+  const { triggers } = (await listed.json()) as { triggers: { id: string }[] };
+  for (const trigger of triggers) {
+    expect((await request.delete(`${base}/${trigger.id}`)).status()).toBe(204);
+  }
+}
+
+/** Makes sure the workspace has a Jira trigger, adding one if it has none; never removes any,
+ * so specs running side by side can share it. */
+export async function ensureJiraTrigger(
+  request: APIRequestContext,
+  workspaceId = e2eWorkspaceId(),
+) {
+  await connectJira(request, workspaceId);
+  const listed = await request.get(`${apiURL}/workspaces/${workspaceId}/jira/triggers`);
+  const { triggers } = (await listed.json()) as { triggers: unknown[] };
+  if (triggers.length === 0) await addJiraTrigger(request, workspaceId);
+}
+
+/** Adds a trigger through the API: when an API issue moves to In Progress, answer it on the
+ * docs demo repo. */
+export async function addJiraTrigger(request: APIRequestContext, workspaceId = e2eWorkspaceId()) {
+  const created = await request.post(`${apiURL}/workspaces/${workspaceId}/jira/triggers`, {
+    data: {
+      cloud_id: JIRA_SITE,
+      project_key: JIRA_PROJECT.key,
+      on: "status",
+      value: "In Progress",
+      template_id: "jira-issue-answer",
+      repo: { url: `https://github.com/${DOCS_DEMO}` },
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+}
+
 /** Makes the browser see the workspace with no connection, or with its GitHub App gone,
  * without changing the stack that other tests share. */
 export async function pretendConnections(page: Page, state: "none" | "github-gone") {

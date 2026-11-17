@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 /** A destructive action behind a confirmation dialog (tech-stack → Interaction). */
 export function ConfirmButton({
   label,
+  ariaLabel,
   title,
   description,
   confirmLabel,
@@ -25,6 +26,8 @@ export function ConfirmButton({
   disabled,
 }: {
   label: string;
+  /** Names what the button acts on when several such buttons share a label. */
+  ariaLabel?: string;
   title: string;
   description: ReactNode;
   confirmLabel: string;
@@ -34,7 +37,7 @@ export function ConfirmButton({
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button type="button" variant="outline" disabled={disabled}>
+        <Button type="button" variant="outline" disabled={disabled} aria-label={ariaLabel}>
           {label}
         </Button>
       </AlertDialogTrigger>

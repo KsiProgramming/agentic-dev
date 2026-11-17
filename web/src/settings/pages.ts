@@ -1,4 +1,4 @@
-import { GaugeIcon, PlugIcon, ReceiptIcon, type LucideIcon } from "lucide-react";
+import { GaugeIcon, PlugIcon, ReceiptIcon, ZapIcon, type LucideIcon } from "lucide-react";
 
 export interface SettingsPage {
   href: string;
@@ -18,6 +18,14 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     description:
       "The model access, the repositories and the issue tracker this workspace works with.",
     icon: PlugIcon,
+  },
+  {
+    href: "/settings/triggers",
+    segment: "triggers",
+    label: "Triggers",
+    description:
+      "Runs that start on their own when a Jira issue moves to a status or gets a label.",
+    icon: ZapIcon,
   },
   {
     href: "/settings/models",

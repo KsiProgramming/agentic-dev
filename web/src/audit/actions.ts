@@ -20,6 +20,8 @@ import {
   ToggleLeftIcon,
   Trash2Icon,
   UnplugIcon,
+  WebhookIcon,
+  ZapIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -77,6 +79,26 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "jira.projects_changed": {
     label: "Jira projects changed",
     icon: ListChecksIcon,
+    category: "settings",
+  },
+  "jira.trigger_created": { label: "Jira trigger added", icon: ZapIcon, category: "settings" },
+  "jira.trigger_updated": { label: "Jira trigger changed", icon: ZapIcon, category: "settings" },
+  "jira.trigger_deleted": { label: "Jira trigger deleted", icon: Trash2Icon, category: "settings" },
+  "jira.trigger_fired": { label: "Started from Jira", icon: ZapIcon, category: "runs" },
+  "jira.trigger_failed": { label: "Jira trigger not started", icon: CircleXIcon, category: "runs" },
+  "jira.webhook_registered": {
+    label: "Jira webhook registered",
+    icon: WebhookIcon,
+    category: "settings",
+  },
+  "jira.webhook_deleted": {
+    label: "Jira webhook removed",
+    icon: WebhookIcon,
+    category: "settings",
+  },
+  "jira.webhook_failed": {
+    label: "Jira webhook failed",
+    icon: WebhookIcon,
     category: "settings",
   },
   "policy.updated": { label: "Run limits changed", icon: GaugeIcon, category: "settings" },
@@ -298,6 +320,27 @@ export function describe(event: AuditEvent): string {
         keys.length > 0 && `${keys.join(", ")}${more > 0 ? ` and ${more} more` : ""}`,
       );
     }
+    case "jira.trigger_created":
+    case "jira.trigger_updated":
+    case "jira.trigger_deleted": {
+      const project = text(d, "project_key") ?? "a project";
+      const value = text(d, "value") ?? "";
+      const when = d.on === "label" ? `gets the label ${value}` : `moves to ${value}`;
+      return join(
+        `When an issue in ${project} ${when}`,
+        d.enabled === false && event.action !== "jira.trigger_deleted" && "off",
+      );
+    }
+    case "jira.trigger_fired":
+      return text(d, "issue_key") ?? "An issue moved";
+    case "jira.trigger_failed":
+      return join(text(d, "issue_key"), text(d, "reason"));
+    case "jira.webhook_registered":
+      return join(text(d, "cloud_id"), strings(d, "projects").join(", "));
+    case "jira.webhook_deleted":
+      return text(d, "cloud_id") ?? "A site";
+    case "jira.webhook_failed":
+      return join(text(d, "cloud_id"), text(d, "error"));
     case "policy.updated": {
       const before = record(d, "before");
       const after = record(d, "after");

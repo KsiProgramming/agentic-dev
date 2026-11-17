@@ -18,13 +18,19 @@ const COOKIE = "agentic-workspace";
 
 /** Finds the E2E workspace, or makes it. Returns its id. */
 export async function ensureE2eWorkspace(request: APIRequestContext): Promise<string> {
+  return ensureWorkspace(request, E2E_WORKSPACE_NAME);
+}
+
+/** Finds the workspace named `name`, or makes it. Returns its id. A spec that changes what
+ * other specs read (Jira triggers) works in one of its own. */
+export async function ensureWorkspace(request: APIRequestContext, name: string): Promise<string> {
   const listed = await request.get(`${apiURL}/workspaces`);
   expect(listed.status()).toBe(200);
   const workspaces = (await listed.json()) as { id: string; name: string }[];
-  const found = workspaces.find((w) => w.name === E2E_WORKSPACE_NAME);
+  const found = workspaces.find((w) => w.name === name);
   if (found) return found.id;
   const created = await request.post(`${apiURL}/workspaces`, {
-    data: { name: E2E_WORKSPACE_NAME },
+    data: { name },
   });
   expect(created.status(), await created.text()).toBe(201);
   return ((await created.json()) as { id: string }).id;
