@@ -50,11 +50,14 @@ class RunSummaryRow:
     rerun_of: UUID | None
     # `{node_id, use_wip, edited}` of a rerun from a step (12.4).
     rerun_from: dict[str, Any] | None
-    # What started the run: `manual`, `api` or `rerun`.
+    # What started the run: `manual`, `api`, `rerun` or `jira` (7.3).
     trigger: str
     # The branch the run works on, if known.
     branch: str | None
     input: str
+    # The Jira issue a trigger started the run on (7.3), `{cloud_id, site, key, url}`; a rerun
+    # keeps it.
+    jira_issue: dict[str, Any] | None
     failure_reason: str | None
     # Why a cancelled run was cancelled: by its user, or its approval expired.
     cancel_reason: str | None
@@ -141,6 +144,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.waiting_gate,
         Run.rerun_of,
         Run.rerun_from,
+        Run.jira_issue,
         Run.trigger,
         Run.branch,
         Run.input,
@@ -185,6 +189,7 @@ def _summary(
         rerun_from=row.rerun_from,
         trigger=row.trigger,
         branch=row.branch,
+        jira_issue=row.jira_issue,
         input=row.input,
         failure_reason=row.failure_reason,
         cancel_reason=row.cancel_reason,

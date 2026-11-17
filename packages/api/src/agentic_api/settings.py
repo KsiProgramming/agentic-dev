@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     web_base_url: str = "http://localhost:3000"
     # Where the browser reaches this API; the fake GitHub install flow redirects back to it.
     api_base_url: str = "http://localhost:8000"
+    # Where Jira posts webhook deliveries (7.3): `<this>/jira/webhooks`; unset, `api_base_url`.
+    # Jira must reach it from the internet (a tunnel in development).
+    jira_webhook_base_url: str | None = None
     # `production` refuses the fakes (`claude_key_check`, `github`, `jira`) (env `AGENTIC_ENV`).
     env: Literal["development", "production"] = Field(
         default="development", validation_alias="agentic_env"

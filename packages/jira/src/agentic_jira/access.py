@@ -13,7 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_jira.platform import JiraPlatform
 from agentic_jira.tokens import call
 from agentic_secrets import KeyProvider
-from agentic_store import JiraConnectionInfo, get_jira_connection, jira_project_allowed
+from agentic_store import (
+    JiraConnectionInfo,
+    get_jira_connection,
+    jira_project_allowed,
+    record_jira_own_move,
+)
 
 
 class WorkspaceJira:
@@ -37,3 +42,9 @@ class WorkspaceJira:
 
     async def call[T](self, request: Callable[[SecretStr], Awaitable[T]]) -> T:
         return await call(self._sessions, self._keys, self.platform, self._workspace_id, request)
+
+    async def moving(self, cloud_id: str, key: str, status: str, run_id: UUID) -> None:
+        """Records a move the run is about to make, so its delivery starts no run (7.3)."""
+        await record_jira_own_move(
+            self._sessions, self._workspace_id, cloud_id, key, status, run_id
+        )

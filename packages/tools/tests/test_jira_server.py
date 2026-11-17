@@ -62,6 +62,7 @@ class Access:
             updated_at=datetime.now(UTC),
         )
         self.tokens_used: list[str] = []
+        self.moves: list[tuple[str, str, str]] = []
 
     async def connection(self) -> JiraConnectionInfo | None:
         return self.info
@@ -75,6 +76,9 @@ class Access:
             and any(p.key == project_key.upper() for p in site.projects)
             for site in self.info.sites
         )
+
+    async def moving(self, cloud_id: str, key: str, status: str, run_id: UUID) -> None:
+        self.moves.append((cloud_id, key, status))
 
     async def call[T](self, request: Callable[[SecretStr], Awaitable[T]]) -> T:
         if self.info is not None and self.info.needs_attention:
@@ -277,6 +281,11 @@ async def test_a_transition_moves_the_issue_by_name_id_or_status() -> None:
     assert (await call(access, "transition", issue="API-1", to="Done"))["to_status"] == "Done"
     assert (await call(access, "transition", issue="API-1", to="done"))["changed"] is False
     assert [m.transition_id for m in access.platform.moved] == ["11", "31"]
+    # Each move is recorded before it is made (7.3); "already Done" moves nothing.
+    assert access.moves == [
+        ("fake-cloud-acme", "API-1", "In Progress"),
+        ("fake-cloud-acme", "API-1", "Done"),
+    ]
 
 
 async def test_a_transition_the_workflow_does_not_offer_is_refused() -> None:

@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 from collections.abc import AsyncIterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID
@@ -23,6 +24,7 @@ from agentic_api.runs.models import (
     CreateRunResponse,
     EditErrorDetail,
     GateBranch,
+    JiraIssueRef,
     PolicyErrorDetail,
     RerunFrom,
     RerunFromRef,
@@ -67,6 +69,7 @@ from agentic_store import (
     InvalidCursorError,
     InvalidEditsError,
     InvalidSelectionError,
+    JiraOrigin,
     PolicyViolationError,
     RerunFromStep,
     RunEndedError,
@@ -200,6 +203,7 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         ),
         "trigger": row.trigger,
         "branch": row.branch,
+        "jira_issue": JiraIssueRef.model_validate(row.jira_issue) if row.jira_issue else None,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
         "active_ms": active_ms,
         "waiting_ms": waiting_ms,
@@ -455,7 +459,56 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     from the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not
     allowed where it is called) is refused with `422` and the issues. A workflow whose `input` is
     `required` is refused with `422` when `input` is empty: "This workflow needs an input: …"."""
+    return await start_run(request, body)
+
+
+@dataclass(frozen=True)
+class PreparedRun:
+    """A run request that passed every check `POST /runs` makes, ready to create."""
+
+    body: CreateRunRequest
+    workspace_id: UUID
+    spec: WorkflowSpec
+    repo: RepoSource | None
+    stored: tuple[str, int] | None
+    called: dict[str, Any] | None
+
+
+async def start_run(
+    request: Request, body: CreateRunRequest, *, jira_origin: JiraOrigin | None = None
+) -> CreateRunResponse:
+    """`POST /runs`'s work: check the request, create the run and queue it. A Jira trigger
+    (7.3) starts its runs here too, with `jira_origin`; the run is then `TriggerRunActiveError`
+    when the rule has a run going on the issue. Refusals are `HTTPException`s."""
+    prepared = await prepare_run(request, body)
+    body = prepared.body
+    try:
+        run_id = await create_run(
+            _sessions(request),
+            prepared.spec,
+            body.input,
+            prepared.repo,
+            prepared.workspace_id,
+            template_id=body.template.id if body.template else None,
+            template_parameters=dict(body.template.parameters) if body.template else None,
+            budget_usd=to_usd(body.budget_usd),
+            trigger=body.trigger,
+            workflow_version=prepared.stored,
+            subflows=prepared.called,
+            jira_origin=jira_origin,
+        )
+    except PolicyViolationError as e:
+        raise _over_policy(e) from e
     redis: Redis = request.app.state.redis
+    await enqueue_run(redis, run_id)
+    return CreateRunResponse(
+        run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
+    )
+
+
+async def prepare_run(request: Request, body: CreateRunRequest) -> PreparedRun:
+    """Every check `POST /runs` makes before it creates a run, without creating one (a Jira
+    trigger rule is checked with it when it is saved, 7.3). Refusals are `HTTPException`s."""
     sessions = _sessions(request)
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
     if await get_workspace(sessions, workspace_id) is None:
@@ -486,25 +539,13 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
             raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
     if uses_jira(spec) and not await _jira_ready(sessions, workspace_id):
         raise HTTPException(status.HTTP_409_CONFLICT, _NO_JIRA)
-    try:
-        run_id = await create_run(
-            sessions,
-            spec,
-            body.input,
-            repo,
-            workspace_id,
-            template_id=body.template.id if body.template else None,
-            template_parameters=dict(body.template.parameters) if body.template else None,
-            budget_usd=to_usd(body.budget_usd),
-            trigger=body.trigger,
-            workflow_version=stored,
-            subflows=resolved.called,
-        )
-    except PolicyViolationError as e:
-        raise _over_policy(e) from e
-    await enqueue_run(redis, run_id)
-    return CreateRunResponse(
-        run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
+    return PreparedRun(
+        body=body,
+        workspace_id=workspace_id,
+        spec=spec,
+        repo=repo,
+        stored=stored,
+        called=resolved.called or None,
     )
 
 

@@ -62,6 +62,9 @@ FAKE_CLIENT_SECRET = "fake-atlassian-client-secret-for-local-dev-only"
 WEBHOOK_LIMIT = 5
 """Webhooks Jira lets one account's app register on a site."""
 WEBHOOK_LIFE = timedelta(days=30)
+_WEBHOOK_IDS = itertools.count(1)
+"""Webhook ids, unique across fakes as Jira's are on a site, so tests sharing a database
+never see another test's webhook match."""
 FAKE_ACCOUNT = Account(account_id="fake-account-1", name="Ada Example")
 FAKE_SITES = (
     Site("fake-cloud-acme", "https://acme.atlassian.net", "Acme"),
@@ -226,7 +229,6 @@ class FakeAtlassian:
         self.searches: list[str] = []
         self.posted: list[PostedComment] = []
         self.moved: list[MadeTransition] = []
-        self._webhook_ids = itertools.count(1)
         self.webhooks: dict[str, dict[int, Webhook]] = {}
         """Registered webhooks by site, then id."""
         self.refuse_webhooks: str | None = None
@@ -364,7 +366,7 @@ class FakeAtlassian:
             raise JiraWebhookError("limit")
         keys = ", ".join(f'"{key}"' for key in sorted(set(project_keys)))
         webhook = Webhook(
-            id=next(self._webhook_ids),
+            id=next(_WEBHOOK_IDS),
             url=url,
             jql_filter=f"project in ({keys})",
             expires_at=datetime.now(UTC) + WEBHOOK_LIFE,

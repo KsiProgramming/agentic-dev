@@ -11,6 +11,7 @@ items. The issue's summary, description and comments are never read: they are da
 to fetch with `jira.getIssue`, not something a trigger passes on (principle 5)."""
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -23,6 +24,7 @@ ALGORITHM = "HS256"
 LEEWAY_S = 30
 """Clock skew allowed on `exp` and `iat`."""
 MAX_BODY_BYTES = 1_000_000
+_ISSUE_KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,31}-[1-9][0-9]{0,9}$")
 DELIVERY_HEADER = "X-Atlassian-Webhook-Identifier"
 """Unique on the site, and the same across Atlassian's retries of one delivery."""
 
@@ -95,6 +97,9 @@ def parse_event(headers: Mapping[str, str], body: bytes) -> IssueEvent:
     project = fields.get("project")
     project_key = cast(_Json, project).get("key") if isinstance(project, dict) else None
     if not (isinstance(issue_id, str) and isinstance(key, str) and isinstance(project_key, str)):
+        raise JiraDeliveryError("payload")
+    if not _ISSUE_KEY.match(key) or len(delivery_id) > 64:
+        # The key becomes a run's input: nothing but a key gets through.
         raise JiraDeliveryError("payload")
     user = data.get("user")
     account_id = cast(_Json, user).get("accountId") if isinstance(user, dict) else None

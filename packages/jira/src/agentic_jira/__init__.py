@@ -54,6 +54,14 @@ from agentic_jira.models import (
     missing_scopes,
 )
 from agentic_jira.platform import JiraPlatform
+from agentic_jira.sync import (
+    RENEW_WITHIN,
+    WEBHOOK_PATH,
+    SiteSync,
+    remove_jira_webhooks,
+    sync_jira_webhooks,
+    webhook_url,
+)
 from agentic_jira.tokens import INVALID_GRANT, REFRESH_MARGIN, UNAUTHORIZED, access_token, call
 from agentic_jira.webhooks import DELIVERY_HEADER, MAX_BODY_BYTES, parse_event, verify_delivery
 
@@ -72,11 +80,13 @@ __all__ = [
     "INVALID_GRANT",
     "MAX_BODY_BYTES",
     "REFRESH_MARGIN",
+    "RENEW_WITHIN",
     "SCOPES",
     "UNAUTHORIZED",
     "WEBHOOK_EVENTS",
     "WEBHOOK_FIELDS",
     "WEBHOOK_LIMIT",
+    "WEBHOOK_PATH",
     "Account",
     "AtlassianApp",
     "AtlassianAppConfig",
@@ -104,6 +114,7 @@ __all__ = [
     "ProjectPage",
     "SearchPage",
     "Site",
+    "SiteSync",
     "Transition",
     "Webhook",
     "WorkspaceJira",
@@ -113,7 +124,10 @@ __all__ = [
     "missing_scopes",
     "parse_event",
     "project_filter",
+    "remove_jira_webhooks",
     "sign_delivery",
+    "sync_jira_webhooks",
     "to_markdown",
     "verify_delivery",
+    "webhook_url",
 ]

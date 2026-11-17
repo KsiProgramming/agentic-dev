@@ -26,6 +26,7 @@ from agentic_store.models import (
     JiraOwnMove,
     JiraTrigger,
     JiraTriggerFire,
+    JiraWebhook,
     Run,
 )
 
@@ -414,6 +415,196 @@ async def is_jira_own_move(
             .limit(1)
         )
     return found is not None
+
+
+# --- webhooks --------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class JiraWebhookInfo:
+    """The webhook a workspace holds on a site for its triggers, and its last failure."""
+
+    workspace_id: UUID
+    cloud_id: str
+    webhook_id: int | None
+    url: str | None
+    projects: tuple[str, ...]
+    expires_at: datetime | None
+    renewed_at: datetime | None
+    error: str | None
+    error_at: datetime | None
+
+
+async def list_jira_webhooks(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID
+) -> list[JiraWebhookInfo]:
+    async with sessions() as session:
+        rows = (
+            await session.scalars(
+                select(JiraWebhook)
+                .where(JiraWebhook.workspace_id == workspace_id)
+                .order_by(JiraWebhook.cloud_id)
+            )
+        ).all()
+    return [_webhook(row) for row in rows]
+
+
+async def get_jira_webhook(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, cloud_id: str
+) -> JiraWebhookInfo | None:
+    async with sessions() as session:
+        row = await _webhook_row(session, workspace_id, cloud_id)
+    return None if row is None else _webhook(row)
+
+
+async def jira_webhook_workspaces(
+    sessions: async_sessionmaker[AsyncSession], cloud_id: str, webhook_ids: Sequence[int]
+) -> list[UUID]:
+    """The workspaces whose webhook on the site is among `webhook_ids` (a delivery's
+    `matchedWebhookIds`): one delivery reaches each of them once."""
+    if not webhook_ids:
+        return []
+    async with sessions() as session:
+        rows = await session.scalars(
+            select(JiraWebhook.workspace_id)
+            .where(JiraWebhook.cloud_id == cloud_id, JiraWebhook.webhook_id.in_(webhook_ids))
+            .distinct()
+        )
+        return list(rows)
+
+
+async def save_jira_webhook(
+    sessions: async_sessionmaker[AsyncSession],
+    workspace_id: UUID,
+    cloud_id: str,
+    *,
+    webhook_id: int,
+    url: str,
+    projects: Sequence[str],
+    expires_at: datetime | None,
+) -> None:
+    """Records the webhook as registered or renewed, clearing any failure. A new registration
+    (another id) is audited as `jira.webhook_registered`."""
+    now = datetime.now(UTC)
+    async with sessions.begin() as session:
+        row = await _webhook_row(session, workspace_id, cloud_id, lock=True)
+        if row is None:
+            row = JiraWebhook(id=uuid4(), workspace_id=workspace_id, cloud_id=cloud_id)
+            session.add(row)
+        registered = row.webhook_id != webhook_id
+        row.webhook_id = webhook_id
+        row.url = url
+        row.projects = sorted(projects)
+        row.expires_at = expires_at
+        row.renewed_at = now
+        row.error = None
+        row.error_at = None
+        row.updated_at = now
+        if registered:
+            listed: list[JsonValue] = list(row.projects)
+            audit(
+                session,
+                workspace_id,
+                "jira.webhook_registered",
+                actor_type="system",
+                details={"cloud_id": cloud_id, "webhook_id": webhook_id, "projects": listed},
+            )
+
+
+async def set_jira_webhook_error(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, cloud_id: str, error: str
+) -> bool:
+    """Records why the site's webhook could not be registered or renewed. Audited as
+    `jira.webhook_failed` once per failure: `False` when the same error was already recorded."""
+    now = datetime.now(UTC)
+    async with sessions.begin() as session:
+        row = await _webhook_row(session, workspace_id, cloud_id, lock=True)
+        if row is None:
+            row = JiraWebhook(id=uuid4(), workspace_id=workspace_id, cloud_id=cloud_id)
+            session.add(row)
+        if row.error == error:
+            return False
+        row.error = error
+        row.error_at = now
+        row.updated_at = now
+        audit(
+            session,
+            workspace_id,
+            "jira.webhook_failed",
+            actor_type="system",
+            details={"cloud_id": cloud_id, "webhook_id": row.webhook_id, "error": error},
+        )
+        return True
+
+
+async def delete_jira_webhook(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, cloud_id: str
+) -> None:
+    """Forgets the site's webhook (the caller deleted it on Jira, or could not). A registered
+    one is audited as `jira.webhook_deleted`."""
+    async with sessions.begin() as session:
+        row = await _webhook_row(session, workspace_id, cloud_id, lock=True)
+        if row is None:
+            return
+        if row.webhook_id is not None:
+            audit(
+                session,
+                workspace_id,
+                "jira.webhook_deleted",
+                actor_type="system",
+                details={"cloud_id": cloud_id, "webhook_id": row.webhook_id},
+            )
+        await session.delete(row)
+
+
+async def lock_jira_webhook(session: AsyncSession, workspace_id: UUID, cloud_id: str) -> bool:
+    """Takes the transaction lock that serialises work on one workspace's webhook on a site
+    (a rule change in the API, the workers' sweep); `False` if another holds it."""
+    taken = await session.scalar(
+        text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"jira-webhook:{workspace_id}:{cloud_id}"},
+    )
+    return bool(taken)
+
+
+async def jira_webhook_sites(sessions: async_sessionmaker[AsyncSession]) -> list[tuple[UUID, str]]:
+    """Every workspace and site that has a webhook row or an enabled rule: what the sweep
+    looks at."""
+    async with sessions() as session:
+        held = (await session.execute(select(JiraWebhook.workspace_id, JiraWebhook.cloud_id))).all()
+        wanted = (
+            await session.execute(
+                select(JiraTrigger.workspace_id, JiraTrigger.cloud_id)
+                .where(JiraTrigger.enabled.is_(True))
+                .distinct()
+            )
+        ).all()
+    return sorted({(w, c) for w, c in held} | {(w, c) for w, c in wanted})
+
+
+def _webhook(row: JiraWebhook) -> JiraWebhookInfo:
+    return JiraWebhookInfo(
+        workspace_id=row.workspace_id,
+        cloud_id=row.cloud_id,
+        webhook_id=row.webhook_id,
+        url=row.url,
+        projects=tuple(row.projects or ()),
+        expires_at=row.expires_at,
+        renewed_at=row.renewed_at,
+        error=row.error,
+        error_at=row.error_at,
+    )
+
+
+async def _webhook_row(
+    session: AsyncSession, workspace_id: UUID, cloud_id: str, *, lock: bool = False
+) -> JiraWebhook | None:
+    query = select(JiraWebhook).where(
+        JiraWebhook.workspace_id == workspace_id, JiraWebhook.cloud_id == cloud_id
+    )
+    if lock:
+        query = query.with_for_update()
+    return await session.scalar(query)
 
 
 # --- helpers ---------------------------------------------------------------------------------
