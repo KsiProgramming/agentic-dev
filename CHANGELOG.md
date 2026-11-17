@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 7.3 Jira webhook trigger on configured status/label:
+- Phase 7.3 Jira webhook trigger on configured status/label ([#239](https://github.com/KsiProgramming/agentic-dev/pull/239)):
   - **Moving an issue starts a run.** A trigger rule says: when an issue of a picked project moves to a status, or gets a label, run a template or stored workflow on a repo, with the issue key as its input. Runs started this way have the trigger `jira` and keep the issue (`jira_issue`); the runs list and the console read "Jira · API-12", linking the issue.
   - **Dynamic webhooks, kept alive.** The platform registers one webhook per workspace and site through the deployment's Atlassian app (`jqlFilter` on the rules' projects, `fieldIdsFilter` on status and labels), registers it again when the projects change, deletes it with the last rule or on disconnect, and every worker renews it before Jira's 30-day expiry (`JIRA_WEBHOOK_SWEEP_S`, 6 h). Settings shows each site as listening, or why not.
   - **`POST /jira/webhooks`** verifies each delivery's JWT (HS256, the app's client secret) before reading anything, finds the workspaces from the verified site and matched webhooks, drops retries, projects not picked and a run's own moves, and starts one run per matching rule through the same checks as `POST /runs`; a rule never has two runs going on one issue.
