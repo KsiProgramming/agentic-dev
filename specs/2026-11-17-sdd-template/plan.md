@@ -15,7 +15,7 @@ Engine and tools first, then the template, then the end-to-end proof. The projec
 
 ## 3. Commit artifacts onto a writer's branch
 - [ ] `repo.commitArtifacts {into, dir, files}` in `agentic_tools.repo` (write tools), committing on `into`'s branch through the engine's integrator / `RepoTools` routing (key = the orchestrator's id)
-- [ ] `dir` placeholders `{issue_key}`, `{issue_slug}` resolved by the engine from `jira_issue` and the brief; path checks (stays under the repo, no `..`, no `.git`)
+- [ ] `dir` placeholder `{issue}` (`<KEY>-<slug>`) resolved by the engine from the brief, else the request; path checks (stays under the repo, no `..`, no `.git`)
 - [ ] Validation: a writer for `into` (gate and publish ordering, `not_allowed_in_*` like other writers); `artifact_unknown` for files no step writes before it
 - [ ] Gate review: the committed files appear in the gate's `changes` under the orchestrator's key
 - [ ] Engine tests (fake runtime + fake integrator) and a sandbox test that the commit lands on the integration branch

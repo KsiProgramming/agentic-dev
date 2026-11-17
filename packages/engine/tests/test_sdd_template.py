@@ -209,7 +209,7 @@ ANSWERS: dict[str, str] = {
             "reason": "One task.",
         }
     ),
-    "engineer": "Did T001: shop/export.py.",
+    "implement.export": "Did T001: shop/export.py.",  # the task's engineer (`task_writer_key`)
     "synthesizer": "PROJ-12: export orders as CSV.",
     "reviewer": json.dumps({"verdict": "ok", "feedback": "FR-001 is met."}),
 }
@@ -224,7 +224,7 @@ class Answers:
 
     def start(self, request: AgentRequest) -> AgentRun:
         self.requests[request.node_id] = request
-        node = request.node_id.split(".")[0]
+        node = request.node_id
         script = [Message(text=self.answers[node]), ECHO_USAGE]
         return FakeRuntime({request.node_id: script}).start(request)
 
