@@ -88,8 +88,7 @@ class Pr:
 
 def sdd(on_review: bool = True) -> WorkflowSpec:
     document = build_sdd_spec(SddParams()).model_dump(mode="json", by_alias=True)
-    if on_review:
-        document["on_review"] = {"from": "review_loop"}
+    document["on_review"] = {"from": "review_loop"} if on_review else None
     return WorkflowSpec.model_validate(document)
 
 
