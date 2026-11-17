@@ -23,8 +23,8 @@ Unblocks 7.6 (PR review comments feed the loop), 7.7 (SDD from a Markdown file) 
 
 - **Template `sdd`** ("Build from a Jira issue", `agentic_engine.templates.sdd`), requires Claude, GitHub and Jira, with a required `input` declared as a Jira issue ("Which Jira issue?", example `PROJ-12`). The flow:
   1. `spec_writer`: reads the issue (brief in the run context, `jira.getIssue`, `jira.search` for linked issues) and the code (repo read tools); writes `spec.md` in Spec Kit's spec layout (user scenarios, functional requirements `FR-001…`, success criteria, the issue's acceptance criteria kept, and each open question as `[NEEDS CLARIFICATION: …]`).
-  2. `clarify`: a rule router. When the spec has open questions, route `ask`: `questions` (no tools, reads `spec.md`) writes `questions.md`, the gate `post_questions` shows it, and `ask_jira` (`jira.comment`, `body_from: questions.md`) posts it. Otherwise nothing runs.
-  3. `approve_spec`: a gate on `spec.md`, editable, `on_reject: end`. Rejecting it completes the run without building, for instance while the team answers the questions. Moving the issue again starts a fresh run.
+  2. `approve_spec`: a gate on the spec writer's answer, `spec.md` (approve or reject; see "Settled" for edits), `on_reject: end`. Rejecting it completes the run without building, for instance while the team answers the questions in Jira. Moving the issue again starts a fresh run.
+  3. `clarify`: a rule router with `otherwise: "skip"`. When the approved spec has open questions, route `ask`: `questions` (no tools, reads `spec.md`) writes `questions.md`, the gate `post_questions` shows it (rejecting cancels the run), and `ask_jira` (`jira.comment`, `body_from: questions.md`) posts it. Otherwise nothing runs. It comes after the spec gate because a gate shows the step before it: placed before, the spec gate would show the posted comment instead of the spec.
   4. `planner` writes `plan.md` (approach, files touched, risks, test plan); `tasker` writes `tasks.md` in Spec Kit's tasks layout (`T001`, `[P]` for parallel, the files each task touches). Both read the code and `spec.md`.
   5. `review_loop`: a loop until `results.reviewer.data.verdict == "ok"` (at most `max_passes`) over `implement` (an orchestrator: its lead has the repo read tools and plans worker tasks from `tasks.md`, keeping dependent tasks in one worker task; the worker `engineer` writes and commits), `synthesizer` (writes `pr-description.md`) and `reviewer` (checks the merged work against `spec.md`'s requirements and acceptance criteria; typed `verdict` and `feedback`).
   6. `commit_specs`: a deterministic tool step that commits `spec.md`, `plan.md` and `tasks.md` to `specs/<KEY>-<slug>/` on `implement`'s integration branch, so they are in the PR and shown in the gate's diff.
@@ -54,7 +54,7 @@ Unblocks 7.6 (PR review comments feed the loop), 7.7 (SDD from a Markdown file) 
 |---|---|---|
 | Spec Kit files | `spec.md`, `plan.md` and `tasks.md` committed to `specs/<KEY>-<slug>/` in the PR, also kept as run artifacts | The Jira comment links real files, and Spec Kit reads them later (user's choice; product spec §6.3) |
 | How Jira gets the PR link | `jira.comment` gains `links` resolved by the engine; one PR gate covers the PR, the comment and the transition | The link exists only after `openPR`, and a second approval would add no information. The links are platform-made, never model text (principle 5) (user's choice) |
-| Open questions | Spec Kit's `[NEEDS CLARIFICATION: …]` markers. A rule router posts them through their own gate before the spec gate | Product spec §6.3, step 3 (user's choice). Posting is irreversible, so it has a gate (principle 3) |
+| Open questions | Spec Kit's `[NEEDS CLARIFICATION: …]` markers. After the spec is approved, a rule router posts them through their own gate | Product spec §6.3, step 3 (user's choice). Posting is irreversible, so it has a gate (principle 3) |
 | Spec gate rejected | `on_reject: end`: the run completes without building | Not building while questions are open is a good outcome, not a cancellation (as in 6.7) |
 | Manual starts | `input.kind: "jira_issue"` makes `POST /runs` set `jira_issue`, so a manual run gets the same brief | Settles 7.4's open item (user's choice). SDD behaves the same whether a trigger or a person starts it |
 | Plan and tasks | Two agents, `planner` → `plan.md` and `tasker` → `tasks.md` | One artifact per step (4.3), and Spec Kit's `/plan` and `/tasks` stages |
@@ -62,9 +62,20 @@ Unblocks 7.6 (PR review comments feed the loop), 7.7 (SDD from a Markdown file) 
 | "Answer a Jira issue" | Kept | It is a cheap, read-mostly template that SDD does not replace (user did not choose to retire it) |
 | Build order | Engine and tools first (links, commit artifacts, manual brief), then the template, then tests and the real run | User's choice. The template needs the engine pieces to validate |
 
+## Settled while starting the build
+
+The four open questions of the plan, and one thing the code showed, were settled in plan group 1:
+
+| Question | Settled | Why |
+|---|---|---|
+| A router with nothing to run | `RouterNode.otherwise: "fail" \| "skip"` (default `"fail"`, today's behaviour). With `"skip"` and no default, a rule router that matches no route completes with its input as its output and runs nothing (`route_chosen` `{route: null, reason: "no route matched"}`; `node_completed` `{route: null, skipped: true}`). It is allowed in rule mode only | Explicit, so no existing workflow changes. A no-op tool node would show a fake step in the console |
+| How `clarify` tests for markers | `when: results.spec_writer.text.contains("[NEEDS CLARIFICATION")` | `results` already carries each node's `text` (loop and router CEL). It needs no extra agent turn when there are no questions |
+| Links to files | The PR's "Files changed" anchors: `<pr url>/files#diff-<sha256 of path>` | They still work once the branch is deleted after merge |
+| Slug | From the brief's summary: lowercase ASCII words joined by `-`, cut at 40 characters on a word. With no brief, or an empty slug, it is `specs/<KEY>/` | Deterministic, and Spec Kit reads any `specs/*/spec.md` |
+| **Editing the spec at its gate** (found in the code) | Not in 7.5: `approve_spec` approves or rejects. A gate edits files on writer branches (4.x), not run artifacts, and `spec.md` is an artifact until `commit_specs`. The approver who wants changes rejects (the run ends) and comments in Jira, or waits for 7.8, which sends a spec back with comments | Making artifacts editable at gates is a contract of its own (API, engine, web). 7.8 already owns revising the spec at its gate |
+| How `commit_specs` writes | `repo.commitArtifacts` is run by the engine, not an MCP server. It reads the artifacts and commits them through `GateReview.apply` (the gate's edit commit, idempotent), with its own message `Add Spec Kit files for <KEY>` | It reuses the one tested path that commits onto an integration branch. The engine still never runs git |
+| How `links_from` gets the PR | `jira.comment` takes `links_from: {pr: <publisher id>, files: <commit step id>}`. The engine reads the publisher's result (`data.url`) and the commit step's paths from the run's results | Platform-made, deterministic, and never model text |
+
 ## Open questions
 
-- **A router with nothing to run.** `clarify` has no default route, and today a router with no match and no default fails. Proposed: allow `default: null` to mean "skip", a small engine change written into the Router contract. The alternative is a no-op tool node.
-- **How `clarify` tests for markers.** Proposed: `questions` always runs and answers a typed `{count, questions}`, and the router's `when` reads `results.questions.data.count > 0`. This needs the router after `questions`, with `post_questions` in the route. The other option is a CEL `contains` on the spec's text, if `results` exposes it.
-- **Links to files:** blob URLs on the PR branch (`…/blob/<branch>/specs/…`) break once the branch is deleted after merge. Proposed: link the PR's "Files changed" anchors instead, which stay valid.
-- **Slug:** taken from the issue summary in the brief (lowercase, at most 40 characters). A summary that gives no slug falls back to `specs/<KEY>/`.
+- None.
