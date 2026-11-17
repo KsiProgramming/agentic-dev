@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 7.5 SDD template (AC-5):
+- Phase 7.5 SDD template (AC-5) ([#243](https://github.com/KsiProgramming/agentic-dev/pull/243)):
   - **Build from a Jira issue.** A new template turns an issue into a pull request in GitHub Spec Kit's stages: a spec writer reads the issue and the code and writes `spec.md`; you approve it (rejecting ends the run with nothing built); its open questions (`[NEEDS CLARIFICATION: …]`) are posted on the issue after their own gate; a planner and a task writer write `plan.md` and `tasks.md`; a lead splits the tasks between engineers while a reviewer checks each requirement; the spec, plan and tasks are committed to `specs/<KEY>-<summary>/`; after you approve the diff, one pull request opens, the issue gets a comment linking it and the files in it, and optionally moves to a status. Start it from a trigger rule or by hand with an issue key.
   - **Runs by hand from an issue.** A workflow whose input is a Jira issue (`input.kind: "jira_issue"`) is told the issue when started by hand, as a triggered run is; `POST /runs` refuses a text that is not one key (`issue_invalid`), a project not picked (`project_not_allowed`) or one picked on several sites (`site_required`). The New run sheet asks for the key on one line. "Answer a Jira issue" declares it too.
   - **Engine.** A rule router may skip when no route matches (`otherwise: "skip"`; the console says nothing ran). `repo.commitArtifacts`, run by the engine, commits run artifacts onto an earlier writer's branch before the gate that shows it. `jira.comment` takes `links_from` and gets a list of links to the pull request and the committed files, made by the platform.
