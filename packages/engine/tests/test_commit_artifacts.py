@@ -82,7 +82,7 @@ def test_a_commit_after_the_gate_needs_another_gate_before_the_publish() -> None
 @pytest.mark.parametrize(
     ("node", "message"),
     [
-        (commit(into="nobody"), "`into` must name an earlier step"),
+        (commit(into="nobody"), "`into` must name a writer that runs before it"),
         (commit(into="spec_writer"), "'spec_writer' is not a writer"),
         (commit(dir="../escape"), "'..'"),
         (commit(dir="/abs"), "not a relative path"),

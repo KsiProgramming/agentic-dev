@@ -1215,38 +1215,44 @@ def create_repo_issues(root: Node) -> list[ValidationIssue]:
 def commit_artifacts_issues(root: Node) -> list[ValidationIssue]:
     """Why the nodes under `root` that commit run artifacts onto a branch (`repo.commitArtifacts`,
     7.5) cannot run, in run order; empty if they can. Each must be a tool node and a step of the
-    root sequence, read at least one artifact (`reads`: what it commits), name in `into` an
-    earlier root step whose branch it commits to (a writer, or an orchestrator whose tasks
-    write), and give `dir`, a relative folder of the repo (`reference` otherwise). That a gate
-    comes between it and a publish of `into` is `publish_gate_issues`'s check."""
+    root sequence, read at least one artifact (`reads`: what it commits), name in `into` a writer
+    that runs before it at the top of the run (a writer, or an orchestrator whose tasks write;
+    one in a loop's body counts at its loop's place, 6.9), and give `dir`, a relative folder of
+    the repo (`reference` otherwise). That a gate comes between it and a publish of `into` is
+    `publish_gate_issues`'s check."""
     issues: list[ValidationIssue] = []
-    top: list[Node] = list(root.steps) if isinstance(root, SequenceNode) else [root]
+    top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else {id(root)}
+    earlier: list[Node] = []
+    loops: set[str] = set()
     for path, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            loops.add(path)
         for tool in sorted(COMMIT_TOOLS.intersection(node_tools(node))):
-            found = _commit_issue(node, tool, top)
+            found = _commit_issue(node, tool, id(node) in top, earlier)
             if found is not None:
                 issues.append(
                     ValidationIssue(code="reference", path=path, node_id=node.id, message=found)
                 )
+        if not scope_of(_runs_in(path, loops)):  # it runs whenever the run gets past it
+            earlier.append(node)
     return issues
 
 
-def _commit_issue(node: Node, tool: str, top: list[Node]) -> str | None:
+def _commit_issue(node: Node, tool: str, at_top: bool, earlier: list[Node]) -> str | None:
     if not isinstance(node, ToolNode):
         return f"node {node.id!r}: {tool} can only be called by a tool node"
-    if not any(step is node for step in top):
+    if not at_top:
         return f"node {node.id!r}: {tool} must be a step of the root sequence"
     if not node.reads:
         return f"node {node.id!r}: {tool} commits the artifacts it reads; give it `reads`"
     if extra := sorted(set(node.args) - {"into", "dir"}):
         return f"node {node.id!r}: {tool} takes `into` and `dir` only, not {extra[0]!r}"
     into = node.args.get("into")
-    earlier = top[: next(i for i, step in enumerate(top) if step is node)]
-    writer = next((step for step in earlier if step.id == into), None)
+    writer = next((n for n in earlier if n.id == into), None)
     if not isinstance(into, str) or writer is None:
         return (
-            f"node {node.id!r}: `into` must name an earlier step of the root sequence whose "
-            "branch it commits to"
+            f"node {node.id!r}: `into` must name a writer that runs before it at the top of the "
+            "run, whose branch it commits to"
         )
     if not _writes(writer):
         return f"node {node.id!r}: `into` {into!r} is not a writer"

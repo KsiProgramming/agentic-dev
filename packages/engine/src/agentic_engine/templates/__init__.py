@@ -30,6 +30,7 @@ from agentic_engine.templates.plan_build_review import (
     PlanBuildReviewParams,
     build_plan_build_review_spec,
 )
+from agentic_engine.templates.sdd import SddParams, build_sdd_spec
 
 type Requirement = Literal["claude", "github", "jira"]
 """A connection a workspace needs before it can run a template: `claude` for its agents,
@@ -86,6 +87,17 @@ TEMPLATES: tuple[Template[Any], ...] = (
         requires=("claude", "github"),
     ),
     Template(
+        id="sdd",
+        name="Build from a Jira issue",
+        description="Writes a specification from a Jira issue and the code, then plans it, "
+        "builds it with a team of engineers and a reviewer, and opens one pull request with the "
+        "specification, plan and tasks. Links it on the issue. You approve the specification "
+        "and the pull request.",
+        params=SddParams,
+        build=build_sdd_spec,
+        requires=("claude", "github", "jira"),
+    ),
+    Template(
         id="jira-issue-answer",
         name="Answer a Jira issue",
         description="Reads a Jira issue and the code it is about, then posts a comment on the "
@@ -112,12 +124,14 @@ __all__ = [
     "License",
     "NewRepo",
     "PlanBuildReviewParams",
+    "SddParams",
     "Requirement",
     "Template",
     "build_audit_spec",
     "build_docs_spec",
     "build_jira_issue_answer_spec",
     "build_plan_build_review_spec",
+    "build_sdd_spec",
     "get_template",
     "wrap_with_create_repo",
 ]
