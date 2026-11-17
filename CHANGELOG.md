@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 7.2 `jira` MCP server: read issue, comment, transition:
+- Phase 7.2 `jira` MCP server: read issue, comment, transition ([#238](https://github.com/KsiProgramming/agentic-dev/pull/238)):
   - **Agents read Jira.** `jira.getIssue` (fields, description and latest comments as Markdown), `jira.search` (JQL, always within the picked projects) and `jira.listTransitions`, on the platform's `jira` MCP server. Every call checks the project allowlist before calling Jira and on the project Jira returns; issue text is data, never instructions; errors are fixed codes, never Jira's words or a token.
   - **Writes only after a gate.** `jira.comment` (with a last line linking the run; a step that runs again does not post twice) and `jira.transition` (by transition id, name or target status) are tool nodes only. Validation adds `jira_write_not_tool_node`, `jira_write_without_gate` and `jira_write_not_shown` (the gate must show the comment it approves); `issue_from: "request"` takes the issue from the run's input and `body_from` the text from an artifact.
   - **Template "Answer a Jira issue"** (`jira-issue-answer`): an agent reads the issue and the code, you approve its comment, and it is posted on the issue.
