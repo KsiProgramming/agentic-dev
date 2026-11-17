@@ -565,3 +565,101 @@ async def test_nothing_from_the_payload_is_logged(
     logged = caplog.text
     assert "Rate limit" not in logged  # the issue's summary
     assert delivery.headers["Authorization"].split()[1] not in logged
+
+
+# --- runs started by hand from an issue (7.5) ----------------------------------------------------
+
+
+def issue_workflow(kind: str = "jira_issue") -> dict[str, Any]:
+    """A workflow whose input is a Jira issue's key."""
+    return {
+        "spec_version": "0",
+        "id": "from-issue",
+        "name": "From an issue",
+        "input": {"required": True, "label": "Which Jira issue?", "kind": kind},
+        "root": {
+            "type": "agent",
+            "id": "reader",
+            "role": "Reader",
+            "instructions": "Your input is a Jira issue key. Read the issue.",
+            "tools": ["jira.getIssue"],
+        },
+    }
+
+
+async def start_by_hand(
+    client: AsyncClient, workspace: str, input: str, kind: str = "jira_issue"
+) -> Any:
+    return await client.post(
+        "/runs",
+        json={
+            "workspace_id": str(workspace_id(workspace)),
+            "workflow": issue_workflow(kind),
+            "input": input,
+            "trigger": "manual",
+        },
+    )
+
+
+async def test_a_run_started_by_hand_from_an_issue_key_keeps_the_issue(
+    client: AsyncClient, workspace: str, sessions: Sessions
+) -> None:
+    await connected(client, workspace)
+
+    started = await start_by_hand(client, workspace, " api-1 ")
+
+    assert started.status_code == 202, started.text
+    [run] = await runs_of(sessions, workspace)
+    assert (run.trigger, run.jira_trigger_id) == ("manual", None)
+    assert run.jira_issue == {
+        "cloud_id": ACME,
+        "site": "acme.atlassian.net",
+        "key": "API-1",
+        "url": "https://acme.atlassian.net/browse/API-1",
+    }
+    async with sessions.begin() as session:
+        await session.execute(update(Run).where(Run.id == run.id).values(status="failed"))
+    rerun = await client.post(f"/runs/{run.id}/rerun")
+    assert rerun.status_code == 202, rerun.text
+    again = (await client.get(f"/runs/{rerun.json()['run_id']}")).json()
+    assert again["jira_issue"]["key"] == "API-1"
+
+
+async def test_a_text_input_is_not_read_as_an_issue(
+    client: AsyncClient, workspace: str, sessions: Sessions
+) -> None:
+    await connected(client, workspace)
+
+    started = await start_by_hand(client, workspace, "API-1", kind="text")
+
+    assert started.status_code == 202, started.text
+    [run] = await runs_of(sessions, workspace)
+    assert run.jira_issue is None
+
+
+@pytest.mark.parametrize(
+    ("input", "status", "code"),
+    [
+        ("fix the login page", 422, "issue_invalid"),
+        ("OPS-3", 422, "project_not_allowed"),
+    ],
+)
+async def test_a_run_by_hand_needs_an_issue_of_a_picked_project(
+    client: AsyncClient, workspace: str, sessions: Sessions, input: str, status: int, code: str
+) -> None:
+    await connected(client, workspace)
+
+    started = await start_by_hand(client, workspace, input)
+
+    assert started.status_code == status
+    assert str(started.json()["detail"]).startswith(code)
+    assert await runs_of(sessions, workspace) == []
+
+
+async def test_a_run_by_hand_from_an_issue_needs_jira(
+    client: AsyncClient, workspace: str, sessions: Sessions
+) -> None:
+    started = await start_by_hand(client, workspace, "API-1")
+
+    assert started.status_code == 409
+    assert str(started.json()["detail"]).startswith("jira_not_connected")

@@ -60,6 +60,9 @@ import {
 import { isReady, useReadiness, type Readiness } from "./readiness";
 import { RepoCombobox } from "./repo-combobox";
 
+/** A Jira issue key, as the API checks it for an input of kind `jira_issue` (7.5). */
+const ISSUE_KEY = /^[A-Za-z][A-Za-z0-9_]*-[1-9][0-9]{0,9}$/;
+
 /** Whether the run works on a repo the GitHub App can reach, or on one it creates. */
 type RepoMode = "existing" | "new";
 
@@ -81,6 +84,8 @@ export interface RunInputSpec {
   label: string;
   description?: string | null;
   example?: string | null;
+  /** Free text, or a Jira issue's key (7.5). */
+  kind?: "text" | "jira_issue";
 }
 
 /** A version of a stored workflow to run (5.7), the connections it needs and what it says about
@@ -148,6 +153,8 @@ function NewRunForm({
     "workflow" in source ? (source.workflow.input ?? null) : (source.template.input ?? null);
   const showInput = "workflow" in source || declared !== null;
   const inputRequired = declared?.required === true;
+  // A Jira issue's key (7.5): one line, in the mono font, checked before the run starts.
+  const issueInput = declared?.kind === "jira_issue";
   const schema = useMemo(
     () =>
       z
@@ -173,6 +180,14 @@ function NewRunForm({
               message: "This workflow needs it to know what to do.",
             });
           }
+          const typed = values.input.trim();
+          if (issueInput && typed !== "" && !ISSUE_KEY.test(typed)) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["input"],
+              message: "Give one Jira issue's key, such as PROJ-12.",
+            });
+          }
           if (!needsRepo) return;
           if (values.repoMode === "existing" && values.repo === "") {
             ctx.addIssue({ code: "custom", path: ["repo"], message: "Pick a repository." });
@@ -182,7 +197,7 @@ function NewRunForm({
             ctx.addIssue({ code: "custom", path: ["newRepo", "name"], message: nameError });
           }
         }),
-    [fields, needsRepo, inputRequired],
+    [fields, needsRepo, inputRequired, issueInput],
   );
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -360,16 +375,31 @@ function NewRunForm({
           render={({ field, fieldState }) => (
             <Field data-invalid={fieldState.error ? true : undefined}>
               <FieldLabel htmlFor={inputId}>{declared?.label ?? "Input"}</FieldLabel>
-              <Textarea
-                id={inputId}
-                rows={4}
-                placeholder={declared?.example ? `e.g. ${declared.example}` : undefined}
-                aria-required={inputRequired ? true : undefined}
-                aria-invalid={fieldState.error ? true : undefined}
-                aria-describedby={fieldState.error ? `${inputId}-error` : `${inputId}-help`}
-                disabled={isSubmitting}
-                {...field}
-              />
+              {issueInput ? (
+                <Input
+                  id={inputId}
+                  className="font-mono"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={declared?.example ? `e.g. ${declared.example}` : undefined}
+                  aria-required={inputRequired ? true : undefined}
+                  aria-invalid={fieldState.error ? true : undefined}
+                  aria-describedby={fieldState.error ? `${inputId}-error` : `${inputId}-help`}
+                  disabled={isSubmitting}
+                  {...field}
+                />
+              ) : (
+                <Textarea
+                  id={inputId}
+                  rows={4}
+                  placeholder={declared?.example ? `e.g. ${declared.example}` : undefined}
+                  aria-required={inputRequired ? true : undefined}
+                  aria-invalid={fieldState.error ? true : undefined}
+                  aria-describedby={fieldState.error ? `${inputId}-error` : `${inputId}-help`}
+                  disabled={isSubmitting}
+                  {...field}
+                />
+              )}
               {fieldState.error?.message ? (
                 <FieldMessage id={`${inputId}-error`}>{fieldState.error.message}</FieldMessage>
               ) : (

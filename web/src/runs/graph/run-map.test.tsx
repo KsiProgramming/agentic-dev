@@ -27,6 +27,7 @@ const withRouter: WorkflowSpec = {
       {
         type: "router",
         id: "report_path",
+        otherwise: "fail",
         routes: [{ id: "clean", when: "true", then: agent("clean_report") }],
         default: agent("standard_report"),
       },

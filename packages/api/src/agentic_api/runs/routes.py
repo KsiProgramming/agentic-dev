@@ -4,12 +4,13 @@ from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -51,6 +52,7 @@ from agentic_engine.agent import IssueBrief
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import StepNotFoundError
+from agentic_engine.graph.compile import ISSUE_KEY
 from agentic_engine.spec import (
     ValidationIssue,
     WorkflowSpec,
@@ -484,6 +486,11 @@ async def start_run(
     when the rule has a run going on the issue. Refusals are `HTTPException`s."""
     prepared = await prepare_run(request, body)
     body = prepared.body
+    manual_issue: dict[str, JsonValue] | None = None
+    if jira_origin is None and prepared.spec.input and prepared.spec.input.kind == "jira_issue":
+        manual_issue = await _manual_jira_issue(
+            _sessions(request), prepared.workspace_id, body.input
+        )
     try:
         run_id = await create_run(
             _sessions(request),
@@ -498,6 +505,7 @@ async def start_run(
             workflow_version=prepared.stored,
             subflows=prepared.called,
             jira_origin=jira_origin,
+            jira_issue=manual_issue,
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e
@@ -637,6 +645,51 @@ _NO_JIRA = (
     "jira_not_connected: the workflow uses jira.* tools, but the workspace's Jira connection "
     "is missing or needs attention; connect it in Settings > Integrations"
 )
+
+
+async def _manual_jira_issue(
+    sessions: async_sessionmaker[AsyncSession], workspace_id: UUID, input: str
+) -> dict[str, JsonValue]:
+    """The Jira issue a run started by hand works on (7.5), when its workflow's input is an issue
+    key (`input.kind: "jira_issue"`): `{cloud_id, site, key, url}`, on the enabled site where the
+    workspace picked its project, as a trigger's run keeps it. Refused with `422`
+    (`issue_invalid`, `project_not_allowed`, `site_required` when several sites have that
+    project) or `409` (`jira_not_connected`)."""
+    key = input.strip().upper()
+    if not ISSUE_KEY.match(key):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "issue_invalid: this workflow starts from a Jira issue; give its key, such as PROJ-12",
+        )
+    connection = await get_jira_connection(sessions, workspace_id)
+    if connection is None or connection.needs_attention is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, _NO_JIRA)
+    project = key.rsplit("-", 1)[0]
+    sites = [
+        site
+        for site in connection.sites
+        if site.enabled and any(p.key.upper() == project for p in site.projects)
+    ]
+    if not sites:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"project_not_allowed: {project} is not a project this workspace picked for Jira "
+            "(Settings > Integrations)",
+        )
+    if len(sites) > 1:
+        hosts = ", ".join(urlsplit(site.url).netloc or site.cloud_id for site in sites)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"site_required: {project} is picked on several Jira sites ({hosts}); start the run "
+            "from a trigger on the site you mean",
+        )
+    site = sites[0]
+    return {
+        "cloud_id": site.cloud_id,
+        "site": urlsplit(site.url).netloc or site.cloud_id,
+        "key": key,
+        "url": f"{site.url.rstrip('/')}/browse/{key}",
+    }
 
 
 async def _jira_ready(sessions: async_sessionmaker[AsyncSession], workspace_id: UUID) -> bool:

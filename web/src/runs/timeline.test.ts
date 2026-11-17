@@ -437,6 +437,7 @@ describe("buildTimeline with routers (4.6)", () => {
         {
           type: "router",
           id: "report_path",
+          otherwise: "fail",
           routes: [
             {
               id: "clean",

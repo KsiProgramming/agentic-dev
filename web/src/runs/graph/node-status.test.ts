@@ -221,6 +221,7 @@ describe("router statuses (4.6)", () => {
     root: {
       type: "router",
       id: "report_path",
+      otherwise: "fail",
       routes: [
         { id: "clean", when: "true", then: agent("clean_report") },
         {

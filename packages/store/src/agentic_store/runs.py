@@ -66,6 +66,7 @@ async def create_run(
     workflow_version: tuple[str, int] | None = None,
     subflows: dict[str, JsonValue] | None = None,
     jira_origin: JiraOrigin | None = None,
+    jira_issue: dict[str, JsonValue] | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) or the stored workflow version it was read
@@ -78,7 +79,9 @@ async def create_run(
 
     With `jira_origin` (7.3) the run is a Jira trigger's: its trigger is `jira`, it keeps the rule
     and the issue, and the rule's fire and audit entry are committed with it. It raises
-    `TriggerRunActiveError` when the rule already has a run going on the issue."""
+    `TriggerRunActiveError` when the rule already has a run going on the issue. Without one,
+    `jira_issue` (`{cloud_id, site, key, url}`, 7.5) is the issue a run started by hand works on,
+    which its agents are then told as a triggered run's are."""
     run_id = uuid4()
     async with sessions.begin() as session:
         if jira_origin is not None:
@@ -100,6 +103,7 @@ async def create_run(
             subflows=subflows or None,
             trigger=trigger,
             branch=repo.ref if repo else None,
+            jira_issue=jira_issue,
         )
         session.add(run)
         audit(

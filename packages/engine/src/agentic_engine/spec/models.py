@@ -2324,6 +2324,12 @@ class WorkflowInput(_Base):
     example: str | None = Field(
         default=None, max_length=300, description="An example input, shown in the empty field."
     )
+    kind: Literal["text", "jira_issue"] = Field(
+        default="text",
+        description='What the input is: free text, or the key of a Jira issue ("jira_issue", '
+        "7.5). A run started by hand with an issue key is then told the issue, as a run a Jira "
+        "trigger started is.",
+    )
 
 
 class WorkflowSpec(_Base):
