@@ -224,6 +224,16 @@ test("settings: triggers", async ({ page, request }) => {
   await checkPage(page, "settings-triggers");
 });
 
+test("settings: the Jira fields sheet", async ({ page, request }) => {
+  await ensureJiraTrigger(request);
+  await page.goto("/settings/integrations");
+  await page.getByRole("button", { name: "Map fields of Acme" }).click();
+  const sheet = page.getByTestId("jira-fields-sheet");
+  await expect(sheet.getByLabel("Story points")).toBeEnabled();
+  await expectNoHorizontalScroll(page);
+  await screenshot(page, "settings-jira-fields");
+});
+
 test("audit log", async ({ page, request }) => {
   await startRun(request, [WRITER], "E2E audit layout");
   await page.goto("/audit");

@@ -15,7 +15,7 @@ import type { ReceivedRunEvent } from "../types";
 import { RawEvents } from "./raw-events";
 import { stepBadge } from "./step-status";
 import type { StepEntry, StepRow } from "./step-entries";
-import { StepInput } from "./step-input";
+import { StepInput, type RunContextView } from "./step-input";
 import { elapsedMs } from "./step-list";
 import { childRows, StepOutput } from "./step-output";
 import { StepUsage } from "./step-usage";
@@ -43,6 +43,7 @@ export function StepPanel({
   entries,
   spec,
   runInput,
+  runContext = null,
   first,
   events,
   now,
@@ -59,6 +60,7 @@ export function StepPanel({
   entries: StepEntry[];
   spec: WorkflowSpec | null;
   runInput: string | null;
+  runContext?: RunContextView | null;
   first: boolean;
   events: ReceivedRunEvent[];
   now: number;
@@ -140,6 +142,7 @@ export function StepPanel({
             row={row}
             spec={spec}
             runInput={runInput}
+            runContext={runContext}
             first={first}
           />
         </TabsContent>

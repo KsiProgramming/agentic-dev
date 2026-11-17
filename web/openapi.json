@@ -1564,6 +1564,7 @@
                       "connection.needs_attention",
                       "jira.site_updated",
                       "jira.projects_changed",
+                      "jira.fields_mapped",
                       "jira.trigger_created",
                       "jira.trigger_updated",
                       "jira.trigger_deleted",
@@ -2473,6 +2474,279 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/fields": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "List Fields",
+        "description": "The site's fields that can hold `role`, read live from Jira: a custom paragraph or short\ntext for acceptance criteria, a custom number for story points. With `project` (a picked\nproject's key), that team-managed project's own fields are listed too. Fields named as the\nrole usually is come first.",
+        "operationId": "listJiraFields",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "cloud_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$",
+              "title": "Cloud Id"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "acceptance_criteria",
+                "story_points"
+              ],
+              "type": "string",
+              "title": "Role"
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraFieldList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or its Jira connection has no such site"
+          },
+          "409": {
+            "description": "`no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Atlassian answered with an error or could not be reached"
+          },
+          "503": {
+            "description": "No Atlassian OAuth app, or no master key, is configured on the API"
+          },
+          "422": {
+            "description": "`project_not_allowed`: `project` is not picked on the site.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects/{project_key}/fields": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Get Project Fields",
+        "description": "The project's mapped fields, as stored.",
+        "operationId": "getJiraProjectFields",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "cloud_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$",
+              "title": "Cloud Id"
+            }
+          },
+          {
+            "name": "project_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+              "title": "Project Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraProjectFieldsOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or no such picked project on the site"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Put Project Fields",
+        "description": "Replace the project's mapping. Each field is checked with Jira, and its name is stored\nas Jira gives it.",
+        "operationId": "putJiraProjectFields",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "cloud_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$",
+              "title": "Cloud Id"
+            }
+          },
+          {
+            "name": "project_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+              "title": "Project Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutJiraProjectFields"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraProjectFieldsOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or its Jira connection has no such site"
+          },
+          "409": {
+            "description": "`no_connection`: the workspace has no Jira connection. `needs_attention`: Atlassian no longer accepts it; connect again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Atlassian answered with an error or could not be reached"
+          },
+          "503": {
+            "description": "No Atlassian OAuth app, or no master key, is configured on the API"
+          },
+          "422": {
+            "description": "`project_not_allowed`: the project is not picked on the site. `unknown_field`: a field id is not one of the site's fields the project can use. `field_type_mismatch`: a field cannot hold its role. Nothing was stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
                 }
               }
             }
@@ -3953,6 +4227,7 @@
               "connection.needs_attention",
               "jira.site_updated",
               "jira.projects_changed",
+              "jira.fields_mapped",
               "jira.trigger_created",
               "jira.trigger_updated",
               "jira.trigger_deleted",
@@ -5116,6 +5391,88 @@
         "title": "Into",
         "description": "Into a container: a sequence's step or a parallel's branch at `index`; a loop's, map's or\norchestrator's body, which must be empty; a router route's `then`, or its `default`, which must\nbe empty."
       },
+      "IssueBrief": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "project": {
+            "type": "string",
+            "title": "Project"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": ""
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": ""
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Labels",
+            "default": []
+          },
+          "components": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Components",
+            "default": []
+          },
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          },
+          "story_points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Points"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "url",
+          "project"
+        ],
+        "title": "IssueBrief",
+        "description": "The Jira issue a run was started from (7.4), as the platform read it once, on the run's\nfirst attempt: what every agent of the run is told about it. Its text is Markdown written in\nJira; it is data, never instructions."
+      },
       "IssueCode": {
         "type": "string",
         "enum": [
@@ -5277,7 +5634,53 @@
           "message"
         ],
         "title": "JiraErrorDetail",
-        "description": "The `detail` of a refused Jira request: `code` says what went wrong (`no_connection`,\n`needs_attention`, `unknown_project`), `message` says it for people."
+        "description": "The `detail` of a refused Jira request: `code` says what went wrong (`no_connection`,\n`needs_attention`, `unknown_project`, `project_not_allowed`, `unknown_field`,\n`field_type_mismatch`), `message` says it for people."
+      },
+      "JiraFieldList": {
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/JiraFieldOut"
+            },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fields"
+        ],
+        "title": "JiraFieldList",
+        "description": "The site's fields that fit the role, suggested ones first, read live from Jira."
+      },
+      "JiraFieldOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "suggested": {
+            "type": "boolean",
+            "title": "Suggested"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "suggested"
+        ],
+        "title": "JiraFieldOut",
+        "description": "A field of the site that can hold the role asked for. `type` says what it is, as a person\nreads it (`Paragraph`, `Short text`, `Number`); `suggested` when its name is the role's\nusual one."
       },
       "JiraIssueRef": {
         "properties": {
@@ -5305,6 +5708,52 @@
         "title": "JiraIssueRef",
         "description": "The Jira issue a trigger started the run on (7.3)."
       },
+      "JiraMappedFieldOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "JiraMappedFieldOut",
+        "description": "A Jira field mapped to a role; `name` as it was when mapped."
+      },
+      "JiraProjectFieldsOut": {
+        "properties": {
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JiraMappedFieldOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "story_points": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JiraMappedFieldOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "JiraProjectFieldsOut",
+        "description": "Which of the project's Jira fields holds each role (7.4); `null` when unmapped."
+      },
       "JiraProjectOut": {
         "properties": {
           "id": {
@@ -5318,6 +5767,10 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/JiraProjectFieldsOut",
+            "description": "The project's mapped fields (7.4); all `null` in a project search."
           }
         },
         "type": "object",
@@ -6857,6 +7310,42 @@
         ],
         "title": "PutClaudeConnection"
       },
+      "PutJiraProjectFields": {
+        "properties": {
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_.:-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          },
+          "story_points": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_.:-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Points"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PutJiraProjectFields",
+        "description": "The project's whole mapping: a field id per role, `null` to leave it unmapped."
+      },
       "PutJiraProjects": {
         "properties": {
           "project_ids": {
@@ -8012,6 +8501,17 @@
             "type": "object",
             "title": "Calls",
             "description": "Each `subflow` of the run (6.5), by its node id: the workflow it calls and that workflow's root as it runs in this run, a subflow inside it having an entry of its own. Empty when the run calls no workflow."
+          },
+          "jira_brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IssueBrief"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Jira issue as every agent of the run was told it (7.4), read before its first step; `null` for a run no Jira trigger started, or before it is read. With the repo and the input, it is the run context the console shows."
           },
           "duration_ms": {
             "anyOf": [

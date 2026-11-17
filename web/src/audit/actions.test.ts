@@ -126,6 +126,29 @@ describe("describe", () => {
       "3 projects of Acme · API, WEB and 1 more",
     ],
     [
+      "mapped Jira fields",
+      {
+        action: "jira.fields_mapped",
+        run_id: null,
+        details: {
+          site: "Acme",
+          cloud_id: "c1",
+          project: "API",
+          fields: { acceptance_criteria: "customfield_1", story_points: "customfield_2" },
+        },
+      },
+      "API: acceptance criteria, story points",
+    ],
+    [
+      "a Jira mapping cleared",
+      {
+        action: "jira.fields_mapped",
+        run_id: null,
+        details: { site: "Acme", cloud_id: "c1", project: "API", fields: {} },
+      },
+      "API: no field mapped",
+    ],
+    [
       "a Jira trigger added",
       {
         action: "jira.trigger_created",
@@ -279,6 +302,7 @@ test("each category has its actions", () => {
     "connection.needs_attention",
     "jira.site_updated",
     "jira.projects_changed",
+    "jira.fields_mapped",
     "jira.trigger_created",
     "jira.trigger_updated",
     "jira.trigger_deleted",

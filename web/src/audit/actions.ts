@@ -81,6 +81,7 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
     icon: ListChecksIcon,
     category: "settings",
   },
+  "jira.fields_mapped": { label: "Jira fields mapped", icon: ListChecksIcon, category: "settings" },
   "jira.trigger_created": { label: "Jira trigger added", icon: ZapIcon, category: "settings" },
   "jira.trigger_updated": { label: "Jira trigger changed", icon: ZapIcon, category: "settings" },
   "jira.trigger_deleted": { label: "Jira trigger deleted", icon: Trash2Icon, category: "settings" },
@@ -319,6 +320,20 @@ export function describe(event: AuditEvent): string {
         `${plural(total, "project")} of ${site}`,
         keys.length > 0 && `${keys.join(", ")}${more > 0 ? ` and ${more} more` : ""}`,
       );
+    }
+    case "jira.fields_mapped": {
+      const project = text(d, "project") ?? "a project";
+      const fields = d.fields;
+      const roles =
+        fields && typeof fields === "object" && !Array.isArray(fields) ? Object.keys(fields) : [];
+      const named = roles.map((r) =>
+        r === "acceptance_criteria"
+          ? "acceptance criteria"
+          : r === "story_points"
+            ? "story points"
+            : r,
+      );
+      return named.length > 0 ? `${project}: ${named.join(", ")}` : `${project}: no field mapped`;
     }
     case "jira.trigger_created":
     case "jira.trigger_updated":

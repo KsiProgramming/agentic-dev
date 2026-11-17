@@ -23,6 +23,9 @@ export type JiraSite = components["schemas"]["JiraSiteOut"];
 export type JiraProject = components["schemas"]["JiraProjectOut"];
 export type JiraProjectPage = components["schemas"]["JiraProjectPage"];
 export type JiraWebhook = components["schemas"]["JiraWebhookOut"];
+export type JiraField = components["schemas"]["JiraFieldOut"];
+export type JiraProjectFields = components["schemas"]["JiraProjectFieldsOut"];
+export type JiraFieldRole = keyof JiraProjectFields;
 export type JiraTrigger = components["schemas"]["JiraTriggerOut"];
 export type JiraTriggerIn = components["schemas"]["JiraTriggerIn"];
 export type JiraTriggerPatch = components["schemas"]["JiraTriggerPatch"];
@@ -510,6 +513,78 @@ export function usePutJiraProjects({
         }),
       );
       if (!data) throw new ApiError(response.status, error, "Could not save the projects");
+      return data;
+    },
+    onSuccess: () =>
+      void queries.invalidateQueries({ queryKey: jiraKey(workspaceId), exact: true }),
+  });
+}
+
+/** The site's fields that can hold `role` (7.4), read live from Jira, suggested ones first. With
+ * `projectKey`, that team-managed project's own fields are listed too. */
+export function useJiraFields({
+  workspaceId,
+  cloudId,
+  role,
+  projectKey,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  cloudId: string;
+  role: JiraFieldRole;
+  projectKey: string;
+  baseUrl?: string;
+}) {
+  return useQuery({
+    queryKey: [...jiraKey(workspaceId), "fields", cloudId, role, projectKey] as const,
+    enabled: Boolean(cloudId && projectKey),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/jira/sites/{cloud_id}/fields", {
+          params: {
+            path: { workspace_id: workspaceId, cloud_id: cloudId },
+            query: { role, project: projectKey },
+          },
+        }),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not load the fields");
+      return data.fields;
+    },
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Replaces a picked project's field mapping (7.4): a field id per role, or `null`. */
+export function usePutJiraProjectFields({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      cloudId,
+      projectKey,
+      fields,
+    }: {
+      cloudId: string;
+      projectKey: string;
+      fields: Record<JiraFieldRole, string | null>;
+    }) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).PUT(
+          "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects/{project_key}/fields",
+          {
+            params: {
+              path: { workspace_id: workspaceId, cloud_id: cloudId, project_key: projectKey },
+            },
+            body: fields,
+          },
+        ),
+      );
+      if (!data) throw new ApiError(response.status, error, "Could not save the fields");
       return data;
     },
     onSuccess: () =>

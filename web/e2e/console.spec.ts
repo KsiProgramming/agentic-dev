@@ -214,3 +214,45 @@ test("a live run shows what the agent is doing, with a timer that ticks", async 
   const first = await elapsed.textContent();
   await expect(elapsed).not.toHaveText(first ?? "", { timeout: 3_000 });
 });
+
+test("a Jira run's Input tab shows the issue its agents were told", async ({ page, request }) => {
+  // The brief is read by the worker from Jira (7.4); this run's detail is given one, so the
+  // console's rendering is checked on a real run without a signed delivery.
+  const runId = await startRun(request, [WRITER], "E2E run context");
+  await page.route(
+    (url) => url.origin === new URL(apiURL).origin && url.pathname === `/runs/${runId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const run = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        response,
+        json: {
+          ...run,
+          jira_brief: {
+            key: "API-1",
+            url: "https://acme.atlassian.net/browse/API-1",
+            project: "API",
+            type: "Story",
+            status: "Ready",
+            summary: "Rate limit the public endpoints",
+            labels: ["backend"],
+            components: ["gateway"],
+            acceptance_criteria: "- A client over 100 requests a minute gets `429`.",
+            story_points: 5,
+            description: "The public endpoints have no rate limit.",
+          },
+        },
+      });
+    },
+  );
+
+  await page.goto(`/runs/${runId}?tab=input`);
+  const panel = page.getByTestId("step-panel");
+  await expect(panel.getByRole("heading", { name: "Run context" })).toBeVisible();
+  const issue = panel.getByTestId("run-context-issue");
+  await expect(
+    issue.getByRole("heading", { name: "API-1: Rate limit the public endpoints" }),
+  ).toBeVisible();
+  await expect(issue).toContainText("Story points: 5");
+  await expect(issue).toContainText("A client over 100 requests a minute gets 429.");
+});

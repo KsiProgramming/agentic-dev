@@ -29,10 +29,10 @@ Contract first, then the backend from the client outward, then the UI and the pr
 - [x] Engine and worker tests: what an agent *receives* (system prompt carries the brief with mapped AC and components; a second agent after a parallel still has it), a brief read once across a resume, no read for a run without `jira_issue`.
 
 ## 6. Web
-- [ ] API client regenerated; `JiraFieldsSheet` (`@/settings/jira-fields`), shaped as the projects sheet: project select, a select per role (suggested first, type in caption), Save fields; refusals in an `Alert`.
-- [ ] Jira card: "Map fields" on each site row; each project shows "Fields mapped" / "No fields mapped".
-- [ ] Run console Input tab: "Run context" section (repository, request, Jira issue brief as sanitised Markdown), from `GET /runs/{id}` (`context` added to the summary).
-- [ ] Unit tests; e2e for mapping a field (fake Atlassian) and the Input tab's brief; axe and layout screenshots.
+- [x] API client regenerated; `JiraFieldsSheet` (`@/settings/jira-fields-sheet`), shaped as the projects sheet: project select, a select per role (suggested first, type in caption), Save fields; refusals in an `Alert`.
+- [x] Jira card: "Map fields" on each site row; each project shows "Fields mapped" / "No fields mapped".
+- [x] Run console Input tab: "Run context" section (repository, request, Jira issue brief as sanitised Markdown), from `GET /runs/{id}` (`jira_brief` added to the run detail; the repo and input were already there).
+- [x] Unit tests; e2e for mapping a field (fake Atlassian) and the Input tab's brief; axe and layout screenshots.
 
 ## 7. Spec-writer test workflow and real run
 - [x] Test fixture workflow: `spec_writer` (read tools, `jira.getIssue`) writing `spec.md` from the brief; used by the engine test of group 5.
