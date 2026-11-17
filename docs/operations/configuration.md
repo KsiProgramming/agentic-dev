@@ -20,6 +20,7 @@ Files referenced below (master key, GitHub App key) should be mounted read-only 
 | `ATLASSIAN_CLIENT_SECRET_FILE` | unset | Path to a file holding the app's client secret. Required with the client id. |
 | `WEB_BASE_URL` | `http://localhost:3000` | Public URL of the web app; the GitHub install flow and the Jira consent redirect the browser there. |
 | `API_BASE_URL` | `http://localhost:8000` | Public URL of the API: the Jira callback URL is `<API_BASE_URL>/jira/callback` (also used by the fake GitHub install flow). |
+| `JIRA_WEBHOOK_BASE_URL` | unset | Where Jira posts the deliveries that start runs (`<this>/jira/webhooks`, 7.3); unset, `API_BASE_URL`. Jira must reach it from the internet. |
 | `AGENTIC_ENV` | `development` | `production` refuses the fakes below. **Set it in every real deployment.** |
 | `CLAUDE_KEY_CHECK` | `anthropic` | How a Claude key is verified before it is stored: one real call (`anthropic`) or by prefix `sk-ant-test-` (`fake`, tests only). |
 | `AGENTIC_GITHUB` | `app` | `fake` replaces GitHub with local bare repos (dev and e2e only). |
@@ -48,6 +49,7 @@ Files referenced below (master key, GitHub App key) should be mounted read-only 
 | `QUEUE_POLL_S` | `1.0` | How long one queue poll blocks. |
 | `CANCEL_POLL_S` | `1.0` | How often a running run is checked for a cancel request. |
 | `GATE_SWEEP_S` | `30` | How often expired gates are swept. |
+| `JIRA_WEBHOOK_SWEEP_S` | `21600` (6 h) | How often each worker renews the Jira trigger webhooks that expire within 10 days, registers again those Jira dropped, and prunes deliveries older than 30 days (7.3). |
 | `READY_FILE` | unset | File touched once the worker is ready (container health checks). |
 | `FAKE_STEP_DELAY_S` | `0` | Pause between fake runtime events, so demo runs stream visibly. |
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY_FILE` | unset | Same App as the API. Unset: GitHub repos are cloned anonymously and `github.*` tools fail. |

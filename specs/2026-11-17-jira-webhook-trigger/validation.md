@@ -46,7 +46,9 @@ Made checkable:
 - [ ] `uv run ruff check`, the repo's Python type check, and the Python test suite are green. Never run `packages/sandbox/tests` whole against the dev stack.
 
 ## Manual / demo checks
-- [ ] **Spike recorded:** tech-stack's "Jira triggers (API contract)" names the JWT claims, the payload fields, the accepted `jqlFilter` clauses and the per-site webhook limit, each confirmed on a real site. Any decision the spike changed is updated in requirements.md.
+- [x] **Spike recorded:** tech-stack's "Jira triggers (API contract)" names the JWT claims, the payload fields, the accepted `jqlFilter` clauses and the per-site webhook limit, each confirmed on a real site. Any decision the spike changed is updated in requirements.md.
+  - Done on 2026-11-17 on a Jira Cloud site with the deployment's own app, through an ngrok tunnel. Confirmed there: the HS256 JWT verified with the client secret; the payload fields, including labels as space-separated lists; one delivery listing every matched webhook; `fieldIdsFilter` dropping summary edits; one URL per account (refused otherwise); and `refresh` answering `200` for an unknown id. From Atlassian's docs: 5 webhooks per account per site, the identifier stable across retries, and `labels` not a documented `jqlFilter` clause. A forced `500` was not retried within 10 minutes, so retry dedupe rests on the documented identifier. Three decisions changed (the receiver URL, the filter, the loop guard), and requirements.md records them.
+  - The spike left two test issues on the site (KAN-2, KAN-3, titled "[7.3 spike] …"). Its webhooks were deleted.
 - [ ] **Real demo**, with the API reachable through a tunnel (`JIRA_WEBHOOK_BASE_URL`), Jira connected with the account that owns the Atlassian app, one project picked, and `AGENTIC_RUNTIME=claude`:
   1. Create the rule above in Settings › Triggers. The site's line shows "Listening".
   2. Move an issue to In Progress in Jira. One run appears in the runs list as "Jira · PROJ-n".
