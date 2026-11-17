@@ -34,6 +34,7 @@ from agentic_store import (
     get_jira_connection,
     get_jira_webhook,
     jira_trigger_projects,
+    jira_webhook_sites,
     list_jira_webhooks,
     lock_jira_webhook,
     save_jira_webhook,
@@ -67,9 +68,12 @@ async def sync_jira_webhooks(
     url: str | None,
     *,
     renew_within: timedelta = RENEW_WITHIN,
+    wait: bool = True,
 ) -> list[SiteSync]:
     """Brings the workspace's webhooks in step with its rules, site by site. `url` is where
-    Jira must post; `None` keeps each row's (the sweep's renewals)."""
+    Jira must post; `None` keeps each row's (the sweep's renewals). With `wait` (a change in
+    the API) it waits for a sweep working on the same site; without (the sweep) it skips the
+    site (`busy`), which the other's work covers."""
     connection = await get_jira_connection(sessions, workspace_id)
     wanted = _wanted(connection, await jira_trigger_projects(sessions, workspace_id))
     held = {row.cloud_id for row in await list_jira_webhooks(sessions, workspace_id)}
@@ -78,7 +82,7 @@ async def sync_jira_webhooks(
     for cloud_id in sorted(set(wanted) | held):
         site = _Site(sessions, keys, platform, workspace_id, cloud_id)
         async with sessions.begin() as session:
-            if not await lock_jira_webhook(session, workspace_id, cloud_id):
+            if not await lock_jira_webhook(session, workspace_id, cloud_id, wait=wait):
                 results.append(SiteSync(cloud_id, "busy"))
                 continue
             results.append(
@@ -86,6 +90,25 @@ async def sync_jira_webhooks(
                     wanted.get(cloud_id, []), url, renew_within, reachable=cloud_id in reachable
                 )
             )
+    return results
+
+
+async def renew_jira_webhooks(
+    sessions: async_sessionmaker[AsyncSession],
+    keys: KeyProvider,
+    platform: JiraPlatform,
+    *,
+    renew_within: timedelta = RENEW_WITHIN,
+) -> list[tuple[UUID, SiteSync]]:
+    """The workers' sweep: every workspace with a webhook or an enabled rule is synced with the
+    URL stored on its rows, so a webhook near its expiry is renewed and one gone from Jira is
+    registered again. One workspace's failure does not stop the others."""
+    results: list[tuple[UUID, SiteSync]] = []
+    for workspace_id in sorted({w for w, _ in await jira_webhook_sites(sessions)}):
+        synced = await sync_jira_webhooks(
+            sessions, keys, platform, workspace_id, None, renew_within=renew_within, wait=False
+        )
+        results.extend((workspace_id, site) for site in synced)
     return results
 
 

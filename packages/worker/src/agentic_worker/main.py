@@ -67,6 +67,10 @@ A gate waits at most its time to live (phase 11.3). Every `GATE_SWEEP_S`, each w
 the runs whose gate has expired (`agentic_store.expire_gates`) and queues them; they are ended
 like a cancelled run, with `run_cancelled` `{reason: "Approval expired", expired: true}`.
 
+Jira trigger webhooks expire after 30 days (phase 7.3). Every `JIRA_WEBHOOK_SWEEP_S`, each worker
+renews those that expire within 10 days, registers again those Jira dropped, and prunes old
+deliveries (`agentic_jira.renew_jira_webhooks`); two workers never work on one site at once.
+
 Postgres is the queue's source of truth (phase 12.1). A run id popped from Redis by a worker that
 died before claiming it is lost from Redis, so when it starts and every `QUEUE_SWEEP_S` each worker
 announces again the runs `queued` with no lease for longer than `QUEUE_STALE_S`
@@ -159,6 +163,7 @@ from agentic_jira import (
     JiraConfigError,
     JiraPlatform,
     WorkspaceJira,
+    renew_jira_webhooks,
 )
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
@@ -208,6 +213,7 @@ from agentic_store import (
     max_event_seq,
     open_checkpointer,
     pending_decision,
+    prune_jira_deliveries,
     reclaim_expired_run,
     record_base_sha,
     release_run,
@@ -293,6 +299,9 @@ class WorkerSettings(BaseSettings):
     # How often kept sandboxes past their time to live are removed, and saved bundles past their
     # run's retention dropped (12.3).
     sandbox_sweep_s: float = Field(default=60.0, gt=0)
+    # How often the Jira trigger webhooks are renewed before their 30-day expiry, registered
+    # again if Jira dropped them, and old deliveries pruned (7.3).
+    jira_webhook_sweep_s: float = Field(default=21600.0, gt=0)
     # Claims of one run before it fails instead of being resumed again (a run that kills workers).
     max_attempts: int = Field(default=3, ge=1)
     # The platform's GitHub App (the same settings as the API's). Unset, runs clone GitHub repos
@@ -768,6 +777,32 @@ async def _sweep_sandboxes(worker: Worker) -> None:
         except Exception:
             log.warning("could not drop old saved bundles", exc_info=True)
         await asyncio.sleep(worker.settings.sandbox_sweep_s)
+
+
+async def _sweep_jira_webhooks(worker: Worker) -> None:
+    """Every `jira_webhook_sweep_s`, renew the workspaces' Jira trigger webhooks that expire
+    within 10 days, register again those Jira dropped, and prune deliveries past their
+    retention (7.3). Does nothing without an Atlassian app and a master key."""
+    while True:
+        if worker.jira is not None and worker.keys is not None:
+            try:
+                for workspace_id, site in await renew_jira_webhooks(
+                    worker.sessions, worker.keys, worker.jira
+                ):
+                    if site.state == "failed":
+                        log.warning(
+                            "jira webhook of workspace %s on %s: %s",
+                            workspace_id,
+                            site.cloud_id,
+                            site.error,
+                        )
+            except Exception:
+                log.warning("could not renew the Jira trigger webhooks", exc_info=True)
+        try:
+            await prune_jira_deliveries(worker.sessions)
+        except Exception:
+            log.warning("could not prune old Jira deliveries", exc_info=True)
+        await asyncio.sleep(worker.settings.jira_webhook_sweep_s)
 
 
 async def fail_unloadable(worker: Worker, run: UnloadableRun) -> None:
@@ -1300,6 +1335,8 @@ async def run(
             stack.push_async_callback(_stop_task, requeue)
             kept = asyncio.create_task(_sweep_sandboxes(worker))
             stack.push_async_callback(_stop_task, kept)
+            webhooks = asyncio.create_task(_sweep_jira_webhooks(worker))
+            stack.push_async_callback(_stop_task, webhooks)
             while not stop.is_set():
                 run = await _next_run(worker, redis)
                 if isinstance(run, UnloadableRun):

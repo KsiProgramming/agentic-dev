@@ -557,12 +557,18 @@ async def delete_jira_webhook(
         await session.delete(row)
 
 
-async def lock_jira_webhook(session: AsyncSession, workspace_id: UUID, cloud_id: str) -> bool:
+async def lock_jira_webhook(
+    session: AsyncSession, workspace_id: UUID, cloud_id: str, *, wait: bool = False
+) -> bool:
     """Takes the transaction lock that serialises work on one workspace's webhook on a site
-    (a rule change in the API, the workers' sweep); `False` if another holds it."""
+    (a rule change in the API, the workers' sweep). With `wait`, waits for it; else `False` if
+    another holds it."""
+    key = {"key": f"jira-webhook:{workspace_id}:{cloud_id}"}
+    if wait:
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), key)
+        return True
     taken = await session.scalar(
-        text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"),
-        {"key": f"jira-webhook:{workspace_id}:{cloud_id}"},
+        text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"), key
     )
     return bool(taken)
 

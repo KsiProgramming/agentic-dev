@@ -59,6 +59,7 @@ from agentic_jira.sync import (
     WEBHOOK_PATH,
     SiteSync,
     remove_jira_webhooks,
+    renew_jira_webhooks,
     sync_jira_webhooks,
     webhook_url,
 )
@@ -125,6 +126,7 @@ __all__ = [
     "parse_event",
     "project_filter",
     "remove_jira_webhooks",
+    "renew_jira_webhooks",
     "sign_delivery",
     "sync_jira_webhooks",
     "to_markdown",
