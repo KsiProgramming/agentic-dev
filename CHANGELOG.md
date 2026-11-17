@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 7.6 PR review comments feed a new loop iteration:
+- Phase 7.6 PR review comments feed a new loop iteration ([#244](https://github.com/KsiProgramming/agentic-dev/pull/244)):
   - **`@<app> fix this` on a pull request.** On a pull request a run opened, a comment, review or inline comment `@<app slug> fix this` from someone with write access starts a follow-up run: a rerun of the latest run on the pull request from its workflow's `on_review.from` (SDD: `review_loop`), on the pull request's code (the latest saved branches, gate edits included). The comment gets 👀; a command while a run on the pull request is going, past the workspace's follow-ups, or on a closed pull request gets 😕. Bots, people without write access and other comments start nothing.
   - **The review as context.** Before its first step the follow-up checks nobody else pushed to the pull request (else it fails `pr_head_moved`), reads the review once (the comment that asked, and the comments people with write access left since the last push, inline ones with file, line and diff) and tells every agent it between `<pr-review>` tags, as data, cut at 16,000 characters. SDD's lead plans only what the review asks, the engineers say which comment each change answers, the synthesizer lists the changes for the review and the reviewer checks each comment.
   - **Same pull request.** After its gate, `github.openPR` pushes a fast-forward onto the pull request's branch (never a force push), opens no new pull request, replies once "Pushed `<sha>` for @author's review, run <id>" and answers `updated: true`; SDD comments the links on the Jira issue again.
