@@ -554,8 +554,13 @@ async def prepare_run(request: Request, body: CreateRunRequest) -> PreparedRun:
     if body.stored_workflow is not None:
         body, stored = await _with_stored_spec(sessions, workspace_id, body)
     spec, repo = body.spec(), body.repo
-    needs_text = spec.input is not None and spec.input.kind != "spec_file"
-    if needs_text and spec.input is not None and spec.input.required and not body.input.strip():
+    # A spec file input (7.7) is checked with the file, once the run is about to be created.
+    if (
+        spec.input is not None
+        and spec.input.kind != "spec_file"
+        and spec.input.required
+        and not body.input.strip()
+    ):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"This workflow needs an input: {spec.input.label}",
@@ -699,6 +704,7 @@ async def _spec_file(request: Request, prepared: PreparedRun) -> dict[str, JsonV
         return None
     path: str | None = None
     ref: str | None = None
+    text = ""
     if isinstance(given, SpecFileUpload):
         name, text = given.name.strip(), given.content
         if "/" in name or "\\" in name:
@@ -707,9 +713,10 @@ async def _spec_file(request: Request, prepared: PreparedRun) -> dict[str, JsonV
         path = _repo_path(given.path)
         name = path.rsplit("/", 1)[-1]
         ref = prepared.repo.ref if prepared.repo is not None else None
-        text = await _repo_spec_file(request, prepared, path)
     if not name.lower().endswith(SPEC_FILE_EXTENSIONS):
         raise _unprocessable("spec_file_invalid", f"{name} is not a Markdown file (.md)")
+    if path is not None:  # read only once the name is known to be Markdown
+        text = await _repo_spec_file(request, prepared, path)
     try:
         data = text.encode()
     except UnicodeEncodeError:

@@ -176,7 +176,8 @@ async def test_a_rerun_keeps_the_file_and_never_reads_the_repo_again(
         ({"source": "repo", "path": "../secrets.md"}, "path_invalid"),
         ({"source": "repo", "path": ".git/config.md"}, "path_invalid"),
         ({"source": "repo", "path": "docs/missing.md"}, "path_not_found"),
-        ({"source": "repo", "path": "docs"}, "not_a_file"),
+        ({"source": "repo", "path": "docs"}, "spec_file_invalid"),
+        ({"source": "repo", "path": "specs.md"}, "not_a_file"),
         ({"source": "repo", "path": "docs/notes.txt"}, "spec_file_invalid"),
     ],
 )
@@ -190,6 +191,7 @@ async def test_a_bad_or_missing_file_is_refused(
 ) -> None:
     github.files[(FULL_NAME, "docs/spec.md")] = TEXT
     github.files[(FULL_NAME, "docs/notes.txt")] = TEXT
+    github.files[(FULL_NAME, "specs.md/one.md")] = TEXT  # a folder named like a file
 
     refused = await start(client, workspace, spec_file)
 
