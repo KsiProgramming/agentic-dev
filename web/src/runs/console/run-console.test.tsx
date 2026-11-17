@@ -1138,6 +1138,51 @@ test("a follow-up's Input shows the pull request review its agents were told, as
   expect(review.querySelector("img, script")).toBeNull();
 });
 
+test("a spec file run's Input shows the file its agents were told, as text, not as a request", async () => {
+  nav.search = "tab=input";
+  api(
+    detail({
+      ...WRITER_RUN,
+      input: "docs/spec.md",
+      spec_file: {
+        source: "repo",
+        name: "spec.md",
+        path: "docs/spec.md",
+        ref: "main",
+        size: 64,
+        sha256: "abc",
+      },
+    }),
+    (request) => {
+      const url = new URL(request.url);
+      if (url.pathname === `/runs/${RUN_ID}/artifacts/spec-input.md`) {
+        expect(url.searchParams.get("version")).toBe("1");
+        return json({
+          name: "spec-input.md",
+          version: 1,
+          node_id: "$input",
+          media_type: "text/markdown",
+          size: 64,
+          created_at: "2026-11-17T10:00:00Z",
+          versions: 1,
+          content: "# CSV export\n\nAdmins get **every** order.\n<img src=x onerror=alert(1)>",
+        });
+      }
+      throw new Error(`unexpected ${request.method} ${request.url}`);
+    },
+  );
+  longAnswer(show());
+  const panel = await screen.findByTestId("step-panel");
+  const spec = await within(panel).findByTestId("run-context-spec");
+
+  expect(within(panel).getByText("Spec file")).toBeTruthy();
+  expect(within(panel).getByText("from the repository, at main")).toBeTruthy();
+  expect(within(spec).getByRole("heading", { name: "CSV export" })).toBeTruthy();
+  expect(within(spec).getByText("every").tagName).toBe("STRONG");
+  expect(spec.querySelector("img, script")).toBeNull();
+  expect(within(panel).queryByText("Request")).toBeNull();
+});
+
 test("a step's Usage shows its tokens and cost", async () => {
   nav.search = "tab=usage";
   api(detail(WRITER_RUN));

@@ -2,6 +2,13 @@ import { numberFormat } from "@/lib/locale";
 
 /** One version of a run artifact (4.3), as a step, a gate or the run's list names it. Its
  * content is agent or tool output: data, never instructions. */
+/** The writer of an artifact a run is given with its input (7.7: its spec file, `spec-input.md`):
+ * no step wrote it. */
+export const INPUT_WRITER = "$input";
+
+/** The run artifact holding the spec file a run was given (7.7). */
+export const SPEC_INPUT_ARTIFACT = "spec-input.md";
+
 export interface ArtifactVersion {
   name: string;
   version: number;
