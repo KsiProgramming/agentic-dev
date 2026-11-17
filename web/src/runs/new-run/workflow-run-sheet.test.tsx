@@ -137,3 +137,48 @@ test("a workflow that needs an input names it, shows its example and will not st
   fireEvent.click(sheet.getByRole("button", { name: "Start run" }));
   await waitFor(() => expect(navigate).toHaveBeenCalledWith(`/runs/${RUN_ID}`));
 });
+
+test("a workflow started from a Jira issue asks for its key on one line", async () => {
+  const fetch = stubApi({
+    [`GET ${CONNECTIONS_PATH}`]: () => json(200, [CLAUDE, GITHUB]),
+    [`GET ${REPOS_PATH}`]: () => json(200, REPOS),
+    "POST /runs": () => json(202, { run_id: RUN_ID }),
+  });
+  const navigate = vi.fn();
+  renderWithQueries(
+    <WorkflowRunSheet
+      open
+      onOpenChange={() => {}}
+      workflow={{
+        id: "sdd",
+        version: 1,
+        name: "Build from a Jira issue",
+        requires: ["claude", "github"],
+        input: {
+          required: true,
+          label: "Which Jira issue?",
+          example: "PROJ-12",
+          kind: "jira_issue",
+        },
+      }}
+      workspaceId={DEFAULT_WORKSPACE_ID}
+      baseUrl="http://api.test"
+      navigate={navigate}
+    />,
+  );
+  const sheet = within(screen.getByTestId("workflow-run-sheet"));
+  fireEvent.click(await sheet.findByRole("combobox", { name: "Repository" }));
+  fireEvent.click(await screen.findByRole("option", { name: /acme\/web/ }));
+
+  const field = sheet.getByLabelText("Which Jira issue?");
+  expect(field.tagName).toBe("INPUT");
+  expect(field.className).toContain("font-mono");
+  fireEvent.change(field, { target: { value: "fix the login page" } });
+  fireEvent.click(sheet.getByRole("button", { name: "Start run" }));
+  expect(await sheet.findByText("Give one Jira issue's key, such as PROJ-12.")).toBeDefined();
+  expect(fetch.mock.calls.some(([r]) => r.method === "POST")).toBe(false);
+
+  fireEvent.change(field, { target: { value: "PROJ-12" } });
+  fireEvent.click(sheet.getByRole("button", { name: "Start run" }));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith(`/runs/${RUN_ID}`));
+});

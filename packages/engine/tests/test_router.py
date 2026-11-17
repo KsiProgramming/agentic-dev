@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from pydantic import TypeAdapter
 
 from agentic_engine.agent import OUTPUT_SCHEMA_INSTRUCTION
 from agentic_engine.artifacts import InMemoryArtifactStore
@@ -26,10 +27,12 @@ from agentic_engine.spec import (
     SequenceNode,
     WorkflowSpec,
     agents_spawned,
+    artifact_issues,
     parse_spec,
     policy_issues,
     validate_workflow,
 )
+from agentic_engine.spec.models import Node
 from agentic_runtime import AgentEvent, AgentRequest, AgentRun, Message
 from agentic_runtime.fake import ECHO_USAGE, Delay, FakeRuntime, Script
 
@@ -193,6 +196,86 @@ async def test_no_match_and_no_default_fails_the_router_and_the_run() -> None:
     error = "no route of 'pick' matched, and it has no default"
     assert of(sink.events, "pick")[-1] == ("node_failed", {"error": error})
     assert result.results["pick"].error == error
+
+
+def skipping(routes: Sequence[Mapping[str, object]], id: str = "pick") -> dict[str, object]:
+    """A rule router that runs nothing when no route matches (7.5)."""
+    return {**router(routes, id=id), "otherwise": "skip"}
+
+
+async def test_a_skipping_router_with_no_match_runs_nothing_and_passes_its_input_on() -> None:
+    """7.5's `clarify`: a step that runs only when its condition holds."""
+    runtime, sink = Recorder(), InMemoryEventSink()
+    routed = spec(agent("first"), skipping([route("never", agent("a"), "false")]), agent("after"))
+
+    result = await run(routed, runtime, sink)
+
+    assert result.status == "completed"
+    assert runtime.nodes == ["first", "after"]
+    assert result.text == "after(first(brief))"
+    assert result.results["pick"].text == "first(brief)"
+    assert of(sink.events, "pick") == [
+        ("node_started", {"routes": ["never"], "mode": "rule"}),
+        ("route_chosen", {"route": None, "mode": "rule", "reason": "no route matched"}),
+        ("node_completed", {"route": None, "skipped": True}),
+    ]
+
+
+async def test_a_skipping_router_still_runs_the_route_that_matches() -> None:
+    runtime, sink = Recorder(), InMemoryEventSink()
+    routed = spec(skipping([route("ask", agent("a"), "true")]), agent("after"))
+
+    result = await run(routed, runtime, sink)
+
+    assert result.status == "completed"
+    assert runtime.nodes == ["a", "after"]
+    assert of(sink.events, "pick")[-1] == ("node_completed", {"route": "ask"})
+
+
+async def test_a_skipping_router_in_a_branch_skips_with_the_branch() -> None:
+    runtime, sink = Recorder(), InMemoryEventSink()
+    routed = spec(
+        {
+            "type": "parallel",
+            "id": "review",
+            "join": "all",
+            "branches": [agent("a"), skipping([route("x", agent("x"), "false")], id="choose")],
+        }
+    )
+
+    result = await run(routed, runtime, sink)
+
+    assert result.status == "completed"
+    assert runtime.nodes == ["a"]
+    ends = [e.payload for e in sink.events if e.node_id == "choose" and e.type == "node_completed"]
+    assert ends == [{"route": None, "skipped": True, "branch": 1}]
+
+
+def test_skip_is_only_for_a_rule_router_with_no_default() -> None:
+    with pytest.raises(ValueError, match="otherwise"):
+        spec({**router([route("a", agent("a"), "true")], default=agent("b")), "otherwise": "skip"})
+    with pytest.raises(ValueError, match="otherwise"):
+        spec(
+            {
+                **router([route("a", agent("a"))], classifier={"instructions": "Pick."}),
+                "otherwise": "skip",
+            }
+        )
+
+
+def test_what_a_skipping_router_writes_is_not_written_after_it() -> None:
+    root = {
+        "type": "sequence",
+        "id": "main",
+        "steps": [
+            skipping([route("ask", agent("a", writes="q.md"), "true")]),
+            agent("after", reads=["q.md"]),
+        ],
+    }
+
+    issues = artifact_issues(TypeAdapter(Node).validate_python(root))
+
+    assert [(i.code, i.path) for i in issues] == [("artifact_unknown", "root.steps[1].reads[0]")]
 
 
 async def test_a_condition_that_fails_to_evaluate_names_its_route() -> None:

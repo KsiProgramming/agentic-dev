@@ -113,6 +113,13 @@ class GateReview(Protocol):
         Raises `GateReviewError` if they cannot be applied."""
         ...
 
+    async def commit(self, edits: Sequence[FileEdit], message: str) -> dict[str, str]:
+        """Write `edits` to their writers' branches and commit them with `message`, one commit
+        per writer, as `apply` does for a gate (7.5: `repo.commitArtifacts`). Files that already
+        hold their text make no commit. Returns each writer's branch tip; raises
+        `GateReviewError` if they cannot be committed."""
+        ...
+
 
 class GateReviewError(Exception):
     """A gate's changes cannot be read or its edits applied; the message says why."""

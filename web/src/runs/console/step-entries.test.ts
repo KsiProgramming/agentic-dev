@@ -241,6 +241,13 @@ describe("routers (4.6)", () => {
     ]);
     expect(stepOutline(steps[0]!)).toBe("Routed to default");
     expect(stepOutline(buildTimeline(events.slice(0, 1)).steps[0]!)).toBe("Choosing a route");
+    const skipped = buildTimeline([
+      events[0]!,
+      on("report_path", runEvent(2, "route_chosen", { route: null, reason: "no route matched" })),
+      on("report_path", runEvent(3, "node_completed", { route: null, skipped: true })),
+    ]).steps[0]!;
+    expect(stepOutline(skipped)).toBe("No route matched, so nothing ran");
+    expect(skipped.status).toBe("completed");
     // The router is a container: the step that did the work is its route's.
     expect(defaultEntry(entries, false)?.key).toBe("report_path>default/standard_report");
   });

@@ -71,12 +71,16 @@ class SandboxGateReview:
     async def apply(self, gate_id: str, edits: Sequence[FileEdit]) -> dict[str, str]:
         """Commit `edits` in their writers' worktrees: one commit `Edit at gate <gate_id>` per
         writer, or none for a writer whose files already hold them."""
+        return await self.commit(edits, f"Edit at gate {gate_id}\n\n{EDITED_BY}")
+
+    async def commit(self, edits: Sequence[FileEdit], message: str) -> dict[str, str]:
+        """Commit `edits` in their writers' worktrees with `message`: one commit per writer, or
+        none for a writer whose files already hold them; each writer's tip either way."""
         by_writer: dict[str, list[tuple[str, bytes]]] = {}
         for edit in edits:
             if not self._is_writer(edit.node_id):
                 raise GateReviewError(f"node {edit.node_id!r} is not a writer of this run")
             by_writer.setdefault(edit.node_id, []).append((edit.path, edit.content.encode()))
-        message = f"Edit at gate {gate_id}\n\n{EDITED_BY}"
         commits: dict[str, str] = {}
         for node_id, files in by_writer.items():
             tree = Worktree.of(self._sandbox, self._run_id, node_id)

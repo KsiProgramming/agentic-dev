@@ -2836,8 +2836,9 @@ export interface components {
          *     `results` and `artifacts` (as for a loop's `until`); the first route whose condition is true
          *     runs, else `default`. In classifier mode no route has `when`: one agent (`classifier`)
          *     chooses a route id, `default` included when there is one, and says why. A router with no
-         *     matching route and no `default` fails. The routes not taken never start. A route is one
-         *     `agent`, `tool` or `sequence` node, and it may hold what the router's own place allows.
+         *     matching route and no `default` fails, unless `otherwise` is `"skip"` (7.5): then it runs
+         *     nothing and passes its input on. The routes not taken never start. A route is one `agent`,
+         *     `tool` or `sequence` node, and it may hold what the router's own place allows.
          */
         RouterNode: {
             /**
@@ -2854,6 +2855,13 @@ export interface components {
              * @description What runs when no route is chosen.
              */
             default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"]) | null;
+            /**
+             * Otherwise
+             * @description Rule mode with no `default`: what happens when no route matches. "fail" fails the router; "skip" runs nothing and passes its input on, for a step that only runs when its condition holds.
+             * @default fail
+             * @enum {string}
+             */
+            otherwise: "fail" | "skip";
             /** @description Classifier mode: the agent that chooses the route. */
             classifier?: components["schemas"]["RouterClassifier"] | null;
         };
@@ -3929,6 +3937,13 @@ export interface components {
              * @description An example input, shown in the empty field.
              */
             example?: string | null;
+            /**
+             * Kind
+             * @description What the input is: free text, or the key of a Jira issue ("jira_issue", 7.5). A run started by hand with an issue key is then told the issue, as a run a Jira trigger started is.
+             * @default text
+             * @enum {string}
+             */
+            kind: "text" | "jira_issue";
         };
         /**
          * WorkflowRef

@@ -504,7 +504,8 @@
               "findings.json"
             ],
             "writes": "report.md"
-          }
+          },
+          "otherwise": "fail"
         },
         {
           "type": "gate",

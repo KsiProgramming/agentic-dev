@@ -7,7 +7,8 @@
     "required": true,
     "label": "What should the team change?",
     "description": "The change to make in the repository, in a few sentences: two analysts study it, then a lead splits it between two engineers.",
-    "example": "Add input validation to the signup form, with tests."
+    "example": "Add input validation to the signup form, with tests.",
+    "kind": "text"
   },
   "root": {
     "type": "sequence",

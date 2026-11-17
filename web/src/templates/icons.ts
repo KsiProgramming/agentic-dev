@@ -1,4 +1,5 @@
 import {
+  ClipboardCheckIcon,
   FileTextIcon,
   LayoutTemplateIcon,
   MessageSquareTextIcon,
@@ -12,6 +13,7 @@ const ICONS: Record<string, LucideIcon> = {
   "generate-docs": FileTextIcon,
   "audit-codebase": ScanSearchIcon,
   "plan-build-review": UsersIcon,
+  sdd: ClipboardCheckIcon,
   "jira-issue-answer": MessageSquareTextIcon,
 };
 

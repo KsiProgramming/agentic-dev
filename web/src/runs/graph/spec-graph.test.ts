@@ -25,6 +25,7 @@ const router: WorkflowSpec["root"] = {
     {
       type: "router",
       id: "report_path",
+      otherwise: "fail",
       routes: [
         { id: "clean", when: "true", then: agent("clean_report") },
         {
@@ -57,6 +58,7 @@ describe("nodeDetail", () => {
     const classifier = spec_({
       type: "router",
       id: "kind",
+      otherwise: "fail",
       classifier: { instructions: "Choose." },
       routes: [{ id: "bug", then: agent("fix") }],
     });

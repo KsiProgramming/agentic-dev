@@ -49,6 +49,9 @@ class FakeReview:
             raise self.fail
         return self.shown
 
+    async def commit(self, edits: Sequence[FileEdit], message: str) -> dict[str, str]:
+        return await self.apply(message, edits)
+
     async def apply(self, gate_id: str, edits: Sequence[FileEdit]) -> dict[str, str]:
         self.applied.append((gate_id, list(edits)))
         if self.fail is not None:

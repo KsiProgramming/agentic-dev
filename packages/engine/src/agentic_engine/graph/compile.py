@@ -78,12 +78,13 @@ end the run.
 
 import asyncio
 import functools
+import hashlib
 import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import TypedDict, cast
+from typing import Final, TypedDict, cast
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
@@ -94,6 +95,7 @@ from pydantic import JsonValue
 from agentic_engine.agent import (
     AgentNodeResult,
     AgentNodeStatus,
+    IssueBrief,
     RunContext,
     run_agent_node,
     sum_usage,
@@ -110,6 +112,7 @@ from agentic_engine.artifacts import (
 )
 from agentic_engine.branches import BranchSaver, owner_node
 from agentic_engine.budget import BudgetMeter
+from agentic_engine.commit import run_commit_node
 from agentic_engine.events import (
     ARTIFACT_WRITTEN,
     BRANCH_INTEGRATED,
@@ -165,6 +168,7 @@ from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
 from agentic_engine.spec import (
     BODY_FROM_TOOLS,
+    COMMIT_TOOLS,
     CREATE_TOOLS,
     DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
@@ -234,6 +238,7 @@ class _Limits:
     context: str = ""
     saver: BranchSaver | None = None
     request: str | None = None
+    issue: IssueBrief | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -429,6 +434,7 @@ def compile_workflow(
         context.text() if context is not None else "",
         saver,
         context.request if context is not None else None,
+        context.issue if context is not None else None,
     )
 
     loops: list[LoopNode] = []  # the loops `add` is inside
@@ -539,8 +545,9 @@ def compile_workflow(
                     route_id: add(route, done)
                     for route_id, _, route in router_routes(node, node.id)
                 }
+                ends = [*starts.values(), END] + ([done] if node.otherwise == "skip" else [])
                 builder.add_conditional_edges(
-                    node.id, _to_route(node, starts), list(dict.fromkeys([*starts.values(), END]))
+                    node.id, _to_route(node, starts), list(dict.fromkeys(ends))
                 )
                 builder.add_node(done, _router_done(node, log))
                 go_on(done, node.id, then)
@@ -649,7 +656,15 @@ def _step(
             refs = state.get("artifacts", {})
             reads = _reads_as(node, _integrated_reader(state))
             return _run_step(
-                node, runtime, tools, log, limits, state["last_text"], refs, route_as=reads
+                node,
+                runtime,
+                tools,
+                log,
+                limits,
+                state["last_text"],
+                refs,
+                route_as=reads,
+                results=state["results"],
             )
 
         if isinstance(node, AgentNode):
@@ -724,6 +739,7 @@ async def _run_step(
     item: int | None = None,
     branch: int | None = None,
     route_as: str | None = None,
+    results: Mapping[str, AgentNodeResult] | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
     a map or an orchestrator's task, `branch` inside a parallel). `route_as` is what the node is
@@ -744,9 +760,20 @@ async def _run_step(
 
     async def run() -> AgentNodeResult:
         match node:
+            case ToolNode() if node.tool in COMMIT_TOOLS:
+                return await run_commit_node(
+                    node,
+                    limits.review,
+                    limits.artifacts,
+                    refs,
+                    limits.issue,
+                    limits.request,
+                    on_event,
+                )
             case ToolNode():
                 try:
                     called = await _with_body_from(node, limits.artifacts, refs)
+                    called = _with_links(called, results or {})
                     called = _with_issue_from(called, limits.request)
                 except (ArtifactError, ToolArgsError) as e:
                     return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
@@ -830,6 +857,36 @@ ISSUE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-[1-9][0-9]{0,9}$")
 
 class ToolArgsError(Exception):
     """A tool node's arguments could not be resolved from the run (`issue_from`)."""
+
+
+def _with_links(node: ToolNode, results: Mapping[str, AgentNodeResult]) -> ToolNode:
+    """`node` with its `links_from` (7.5, a Jira comment's argument) put in place: a "Links" list
+    at the end of its `body`, with the pull request the `pr` step opened and, for each file the
+    `files` step committed, its diff in that pull request (`<pr>/files#diff-<sha256 of path>`,
+    which still works once the branch is deleted). The links are made by the platform from the
+    steps' `results`, never by a model. The tool never sees `links_from`; with no pull request,
+    there is no list."""
+    links = node.args.get("links_from")
+    if not isinstance(links, dict):
+        return node
+    pr = results.get(str(links.get("pr")))
+    url = (pr.data or {}).get("url") if pr is not None else None
+    lines: list[str] = []
+    if isinstance(url, str) and url:
+        lines.append(f"- Pull request: {url}")
+        done = results.get(str(links.get("files")))
+        paths = (done.data or {}).get("paths") if done is not None else None
+        for path in paths if isinstance(paths, list) else []:
+            if isinstance(path, str):
+                anchor = hashlib.sha256(path.encode()).hexdigest()
+                lines.append(f"- [{path}]({url}/files#diff-{anchor})")
+    args = {k: v for k, v in node.args.items() if k != "links_from"}
+    if lines:
+        static = args.get("body")
+        head = static if isinstance(static, str) and static else ""
+        listed = "**Links**\n" + "\n".join(lines)
+        args["body"] = f"{head}\n\n{listed}" if head else listed
+    return node.model_copy(update={"args": args})
 
 
 def _with_issue_from(node: ToolNode, request: str | None) -> ToolNode:
@@ -1714,20 +1771,38 @@ def _router_entry(
     return enter
 
 
+SKIPPED_ROUTE = ""
+"""What a router chose when no route matched and it skips (`otherwise: "skip"`, 7.5): not a
+route id (a route id is a `NodeId`), so it never names one."""
+
+
 def _chosen(choice: AgentNodeResult) -> str | None:
-    """The route a router's choice names, if it made one."""
-    route = (choice.data or {}).get("route") if choice.status == "completed" else None
+    """The route a router's choice names, `SKIPPED_ROUTE` if it skips, or `None` if it made no
+    choice."""
+    if choice.status != "completed":
+        return None
+    data = choice.data or {}
+    if data.get("skipped") is True:
+        return SKIPPED_ROUTE
+    route = data.get("route")
     return route if isinstance(route, str) else None
 
 
 def _to_route(router: RouterNode, starts: Mapping[str, str]) -> Callable[[RunState], str]:
-    """To the first node of the route `router` chose; to `END` if it chose none."""
+    """To the first node of the route `router` chose; to its end if it skipped (7.5); to `END`
+    if it chose none."""
 
     def route(state: RunState) -> str:
         chosen = state.get("routes", {}).get(router.id)
+        if chosen == SKIPPED_ROUTE:
+            return router_done_node_id(router)
         return starts[chosen] if chosen is not None else END
 
     return route
+
+
+_SKIPPED_END: Final[dict[str, JsonValue]] = {"route": None, "skipped": True}
+"""The `node_completed` payload of a router that skipped (7.5)."""
 
 
 def _router_done(
@@ -1738,7 +1813,12 @@ def _router_done(
     outputs = {route_id: _output_id(route) for route_id, _, route in router_routes(router, "")}
 
     async def done(state: RunState) -> RunUpdate:
-        chosen = state.get("routes", {}).get(router.id) or DEFAULT_ROUTE
+        chosen = state.get("routes", {}).get(router.id)
+        if chosen == SKIPPED_ROUTE:
+            await log.emit(NODE_COMPLETED, node_id=router.id, payload=_SKIPPED_END)
+            skipped = AgentNodeResult(status="completed", text=state["last_text"], usage=None)
+            return _update(router.id, skipped)
+        chosen = chosen or DEFAULT_ROUTE
         source = state["results"].get(outputs[chosen])
         await log.emit(NODE_COMPLETED, node_id=router.id, payload={"route": chosen})
         data = source.data if source is not None else None
@@ -1764,6 +1844,11 @@ async def _router_inline(
     if route_id is None:
         scope.ran[router.id] = choice
         return router.id, choice
+    if route_id == SKIPPED_ROUTE:
+        await scope.log.emit(NODE_COMPLETED, node_id=router.id, payload=_SKIPPED_END, **scope.tag())
+        skipped = AgentNodeResult(status="completed", text=input, usage=None)
+        scope.ran[router.id] = skipped
+        return router.id, skipped
     ended, result = await _run_inline(router.route(route_id), input, scope)
     log, tag = scope.log, scope.tag()
     end: dict[str, JsonValue] = {"route": route_id}
@@ -1809,6 +1894,11 @@ async def _choose(
             route, reason = await _rule(router, input, results, refs, scope.limits)
         except ExpressionError as e:
             return await _not_routed(router, "failed", str(e), input, None, None, scope)
+        if route is None and router.otherwise == "skip":
+            skipped: dict[str, JsonValue] = {"route": None, "mode": mode, "reason": reason}
+            await log.emit(ROUTE_CHOSEN, node_id=router.id, payload=skipped, **tag)
+            data = {**skipped, "skipped": True}
+            return AgentNodeResult(status="completed", text=input, usage=None, data=data)
         if route is None:
             error = f"no route of {router.id!r} matched, and it has no default"
             return await _not_routed(router, "failed", error, input, None, None, scope)
@@ -1857,7 +1947,7 @@ async def _rule(
         if met:
             return route.id, when
     if router.default is None:
-        return None, ""
+        return None, "no route matched"
     return DEFAULT_ROUTE, "no route matched"
 
 

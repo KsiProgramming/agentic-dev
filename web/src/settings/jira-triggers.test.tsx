@@ -66,7 +66,7 @@ const JIRA_TEMPLATE: Template = {
   id: "jira-issue-answer",
   name: "Answer a Jira issue",
   requires: ["claude", "github", "jira"],
-  input: { required: true, label: "Which Jira issue?" },
+  input: { required: true, label: "Which Jira issue?", kind: "jira_issue" },
 };
 
 afterEach(() => {

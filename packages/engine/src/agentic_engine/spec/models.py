@@ -422,13 +422,20 @@ class RouterNode(_Base):
     `results` and `artifacts` (as for a loop's `until`); the first route whose condition is true
     runs, else `default`. In classifier mode no route has `when`: one agent (`classifier`)
     chooses a route id, `default` included when there is one, and says why. A router with no
-    matching route and no `default` fails. The routes not taken never start. A route is one
-    `agent`, `tool` or `sequence` node, and it may hold what the router's own place allows."""
+    matching route and no `default` fails, unless `otherwise` is `"skip"` (7.5): then it runs
+    nothing and passes its input on. The routes not taken never start. A route is one `agent`,
+    `tool` or `sequence` node, and it may hold what the router's own place allows."""
 
     type: Literal["router"]
     id: NodeId
     routes: list[Route] = Field(min_length=1, max_length=MAX_ROUTES)
     default: "Node | None" = Field(default=None, description="What runs when no route is chosen.")
+    otherwise: Literal["fail", "skip"] = Field(
+        default="fail",
+        description='Rule mode with no `default`: what happens when no route matches. "fail" '
+        'fails the router; "skip" runs nothing and passes its input on, for a step that only '
+        "runs when its condition holds.",
+    )
     classifier: RouterClassifier | None = Field(
         default=None, description="Classifier mode: the agent that chooses the route."
     )
@@ -452,6 +459,11 @@ class RouterNode(_Base):
             raise ValueError(f"no route may be named {DEFAULT_ROUTE!r}; use `default`")
         if len(set(ids)) != len(ids):
             raise ValueError("two routes have the same id")
+        if self.otherwise == "skip" and (self.default is not None or self.classifier):
+            raise ValueError(
+                '`otherwise: "skip"` is for a rule router with no `default`: a default or a '
+                "classifier always chooses a route"
+            )
         if self.classifier is None:
             if missing := [route.id for route in self.routes if route.when is None]:
                 raise ValueError(
@@ -821,9 +833,20 @@ JIRA_ISSUE_FROM = frozenset({"request"})
 BODY_FROM_TOOLS = frozenset({"github.openPR", "jira.comment"})
 """Tool nodes that may take their `body` from a run artifact (`body_from`, 6.7 and 7.2)."""
 
+COMMIT_TOOLS = frozenset({"repo.commitArtifacts"})
+"""Run by the engine itself, not a tool server (7.5): `repo.commitArtifacts {into, dir}` commits
+the run artifacts its tool node reads onto the branch of an earlier writer (`into`, an
+orchestrator's integration branch), as `<dir>/<name>`, so they are in the pull request a gate
+then shows. Only a tool node of the root sequence may call it, before the gate that shows the
+branch (`commit_artifacts_issues`)."""
+
+COMMIT_DIR_PLACEHOLDER = "{issue}"
+"""What `repo.commitArtifacts`'s `dir` may name: the run's Jira issue, as `<KEY>-<slug>` (7.5)."""
+
 PLATFORM_TOOLS = (
     READ_TOOLS
     | WRITE_TOOLS
+    | COMMIT_TOOLS
     | PUBLISH_TOOLS
     | CREATE_TOOLS
     | ARTIFACT_TOOLS
@@ -987,7 +1010,9 @@ def _publish_issue(
     writer = earlier[ids.index(source)]
     if not _writes(writer):
         return "reference", f"node {node.id!r}: `from_node` {source!r} is not a writer"
-    between = earlier[ids.index(source) + 1 :]
+    # A step that commits onto the writer's branch (7.5) changes what is published, too.
+    last = max(i for i, n in enumerate(earlier) if n.id == source or commits_into(n) == source)
+    between = earlier[last + 1 :]
     if not any(isinstance(n, GateNode) for n in between):
         return (
             "publish_without_gate",
@@ -1058,6 +1083,8 @@ def _jira_write_issue(
     to = args.get("to")
     if tool == "jira.transition" and not (isinstance(to, str) and to.strip()):
         return "reference", f"node {node.id!r}: {tool} needs `to`, the transition or status"
+    if "links_from" in args and (problem := _links_problem(node, tool, path, seen)) is not None:
+        return "reference", problem
     earlier = [(at, n) for at, n in seen if within(path, scope_of(at))]
     gates = [i for i, (_, n) in enumerate(earlier) if isinstance(n, GateNode)]
     if not gates:
@@ -1079,6 +1106,45 @@ def _jira_write_issue(
             "approver reads the comment that is posted",
         )
     return None
+
+
+LINKS_FROM_KEYS = frozenset({"pr", "files"})
+"""What a Jira comment's `links_from` names (7.5): the publisher whose pull request it links
+(`pr`), and the step whose committed files it links in that pull request (`files`)."""
+
+
+def _links_problem(
+    node: ToolNode, tool: str, path: str, seen: list[tuple[str, Node]]
+) -> str | None:
+    """Why `node`'s `links_from` cannot be resolved, or `None`: only a `jira.comment` of the root
+    sequence takes it, naming an earlier root step that publishes (`pr`) and one that commits
+    artifacts (`repo.commitArtifacts`, `files`), the latter only with `pr`, since its links are
+    into that pull request."""
+    links = node.args["links_from"]
+    if tool != "jira.comment":
+        return f"node {node.id!r}: only jira.comment takes `links_from`"
+    if not _is_root_step(path):
+        return f"node {node.id!r}: `links_from` needs the comment to be a step of the root sequence"
+    if not isinstance(links, dict) or not links or set(links) - LINKS_FROM_KEYS:
+        return f"node {node.id!r}: `links_from` takes `pr` and `files`, each a step's id"
+    if "files" in links and "pr" not in links:
+        return f"node {node.id!r}: `links_from.files` links into a pull request; name it in `pr`"
+    earlier = {n.id: n for at, n in seen if _is_root_step(at)}
+    pr, files = earlier.get(str(links.get("pr"))), earlier.get(str(links.get("files")))
+    if "pr" in links and not (isinstance(pr, ToolNode) and pr.tool in PUBLISH_TOOLS):
+        return (
+            f"node {node.id!r}: `links_from.pr` must name an earlier step that opens a pull request"
+        )
+    if "files" in links and (files is None or commits_into(files) is None):
+        return (
+            f"node {node.id!r}: `links_from.files` must name an earlier repo.commitArtifacts step"
+        )
+    return None
+
+
+def _is_root_step(path: str) -> bool:
+    """Whether the node at `path` is a step of the root sequence."""
+    return re.fullmatch(r"root\.steps\[\d+\]", path) is not None
 
 
 def _previous_step(path: str, at_path: Mapping[str, Node]) -> Node | None:
@@ -1144,6 +1210,81 @@ def create_repo_issues(root: Node) -> list[ValidationIssue]:
             created = True
         earlier.append(node)
     return issues
+
+
+def commit_artifacts_issues(root: Node) -> list[ValidationIssue]:
+    """Why the nodes under `root` that commit run artifacts onto a branch (`repo.commitArtifacts`,
+    7.5) cannot run, in run order; empty if they can. Each must be a tool node and a step of the
+    root sequence, read at least one artifact (`reads`: what it commits), name in `into` a writer
+    that runs before it at the top of the run (a writer, or an orchestrator whose tasks write;
+    one in a loop's body counts at its loop's place, 6.9), and give `dir`, a relative folder of
+    the repo (`reference` otherwise). That a gate comes between it and a publish of `into` is
+    `publish_gate_issues`'s check."""
+    issues: list[ValidationIssue] = []
+    top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else {id(root)}
+    earlier: list[Node] = []
+    loops: set[str] = set()
+    for path, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            loops.add(path)
+        for tool in sorted(COMMIT_TOOLS.intersection(node_tools(node))):
+            found = _commit_issue(node, tool, id(node) in top, earlier)
+            if found is not None:
+                issues.append(
+                    ValidationIssue(code="reference", path=path, node_id=node.id, message=found)
+                )
+        if not scope_of(_runs_in(path, loops)):  # it runs whenever the run gets past it
+            earlier.append(node)
+    return issues
+
+
+def _commit_issue(node: Node, tool: str, at_top: bool, earlier: list[Node]) -> str | None:
+    if not isinstance(node, ToolNode):
+        return f"node {node.id!r}: {tool} can only be called by a tool node"
+    if not at_top:
+        return f"node {node.id!r}: {tool} must be a step of the root sequence"
+    if not node.reads:
+        return f"node {node.id!r}: {tool} commits the artifacts it reads; give it `reads`"
+    if extra := sorted(set(node.args) - {"into", "dir"}):
+        return f"node {node.id!r}: {tool} takes `into` and `dir` only, not {extra[0]!r}"
+    into = node.args.get("into")
+    writer = next((n for n in earlier if n.id == into), None)
+    if not isinstance(into, str) or writer is None:
+        return (
+            f"node {node.id!r}: `into` must name a writer that runs before it at the top of the "
+            "run, whose branch it commits to"
+        )
+    if not _writes(writer):
+        return f"node {node.id!r}: `into` {into!r} is not a writer"
+    folder = node.args.get("dir")
+    if not isinstance(folder, str) or commit_dir_problem(folder) is not None:
+        why = commit_dir_problem(folder) if isinstance(folder, str) else "it is missing"
+        return f"node {node.id!r}: `dir` must be a relative folder of the repo: {why}"
+    return None
+
+
+def commit_dir_problem(folder: str) -> str | None:
+    """Why `folder` cannot be `repo.commitArtifacts`'s `dir`, or `None`: a relative path of
+    plain segments (no `..`, no `.git`, no backslash), whose only placeholder is
+    `COMMIT_DIR_PLACEHOLDER`."""
+    plain = folder.replace(COMMIT_DIR_PLACEHOLDER, "issue")
+    if not plain.strip() or plain.startswith("/") or "\\" in plain:
+        return f"{folder!r} is not a relative path"
+    if "{" in plain or "}" in plain:
+        return f"{folder!r} names a placeholder other than {COMMIT_DIR_PLACEHOLDER}"
+    parts = plain.strip("/").split("/")
+    if any(part in {"", ".", ".."} or part.lower() == ".git" for part in parts):
+        return f"{folder!r} has an empty, '.', '..' or '.git' segment"
+    return None
+
+
+def commits_into(node: Node) -> str | None:
+    """The writer whose branch `node` commits run artifacts onto (`repo.commitArtifacts`'s
+    `into`), if it does."""
+    if not (isinstance(node, ToolNode) and node.tool in COMMIT_TOOLS):
+        return None
+    into = node.args.get("into")
+    return into if isinstance(into, str) else None
 
 
 def creates_repo(root: Node) -> bool:
@@ -1841,6 +1982,8 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                 # it. Its typed producer is the routes' writer when they all type it alike;
                 # otherwise a reader of it has none.
                 wrote = [visit(r, at, seen) for _, at, r in router_routes(node, path)]
+                if node.otherwise == "skip":
+                    wrote.append({})  # skipped: no route wrote anything
                 after = dict(seen)
                 for name, writer in wrote[0].items():
                     writers = [w.get(name) for w in wrote]
@@ -2070,6 +2213,7 @@ def structure_issues(root: Node) -> list[ValidationIssue]:
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
+    issues += commit_artifacts_issues(root)
     issues += port_issues(root) + artifact_issues(root) + subflow_issues(root)
     issues += gate_issues(root)
     return in_run_order(root, issues)
@@ -2185,6 +2329,12 @@ class WorkflowInput(_Base):
     )
     example: str | None = Field(
         default=None, max_length=300, description="An example input, shown in the empty field."
+    )
+    kind: Literal["text", "jira_issue"] = Field(
+        default="text",
+        description='What the input is: free text, or the key of a Jira issue ("jira_issue", '
+        "7.5). A run started by hand with an issue key is then told the issue, as a run a Jira "
+        "trigger started is.",
     )
 
 

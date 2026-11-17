@@ -85,6 +85,7 @@ def build_jira_issue_answer_spec(params: JiraIssueAnswerParams) -> WorkflowSpec:
                 "description": "The key of an issue in a project this workspace picked for "
                 "Jira (Settings > Integrations).",
                 "example": "PROJ-12",
+                "kind": "jira_issue",
             },
             "root": {
                 "type": "sequence",
