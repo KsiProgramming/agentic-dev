@@ -3,7 +3,7 @@
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
@@ -680,5 +680,6 @@ async def test_moving_an_issue_starts_the_sdd_template_on_it(
     [run] = await runs_of(sessions, workspace)
     assert (run.trigger, run.input, run.template_id) == ("jira", "API-1", "sdd")
     assert run.jira_issue is not None and run.jira_issue["key"] == "API-1"
-    steps = [step["id"] for step in run.spec["root"]["steps"]]
+    spec = cast(dict[str, Any], run.spec)
+    steps = [step["id"] for step in spec["root"]["steps"]]
     assert steps[:3] == ["spec_writer", "approve_spec", "clarify"]

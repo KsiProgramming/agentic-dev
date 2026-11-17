@@ -30,7 +30,7 @@ import pytest
 from docker.errors import DockerException
 from docker.models.containers import Container
 from langgraph.checkpoint.memory import InMemorySaver
-from pydantic import SecretStr
+from pydantic import JsonValue, SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -2567,7 +2567,7 @@ def sdd_team(tools: ToolExecutor | None) -> AgentRuntime:
         "reason": "One task.",
     }
     verdict = {"verdict": "ok", "feedback": "FR-001 is met and tested."}
-    write = {"path": "gateway/limits.py", "content": "LIMIT = 100\n"}
+    write: dict[str, JsonValue] = {"path": "gateway/limits.py", "content": "LIMIT = 100\n"}
     return ByRole(
         {
             "Product engineer writing a specification": [Message(text=SDD_SPEC), ECHO_USAGE],
@@ -2685,5 +2685,6 @@ async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
     assert stored is not None and stored.jira_brief is not None
     assert stored.jira_brief["key"] == "API-1"
     waiting = next(e for e in events if e.type == "gate_waiting" and e.node_id == "approve_pr")
-    shown = {c["path"] for c in waiting.payload["changes"]}
+    changes = cast(list[dict[str, Any]], (waiting.payload or {})["changes"])
+    shown = {c["path"] for c in changes}
     assert {"gateway/limits.py", f"{SDD_FOLDER}/spec.md"} <= shown
