@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0033_jira_connection"
+    assert version == "0034_jira_triggers"
     assert {
         "runs",
         "run_events",
@@ -729,3 +729,31 @@ async def test_the_jira_connection_revision_downgrades_and_upgrades(postgres_url
     assert left == 0
     assert {"jira_sites", "jira_projects"} <= await table_names(postgres_url)
     assert {"scopes", "needs_attention"} <= await connection_columns(postgres_url)
+
+
+async def test_the_jira_triggers_revision_downgrades_and_upgrades(postgres_url: str) -> None:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    triggers = {"jira_triggers", "jira_webhooks", "jira_deliveries", "jira_trigger_fires"}
+    assert triggers | {"jira_own_moves"} <= await table_names(postgres_url)
+
+    await asyncio.to_thread(command.downgrade, config, "0033_jira_connection")
+    assert not (triggers | {"jira_own_moves"}) & await table_names(postgres_url)
+    engine = create_async_engine(postgres_url)
+    async with engine.connect() as conn:
+        columns = set(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'runs'"
+                    )
+                )
+            ).scalars()
+        )
+    await engine.dispose()
+    assert not {"jira_trigger_id", "jira_issue"} & columns
+
+    await asyncio.to_thread(command.upgrade, config, "head")
+    assert triggers <= await table_names(postgres_url)

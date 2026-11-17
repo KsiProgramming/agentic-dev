@@ -34,3 +34,23 @@ class JiraBadRequestError(JiraApiError):
 
 class JiraRateLimitedError(JiraApiError):
     """Jira answered `429` again after one wait, or asked for a wait longer than we take."""
+
+
+class JiraWebhookError(JiraApiError):
+    """Jira refused to register a webhook. `kind` is fixed: `url_conflict` (the account already
+    has webhooks at another URL; Jira allows one), `limit` (the account holds as many webhooks
+    on the site as Jira allows) or `refused` (anything else). Jira's own words are dropped."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"Jira refused the webhook: {kind}")
+        self.kind = kind
+
+
+class JiraDeliveryError(ValueError):
+    """A webhook delivery we do not accept. `reason` is fixed: `missing`, `malformed`,
+    `signature`, `issuer`, `expired` and `site` are about its JWT; `payload` about its body.
+    The message never holds the token or the body."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"webhook delivery refused: {reason}")
+        self.reason = reason

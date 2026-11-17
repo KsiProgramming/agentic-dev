@@ -4,12 +4,13 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentic_jira import Project
-from agentic_store import JiraConnectionInfo, JiraProjectRef, JiraSiteInfo
+from agentic_store import JiraConnectionInfo, JiraProjectRef, JiraSiteInfo, JiraWebhookInfo
 
 JiraStatus = Literal["not_connected", "connected", "needs_attention"]
 # Why a connection needs attention: the refresh token was refused, the access token was (the
 # app's access was removed), or the grant lacks a scope the platform asks for.
 JiraAttentionReason = Literal["invalid_grant", "unauthorized", "scopes"]
+WebhookState = Literal["listening", "not_needed", "failed"]
 
 CloudId = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9-]+$")]
 ProjectId = Annotated[str, Field(min_length=1, max_length=32, pattern=r"^[0-9]+$")]
@@ -70,6 +71,35 @@ class JiraSiteOut(BaseModel):
         )
 
 
+class JiraWebhookOut(BaseModel):
+    """Whether Jira can start the workspace's runs on a site: `listening` (a webhook is
+    registered), `not_needed` (no enabled rule there) or `failed` (`error` says why:
+    `url_conflict`, `limit`, `needs_attention`, `jira_unavailable`, `refused`, `no_url`)."""
+
+    cloud_id: str
+    state: WebhookState
+    error: str | None = None
+    expires_at: datetime | None = None
+    renewed_at: datetime | None = None
+
+    @classmethod
+    def of(cls, info: JiraWebhookInfo) -> "JiraWebhookOut":
+        state: WebhookState = (
+            "failed"
+            if info.error is not None
+            else "listening"
+            if info.webhook_id is not None
+            else "not_needed"
+        )
+        return cls(
+            cloud_id=info.cloud_id,
+            state=state,
+            error=info.error,
+            expires_at=info.expires_at,
+            renewed_at=info.renewed_at,
+        )
+
+
 class JiraConnectionOut(BaseModel):
     """The workspace's Jira connection. Its tokens are never returned."""
 
@@ -88,12 +118,21 @@ class JiraConnectionOut(BaseModel):
         default_factory=list[str], description="Scopes the platform asks for that it lacks."
     )
     sites: list[JiraSiteOut] = Field(default_factory=list[JiraSiteOut])
+    webhooks: list[JiraWebhookOut] = Field(
+        default_factory=list[JiraWebhookOut],
+        description="Whether Jira can start runs on each site the workspace's triggers use (7.3).",
+    )
     connected_at: datetime | None = None
     updated_at: datetime | None = None
 
     @classmethod
     def of(
-        cls, info: JiraConnectionInfo | None, *, configured: bool, missing: tuple[str, ...] = ()
+        cls,
+        info: JiraConnectionInfo | None,
+        *,
+        configured: bool,
+        missing: tuple[str, ...] = (),
+        webhooks: list[JiraWebhookInfo] | None = None,
     ) -> "JiraConnectionOut":
         if info is None:
             return cls(configured=configured, status="not_connected")
@@ -112,6 +151,7 @@ class JiraConnectionOut(BaseModel):
             scopes=list(info.scopes),
             missing_scopes=list(missing),
             sites=[JiraSiteOut.of(s) for s in info.sites],
+            webhooks=[JiraWebhookOut.of(w) for w in webhooks or ()],
             connected_at=info.created_at,
             updated_at=info.updated_at,
         )

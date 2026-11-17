@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { DOCS_DEMO, pretendConnections } from "./connections";
+import { DOCS_DEMO, ensureJiraTrigger, pretendConnections } from "./connections";
 import {
   apiURL,
   COMBINE,
@@ -152,6 +152,20 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.getByLabel("Loop iterations").fill("2");
       await expect(page.getByTestId("limits-save-bar")).toBeVisible();
       await expectNoSeriousIssues(page);
+    });
+
+    test("settings' triggers sub-page has no serious a11y issues", async ({ page, request }) => {
+      await ensureJiraTrigger(request);
+      await open(page, "/settings/triggers");
+      await expect(
+        page.getByTestId("jira-trigger").filter({ visible: true }).first(),
+      ).toBeVisible();
+      await expect(page.getByTestId("jira-listening")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.getByRole("button", { name: "New trigger" }).click();
+      await expect(page.getByTestId("jira-trigger-sheet")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
     });
 
     test("the command palette and the user menu have no serious a11y issues", async ({ page }) => {

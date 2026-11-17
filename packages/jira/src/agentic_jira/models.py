@@ -154,3 +154,51 @@ class Transition:
     id: str
     name: str
     to_status: str
+
+
+WEBHOOK_EVENTS: tuple[str, ...] = ("jira:issue_created", "jira:issue_updated")
+"""The events a trigger webhook asks for (7.3)."""
+WEBHOOK_FIELDS: tuple[str, ...] = ("status", "labels")
+"""Its `fieldIdsFilter`: an update is delivered only when it changes one of these."""
+
+
+@dataclass(frozen=True)
+class Webhook:
+    """A dynamic webhook the app registered on a site (7.3)."""
+
+    id: int
+    url: str
+    jql_filter: str
+    expires_at: datetime | None
+
+
+@dataclass(frozen=True)
+class DeliveryClaims:
+    """What a verified delivery's JWT says: the site it comes from and the account that
+    registered the webhook."""
+
+    cloud_id: str
+    account_id: str
+
+
+@dataclass(frozen=True)
+class IssueEvent:
+    """The part of a `jira:issue_*` delivery a trigger reads, and nothing else: no summary,
+    description or comment (principle 5).
+
+    `status_to` is the status an update moved the issue to; `labels_added` the labels an update
+    added, or a new issue's labels."""
+
+    delivery_id: str
+    event: str
+    webhook_ids: tuple[int, ...]
+    account_id: str | None
+    issue_id: str
+    issue_key: str
+    project_key: str
+    status_to: str | None
+    labels_added: tuple[str, ...]
+
+    @property
+    def created(self) -> bool:
+        return self.event == "jira:issue_created"

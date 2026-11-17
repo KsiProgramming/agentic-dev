@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { DOCS_DEMO, pretendConnections } from "./connections";
+import { DOCS_DEMO, ensureJiraTrigger, pretendConnections } from "./connections";
 import {
   apiURL,
   COMBINE,
@@ -209,6 +209,19 @@ test("settings: limits and budgets, with unsaved changes", async ({ page }) => {
   await expect(page.getByTestId("limits-save-bar")).toBeVisible();
   await expectSettingsLayout(page);
   await checkPage(page, "settings-limits");
+});
+
+test("settings: triggers", async ({ page, request }) => {
+  await ensureJiraTrigger(request);
+  await page.goto("/settings/triggers");
+  const table = page.getByRole("table", { name: "Jira triggers" });
+  const list = page.getByRole("list", { name: "Jira triggers" });
+  // A table from 720 px of the card's own width, a list below that: one of them, never both.
+  await expect(table.or(list).filter({ visible: true })).toHaveCount(1);
+  if (page.viewportSize()!.width >= 1440) await expect(table).toBeVisible();
+  await expect(page.getByTestId("jira-listening")).toBeVisible();
+  await expectSettingsLayout(page);
+  await checkPage(page, "settings-triggers");
 });
 
 test("audit log", async ({ page, request }) => {

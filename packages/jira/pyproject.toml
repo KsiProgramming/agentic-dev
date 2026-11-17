@@ -8,6 +8,7 @@ dependencies = [
     "agentic-store",
     "httpx2>=2.0,<3",
     "pydantic>=2.11",
+    "pyjwt>=2.10,<3",
 ]
 
 [build-system]

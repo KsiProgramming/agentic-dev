@@ -747,9 +747,102 @@ export interface paths {
         /**
          * Delete Jira
          * @description Remove the workspace's grant, its sites and its picked projects. The app's access stays
-         *     listed in the person's Atlassian account until they remove it there.
+         *     listed in the person's Atlassian account until they remove it there. Its trigger webhooks
+         *     are deleted on Jira first, as far as Jira lets us (7.3).
          */
         delete: operations["deleteJiraConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/jira/triggers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Triggers
+         * @description The workspace's rules, oldest first, each with the last thing it did.
+         */
+        get: operations["listJiraTriggers"];
+        put?: never;
+        /**
+         * Create Trigger
+         * @description Add a rule. It is checked as a run of its workflow on the project's first issue would be,
+         *     and the site's webhook is registered (or its projects widened) on Jira.
+         */
+        post: operations["createJiraTrigger"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/jira/triggers/{trigger_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Trigger
+         * @description Remove a rule. The runs it started keep their issue. A webhook no rule needs any more is
+         *     deleted on Jira.
+         */
+        delete: operations["deleteJiraTrigger"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Trigger
+         * @description Change a rule; only the fields given change. Turning it off (`enabled: false`) skips the
+         *     checks, so a rule whose workflow broke can still be paused.
+         */
+        patch: operations["patchJiraTrigger"];
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects/{project_key}/statuses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Project Statuses
+         * @description The project's status names, read live from Jira, for a rule's "moves to" field.
+         */
+        get: operations["listJiraProjectStatuses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jira/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive
+         * @description A delivery from Jira. Answers `202` once it is verified, whatever came of it; what did is
+         *     recorded per workspace (`jira_deliveries`, and each rule's fires).
+         */
+        post: operations["receiveJiraWebhook"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1134,7 +1227,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1694,6 +1787,11 @@ export interface components {
             missing_scopes?: string[];
             /** Sites */
             sites?: components["schemas"]["JiraSiteOut"][];
+            /**
+             * Webhooks
+             * @description Whether Jira can start runs on each site the workspace's triggers use (7.3).
+             */
+            webhooks?: components["schemas"]["JiraWebhookOut"][];
             /** Connected At */
             connected_at?: string | null;
             /** Updated At */
@@ -1709,6 +1807,24 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /**
+         * JiraIssueRef
+         * @description The Jira issue a trigger started the run on (7.3).
+         */
+        JiraIssueRef: {
+            /**
+             * Site
+             * @description The site's host, e.g. `acme.atlassian.net`.
+             */
+            site: string;
+            /** Key */
+            key: string;
+            /**
+             * Url
+             * @description The issue in Jira: `https://<site>/browse/<key>`.
+             */
+            url: string;
         };
         /** JiraProjectOut */
         JiraProjectOut: {
@@ -1746,6 +1862,150 @@ export interface components {
             enabled: boolean;
             /** Projects */
             projects: components["schemas"]["JiraProjectOut"][];
+        };
+        /**
+         * JiraStatusList
+         * @description The project's status names, read live from Jira.
+         */
+        JiraStatusList: {
+            /** Statuses */
+            statuses: string[];
+        };
+        /**
+         * JiraTriggerIn
+         * @description A rule: when an issue of `project_key` on the site moves to the status `value` (`on:
+         *     status`) or gets the label `value` (`on: label`), run `template_id` or `workflow` on `repo`
+         *     with the issue key as input. Give `template_id` or `workflow`, not both.
+         */
+        JiraTriggerIn: {
+            /** Cloud Id */
+            cloud_id: string;
+            /** Project Key */
+            project_key: string;
+            /**
+             * On
+             * @enum {string}
+             */
+            on: "status" | "label";
+            /** Value */
+            value: string;
+            /** Template Id */
+            template_id?: string | null;
+            /** @description A stored workflow; no `version` runs the latest. */
+            workflow?: components["schemas"]["StoredWorkflowRun"] | null;
+            /** @description The repo the run works on, when its workflow needs one. */
+            repo?: components["schemas"]["RepoSource"] | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /**
+         * JiraTriggerLast
+         * @description The last thing the rule did with an issue.
+         */
+        JiraTriggerLast: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Outcome
+             * @description `started` a run, found one `already_running` on the issue, or the start was refused (`start_failed`, with `reason`).
+             * @enum {string}
+             */
+            outcome: "started" | "already_running" | "start_failed";
+            /** Issue Key */
+            issue_key: string;
+            /** Run Id */
+            run_id: string | null;
+            /** Reason */
+            reason: string | null;
+        };
+        /** JiraTriggerList */
+        JiraTriggerList: {
+            /** Triggers */
+            triggers: components["schemas"]["JiraTriggerOut"][];
+        };
+        /** JiraTriggerOut */
+        JiraTriggerOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Cloud Id */
+            cloud_id: string;
+            /** Project Key */
+            project_key: string;
+            /**
+             * On
+             * @enum {string}
+             */
+            on: "status" | "label";
+            /** Value */
+            value: string;
+            /** Template Id */
+            template_id: string | null;
+            workflow: components["schemas"]["StoredWorkflowRun"] | null;
+            repo: components["schemas"]["RepoSource"] | null;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            last: components["schemas"]["JiraTriggerLast"] | null;
+        };
+        /**
+         * JiraTriggerPatch
+         * @description Changes to a rule: only the fields given change. Setting `template_id` drops the
+         *     workflow and the other way round; `repo: null` drops the repo.
+         */
+        JiraTriggerPatch: {
+            /** Cloud Id */
+            cloud_id?: string | null;
+            /** Project Key */
+            project_key?: string | null;
+            /** On */
+            on?: ("status" | "label") | null;
+            /** Value */
+            value?: string | null;
+            /** Template Id */
+            template_id?: string | null;
+            workflow?: components["schemas"]["StoredWorkflowRun"] | null;
+            repo?: components["schemas"]["RepoSource"] | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * JiraWebhookOut
+         * @description Whether Jira can start the workspace's runs on a site: `listening` (a webhook is
+         *     registered), `not_needed` (no enabled rule there) or `failed` (`error` says why:
+         *     `url_conflict`, `limit`, `needs_attention`, `jira_unavailable`, `refused`, `no_url`).
+         */
+        JiraWebhookOut: {
+            /** Cloud Id */
+            cloud_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "listening" | "not_needed" | "failed";
+            /** Error */
+            error?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Renewed At */
+            renewed_at?: string | null;
         };
         JsonValue: unknown;
         /** LongContextPrice */
@@ -2654,8 +2914,10 @@ export interface components {
             rerun_of: string | null;
             /** @description Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again. */
             rerun_from?: components["schemas"]["RerunFromRef"] | null;
-            /** @description What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`). */
+            /** @description What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3). */
             trigger: components["schemas"]["RunTrigger"];
+            /** @description The Jira issue a trigger started the run on (7.3); a rerun keeps it. */
+            jira_issue?: components["schemas"]["JiraIssueRef"] | null;
             /**
              * Branch
              * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
@@ -2962,8 +3224,10 @@ export interface components {
             rerun_of: string | null;
             /** @description Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again. */
             rerun_from?: components["schemas"]["RerunFromRef"] | null;
-            /** @description What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`). */
+            /** @description What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3). */
             trigger: components["schemas"]["RunTrigger"];
+            /** @description The Jira issue a trigger started the run on (7.3); a rerun keeps it. */
+            jira_issue?: components["schemas"]["JiraIssueRef"] | null;
             /**
              * Branch
              * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
@@ -3005,7 +3269,7 @@ export interface components {
             next_cursor: string | null;
         };
         /** @enum {string} */
-        RunTrigger: "manual" | "api" | "rerun";
+        RunTrigger: "manual" | "api" | "rerun" | "jira";
         /**
          * RunUsage
          * @description Totals of the run's usage events, priced when each was logged.
@@ -4901,7 +5165,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -5499,6 +5763,273 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    listJiraTriggers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraTriggerList"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createJiraTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JiraTriggerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraTriggerOut"];
+                };
+            };
+            /** @description No such workspace, or no such rule in it */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+        };
+    };
+    deleteJiraTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                trigger_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such workspace, or no such rule in it */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patchJiraTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                trigger_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JiraTriggerPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraTriggerOut"];
+                };
+            };
+            /** @description No such workspace, or no such rule in it */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraErrorDetail"];
+                };
+            };
+        };
+    };
+    listJiraProjectStatuses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                cloud_id: string;
+                project_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JiraStatusList"];
+                };
+            };
+            /** @description No such workspace, site, or project the account can see */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The workspace's Jira connection is missing or needs attention */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Atlassian answered with an error or could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No Atlassian OAuth app, or no master key, is configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    receiveJiraWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A signed delivery that is not an issue event we can read */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The delivery's JWT is missing or does not check out */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is over 1 MB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No Atlassian OAuth app is configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

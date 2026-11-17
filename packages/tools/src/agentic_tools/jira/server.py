@@ -89,6 +89,11 @@ class JiraAccess(Protocol):
 
     async def call[T](self, request: Callable[[SecretStr], Awaitable[T]]) -> T: ...
 
+    async def moving(self, cloud_id: str, key: str, status: str, run_id: UUID) -> None:
+        """Records that the run is about to move the issue to `status`, so the webhook delivery
+        it causes starts no run (7.3)."""
+        ...
+
 
 def fail(code: ErrorCode, message: str) -> ToolError:
     return ToolError(f"{code}: {message}")
@@ -509,6 +514,8 @@ class _JiraTools:
                 "transition_unavailable",
                 f"{found.key} is {found.status}; its transitions from there: {names}",
             )
+        # Recorded first: Jira's delivery of this move can arrive before the call returns.
+        await self._access.moving(where.cloud_id, found.key, chosen.to_status, self._run_id)
         await self._call(
             lambda token: platform.transition(token, where.cloud_id, found.key, chosen.id),
             bad="transition_unavailable",

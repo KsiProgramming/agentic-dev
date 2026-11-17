@@ -81,7 +81,13 @@ What to know:
 
 **What runs can do in Jira (7.2).** Agents may be given `jira.getIssue`, `jira.search` and `jira.listTransitions`: they read issues, their comments and the transitions their workflow offers, only in the projects you picked. A workflow writes to Jira only from a step after an approval gate: `jira.comment` posts a comment (ending with a line that links the run) and `jira.transition` moves an issue. The **Answer a Jira issue** template is the simplest example: an agent reads the issue and the code, you approve its comment, and it is posted. Issue text is given to agents as data, never as instructions.
 
-Issues start runs from a webhook in the next phase of roadmap Milestone 7.
+**Issues that start runs (7.3).** In **Settings → Triggers**, add a rule: when an issue of a picked project moves to a status, or gets a label, a run of a template or stored workflow starts on a repo, with the issue key as its input (the workflow must declare a required input). The run reads the issue itself with `jira.getIssue`; nothing from the issue's text is passed to it. Every write the run makes still waits for an approval.
+
+- **Jira must reach the API.** The platform registers a webhook on each site your rules use, pointing at `<JIRA_WEBHOOK_BASE_URL or API_BASE_URL>/jira/webhooks`, and renews it before Jira's 30-day expiry. That URL must be public. In development, open a tunnel to the API (`ngrok http 8000`) and set `JIRA_WEBHOOK_BASE_URL` to the tunnel's URL on the API.
+- **The connected account must own the Atlassian app.** Jira delivers an OAuth app's webhooks only when the account that registered them (the one that connected the workspace) owns the app, unless the app is shared. Create the app with the dedicated Jira account you connect, or share it with that account.
+- **One address and five webhooks per account.** Jira lets one account register webhooks at a single URL, and at most five per site. A workspace uses one per site. An account that already sends webhooks elsewhere (another deployment, a script) shows "Not listening" with the reason on Settings → Triggers until those are removed.
+- **Each move starts at most one run per rule.** A delivery Jira retries is recognised and dropped; while a rule's run on an issue is queued, running or waiting, moving the issue again starts no other; a move a run made itself (`jira.transition`) starts nothing.
+- **Projects you did not pick are ignored**, whatever Jira sends.
 
 ### 5. Calling the platform from your systems
 

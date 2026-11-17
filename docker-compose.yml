@@ -95,6 +95,9 @@ services:
       # client secret is read from ./.secrets/atlassian-client-secret.
       ATLASSIAN_CLIENT_ID: ${ATLASSIAN_CLIENT_ID:-}
       ATLASSIAN_CLIENT_SECRET_FILE: /github/atlassian-client-secret
+      # Where Jira posts the webhook deliveries that start runs (7.3): <this>/jira/webhooks. Jira
+      # must reach it from the internet; in development, a tunnel's URL. Blank: API_BASE_URL.
+      JIRA_WEBHOOK_BASE_URL: ${JIRA_WEBHOOK_BASE_URL:-}
       # GitHub's install redirect comes back to the API, which sends the browser on to the web app.
       WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
       # With AGENTIC_GITHUB=fake, the fake App's bare repos (shared with the worker), so the API
@@ -166,6 +169,9 @@ services:
       # Every SANDBOX_SWEEP_S, the sandboxes failed and cancelled runs kept past their time to live
       # are removed, and saved bundles past their run's retention dropped (phase 12.3).
       SANDBOX_SWEEP_S: ${SANDBOX_SWEEP_S:-60}
+      # Every JIRA_WEBHOOK_SWEEP_S, the Jira trigger webhooks that expire within 10 days are
+      # renewed, those Jira dropped registered again, and old deliveries pruned (phase 7.3).
+      JIRA_WEBHOOK_SWEEP_S: ${JIRA_WEBHOOK_SWEEP_S:-21600}
       # Runs with a repo get a sandbox container on the host's Docker. Local repo paths may only
       # come from /samples, where this project's own git history is mounted as a demo repo.
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}

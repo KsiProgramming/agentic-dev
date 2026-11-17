@@ -10,15 +10,24 @@ Issues (7.2): a few seeded issues (`FAKE_ISSUES`) on a three-status workflow (To
 Progress, Done), and `DOCS-9`, an issue moved to OPS that still answers to its old key. A
 search understands only the `project in (…)` clause the Jira tools put first; `leak_search`
 makes it return every issue of the site, to test that the tools filter. What runs post is kept
-in `posted` and `moved`, and shows on the issue afterwards."""
+in `posted` and `moved`, and shows on the issue afterwards.
+
+Webhooks (7.3): registrations are kept per site with a 30-day expiry, and refused as Jira
+refuses them (one URL per account, `WEBHOOK_LIMIT` per site; `refuse_webhooks` forces a kind).
+A refresh answers for unknown ids too, as Jira does. `delivery` builds a delivery signed with
+`FAKE_CLIENT_SECRET`, shaped as Jira sends it, for tests."""
 
 import itertools
+import json
 import re
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import urlencode
 
+import jwt
 from pydantic import SecretStr
 
 from agentic_jira.errors import (
@@ -27,10 +36,12 @@ from agentic_jira.errors import (
     JiraBadRequestError,
     JiraNotFoundError,
     JiraUnauthorizedError,
+    JiraWebhookError,
 )
 from agentic_jira.models import (
     SCOPES,
     Account,
+    DeliveryClaims,
     Grant,
     Issue,
     IssueComment,
@@ -40,9 +51,20 @@ from agentic_jira.models import (
     SearchPage,
     Site,
     Transition,
+    Webhook,
 )
+from agentic_jira.webhooks import ALGORITHM, DELIVERY_HEADER, verify_delivery
 
 FAKE_CODE = "fake-code"
+FAKE_CLIENT_ID = "fake-atlassian-client"
+FAKE_CLIENT_SECRET = "fake-atlassian-client-secret-for-local-dev-only"
+"""The fake app's credentials: deliveries it signs verify with them."""
+WEBHOOK_LIMIT = 5
+"""Webhooks Jira lets one account's app register on a site."""
+WEBHOOK_LIFE = timedelta(days=30)
+_WEBHOOK_IDS = itertools.count(1)
+"""Webhook ids, unique across fakes as Jira's are on a site, so tests sharing a database
+never see another test's webhook match."""
 FAKE_ACCOUNT = Account(account_id="fake-account-1", name="Ada Example")
 FAKE_SITES = (
     Site("fake-cloud-acme", "https://acme.atlassian.net", "Acme"),
@@ -162,6 +184,14 @@ _PROJECT_CLAUSE = re.compile(r"^\s*project\s+in\s+\(([^)]*)\)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
+class FakeDelivery:
+    """A delivery as Jira sends it: its headers and its JSON body."""
+
+    headers: dict[str, str]
+    body: bytes
+
+
+@dataclass(frozen=True)
 class PostedComment:
     cloud_id: str
     key: str
@@ -199,6 +229,11 @@ class FakeAtlassian:
         self.searches: list[str] = []
         self.posted: list[PostedComment] = []
         self.moved: list[MadeTransition] = []
+        self.webhooks: dict[str, dict[int, Webhook]] = {}
+        """Registered webhooks by site, then id."""
+        self.refuse_webhooks: str | None = None
+        """A `JiraWebhookError` kind every registration fails with."""
+        self.refreshed: list[tuple[str, tuple[int, ...]]] = []
 
     def authorize_url(self, state: str) -> str:
         return (
@@ -311,6 +346,131 @@ class FakeAtlassian:
         self.issues[cloud_id][issue.key] = replace(issue, status=offered[transition_id].to_status)
         self.moved.append(MadeTransition(cloud_id, issue.key, transition_id))
 
+    def verify_delivery(self, authorization: str | None) -> DeliveryClaims:
+        return verify_delivery(
+            authorization, client_id=FAKE_CLIENT_ID, client_secret=FAKE_CLIENT_SECRET
+        )
+
+    async def register_webhook(
+        self, token: SecretStr, cloud_id: str, url: str, project_keys: Sequence[str]
+    ) -> int:
+        self._accepted(token)
+        self._site_projects(cloud_id)
+        if self.refuse_webhooks:
+            raise JiraWebhookError(self.refuse_webhooks)
+        everywhere = [hook for hooks in self.webhooks.values() for hook in hooks.values()]
+        if any(hook.url != url for hook in everywhere):
+            raise JiraWebhookError("url_conflict")
+        site = self.webhooks.setdefault(cloud_id, {})
+        if len(site) >= WEBHOOK_LIMIT:
+            raise JiraWebhookError("limit")
+        keys = ", ".join(f'"{key}"' for key in sorted(set(project_keys)))
+        webhook = Webhook(
+            id=next(_WEBHOOK_IDS),
+            url=url,
+            jql_filter=f"project in ({keys})",
+            expires_at=datetime.now(UTC) + WEBHOOK_LIFE,
+        )
+        site[webhook.id] = webhook
+        return webhook.id
+
+    async def list_webhooks(self, token: SecretStr, cloud_id: str) -> list[Webhook]:
+        self._accepted(token)
+        self._site_projects(cloud_id)
+        return list(self.webhooks.get(cloud_id, {}).values())
+
+    async def refresh_webhooks(
+        self, token: SecretStr, cloud_id: str, ids: Sequence[int]
+    ) -> datetime | None:
+        self._accepted(token)
+        self._site_projects(cloud_id)
+        expires_at = datetime.now(UTC) + WEBHOOK_LIFE
+        site = self.webhooks.get(cloud_id, {})
+        for webhook_id in ids:
+            if webhook_id in site:  # an unknown id is not an error, as on Jira
+                site[webhook_id] = replace(site[webhook_id], expires_at=expires_at)
+        self.refreshed.append((cloud_id, tuple(ids)))
+        return expires_at
+
+    async def delete_webhooks(self, token: SecretStr, cloud_id: str, ids: Sequence[int]) -> None:
+        self._accepted(token)
+        self._site_projects(cloud_id)
+        site = self.webhooks.get(cloud_id, {})
+        for webhook_id in ids:
+            site.pop(webhook_id, None)
+
+    async def project_statuses(self, token: SecretStr, cloud_id: str, key: str) -> list[str]:
+        self._accepted(token)
+        if key not in {project.key for project in self._site_projects(cloud_id)}:
+            raise JiraNotFoundError("Atlassian answered 404")
+        return list(_WORKFLOW)
+
+    def delivery(
+        self,
+        cloud_id: str,
+        key: str,
+        *,
+        status_to: str | None = None,
+        labels: tuple[str, str] | None = None,
+        created: bool = False,
+        account_id: str = FAKE_ACCOUNT.account_id,
+        delivery_id: str | None = None,
+        webhook_ids: Sequence[int] | None = None,
+    ) -> FakeDelivery:
+        """A signed delivery about the seeded issue `key` on `cloud_id`: a status move to
+        `status_to`, a label change `labels` (`fromString`, `toString`), or with `created` the
+        issue's creation. Matched to every webhook of the site unless `webhook_ids` says."""
+        issue = self._find(cloud_id, key)
+        items: list[dict[str, Any]] = []
+        if status_to is not None:
+            items.append(
+                {
+                    "field": "status",
+                    "fieldId": "status",
+                    "fromString": issue.status,
+                    "toString": status_to,
+                }
+            )
+        if labels is not None:
+            items.append(
+                {
+                    "field": "labels",
+                    "fieldId": "labels",
+                    "fromString": labels[0],
+                    "toString": labels[1],
+                }
+            )
+        matched = (
+            list(webhook_ids) if webhook_ids is not None else list(self.webhooks.get(cloud_id, {}))
+        )
+        payload = {
+            "timestamp": int(datetime.now(UTC).timestamp() * 1000),
+            "webhookEvent": "jira:issue_created" if created else "jira:issue_updated",
+            "issue_event_type_name": "issue_created" if created else "issue_generic",
+            "user": {"accountId": account_id, "displayName": FAKE_ACCOUNT.name},
+            "issue": {
+                "id": issue.id,
+                "key": issue.key,
+                "fields": {
+                    "summary": issue.summary,
+                    "description": None,
+                    "project": {"key": issue.project_key},
+                    "status": {"name": status_to or issue.status},
+                    "labels": list(issue.labels),
+                },
+            },
+            "changelog": {"id": str(next(self._comment_ids)), "items": items},
+            "matchedWebhookIds": matched,
+        }
+        return FakeDelivery(
+            headers={
+                "Authorization": f"Bearer {sign_delivery(cloud_id)}",
+                "Content-Type": "application/json; charset=UTF-8",
+                DELIVERY_HEADER: delivery_id or str(uuid.uuid4().int)[:19],
+            },
+            body=json.dumps(payload).encode(),
+        )
+
     async def aclose(self) -> None:
         return None
 
@@ -346,3 +506,26 @@ class FakeAtlassian:
         self._reachable()
         if self.unauthorized or not token.get_secret_value().startswith(_ACCESS):
             raise JiraUnauthorizedError("Atlassian did not accept the access token")
+
+
+def sign_delivery(
+    cloud_id: str,
+    *,
+    secret: str = FAKE_CLIENT_SECRET,
+    issuer: str = FAKE_CLIENT_ID,
+    expires_in_s: int = 900,
+    algorithm: str = ALGORITHM,
+) -> str:
+    """A delivery JWT shaped as Atlassian's (`iss`, `sub`, `context`, `iat`, `exp`, `jti`).
+    Tests pass another secret, issuer, a negative expiry or another algorithm to see it
+    refused."""
+    now = datetime.now(UTC)
+    claims = {
+        "iss": issuer,
+        "sub": FAKE_ACCOUNT.account_id,
+        "context": {"resourceType": "site", "resourceId": cloud_id, "cloudId": cloud_id},
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=expires_in_s)).timestamp()),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(claims, secret, algorithm=algorithm)

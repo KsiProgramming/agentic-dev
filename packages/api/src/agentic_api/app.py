@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from agentic_api.github.routes import router as github_router
 from agentic_api.health import router as health_router
 from agentic_api.jira.routes import router as jira_router
+from agentic_api.jira.triggers import router as jira_triggers_router
+from agentic_api.jira.webhooks import router as jira_webhooks_router
 from agentic_api.node_types.routes import router as node_types_router
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.routes import router as runs_router
@@ -113,6 +115,8 @@ def create_app(
     app.include_router(workspaces_router)
     app.include_router(github_router)
     app.include_router(jira_router)
+    app.include_router(jira_triggers_router)
+    app.include_router(jira_webhooks_router)
     app.include_router(templates_router)
     app.include_router(workflows_router)
     app.include_router(node_types_router)

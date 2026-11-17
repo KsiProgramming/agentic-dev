@@ -34,6 +34,7 @@ from agentic_api.jira.models import (
     PutJiraProjects,
     StartAuthorize,
 )
+from agentic_api.jira.sync import sync_webhooks
 from agentic_api.settings import Settings
 from agentic_jira import (
     JiraApiError,
@@ -44,6 +45,7 @@ from agentic_jira import (
     ProjectPage,
     call,
     missing_scopes,
+    remove_jira_webhooks,
 )
 from agentic_secrets import KeyProvider, SecretDecryptError, registered
 from agentic_store import (
@@ -56,6 +58,7 @@ from agentic_store import (
     delete_connection,
     get_jira_connection,
     get_workspace,
+    list_jira_webhooks,
     put_jira_connection,
     set_jira_site_enabled,
     set_jira_site_projects,
@@ -100,7 +103,7 @@ def _redis(request: Request) -> Redis:
     return request.app.state.redis
 
 
-def _jira(request: Request) -> JiraPlatform:
+def jira_app(request: Request) -> JiraPlatform:
     jira: JiraPlatform | None = request.app.state.jira
     if jira is None:
         raise HTTPException(
@@ -111,7 +114,7 @@ def _jira(request: Request) -> JiraPlatform:
     return jira
 
 
-def _keys(request: Request) -> KeyProvider:
+def master_keys(request: Request) -> KeyProvider:
     keys: KeyProvider | None = request.app.state.keys
     if keys is None:
         raise HTTPException(
@@ -143,8 +146,8 @@ def _refused(status_code: int, code: str, message: str) -> HTTPException:
 async def start_authorize(
     workspace_id: UUID,
     request: Request,
-    jira: Annotated[JiraPlatform, Depends(_jira)],
-    _: Annotated[KeyProvider, Depends(_keys)],
+    jira: Annotated[JiraPlatform, Depends(jira_app)],
+    _: Annotated[KeyProvider, Depends(master_keys)],
     body: StartAuthorize | None = None,
 ) -> AuthorizeUrlOut:
     """Atlassian's consent URL for the workspace. Consenting stores the grant, then sends the
@@ -249,6 +252,7 @@ async def jira_connection(workspace_id: UUID, request: Request) -> JiraConnectio
         info,
         configured=request.app.state.jira is not None,
         missing=() if info is None else missing_scopes(info.scopes),
+        webhooks=await list_jira_webhooks(_sessions(request), workspace_id),
     )
 
 
@@ -266,10 +270,11 @@ async def patch_site(
     site = await set_jira_site_enabled(_sessions(request), workspace_id, cloud_id, body.enabled)
     if site is None:
         raise _no_site(cloud_id)
+    await sync_webhooks(request, workspace_id)  # 7.3: a site turned off stops its triggers
     return JiraSiteOut.of(site)
 
 
-async def _known_site(request: Request, workspace_id: UUID, cloud_id: str) -> None:
+async def known_site(request: Request, workspace_id: UUID, cloud_id: str) -> None:
     """Raises unless the workspace's Jira connection reaches the site: a cloud id is only ever
     sent to Atlassian when the connection's own grant listed it."""
     try:
@@ -284,7 +289,7 @@ async def _known_site(request: Request, workspace_id: UUID, cloud_id: str) -> No
         raise _no_site(cloud_id)
 
 
-async def _from_jira[T](
+async def from_jira[T](
     request: Request,
     workspace_id: UUID,
     jira: JiraPlatform,
@@ -323,19 +328,19 @@ async def search_projects(
     workspace_id: UUID,
     cloud_id: CloudId,
     request: Request,
-    jira: Annotated[JiraPlatform, Depends(_jira)],
-    keys: Annotated[KeyProvider, Depends(_keys)],
+    jira: Annotated[JiraPlatform, Depends(jira_app)],
+    keys: Annotated[KeyProvider, Depends(master_keys)],
     q: Annotated[str, Query(max_length=100)] = "",
     cursor: Annotated[int, Query(ge=0, le=100_000)] = 0,
 ) -> JiraProjectPage:
     """The site's projects the connected account can see, by name, read live from Jira, to
     pick from. `q` filters by key or name."""
-    await _known_site(request, workspace_id, cloud_id)
+    await known_site(request, workspace_id, cloud_id)
 
     async def fetch(token: SecretStr) -> ProjectPage:
         return await jira.search_projects(token, cloud_id, query=q.strip(), start_at=cursor)
 
-    page = await _from_jira(request, workspace_id, jira, keys, fetch)
+    page = await from_jira(request, workspace_id, jira, keys, fetch)
     return JiraProjectPage(
         projects=[JiraProjectOut.of(p) for p in page.projects], next_cursor=page.next_start_at
     )
@@ -358,18 +363,18 @@ async def put_projects(
     cloud_id: CloudId,
     body: PutJiraProjects,
     request: Request,
-    jira: Annotated[JiraPlatform, Depends(_jira)],
-    keys: Annotated[KeyProvider, Depends(_keys)],
+    jira: Annotated[JiraPlatform, Depends(jira_app)],
+    keys: Annotated[KeyProvider, Depends(master_keys)],
 ) -> JiraSiteOut:
     """Replace the projects the workspace may use on the site. Each id is checked with Jira,
     and its key and name are stored as Jira gives them."""
-    await _known_site(request, workspace_id, cloud_id)
+    await known_site(request, workspace_id, cloud_id)
     ids = list(dict.fromkeys(body.project_ids))
 
     async def fetch(token: SecretStr) -> list[Project]:
         return await jira.get_projects(token, cloud_id, ids)
 
-    found = await _from_jira(request, workspace_id, jira, keys, fetch) if ids else []
+    found = await from_jira(request, workspace_id, jira, keys, fetch) if ids else []
     by_id = {project.id: project for project in found}
     unknown = [project_id for project_id in ids if project_id not in by_id]
     if unknown:
@@ -386,6 +391,7 @@ async def put_projects(
     )
     if site is None:
         raise _no_site(cloud_id)
+    await sync_webhooks(request, workspace_id)  # 7.3: the webhook covers picked projects only
     return JiraSiteOut.of(site)
 
 
@@ -398,7 +404,12 @@ async def put_projects(
 )
 async def delete_jira(workspace_id: UUID, request: Request) -> None:
     """Remove the workspace's grant, its sites and its picked projects. The app's access stays
-    listed in the person's Atlassian account until they remove it there."""
+    listed in the person's Atlassian account until they remove it there. Its trigger webhooks
+    are deleted on Jira first, as far as Jira lets us (7.3)."""
+    jira: JiraPlatform | None = request.app.state.jira
+    keys: KeyProvider | None = request.app.state.keys
+    if jira is not None and keys is not None:
+        await remove_jira_webhooks(_sessions(request), keys, jira, workspace_id)
     try:
         deleted = await delete_connection(_sessions(request), workspace_id, JIRA)
     except WorkspaceNotFoundError:

@@ -165,6 +165,7 @@ dependencies = [
     { name = "agentic-store" },
     { name = "httpx2" },
     { name = "pydantic" },
+    { name = "pyjwt" },
 ]
 
 [package.metadata]
@@ -173,6 +174,7 @@ requires-dist = [
     { name = "agentic-store", editable = "packages/store" },
     { name = "httpx2", specifier = ">=2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
+    { name = "pyjwt", specifier = ">=2.10,<3" },
 ]
 
 [[package]]

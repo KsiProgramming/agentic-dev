@@ -295,7 +295,15 @@ class CancelResponse(BaseModel):
 
 type RunStatus = Literal["queued", "running", "waiting", "completed", "failed", "cancelled"]
 
-type RunTrigger = Literal["manual", "api", "rerun"]
+type RunTrigger = Literal["manual", "api", "rerun", "jira"]
+
+
+class JiraIssueRef(BaseModel):
+    """The Jira issue a trigger started the run on (7.3)."""
+
+    site: str = Field(description="The site's host, e.g. `acme.atlassian.net`.")
+    key: str
+    url: str = Field(description="The issue in Jira: `https://<site>/browse/<key>`.")
 
 
 class WorkflowRef(BaseModel):
@@ -432,7 +440,11 @@ class RunSummary(BaseModel):
     )
     trigger: RunTrigger = Field(
         description="What started the run: a person in the web app (`manual`), another client "
-        "(`api`), or a rerun of `rerun_of` (`rerun`)."
+        "(`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3)."
+    )
+    jira_issue: JiraIssueRef | None = Field(
+        default=None,
+        description="The Jira issue a trigger started the run on (7.3); a rerun keeps it.",
     )
     branch: str | None = Field(
         description="The branch the run works on: the repo's `ref`, else the default branch of a "

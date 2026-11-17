@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import type { TokenUsage } from "../cost";
-import { RerunOf } from "../rerun";
+import { RunTrigger } from "../trigger";
 import { repoLabel } from "../summaries";
 import type { ReceivedRunEvent } from "../types";
 import type { RunDetail } from "../use-run-detail";
@@ -44,16 +44,6 @@ export interface HeaderFacts {
   wallClock: string | undefined;
   prUrl: string | null;
   usage: TokenUsage | null;
-}
-
-/** What started the run: "Manual", "API" or "Rerun of <id>". */
-function Trigger({ run }: { run: RunDetail }) {
-  if (run.rerun_of) {
-    return <RerunOf runId={run.rerun_of} fromStep={run.rerun_from?.node_id} />;
-  }
-  return (
-    <span>{run.trigger === "manual" ? "Manual" : run.trigger === "api" ? "API" : "Rerun"}</span>
-  );
 }
 
 /** Saves the events the console received as `run-<id8>-events.json`, built in the browser. */
@@ -177,7 +167,7 @@ export function RunHeader({
           ) : null}
           {run ? (
             <li className="flex min-w-0 items-center gap-1.5">
-              <Trigger run={run} />
+              <RunTrigger run={run} />
             </li>
           ) : null}
           {facts.startedAt ? (

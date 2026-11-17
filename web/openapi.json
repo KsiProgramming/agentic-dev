@@ -1564,6 +1564,14 @@
                       "connection.needs_attention",
                       "jira.site_updated",
                       "jira.projects_changed",
+                      "jira.trigger_created",
+                      "jira.trigger_updated",
+                      "jira.trigger_deleted",
+                      "jira.trigger_fired",
+                      "jira.trigger_failed",
+                      "jira.webhook_registered",
+                      "jira.webhook_deleted",
+                      "jira.webhook_failed",
                       "policy.updated",
                       "pricing.updated",
                       "workflow.created",
@@ -2438,7 +2446,7 @@
           "jira"
         ],
         "summary": "Delete Jira",
-        "description": "Remove the workspace's grant, its sites and its picked projects. The app's access stays\nlisted in the person's Atlassian account until they remove it there.",
+        "description": "Remove the workspace's grant, its sites and its picked projects. The app's access stays\nlisted in the person's Atlassian account until they remove it there. Its trigger webhooks\nare deleted on Jira first, as far as Jira lets us (7.3).",
         "operationId": "deleteJiraConnection",
         "parameters": [
           {
@@ -2468,6 +2476,330 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira/triggers": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "List Triggers",
+        "description": "The workspace's rules, oldest first, each with the last thing it did.",
+        "operationId": "listJiraTriggers",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraTriggerList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Create Trigger",
+        "description": "Add a rule. It is checked as a run of its workflow on the project's first issue would be,\nand the site's webhook is registered (or its projects widened) on Jira.",
+        "operationId": "createJiraTrigger",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JiraTriggerIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraTriggerOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or no such rule in it"
+          },
+          "422": {
+            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira/triggers/{trigger_id}": {
+      "patch": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Patch Trigger",
+        "description": "Change a rule; only the fields given change. Turning it off (`enabled: false`) skips the\nchecks, so a rule whose workflow broke can still be paused.",
+        "operationId": "patchJiraTrigger",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Trigger Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JiraTriggerPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraTriggerOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, or no such rule in it"
+          },
+          "422": {
+            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraErrorDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Delete Trigger",
+        "description": "Remove a rule. The runs it started keep their issue. A webhook no rule needs any more is\ndeleted on Jira.",
+        "operationId": "deleteJiraTrigger",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Trigger Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such workspace, or no such rule in it"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/jira/sites/{cloud_id}/projects/{project_key}/statuses": {
+      "get": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Project Statuses",
+        "description": "The project's status names, read live from Jira, for a rule's \"moves to\" field.",
+        "operationId": "listJiraProjectStatuses",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "cloud_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$",
+              "title": "Cloud Id"
+            }
+          },
+          {
+            "name": "project_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+              "title": "Project Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JiraStatusList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such workspace, site, or project the account can see"
+          },
+          "409": {
+            "description": "The workspace's Jira connection is missing or needs attention"
+          },
+          "502": {
+            "description": "Atlassian answered with an error or could not be reached"
+          },
+          "503": {
+            "description": "No Atlassian OAuth app, or no master key, is configured"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jira/webhooks": {
+      "post": {
+        "tags": [
+          "jira"
+        ],
+        "summary": "Receive",
+        "description": "A delivery from Jira. Answers `202` once it is verified, whatever came of it; what did is\nrecorded per workspace (`jira_deliveries`, and each rule's fires).",
+        "operationId": "receiveJiraWebhook",
+        "responses": {
+          "202": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "A signed delivery that is not an issue event we can read"
+          },
+          "401": {
+            "description": "The delivery's JWT is missing or does not check out"
+          },
+          "413": {
+            "description": "The body is over 1 MB"
+          },
+          "503": {
+            "description": "No Atlassian OAuth app is configured on the API"
           }
         }
       }
@@ -3621,6 +3953,14 @@
               "connection.needs_attention",
               "jira.site_updated",
               "jira.projects_changed",
+              "jira.trigger_created",
+              "jira.trigger_updated",
+              "jira.trigger_deleted",
+              "jira.trigger_fired",
+              "jira.trigger_failed",
+              "jira.webhook_registered",
+              "jira.webhook_deleted",
+              "jira.webhook_failed",
               "policy.updated",
               "pricing.updated",
               "workflow.created",
@@ -4879,6 +5219,14 @@
             "type": "array",
             "title": "Sites"
           },
+          "webhooks": {
+            "items": {
+              "$ref": "#/components/schemas/JiraWebhookOut"
+            },
+            "type": "array",
+            "title": "Webhooks",
+            "description": "Whether Jira can start runs on each site the workspace's triggers use (7.3)."
+          },
           "connected_at": {
             "anyOf": [
               {
@@ -4930,6 +5278,32 @@
         ],
         "title": "JiraErrorDetail",
         "description": "The `detail` of a refused Jira request: `code` says what went wrong (`no_connection`,\n`needs_attention`, `unknown_project`), `message` says it for people."
+      },
+      "JiraIssueRef": {
+        "properties": {
+          "site": {
+            "type": "string",
+            "title": "Site",
+            "description": "The site's host, e.g. `acme.atlassian.net`."
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The issue in Jira: `https://<site>/browse/<key>`."
+          }
+        },
+        "type": "object",
+        "required": [
+          "site",
+          "key",
+          "url"
+        ],
+        "title": "JiraIssueRef",
+        "description": "The Jira issue a trigger started the run on (7.3)."
       },
       "JiraProjectOut": {
         "properties": {
@@ -5018,6 +5392,442 @@
         ],
         "title": "JiraSiteOut",
         "description": "A Jira site the connection reaches. `projects` are the ones the workspace may use\nthere: nothing on a site is usable until some are picked, or while it is not `enabled`."
+      },
+      "JiraStatusList": {
+        "properties": {
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statuses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "statuses"
+        ],
+        "title": "JiraStatusList",
+        "description": "The project's status names, read live from Jira."
+      },
+      "JiraTriggerIn": {
+        "properties": {
+          "cloud_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9-]+$",
+            "title": "Cloud Id"
+          },
+          "project_key": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Project Key"
+          },
+          "on": {
+            "type": "string",
+            "enum": [
+              "status",
+              "label"
+            ],
+            "title": "On"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Value"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "workflow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredWorkflowRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A stored workflow; no `version` runs the latest."
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The repo the run works on, when its workflow needs one."
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cloud_id",
+          "project_key",
+          "on",
+          "value"
+        ],
+        "title": "JiraTriggerIn",
+        "description": "A rule: when an issue of `project_key` on the site moves to the status `value` (`on:\nstatus`) or gets the label `value` (`on: label`), run `template_id` or `workflow` on `repo`\nwith the issue key as input. Give `template_id` or `workflow`, not both."
+      },
+      "JiraTriggerLast": {
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "At"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "started",
+              "already_running",
+              "start_failed"
+            ],
+            "title": "Outcome",
+            "description": "`started` a run, found one `already_running` on the issue, or the start was refused (`start_failed`, with `reason`)."
+          },
+          "issue_key": {
+            "type": "string",
+            "title": "Issue Key"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "at",
+          "outcome",
+          "issue_key",
+          "run_id",
+          "reason"
+        ],
+        "title": "JiraTriggerLast",
+        "description": "The last thing the rule did with an issue."
+      },
+      "JiraTriggerList": {
+        "properties": {
+          "triggers": {
+            "items": {
+              "$ref": "#/components/schemas/JiraTriggerOut"
+            },
+            "type": "array",
+            "title": "Triggers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "triggers"
+        ],
+        "title": "JiraTriggerList"
+      },
+      "JiraTriggerOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "cloud_id": {
+            "type": "string",
+            "title": "Cloud Id"
+          },
+          "project_key": {
+            "type": "string",
+            "title": "Project Key"
+          },
+          "on": {
+            "type": "string",
+            "enum": [
+              "status",
+              "label"
+            ],
+            "title": "On"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "workflow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredWorkflowRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JiraTriggerLast"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "cloud_id",
+          "project_key",
+          "on",
+          "value",
+          "template_id",
+          "workflow",
+          "repo",
+          "enabled",
+          "created_at",
+          "updated_at",
+          "last"
+        ],
+        "title": "JiraTriggerOut"
+      },
+      "JiraTriggerPatch": {
+        "properties": {
+          "cloud_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud Id"
+          },
+          "project_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1,
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Key"
+          },
+          "on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "label"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "workflow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredWorkflowRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "JiraTriggerPatch",
+        "description": "Changes to a rule: only the fields given change. Setting `template_id` drops the\nworkflow and the other way round; `repo: null` drops the repo."
+      },
+      "JiraWebhookOut": {
+        "properties": {
+          "cloud_id": {
+            "type": "string",
+            "title": "Cloud Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "listening",
+              "not_needed",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "renewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renewed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cloud_id",
+          "state"
+        ],
+        "title": "JiraWebhookOut",
+        "description": "Whether Jira can start the workspace's runs on a site: `listening` (a webhook is\nregistered), `not_needed` (no enabled rule there) or `failed` (`error` says why:\n`url_conflict`, `limit`, `needs_attention`, `jira_unavailable`, `refused`, `no_url`)."
       },
       "JsonValue": {},
       "LongContextPrice": {
@@ -7120,7 +7930,18 @@
           },
           "trigger": {
             "$ref": "#/components/schemas/RunTrigger",
-            "description": "What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`)."
+            "description": "What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3)."
+          },
+          "jira_issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JiraIssueRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Jira issue a trigger started the run on (7.3); a rerun keeps it."
           },
           "branch": {
             "anyOf": [
@@ -7798,7 +8619,18 @@
           },
           "trigger": {
             "$ref": "#/components/schemas/RunTrigger",
-            "description": "What started the run: a person in the web app (`manual`), another client (`api`), or a rerun of `rerun_of` (`rerun`)."
+            "description": "What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3)."
+          },
+          "jira_issue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JiraIssueRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Jira issue a trigger started the run on (7.3); a rerun keeps it."
           },
           "branch": {
             "anyOf": [
@@ -7916,7 +8748,8 @@
         "enum": [
           "manual",
           "api",
-          "rerun"
+          "rerun",
+          "jira"
         ]
       },
       "RunUsage": {

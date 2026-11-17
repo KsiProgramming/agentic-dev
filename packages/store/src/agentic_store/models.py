@@ -128,6 +128,121 @@ class JiraProject(Base):
     name: Mapped[str] = mapped_column(String(255))
 
 
+class JiraTrigger(Base):
+    """A rule that starts a run when an issue of a picked project moves to a status (`on =
+    'status'`) or gets a label (`on = 'label'`) (7.3). What runs is a template or a stored
+    workflow (its latest version when `workflow_version` is null), on `repo_url` at `ref`; its
+    input is the issue key."""
+
+    __tablename__ = "jira_triggers"
+    __table_args__ = (
+        CheckConstraint("\"on\" IN ('status', 'label')", name="ck_jira_triggers_on"),
+        CheckConstraint(
+            "(template_id IS NULL) <> (workflow_id IS NULL)", name="ck_jira_triggers_target"
+        ),
+        Index("ix_jira_triggers_workspace_site_project", "workspace_id", "cloud_id", "project_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    cloud_id: Mapped[str] = mapped_column(String(64))
+    project_key: Mapped[str] = mapped_column(String(32))
+    on: Mapped[str] = mapped_column(String(16))
+    value: Mapped[str] = mapped_column(String(255))
+    template_id: Mapped[str | None] = mapped_column(String(128))
+    workflow_id: Mapped[str | None] = mapped_column(String(64))
+    workflow_version: Mapped[int | None] = mapped_column(Integer)
+    repo_url: Mapped[str | None] = mapped_column(Text)
+    ref: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default=true())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JiraWebhook(Base):
+    """The webhook a workspace holds on a Jira site for its triggers (7.3): Jira's id for it,
+    the URL and projects it was registered with, when it expires, and the last failure to
+    register or renew it (`error`, a fixed kind), cleared by the next success."""
+
+    __tablename__ = "jira_webhooks"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "cloud_id", name="uq_jira_webhooks_workspace_id_cloud_id"),
+        Index("ix_jira_webhooks_cloud_id_webhook_id", "cloud_id", "webhook_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    cloud_id: Mapped[str] = mapped_column(String(64))
+    webhook_id: Mapped[int | None] = mapped_column(BigInteger)
+    url: Mapped[str | None] = mapped_column(Text)
+    projects: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    renewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(String(64))
+    error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JiraDelivery(Base):
+    """One webhook delivery a workspace received (7.3), kept 30 days. `(workspace_id, cloud_id,
+    delivery_id)` is unique, so a retry of the same delivery is dropped. `outcome` is what the
+    delivery came to before rules were tried (`project_not_allowed`, `own_change`, `no_match`)
+    or `matched`; what each matching rule did is a `JiraTriggerFire`."""
+
+    __tablename__ = "jira_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "cloud_id", "delivery_id", name="uq_jira_deliveries_delivery"
+        ),
+        Index("ix_jira_deliveries_received_at", "received_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    cloud_id: Mapped[str] = mapped_column(String(64))
+    delivery_id: Mapped[str] = mapped_column(String(64))
+    issue_key: Mapped[str] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(32), server_default="received")
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class JiraTriggerFire(Base):
+    """What a rule did with a delivery that matched it (7.3): `started` (with the run),
+    `already_running` (with the run still going) or `start_failed` (with the reason)."""
+
+    __tablename__ = "jira_trigger_fires"
+    __table_args__ = (Index("ix_jira_trigger_fires_trigger_at", "trigger_id", text("at DESC")),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    trigger_id: Mapped[UUID] = mapped_column(ForeignKey("jira_triggers.id", ondelete="CASCADE"))
+    delivery_id: Mapped[int | None] = mapped_column(
+        ForeignKey("jira_deliveries.id", ondelete="SET NULL")
+    )
+    issue_key: Mapped[str] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str | None] = mapped_column(Text)
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JiraOwnMove(Base):
+    """A status move a run's own `jira.transition` made (7.3), so the delivery it causes does
+    not start another run. Matched for 10 minutes by site, issue and status."""
+
+    __tablename__ = "jira_own_moves"
+    __table_args__ = (Index("ix_jira_own_moves_issue", "cloud_id", "issue_key", "at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    cloud_id: Mapped[str] = mapped_column(String(64))
+    issue_key: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(255))
+    run_id: Mapped[UUID | None] = mapped_column(ForeignKey("runs.id"))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WorkspaceModelPrice(Base):
     """A workspace's price for a model, overriding its list price. USD per million tokens."""
 
@@ -213,6 +328,14 @@ class Run(Base):
         Index(
             "ix_runs_workspace_created", "workspace_id", text("created_at DESC"), text("id DESC")
         ),
+        # A trigger's active run on an issue (`agentic_store.jira_triggers`).
+        Index(
+            "ix_runs_jira_trigger_active",
+            "jira_trigger_id",
+            postgresql_where=text(
+                "jira_trigger_id IS NOT NULL AND status IN ('queued', 'running', 'waiting')"
+            ),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -249,8 +372,14 @@ class Run(Base):
     # it starts from, whether that step's uncommitted work is restored, and the parameter paths
     # changed (never their values). Null for a run that starts from the beginning.
     rerun_from: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
-    # What started the run: `manual` (a person, from the web), `api` or `rerun`.
+    # What started the run: `manual` (a person, from the web), `api`, `rerun` or `jira` (7.3).
     trigger: Mapped[str] = mapped_column(String(32), server_default="api")
+    # A run a Jira trigger started (7.3): the rule, and the issue `{cloud_id, site, key, url}`;
+    # a rerun keeps the issue.
+    jira_trigger_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("jira_triggers.id", ondelete="SET NULL")
+    )
+    jira_issue: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
     branch: Mapped[str | None] = mapped_column(Text)
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):
