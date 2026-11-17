@@ -29,6 +29,7 @@ def test_the_docs_template_is_registered() -> None:
         "audit-codebase",
         "plan-build-review",
         "sdd",
+        "sdd-spec-file",
         "jira-issue-answer",
     ]
     assert set(template.parameters_schema()["properties"]) == {
