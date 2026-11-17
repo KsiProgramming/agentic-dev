@@ -80,6 +80,12 @@ export interface paths {
          *     from the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not
          *     allowed where it is called) is refused with `422` and the issues. A workflow whose `input` is
          *     `required` is refused with `422` when `input` is empty: "This workflow needs an input: …".
+         *
+         *     A workflow whose `input` is a spec file (`kind: "spec_file"`, 7.7) is given one with
+         *     `spec_file`: uploaded, or a path read from `repo` at its ref now. It is refused with `422`:
+         *     `spec_file_required`, `spec_file_invalid` (its name does not end in `.md` or `.markdown`, it
+         *     is empty, over 256 KB or not UTF-8), `path_invalid`, `path_not_found` or `not_a_file`; and
+         *     `spec_file_unexpected` for another workflow. The run's `input` is the file's name or path.
          */
         post: operations["createRun"];
         delete?: never;
@@ -1478,6 +1484,8 @@ export interface components {
              * @default
              */
             input: string;
+            /** @description The Markdown spec file the run is given (7.7), uploaded or read from the repo, when the workflow's `input` has `kind: "spec_file"`; the run's `input` is then the file's name or path. */
+            spec_file?: components["schemas"]["SpecFileSource"] | null;
             /** @description The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`). */
             repo?: components["schemas"]["RepoSource"] | null;
             /** @description A repo to create for the run, in the organisation the workspace's GitHub App is installed on, instead of `repo`. The run first waits for approval to create it (gate `approve_repo`), creates it (`create_repo`), then runs the workflow on it. */
@@ -3235,6 +3243,8 @@ export interface components {
             jira_brief?: components["schemas"]["IssueBrief"] | null;
             /** @description For a follow-up of a pull request review (7.6): the review as every agent of the run was told it, read before its first step; `null` for any other run, or before it is read. Its comments are what people wrote on GitHub: data. */
             pr_review_brief?: components["schemas"]["ReviewBrief"] | null;
+            /** @description The spec file the run was given (7.7), without its text (the run artifact `spec-input.md` holds it); `null` for a run given none. */
+            spec_file?: components["schemas"]["RunSpecFile"] | null;
             /**
              * Duration Ms
              * @deprecated
@@ -3440,6 +3450,40 @@ export interface components {
              * @description When a worker removed it.
              */
             removed_at?: string | null;
+        };
+        /**
+         * RunSpecFile
+         * @description The spec file a run was given (7.7), without its text: that is the run artifact
+         *     `spec-input.md`.
+         */
+        RunSpecFile: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "upload" | "repo";
+            /**
+             * Name
+             * @description The file's name: the uploaded one, or the path's last part.
+             */
+            name: string;
+            /**
+             * Path
+             * @description Its path in the repo, if read from it.
+             */
+            path?: string | null;
+            /**
+             * Ref
+             * @description The branch it was read at; `null` for the default branch.
+             */
+            ref?: string | null;
+            /**
+             * Size
+             * @description Its size in bytes, as UTF-8.
+             */
+            size: number;
+            /** Sha256 */
+            sha256: string;
         };
         /** @enum {string} */
         RunStatus: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
@@ -3721,6 +3765,46 @@ export interface components {
              */
             path: string;
             value: components["schemas"]["JsonValue"];
+        };
+        /**
+         * SpecFileFromRepo
+         * @description A Markdown spec file in the run's repo, read at the run's ref when it is created (7.7).
+         */
+        SpecFileFromRepo: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            source: "repo";
+            /**
+             * Path
+             * @description The file's path from the repo's root, ending in `.md` or `.markdown`.
+             * @example docs/spec.md
+             */
+            path: string;
+        };
+        SpecFileSource: components["schemas"]["SpecFileUpload"] | components["schemas"]["SpecFileFromRepo"];
+        /**
+         * SpecFileUpload
+         * @description A Markdown spec file the person starting the run uploads (7.7).
+         */
+        SpecFileUpload: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            source: "upload";
+            /**
+             * Name
+             * @description The file's name, ending in `.md` or `.markdown`, with no folder.
+             * @example csv-export.md
+             */
+            name: string;
+            /**
+             * Content
+             * @description The file's text, at most 256 KB as UTF-8, not empty.
+             */
+            content: string;
         };
         /** StartAuthorize */
         StartAuthorize: {
@@ -4067,11 +4151,11 @@ export interface components {
             example?: string | null;
             /**
              * Kind
-             * @description What the input is: free text, or the key of a Jira issue ("jira_issue", 7.5). A run started by hand with an issue key is then told the issue, as a run a Jira trigger started is.
+             * @description What the input is: free text, the key of a Jira issue ("jira_issue", 7.5), or a Markdown spec file ("spec_file", 7.7), uploaded or read from the repo. A run started by hand with an issue key is then told the issue, as a run a Jira trigger started is; a run given a spec file has it as the run artifact `spec-input.md` and every agent is told it.
              * @default text
              * @enum {string}
              */
-            kind: "text" | "jira_issue";
+            kind: "text" | "jira_issue" | "spec_file";
         };
         /**
          * WorkflowRef

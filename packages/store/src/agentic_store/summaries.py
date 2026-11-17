@@ -75,6 +75,8 @@ class RunSummaryRow:
     # and, with `spec`, the review as its agents were told it.
     pr_review: dict[str, Any] | None = None
     pr_review_brief: dict[str, Any] | None = None
+    # The spec file the run was given (7.7), without its text; with `spec`.
+    spec_file: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,7 @@ def _summary(
     subflows: dict[str, Any] | None = None,
     jira_brief: dict[str, Any] | None = None,
     pr_review_brief: dict[str, Any] | None = None,
+    spec_file: dict[str, Any] | None = None,
 ) -> RunSummaryRow:
     return RunSummaryRow(
         id=row.id,
@@ -231,6 +234,7 @@ def _summary(
         jira_brief=jira_brief,
         pr_review=row.pr_review,
         pr_review_brief=pr_review_brief,
+        spec_file={k: v for k, v in spec_file.items() if k != "text"} if spec_file else None,
     )
 
 
@@ -365,7 +369,7 @@ async def get_run_summary(
     async with sessions() as session:
         query = (
             _select()
-            .add_columns(Run.spec, Run.subflows, Run.jira_brief, Run.pr_review_brief)
+            .add_columns(Run.spec, Run.subflows, Run.jira_brief, Run.pr_review_brief, Run.spec_file)
             .where(Run.id == run_id)
         )
         row = (await session.execute(query)).one_or_none()
@@ -377,4 +381,5 @@ async def get_run_summary(
         subflows=row.subflows,
         jira_brief=row.jira_brief,
         pr_review_brief=row.pr_review_brief,
+        spec_file=row.spec_file,
     )

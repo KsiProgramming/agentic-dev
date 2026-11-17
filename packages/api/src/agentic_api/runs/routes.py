@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hashlib
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,8 @@ from agentic_api.github.models import GithubErrorDetail
 from agentic_api.github.routes import NewRepoRefused, github_app, new_repo_owner
 from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.models import (
+    MAX_SPEC_FILE_BYTES,
+    SPEC_FILE_EXTENSIONS,
     ApprovalRequest,
     ApprovalResponse,
     CancelResponse,
@@ -38,11 +41,13 @@ from agentic_api.runs.models import (
     RunDetail,
     RunGate,
     RunSandbox,
+    RunSpecFile,
     RunStatus,
     RunSummary,
     RunSummaryPage,
     RunUsage,
     SavedBranchChanges,
+    SpecFileUpload,
     WaitingGate,
     WorkflowRef,
     uses_github,
@@ -64,7 +69,13 @@ from agentic_engine.spec import (
 )
 from agentic_engine.spec.ops import OpError
 from agentic_engine.templates import wrap_with_create_repo
-from agentic_github import GithubApiError, github_remote
+from agentic_github import (
+    GithubApiError,
+    InstallationNotFoundError,
+    NotAFileError,
+    github_remote,
+    repo_full_name,
+)
 from agentic_sandbox import ARTIFACT_NAME, RepoSource, branch_name
 from agentic_store import (
     APPROVAL_EXPIRED_REASON,
@@ -361,6 +372,7 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
         pr_review_brief=(
             ReviewBrief.model_validate(row.pr_review_brief) if row.pr_review_brief else None
         ),
+        spec_file=RunSpecFile.model_validate(row.spec_file) if row.spec_file else None,
     )
 
 
@@ -467,7 +479,13 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
     A workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read
     from the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not
     allowed where it is called) is refused with `422` and the issues. A workflow whose `input` is
-    `required` is refused with `422` when `input` is empty: "This workflow needs an input: …"."""
+    `required` is refused with `422` when `input` is empty: "This workflow needs an input: …".
+
+    A workflow whose `input` is a spec file (`kind: "spec_file"`, 7.7) is given one with
+    `spec_file`: uploaded, or a path read from `repo` at its ref now. It is refused with `422`:
+    `spec_file_required`, `spec_file_invalid` (its name does not end in `.md` or `.markdown`, it
+    is empty, over 256 KB or not UTF-8), `path_invalid`, `path_not_found` or `not_a_file`; and
+    `spec_file_unexpected` for another workflow. The run's `input` is the file's name or path."""
     return await start_run(request, body)
 
 
@@ -496,6 +514,9 @@ async def start_run(
         manual_issue = await _manual_jira_issue(
             _sessions(request), prepared.workspace_id, body.input
         )
+    spec_file = await _spec_file(request, prepared)
+    if spec_file is not None:
+        body = body.model_copy(update={"input": spec_file["path"] or spec_file["name"]})
     try:
         run_id = await create_run(
             _sessions(request),
@@ -511,6 +532,7 @@ async def start_run(
             subflows=prepared.called,
             jira_origin=jira_origin,
             jira_issue=manual_issue,
+            spec_file=spec_file,
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e
@@ -532,7 +554,8 @@ async def prepare_run(request: Request, body: CreateRunRequest) -> PreparedRun:
     if body.stored_workflow is not None:
         body, stored = await _with_stored_spec(sessions, workspace_id, body)
     spec, repo = body.spec(), body.repo
-    if spec.input is not None and spec.input.required and not body.input.strip():
+    needs_text = spec.input is not None and spec.input.kind != "spec_file"
+    if needs_text and spec.input is not None and spec.input.required and not body.input.strip():
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"This workflow needs an input: {spec.input.label}",
@@ -650,6 +673,110 @@ _NO_JIRA = (
     "jira_not_connected: the workflow uses jira.* tools, but the workspace's Jira connection "
     "is missing or needs attention; connect it in Settings > Integrations"
 )
+
+
+def _unprocessable(code: str, message: str) -> HTTPException:
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"{code}: {message}")
+
+
+async def _spec_file(request: Request, prepared: PreparedRun) -> dict[str, JsonValue] | None:
+    """The spec file a run of a workflow whose input is one is given (7.7): `{source, name,
+    path, ref, size, sha256, text}`, uploaded or read from the run's repo at its ref through the
+    GitHub App. `None` for any other workflow, or when an optional one is not given. Refusals
+    are `HTTPException`s (`POST /runs`)."""
+    given, spec = prepared.body.spec_file, prepared.spec
+    if spec.input is None or spec.input.kind != "spec_file":
+        if given is not None:
+            raise _unprocessable(
+                "spec_file_unexpected", "this workflow does not take a spec file as its input"
+            )
+        return None
+    if given is None:
+        if spec.input.required:
+            raise _unprocessable(
+                "spec_file_required", f"This workflow needs a spec file: {spec.input.label}"
+            )
+        return None
+    path: str | None = None
+    ref: str | None = None
+    if isinstance(given, SpecFileUpload):
+        name, text = given.name.strip(), given.content
+        if "/" in name or "\\" in name:
+            raise _unprocessable("spec_file_invalid", "the file's name must not name a folder")
+    else:
+        path = _repo_path(given.path)
+        name = path.rsplit("/", 1)[-1]
+        ref = prepared.repo.ref if prepared.repo is not None else None
+        text = await _repo_spec_file(request, prepared, path)
+    if not name.lower().endswith(SPEC_FILE_EXTENSIONS):
+        raise _unprocessable("spec_file_invalid", f"{name} is not a Markdown file (.md)")
+    try:
+        data = text.encode()
+    except UnicodeEncodeError:
+        raise _unprocessable("spec_file_invalid", f"{name} is not UTF-8 text") from None
+    if not text.strip():
+        raise _unprocessable("spec_file_invalid", f"{name} is empty")
+    if len(data) > MAX_SPEC_FILE_BYTES:
+        raise _unprocessable(
+            "spec_file_invalid", f"{name} is over {MAX_SPEC_FILE_BYTES // 1024} KB"
+        )
+    return {
+        "source": given.source,
+        "name": name,
+        "path": path,
+        "ref": ref,
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "text": text,
+    }
+
+
+def _repo_path(raw: str) -> str:
+    """`raw` as a path from the repo's root (a leading `/` dropped), or `path_invalid`."""
+    path = raw.strip().lstrip("/")
+    parts = path.split("/")
+    if (
+        not path
+        or "\\" in path
+        or any(part in {"", ".", ".."} or part.lower() == ".git" for part in parts)
+    ):
+        raise _unprocessable(
+            "path_invalid",
+            f"{raw!r} is not a path in the repo; give one like docs/spec.md, with no '..'",
+        )
+    return path
+
+
+async def _repo_spec_file(request: Request, prepared: PreparedRun, path: str) -> str:
+    """The text of the spec file at `path` in the run's repo at its ref (7.7)."""
+    repo = prepared.repo
+    full_name = repo_full_name(repo.url) if repo is not None else None
+    if repo is None or full_name is None:
+        raise _unprocessable(
+            "path_invalid", "a spec file from the repo needs the run's repo, on GitHub"
+        )
+    installation = await get_github_installation(_sessions(request), prepared.workspace_id)
+    if installation is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
+    where = f"{full_name} at {repo.ref}" if repo.ref else f"{full_name}'s default branch"
+    try:
+        found = await github_app(request).file_at(installation, full_name, path, repo.ref)
+    except NotAFileError:
+        raise _unprocessable("not_a_file", f"{path} is not a file in {where}") from None
+    except (GithubApiError, InstallationNotFoundError) as e:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"GitHub could not be asked for {path}: {e}"
+        ) from None
+    if found is None:
+        raise _unprocessable("path_not_found", f"{path} is not in {where}")
+    if found.content is None or found.size > MAX_SPEC_FILE_BYTES:
+        raise _unprocessable(
+            "spec_file_invalid", f"{path} is over {MAX_SPEC_FILE_BYTES // 1024} KB"
+        )
+    try:
+        return found.content.decode()
+    except UnicodeDecodeError:
+        raise _unprocessable("spec_file_invalid", f"{path} is not UTF-8 text") from None
 
 
 async def _manual_jira_issue(

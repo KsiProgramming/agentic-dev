@@ -106,7 +106,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from agentic_engine.agent import IssueBrief, ReviewBrief, ReviewComment, RunContext
+from agentic_engine.agent import IssueBrief, ReviewBrief, ReviewComment, RunContext, SpecFile
 from agentic_engine.artifacts import ArtifactStore
 from agentic_engine.branches import BranchSaver
 from agentic_engine.events import (
@@ -136,6 +136,7 @@ from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.logging import configure_logging
 from agentic_engine.policy import PolicyLimitExceeded
 from agentic_engine.spec import (
+    SPEC_INPUT_ARTIFACT,
     WorkflowSpec,
     creates_repo,
     iter_nodes,
@@ -1267,23 +1268,44 @@ def run_context(run: StoredRun) -> RunContext | None:
     """What every agent of `run` is told about it: the repository it works on, by its
     `owner/name` when it is on GitHub, else its URL, what the person who started it asked for
     (its input, 6.8), the Jira issue a trigger started it on, once read (7.4), and, for a
-    follow-up, the review of its pull request (7.6)."""
-    request = run.input if run.input.strip() else None
+    follow-up, the review of its pull request (7.6), and the spec file it was given (7.7), in
+    place of its request."""
+    spec = run_spec_file(run)
+    # A spec file run's input is only the file's name: the file itself is what it asks for.
+    request = run.input if run.input.strip() and spec is None else None
     issue = IssueBrief.model_validate(run.jira_brief) if run.jira_brief is not None else None
     review = (
         ReviewBrief.model_validate(run.pr_review_brief) if run.pr_review_brief is not None else None
     )
     if run.repo is None:
-        if request or issue or review:
-            return RunContext(request=request, issue=issue, review=review)
+        if request or issue or review or spec:
+            return RunContext(request=request, issue=issue, review=review, spec=spec)
         return None
     return RunContext(
         repo=repo_full_name(run.repo.url) or run.repo.url,
         repo_url=run.repo.url,
         request=request,
         issue=issue,
+        spec=spec,
         review=review,
     )
+
+
+def run_spec_file(run: StoredRun) -> SpecFile | None:
+    """The spec file `run` was given (7.7), as its agents are told it."""
+    stored = run.spec_file
+    if stored is None:
+        return None
+    return SpecFile.model_validate(
+        {key: stored.get(key) for key in ("source", "name", "path", "text")}
+    )
+
+
+def run_inputs(run: StoredRun) -> dict[str, str] | None:
+    """The run artifacts `run` is given from its input (7.7): its spec file as
+    `spec-input.md`."""
+    spec = run_spec_file(run)
+    return {SPEC_INPUT_ARTIFACT: spec.text} if spec is not None else None
 
 
 async def _workflow(
@@ -1336,6 +1358,7 @@ async def _workflow(
                 artifacts=artifacts,
                 integrator=integrator,
                 context=run_context(run),
+                inputs=run_inputs(run),
                 saver=saver,
                 on_seeded=copy_artifacts,
             )
@@ -1362,6 +1385,7 @@ async def _workflow(
             integrator=integrator,
             context=run_context(run),
             saver=saver,
+            inputs=run_inputs(run),
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -1382,6 +1406,7 @@ async def _workflow(
         integrator=integrator,
         context=run_context(run),
         saver=saver,
+        inputs=run_inputs(run),
     )
 
 

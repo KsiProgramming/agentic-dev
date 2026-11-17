@@ -5,6 +5,7 @@ from the private key. Calls about an installation's repos (listing, reading and 
 opening pull requests) use an installation token, which githubkit fetches with the JWT and caches
 until a minute before it expires. Errors never carry the token or the headers."""
 
+import base64
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
@@ -19,6 +20,7 @@ from agentic_github.config import GithubAppConfig
 from agentic_github.errors import (
     GithubApiError,
     InstallationNotFoundError,
+    NotAFileError,
     PullRequestError,
     RepoCreationNotAllowedError,
     RepoExistsError,
@@ -27,6 +29,7 @@ from agentic_github.models import (
     InstallationInfo,
     PullRequestInfo,
     PullRequestState,
+    RepoFile,
     RepoInfo,
     ReviewItem,
 )
@@ -128,6 +131,26 @@ class GithubApp:
                     return None
                 raise
         return _full_repo_info(response.json())
+
+    async def file_at(
+        self, installation_id: int, full_name: str, path: str, ref: str | None = None
+    ) -> RepoFile | None:
+        """The file at `path` in `full_name` at `ref` (the default branch without one), or
+        `None` if there is none. Raises `NotAFileError` when the path is a folder, a symbolic
+        link or a submodule."""
+        owner, repo = full_name.split("/", 1)
+        github = self._installation(installation_id)
+        with _github_errors(installation_id, not_found=f"repo {full_name} not found"):
+            try:
+                if ref is None:
+                    response = await github.rest.repos.async_get_content(owner, repo, path)
+                else:
+                    response = await github.rest.repos.async_get_content(owner, repo, path, ref=ref)
+            except RequestFailed as e:
+                if e.response.status_code == 404:
+                    return None
+                raise
+        return repo_file(response.json(), path)
 
     async def create_org_repo(
         self,
@@ -283,6 +306,27 @@ class GithubApp:
 
     def close(self) -> None:
         self._redaction.close()
+
+
+def repo_file(data: object, path: str) -> RepoFile:
+    """A contents API answer as a `RepoFile`; `NotAFileError` for anything but a file."""
+    if not isinstance(data, dict):
+        raise NotAFileError(f"{path} is a folder, not a file")
+    found = cast(dict[str, Any], data)
+    if found.get("type") != "file":
+        raise NotAFileError(f"{path} is a {found.get('type') or 'folder'}, not a file")
+    encoded = found.get("content")
+    content = (
+        base64.b64decode(encoded)
+        if found.get("encoding") == "base64" and isinstance(encoded, str) and encoded
+        else None
+    )
+    size = found.get("size")
+    return RepoFile(
+        path=str(found.get("path") or path),
+        size=size if isinstance(size, int) else len(content or b""),
+        content=content,
+    )
 
 
 class _Unprocessable(Exception):

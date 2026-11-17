@@ -435,6 +435,10 @@ class Run(Base):
     # first step. Null for every other run.
     pr_review: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     pr_review_brief: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    # The Markdown spec file a run was given as its input (7.7): `{source, name, path,
+    # ref, size, sha256, text}`, uploaded or read from the repo when the run was created;
+    # its agents are told it and it is the run artifact `spec-input.md`. A rerun keeps it.
+    spec_file: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
     branch: Mapped[str | None] = mapped_column(Text)
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):
