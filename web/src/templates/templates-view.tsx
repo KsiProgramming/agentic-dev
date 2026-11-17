@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { NewRunSheet } from "@/runs/new-run/new-run-sheet";
 import { useReadiness } from "@/runs/new-run/readiness";
 import { installResult } from "@/settings/github-connection";
+import { connectResult } from "@/settings/jira-connection";
 import { useWorkflowFromTemplate } from "@/workflows/api";
 import { NewWorkflowSheet } from "@/workflows/new-workflow";
 import { useWorkspaceId } from "@/workspace";
@@ -18,7 +19,8 @@ import { TemplateGallery } from "./template-gallery";
 /**
  * The start screen: a blank canvas and the template gallery, the "New run" sheet of the template
  * named by `?template=`, and the new workflow sheet with `?blank=1` (5.8). GitHub's install comes back here with `&github=connected|error` when it was
- * started from the sheet.
+ * started from the sheet, and Atlassian's consent with `&jira=connected|error` (7.2); `reason` belongs to whichever
+ * of the two is in the URL.
  */
 export function TemplatesView({
   baseUrl,
@@ -34,10 +36,9 @@ export function TemplatesView({
   const readiness = useReadiness({ workspaceId, baseUrl });
   const templateId = searchParams.get("template");
   const blank = searchParams.get("blank") === "1";
-  const banner = installResult(
-    searchParams.get("github") ?? undefined,
-    searchParams.get("reason") ?? undefined,
-  );
+  const reason = searchParams.get("reason") ?? undefined;
+  const githubBanner = installResult(searchParams.get("github") ?? undefined, reason);
+  const banner = githubBanner ?? connectResult(searchParams.get("jira") ?? undefined, reason);
 
   const open = (id: string) =>
     router.replace(`${pathname}?template=${encodeURIComponent(id)}`, { scroll: false });
@@ -60,7 +61,7 @@ export function TemplatesView({
         <Alert
           role="status"
           variant={banner.ok ? "default" : "destructive"}
-          data-testid="github-result"
+          data-testid={githubBanner ? "github-result" : "jira-result"}
         >
           {banner.ok ? (
             <CircleCheckIcon aria-hidden="true" className="text-status-succeeded" />

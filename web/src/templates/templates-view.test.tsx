@@ -420,6 +420,14 @@ test("an install result from GitHub is shown above the gallery", async () => {
   expect(screen.getByTestId("github-result").textContent).toBe("GitHub App installed.");
 });
 
+test("a Jira connect result is shown above the gallery (7.2)", async () => {
+  stubApi(connected());
+  navigation.search = new URLSearchParams({ jira: "connected" });
+  renderWithQueries(<TemplatesView baseUrl="http://api.test" />);
+
+  expect(screen.getByTestId("jira-result").textContent).toBe("Jira connected.");
+});
+
 test("a run's own budget is sent, and a budget the API refuses is shown on its field", async () => {
   const policy = {
     defaults: {},

@@ -245,7 +245,7 @@
             "description": "No workspace with this id, or no such stored workflow or version"
           },
           "409": {
-            "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`."
+            "description": "The workflow uses `github.*` tools, but the workspace has no GitHub connection; or `jira.*` tools, but its Jira connection is missing or needs attention. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`."
           },
           "422": {
             "description": "Invalid request, the workflow is above the workspace's limits, or it requires an input (`input.required`) and none was given"
@@ -4805,7 +4805,10 @@
           "subflow_unknown",
           "subflow_cycle",
           "subflow_unpublished",
-          "invalid_gate"
+          "invalid_gate",
+          "jira_write_not_tool_node",
+          "jira_write_without_gate",
+          "jira_write_not_shown"
         ]
       },
       "JiraConnectionOut": {
@@ -6360,7 +6363,8 @@
         "type": "string",
         "enum": [
           "claude",
-          "github"
+          "github",
+          "jira"
         ]
       },
       "RerunFrom": {

@@ -1656,7 +1656,7 @@ export interface components {
             route?: string | null;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -2296,7 +2296,7 @@ export interface components {
             ref?: string | null;
         };
         /** @enum {string} */
-        Requirement: "claude" | "github";
+        Requirement: "claude" | "github" | "jira";
         /** RerunFrom */
         RerunFrom: {
             /**
@@ -3968,7 +3968,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The workflow uses `github.*` tools, but the workspace has no GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`. */
+            /** @description The workflow uses `github.*` tools, but the workspace has no GitHub connection; or `jira.*` tools, but its Jira connection is missing or needs attention. With `new_repo`, a `GithubErrorDetail`: `no_connection`, `installation_gone`, `personal_account` (repos are created in organisations only) or `repo_exists`. */
             409: {
                 headers: {
                     [name: string]: unknown;
