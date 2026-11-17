@@ -2873,7 +2873,7 @@
             "description": "No such workspace, or no such rule in it"
           },
           "422": {
-            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key).",
+            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key, or its input is a spec file, 7.7).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2940,7 +2940,7 @@
             "description": "No such workspace, or no such rule in it"
           },
           "422": {
-            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key).",
+            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key, or its input is a spec file, 7.7).",
             "content": {
               "application/json": {
                 "schema": {

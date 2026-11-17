@@ -6435,7 +6435,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key). */
+            /** @description The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key, or its input is a spec file, 7.7). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6515,7 +6515,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key). */
+            /** @description The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key, or its input is a spec file, 7.7). */
             422: {
                 headers: {
                     [name: string]: unknown;
