@@ -189,6 +189,13 @@ def uses_github(spec: WorkflowSpec) -> bool:
     )
 
 
+def uses_jira(spec: WorkflowSpec) -> bool:
+    """Whether a node of `spec` names a `jira.*` tool (7.2)."""
+    return any(
+        tool.startswith("jira.") for _, node in iter_nodes(spec.root) for tool in node_tools(node)
+    )
+
+
 class RerunParam(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

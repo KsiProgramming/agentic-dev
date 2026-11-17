@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import itertools
 import json
+import os
 import socket
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -23,6 +24,7 @@ import httpx
 import pytest
 import uvicorn
 from langgraph.checkpoint.memory import InMemorySaver
+from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -36,9 +38,11 @@ from agentic_engine.policy import PolicyOverrides, effective_policy
 from agentic_engine.spec import AgentNode, SequenceNode, WorkflowSpec, parse_spec
 from agentic_runtime import AgentRuntime, Failed
 from agentic_runtime.fake import FakeRuntime
+from agentic_secrets import KEY_BYTES, LocalKeyProvider
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     RUN_QUEUE,
+    JiraSiteRef,
     PostgresEventSink,
     Run,
     Workspace,
@@ -46,7 +50,9 @@ from agentic_store import (
     delete_connection,
     get_run,
     get_run_summary,
+    mark_jira_needs_attention,
     put_github_connection,
+    put_jira_connection,
     replace_policy_overrides,
 )
 from agentic_worker.main import WorkerSettings
@@ -1757,3 +1763,90 @@ async def test_a_call_that_cannot_run_refuses_the_run(
     assert [(i["code"], i["node_id"]) for i in validated.json()["issues"]] == [
         ("subflow_cycle", "again")
     ]
+
+
+# --- Jira (7.2) ---------------------------------------------------------------------------------
+
+
+def jira_workflow() -> dict[str, Any]:
+    """A gated static comment: needs a connected Jira, not a repo."""
+    return {
+        "spec_version": "0",
+        "id": "jira-note",
+        "name": "Jira note",
+        "root": {
+            "type": "sequence",
+            "id": "main",
+            "steps": [
+                {"type": "gate", "id": "ok", "title": "Post?"},
+                {
+                    "type": "tool",
+                    "id": "post",
+                    "tool": "jira.comment",
+                    "args": {"issue": "API-1", "body": "Released in 1.4."},
+                },
+            ],
+        },
+    }
+
+
+async def jira_workspace(
+    sessions: async_sessionmaker[AsyncSession], *, needs_attention: str | None = None
+) -> UUID:
+    workspace_id = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=workspace_id, name=f"jira-{workspace_id.hex[:6]}"))
+    keys = LocalKeyProvider(os.urandom(KEY_BYTES))
+    await put_jira_connection(
+        sessions,
+        keys,
+        workspace_id,
+        SecretStr(
+            '{"access_token": "a", "refresh_token": "r", '
+            '"expires_at": "2030-01-01T00:00:00+00:00", "scopes": []}'
+        ),
+        account="Ada Example",
+        scopes=(),
+        sites=[JiraSiteRef("fake-cloud-acme", "https://acme.atlassian.net", "Acme")],
+    )
+    if needs_attention is not None:
+        await mark_jira_needs_attention(sessions, workspace_id, needs_attention)
+    return workspace_id
+
+
+async def test_a_jira_workflow_needs_a_usable_jira_connection(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    bare = uuid4()
+    async with sessions.begin() as session:
+        session.add(Workspace(id=bare, name="no jira"))
+    marked = await jira_workspace(sessions, needs_attention="invalid_grant")
+    connected = await jira_workspace(sessions)
+    runs_before = await count_runs(sessions)
+
+    async with api(postgres_url, redis_url) as client:
+        refused = [
+            await client.post(
+                "/runs", json={"workflow": jira_workflow(), "workspace_id": str(workspace)}
+            )
+            for workspace in (bare, marked)
+        ]
+        accepted = await client.post(
+            "/runs", json={"workflow": jira_workflow(), "workspace_id": str(connected)}
+        )
+
+    for response in refused:
+        assert response.status_code == 409
+        assert "jira_not_connected" in response.text
+    assert accepted.status_code == 202
+    assert await count_runs(sessions) == runs_before + 1
+
+
+async def test_the_jira_template_lists_jira_in_what_it_requires(
+    postgres_url: str, redis_url: str
+) -> None:
+    async with api(postgres_url, redis_url) as client:
+        response = await client.get("/templates")
+
+    found = {t["id"]: t["requires"] for t in response.json()}
+    assert found["jira-issue-answer"] == ["claude", "github", "jira"]

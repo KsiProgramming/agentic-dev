@@ -285,6 +285,7 @@ source = { editable = "packages/worker" }
 dependencies = [
     { name = "agentic-engine" },
     { name = "agentic-github" },
+    { name = "agentic-jira" },
     { name = "agentic-runtime" },
     { name = "agentic-sandbox" },
     { name = "agentic-secrets" },
@@ -300,6 +301,7 @@ dependencies = [
 requires-dist = [
     { name = "agentic-engine", editable = "packages/engine" },
     { name = "agentic-github", editable = "packages/github" },
+    { name = "agentic-jira", editable = "packages/jira" },
     { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-secrets", editable = "packages/secrets" },

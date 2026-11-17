@@ -152,6 +152,14 @@ from agentic_github import (
     fixture_path,
     repo_full_name,
 )
+from agentic_jira import (
+    AtlassianApp,
+    AtlassianAppConfig,
+    FakeAtlassian,
+    JiraConfigError,
+    JiraPlatform,
+    WorkspaceJira,
+)
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
@@ -215,6 +223,7 @@ from agentic_store import (
 from agentic_store.sink import SANDBOX_KEPT_UNTIL
 from agentic_tools.artifacts import open_artifact_tools
 from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
+from agentic_tools.jira import open_jira_tools
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
 from agentic_tools.scan import open_scan_tools
@@ -298,6 +307,14 @@ class WorkerSettings(BaseSettings):
     env: Literal["development", "production"] = Field(
         default="development", validation_alias="agentic_env"
     )
+    # The deployment's Atlassian OAuth app (the same settings as the API's, 7.1): the `jira.*`
+    # tools (7.2) refresh the workspace's grant with it. Unset, runs that use them fail.
+    atlassian_client_id: str | None = None
+    atlassian_client_secret_file: Path | None = None
+    # `fake` stands in a local Atlassian for dev and e2e tests (env `AGENTIC_JIRA`).
+    jira: Literal["app", "fake"] = Field(default="app", validation_alias="agentic_jira")
+    # Where the web app is served; a Jira comment a run posts links to the run there.
+    web_base_url: str | None = None
 
 
 type RuntimeFactory = Callable[[ToolExecutor | None], AgentRuntime]
@@ -432,6 +449,26 @@ def build_github(settings: WorkerSettings) -> GithubPlatform | None:
     return GithubApp(config)
 
 
+def build_jira(settings: WorkerSettings) -> JiraPlatform | None:
+    """The deployment's Atlassian app, if its client id is set (or the fake one). Only token
+    refreshes go through it here, so its callback URL is never used."""
+    if settings.jira == "fake":
+        if settings.env == "production":
+            raise ConfigError("AGENTIC_JIRA=fake is not allowed with AGENTIC_ENV=production")
+        return FakeAtlassian("")
+    if settings.atlassian_client_id is None:
+        return None
+    if settings.atlassian_client_secret_file is None:
+        raise ConfigError("ATLASSIAN_CLIENT_SECRET_FILE must be set with ATLASSIAN_CLIENT_ID")
+    try:
+        config = AtlassianAppConfig.from_file(
+            settings.atlassian_client_id, settings.atlassian_client_secret_file, ""
+        )
+    except JiraConfigError as e:
+        raise ConfigError(str(e)) from None
+    return AtlassianApp(config)
+
+
 def fake_github_remote(fixtures: Path) -> Callable[[str], str]:
     """Pushes to the fake GitHub App's repos go to their bare repos under `fixtures`."""
     return lambda full_name: fixture_path(fixtures, full_name).as_uri()
@@ -499,6 +536,9 @@ class Worker:
     github_remote: Callable[[str], str] | None = None
     # Where a run's repo is cloned from; the repo itself unless the fake GitHub App stands in.
     clone_source: Callable[[RepoSource], RepoSource] | None = None
+    # The Atlassian app and the master key, for the `jira.*` tools (7.2).
+    jira: JiraPlatform | None = None
+    keys: KeyProvider | None = None
 
 
 class AttemptSink:
@@ -807,6 +847,7 @@ async def _attempt(
         return "failed"
     try:
         target = await _github_target(worker, run)
+        jira = await _jira_access(worker, run)
     except RunSetupError as e:
         log.warning("run %s cannot start: %s", run.id, e)
         await _fail(run, sink, last_seq, str(e))
@@ -888,6 +929,16 @@ async def _attempt(
             open_artifact_tools(artifacts, mirror_dir=mirror_dir)
         )
         tools = RunTools([tools, reading]) if tools is not None else reading
+        if jira is not None:
+            web = worker.settings.web_base_url
+            tracker = await stack.enter_async_context(
+                open_jira_tools(
+                    jira,
+                    run_id=run.id,
+                    run_url=f"{web.rstrip('/')}/runs/{run.id}" if web else None,
+                )
+            )
+            tools = RunTools([tools, tracker])
         try:
             runtime = await stack.enter_async_context(worker.open_runtime(run, tools))
         except RunSetupError as e:
@@ -959,6 +1010,35 @@ def uses_github(spec: WorkflowSpec) -> bool:
     return any(
         tool.startswith("github.") for _, node in iter_nodes(spec.root) for tool in node_tools(node)
     )
+
+
+def uses_jira(spec: WorkflowSpec) -> bool:
+    """Whether a node of `spec` names a `jira.*` tool (7.2)."""
+    return any(
+        tool.startswith("jira.") for _, node in iter_nodes(spec.root) for tool in node_tools(node)
+    )
+
+
+async def _jira_access(worker: Worker, run: StoredRun) -> WorkspaceJira | None:
+    """The run's workspace's Jira, if the run uses `jira.*` tools. Raises `RunSetupError` when
+    this worker cannot reach Atlassian or the workspace's Jira connection cannot be used (it was
+    disconnected or needs attention since the run was started)."""
+    if not uses_jira(run.spec):
+        return None
+    if worker.jira is None or worker.keys is None:
+        raise RunSetupError(
+            "Jira is not configured on this worker (ATLASSIAN_CLIENT_ID and MASTER_KEY_FILE)"
+        )
+    access = WorkspaceJira(worker.sessions, worker.keys, worker.jira, run.workspace_id)
+    connection = await access.connection()
+    if connection is None:
+        raise RunSetupError("jira_not_connected: the workspace has no Jira connection")
+    if connection.needs_attention:
+        raise RunSetupError(
+            "needs_attention: the workspace's Jira connection needs attention; reconnect it in "
+            "Settings > Integrations"
+        )
+    return access
 
 
 async def _github_target(worker: Worker, run: StoredRun) -> GithubTarget | None:
@@ -1156,6 +1236,7 @@ async def run(
     checkpointer: Checkpointer | None = None,
     github: GithubPublisher | None = None,
     github_remote: Callable[[str], str] | None = None,
+    jira: JiraPlatform | None = None,
 ) -> None:
     """Run abandoned and queued runs until `stop` is set; a run still going then is released
     unfinished, for another worker to resume.
@@ -1165,6 +1246,7 @@ async def run(
     `github_remote`, where branches are pushed); otherwise they are built from `settings`."""
     keys = build_keys(settings)
     app = build_github(settings) if github is None else None
+    atlassian = build_jira(settings) if jira is None else jira
     redis = Redis.from_url(settings.redis_url)  # pyright: ignore[reportUnknownMemberType]
     db = create_async_engine(settings.database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(db, expire_on_commit=False)
@@ -1190,6 +1272,8 @@ async def run(
                 )
             if app is not None:
                 stack.callback(app.close)
+            if atlassian is not None and jira is None:
+                stack.push_async_callback(atlassian.aclose)
             fixtures = settings.sandbox_local_root if settings.github == "fake" else None
             worker = Worker(
                 settings,
@@ -1201,6 +1285,8 @@ async def run(
                 github_remote=github_remote
                 or (fake_github_remote(fixtures) if fixtures is not None else None),
                 clone_source=fake_clone_source(fixtures) if fixtures is not None else None,
+                jira=atlassian,
+                keys=keys,
             )
             await redis.ping()  # pyright: ignore[reportUnknownMemberType]
             log.info("worker ready")

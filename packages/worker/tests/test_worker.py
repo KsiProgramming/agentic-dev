@@ -43,6 +43,8 @@ from agentic_engine.policy import PolicyOverrides
 from agentic_engine.spec import (
     ARTIFACT_TOOLS,
     CREATE_TOOLS,
+    JIRA_READ_TOOLS,
+    JIRA_WRITE_TOOLS,
     PUBLISH_TOOLS,
     READ_TOOLS,
     SCAN_TOOLS,
@@ -50,8 +52,16 @@ from agentic_engine.spec import (
     WorkflowSpec,
     parse_spec,
 )
-from agentic_engine.templates import DocsParams, NewRepo, build_docs_spec, wrap_with_create_repo
+from agentic_engine.templates import (
+    DocsParams,
+    JiraIssueAnswerParams,
+    NewRepo,
+    build_docs_spec,
+    build_jira_issue_answer_spec,
+    wrap_with_create_repo,
+)
 from agentic_engine.templates.docs import PAGE_SEPARATOR
+from agentic_jira import FAKE_CODE, FAKE_SITES, FakeAtlassian, JiraPlatform
 from agentic_runtime import (
     AgentRuntime,
     ClaudeRuntime,
@@ -70,6 +80,8 @@ from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_secrets import LocalKeyProvider, generate_key_file, install_redaction
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
+    JiraProjectRef,
+    JiraSiteRef,
     Run,
     Workspace,
     active_seconds,
@@ -86,14 +98,18 @@ from agentic_store import (
     pending_gate,
     put_connection,
     put_github_connection,
+    put_jira_connection,
     record_approval,
     replace_policy_overrides,
     replace_price_overrides,
     request_cancel,
     saved_changes,
+    set_jira_site_enabled,
+    set_jira_site_projects,
 )
 from agentic_tools.artifacts import ARTIFACT_TOOL_NAMES
 from agentic_tools.github import CREATE_TOOL_NAMES, PUBLISH_TOOL_NAMES, GithubPublisher
+from agentic_tools.jira import JIRA_READ_TOOL_NAMES, JIRA_WRITE_TOOL_NAMES
 from agentic_tools.repo import COMMIT_AUTHOR, READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.scan import SCAN_TOOL_NAMES
 from agentic_tools.testing import FakeGithub, bare_remote
@@ -125,6 +141,7 @@ async def worker(
     master_key_file: Path | None = None,
     github: GithubPublisher | None = None,
     github_remote: Callable[[str], str] | None = None,
+    jira: JiraPlatform | None = None,
     **more_settings: Any,
 ) -> AsyncGenerator[asyncio.Event]:
     """A worker running in this event loop; yields its stop event and stops it on exit.
@@ -158,6 +175,7 @@ async def worker(
             checkpointer=checkpointer,
             github=github,
             github_remote=github_remote,
+            jira=jira,
         )
     )
     try:
@@ -2347,3 +2365,169 @@ async def test_a_starting_worker_spares_kept_sandboxes(
     assert str(kept) in keep
     assert str(swept) not in keep
     await set_run(sessions, kept, sandbox_removed_at=func.now())  # out of later sweeps
+
+
+# --- Jira (7.2) ---------------------------------------------------------------------------------
+
+JIRA_COMMENT = "The limit lives in `gateway/limits.py`; per API key."
+
+
+def test_the_engine_and_the_jira_server_agree_on_tool_names() -> None:
+    assert JIRA_READ_TOOLS == JIRA_READ_TOOL_NAMES
+    assert JIRA_WRITE_TOOLS == JIRA_WRITE_TOOL_NAMES
+
+
+async def jira_workspace(
+    sessions: async_sessionmaker[AsyncSession], atlassian: FakeAtlassian, master_key: Path
+) -> UUID:
+    """A workspace connected to the fake Atlassian, with project API picked on its first site."""
+    workspace_id = await new_workspace(sessions)
+    grant = await atlassian.exchange(FAKE_CODE)
+    await put_jira_connection(
+        sessions,
+        LocalKeyProvider.from_file(master_key),
+        workspace_id,
+        grant.to_secret(),
+        account="Ada Example",
+        scopes=grant.scopes,
+        sites=[JiraSiteRef(s.cloud_id, s.url, s.name) for s in FAKE_SITES],
+    )
+    await set_jira_site_enabled(sessions, workspace_id, "fake-cloud-labs", False)
+    await set_jira_site_projects(
+        sessions, workspace_id, "fake-cloud-acme", [JiraProjectRef("10001", "API", "Public API")]
+    )
+    return workspace_id
+
+
+def answering_spec() -> WorkflowSpec:
+    """The "Answer a Jira issue" flow without the repo: read, gate, post."""
+    spec = build_jira_issue_answer_spec(JiraIssueAnswerParams())
+    raw = spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+    raw["root"]["steps"][0]["tools"] = ["jira.getIssue", "jira.search"]
+    return parse_spec(raw)
+
+
+async def submit_jira_run(
+    sessions: async_sessionmaker[AsyncSession], redis_url: str, workspace_id: UUID, input: str
+) -> UUID:
+    run_id = await create_run(sessions, answering_spec(), input, workspace_id=workspace_id)
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await enqueue_run(redis, run_id)
+    finally:
+        await redis.aclose()
+    return run_id
+
+
+def jira_answerer(tools: ToolExecutor | None) -> AgentRuntime:
+    return FakeRuntime(
+        {
+            "analyst": [
+                CallTool("jira.getIssue", {"issue": "API-1"}),
+                Message(text=JIRA_COMMENT),
+                ECHO_USAGE,
+            ]
+        },
+        tools=tools,
+    )
+
+
+async def test_done_when_an_agent_reads_an_issue_and_a_comment_is_posted(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, master_key: Path
+) -> None:
+    """Done when (7.2), on the fake Atlassian: the agent reads the issue through the `jira`
+    server, the gate shows its comment, and approving posts it on the run's issue."""
+    atlassian = FakeAtlassian("")
+    workspace_id = await jira_workspace(sessions, atlassian, master_key)
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=jira_answerer,
+        master_key_file=master_key,
+        jira=atlassian,
+        web_base_url="https://agentic.example",
+    ):
+        run_id = await submit_jira_run(sessions, redis_url, workspace_id, "API-1")
+        await wait_for_status(sessions, run_id, "waiting")
+        assert atlassian.posted == []
+
+        await record_approval(sessions, run_id, "approve_comment", GateDecision(decision="approve"))
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    read = next(e for e in events if e.type == "tool_result" and e.node_id == "analyst")
+    assert "Rate limit the public endpoints" in json.dumps(read.payload)
+    waiting = next(e for e in events if e.type == "gate_waiting")
+    assert waiting.payload is not None and waiting.payload["artifact"] == JIRA_COMMENT
+    [posted] = atlassian.posted
+    assert (posted.cloud_id, posted.key) == ("fake-cloud-acme", "API-1")
+    assert posted.body == (
+        f"{JIRA_COMMENT}\n\n_Posted by agentic-dev run "
+        f"[{str(run_id)[:8]}](https://agentic.example/runs/{run_id})_"
+    )
+    for token in (g.access_token.get_secret_value() for g in atlassian.issued):
+        assert token not in json.dumps([e.payload for e in events])
+
+
+async def test_an_issue_outside_the_picked_projects_is_refused_to_the_agent(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, master_key: Path
+) -> None:
+    atlassian = FakeAtlassian("")
+    workspace_id = await jira_workspace(sessions, atlassian, master_key)
+
+    def reader(tools: ToolExecutor | None) -> AgentRuntime:
+        return FakeRuntime(
+            {
+                "analyst": [
+                    CallTool("jira.getIssue", {"issue": "OPS-1"}),
+                    Message(text="no"),
+                    ECHO_USAGE,
+                ]
+            },
+            tools=tools,
+        )
+
+    async with worker(
+        postgres_url, redis_url, make_runtime=reader, master_key_file=master_key, jira=atlassian
+    ):
+        run_id = await submit_jira_run(sessions, redis_url, workspace_id, "OPS-1")
+        await wait_for_status(sessions, run_id, "waiting")
+
+    events = await list_run_events(sessions, run_id)
+    result = next(e for e in events if e.type == "tool_result" and e.node_id == "analyst")
+    assert result.payload is not None and result.payload["is_error"] is True
+    assert "project_not_allowed" in json.dumps(result.payload)
+
+
+async def test_a_jira_run_without_a_connection_fails_before_it_starts(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str, master_key: Path
+) -> None:
+    workspace_id = await new_workspace(sessions)
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=jira_answerer,
+        master_key_file=master_key,
+        jira=FakeAtlassian(""),
+    ):
+        run_id = await submit_jira_run(sessions, redis_url, workspace_id, "API-1")
+        await wait_for_status(sessions, run_id, "failed")
+
+    [*_, failed] = await list_run_events(sessions, run_id)
+    assert failed.payload == {"error": "jira_not_connected: the workspace has no Jira connection"}
+
+
+def test_the_fake_atlassian_is_refused_in_production() -> None:
+    from agentic_worker.main import ConfigError, build_jira
+
+    settings = WorkerSettings.model_validate({"jira": "fake", "env": "production"})
+
+    with pytest.raises(ConfigError, match="AGENTIC_JIRA=fake"):
+        build_jira(settings)
