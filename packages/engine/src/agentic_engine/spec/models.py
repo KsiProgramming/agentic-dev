@@ -843,6 +843,10 @@ branch (`commit_artifacts_issues`)."""
 COMMIT_DIR_PLACEHOLDER = "{issue}"
 """What `repo.commitArtifacts`'s `dir` may name: the run's Jira issue, as `<KEY>-<slug>` (7.5)."""
 
+COMMIT_DIR_SPEC = "{spec}"
+"""What `repo.commitArtifacts`'s `dir` may also name: the run's spec file (7.7), as the slug of its
+first `# ` heading, else of its file name."""
+
 PLATFORM_TOOLS = (
     READ_TOOLS
     | WRITE_TOOLS
@@ -1267,12 +1271,17 @@ def _commit_issue(node: Node, tool: str, at_top: bool, earlier: list[Node]) -> s
 def commit_dir_problem(folder: str) -> str | None:
     """Why `folder` cannot be `repo.commitArtifacts`'s `dir`, or `None`: a relative path of
     plain segments (no `..`, no `.git`, no backslash), whose only placeholder is
-    `COMMIT_DIR_PLACEHOLDER`."""
-    plain = folder.replace(COMMIT_DIR_PLACEHOLDER, "issue")
+    `COMMIT_DIR_PLACEHOLDER` or `COMMIT_DIR_SPEC`, not both."""
+    if COMMIT_DIR_PLACEHOLDER in folder and COMMIT_DIR_SPEC in folder:
+        return f"{folder!r} names both {COMMIT_DIR_PLACEHOLDER} and {COMMIT_DIR_SPEC}"
+    plain = folder.replace(COMMIT_DIR_PLACEHOLDER, "issue").replace(COMMIT_DIR_SPEC, "spec")
     if not plain.strip() or plain.startswith("/") or "\\" in plain:
         return f"{folder!r} is not a relative path"
     if "{" in plain or "}" in plain:
-        return f"{folder!r} names a placeholder other than {COMMIT_DIR_PLACEHOLDER}"
+        return (
+            f"{folder!r} names a placeholder other than {COMMIT_DIR_PLACEHOLDER} or "
+            f"{COMMIT_DIR_SPEC}"
+        )
     parts = plain.strip("/").split("/")
     if any(part in {"", ".", ".."} or part.lower() == ".git" for part in parts):
         return f"{folder!r} has an empty, '.', '..' or '.git' segment"
@@ -1865,13 +1874,21 @@ class _ArtifactFlow:
     issues: list[ValidationIssue] = field(default_factory=list[ValidationIssue])
 
 
-def _walk_artifacts(root: Node) -> _ArtifactFlow:
+_RUN_INPUT = ReduceNode.model_validate(
+    {"type": "reduce", "id": "run-input", "from": "run-input", "strategy": "concat"}
+)
+"""The writer of an artifact the run is given before its first step (`input_artifacts`, 7.7): it
+has no typed output, so no port edge is drawn from it."""
+
+
+def _walk_artifacts(root: Node, inputs: Collection[str] = ()) -> _ArtifactFlow:
     """Follow the run artifacts under `root` in run order. A read must have a writer that has
     always run before it: an earlier step, not a sibling branch of the same parallel, and not a
     later step of the same loop body (its first iteration would not have it). A map's body may not
     write (its ids repeat for every item), and two branches of one parallel may not write the same
     name. After a parallel, what its branches wrote is visible; after a router, what all its
-    routes wrote."""
+    routes wrote. The artifacts in `inputs` are written before the first step, from the run's
+    input (7.7), and no node may write them."""
     flow = _ArtifactFlow()
 
     def conflict(node: Node, path: str, why: str) -> None:
@@ -1999,15 +2016,24 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                 # The called workflow runs in this run: what it writes is the run's.
                 return seen if node.call is None else visit(node.call, f"{path}.call", seen)
 
-    visit(root, "root", {})
+    for path, node in iter_nodes(root):
+        writes = getattr(node, "writes", None)
+        if writes is not None and writes in inputs:
+            conflict(
+                node,
+                path,
+                f"writes {writes!r}, which the run is given as its input; write another name",
+            )
+    visit(root, "root", dict.fromkeys(inputs, _RUN_INPUT))
     return flow
 
 
-def artifact_issues(root: Node) -> list[ValidationIssue]:
+def artifact_issues(root: Node, inputs: Collection[str] = ()) -> list[ValidationIssue]:
     """Why the run artifacts under `root` cannot be exchanged, in run order: a read with no
     earlier writer (`artifact_unknown`, on the read), and a write that races
-    (`artifact_conflict`, on the writer)."""
-    return _walk_artifacts(root).issues
+    (`artifact_conflict`, on the writer). The artifacts in `inputs` are the run's from its
+    input (`input_artifacts`)."""
+    return _walk_artifacts(root, inputs).issues
 
 
 def artifact_writers(root: Node) -> dict[str, dict[str, ArtifactWriter]]:
@@ -2207,15 +2233,16 @@ def _types(schema: JsonValue) -> set[str]:
             return set()
 
 
-def structure_issues(root: Node) -> list[ValidationIssue]:
+def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[ValidationIssue]:
     """Why the spec under `root` cannot run anywhere, in run order: duplicate node ids, the loop,
     map, parallel and router rules, references to other nodes, a gate before every publisher, the
-    rules for creating the repo, typed ports and run artifacts."""
+    rules for creating the repo, typed ports and run artifacts (with `inputs`, the artifacts the
+    run is given from its input: `input_artifacts`)."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
     issues += commit_artifacts_issues(root)
-    issues += port_issues(root) + artifact_issues(root) + subflow_issues(root)
+    issues += port_issues(root) + artifact_issues(root, inputs) + subflow_issues(root)
     issues += gate_issues(root)
     return in_run_order(root, issues)
 
@@ -2331,12 +2358,28 @@ class WorkflowInput(_Base):
     example: str | None = Field(
         default=None, max_length=300, description="An example input, shown in the empty field."
     )
-    kind: Literal["text", "jira_issue"] = Field(
+    kind: Literal["text", "jira_issue", "spec_file"] = Field(
         default="text",
-        description='What the input is: free text, or the key of a Jira issue ("jira_issue", '
-        "7.5). A run started by hand with an issue key is then told the issue, as a run a Jira "
-        "trigger started is.",
+        description='What the input is: free text, the key of a Jira issue ("jira_issue", '
+        '7.5), or a Markdown spec file ("spec_file", 7.7), uploaded or read from the repo. '
+        "A run started by hand with an issue key is then told the issue, as a run a Jira "
+        "trigger started is; a run given a spec file has it as the run artifact "
+        "`spec-input.md` and every agent is told it.",
     )
+
+
+SPEC_INPUT_ARTIFACT = "spec-input.md"
+"""The run artifact that holds a run's spec file (7.7), written before its first step."""
+
+INPUT_WRITER = "$input"
+"""The writer an artifact the run is given from its input is stored under (7.7). No node id can
+be it, so it names no step."""
+
+
+def input_artifacts(input: "WorkflowInput | None") -> tuple[str, ...]:
+    """The run artifacts a run of a workflow with `input` is given before its first step:
+    `spec-input.md` for a spec file (7.7), else none."""
+    return (SPEC_INPUT_ARTIFACT,) if input is not None and input.kind == "spec_file" else ()
 
 
 class OnReview(_Base):
@@ -2461,6 +2504,9 @@ class WorkflowSpec(_Base):
         # expanded tree (`expand_workflow`): what it reads or publishes may come from them.
         if any(isinstance(node, SubflowNode) for _, node in iter_nodes(self.root)):
             return self
-        if issues := structure_issues(self.root) + on_review_issues(self.root, self.on_review):
+        inputs = input_artifacts(self.input)
+        if issues := structure_issues(self.root, inputs) + on_review_issues(
+            self.root, self.on_review
+        ):
             raise ValueError("; ".join(messages(issues)))
         return self

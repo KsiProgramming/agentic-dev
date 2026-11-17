@@ -19,9 +19,11 @@ from agentic_engine.spec.models import (
     OnReview,
     ToolNode,
     ValidationIssue,
+    WorkflowInput,
     WorkflowSpec,
     budget_issues,
     in_run_order,
+    input_artifacts,
     iter_nodes,
     on_review_issues,
     policy_issues,
@@ -66,7 +68,8 @@ def validate_workflow(
     )
     issues = document_port_issues(document) + issues + issue_from_issues(document, root)
     issues += document_on_review_issues(document, root)
-    issues += structure_issues(root) + tool_issues(root, known_tools)
+    issues += structure_issues(root, document_input_artifacts(document))
+    issues += tool_issues(root, known_tools)
     issues += policy_issues(root, policy)
     issues += budget_issues(root, policy, priced, default_model)
     return on_subflows(root, in_run_order(root, issues))
@@ -89,6 +92,15 @@ def document_port_issues(document: Mapping[str, object]) -> list[ValidationIssue
                 )
             )
     return issues
+
+
+def document_input_artifacts(document: Mapping[str, object]) -> tuple[str, ...]:
+    """The run artifacts the document's `input` gives a run before its first step (7.7); none
+    when it has no valid `input`."""
+    try:
+        return input_artifacts(WorkflowInput.model_validate(document.get("input")))
+    except ValidationError:
+        return ()
 
 
 def document_on_review_issues(document: Mapping[str, object], root: Node) -> list[ValidationIssue]:
