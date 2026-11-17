@@ -9,6 +9,12 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 7.4 Per-project field mapping (acceptance criteria, components):
+  - **Map a project's fields.** Each picked Jira project says which of its fields holds its acceptance criteria (a paragraph or short text) and its story points (a number), picked from the site's fields read live from Jira, the usual names first. A mapping is checked with Jira, kept with its project and removed with it.
+  - **Agents are told the issue.** A run a Jira trigger started reads its issue once, before its first step, and tells every agent: key, status, type, labels, components, story points, the acceptance criteria and the description, between `<jira-issue>` tags as data, cut at 16,000 characters. Resumes and a rerun from a step reuse it; an issue that cannot be read ends the run before any step with a fixed reason.
+  - **`jira.getIssue` returns `mapped`**: the acceptance criteria as Markdown and the story points, with the mapping of the project the issue is in now.
+  - **API.** `GET …/jira/sites/{cloud_id}/fields?role=&project=`, `GET`/`PUT …/sites/{cloud_id}/projects/{key}/fields` (`422` `project_not_allowed`, `unknown_field`, `field_type_mismatch`); `GET /workspaces/{id}/jira` gives each project its `fields`. Audit action `jira.fields_mapped`. Alembic `0035_jira_field_mappings` (with `runs.jira_brief`).
+  - Specs: tech-stack (Jira field mapping contract, the issue in what an agent is told, `mapped` on `jira.getIssue`, four decisions) and the 7.4 plan with its spike on a real site (`specs/2026-11-17-jira-field-mapping/`).
 - Phase 7.3 Jira webhook trigger on configured status/label ([#239](https://github.com/KsiProgramming/agentic-dev/pull/239)):
   - **Moving an issue starts a run.** A trigger rule says: when an issue of a picked project moves to a status, or gets a label, run a template or stored workflow on a repo, with the issue key as its input. Runs started this way have the trigger `jira` and keep the issue (`jira_issue`); the runs list and the console read "Jira · API-12", linking the issue.
   - **Dynamic webhooks, kept alive.** The platform registers one webhook per workspace and site through the deployment's Atlassian app (`jqlFilter` on the rules' projects, `fieldIdsFilter` on status and labels), registers it again when the projects change, deletes it with the last rule or on disconnect, and every worker renews it before Jira's 30-day expiry (`JIRA_WEBHOOK_SWEEP_S`, 6 h). Settings shows each site as listening, or why not.
