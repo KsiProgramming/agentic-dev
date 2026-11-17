@@ -56,13 +56,17 @@ from agentic_engine.templates import (
     DocsParams,
     JiraIssueAnswerParams,
     NewRepo,
+    SddParams,
     build_docs_spec,
     build_jira_issue_answer_spec,
+    build_sdd_spec,
     wrap_with_create_repo,
 )
 from agentic_engine.templates.docs import PAGE_SEPARATOR
 from agentic_jira import FAKE_CODE, FAKE_SITES, FakeAtlassian, JiraPlatform
 from agentic_runtime import (
+    AgentRequest,
+    AgentRun,
     AgentRuntime,
     ClaudeRuntime,
     Completed,
@@ -2531,3 +2535,155 @@ def test_the_fake_atlassian_is_refused_in_production() -> None:
 
     with pytest.raises(ConfigError, match="AGENTIC_JIRA=fake"):
         build_jira(settings)
+
+
+# --- Build from a Jira issue (7.5, AC-5) ---------------------------------------------------------
+
+SDD_FOLDER = "specs/API-1-rate-limit-the-public-endpoints"
+SDD_SPEC = (
+    "# Feature specification: Rate limit the public endpoints\n\nAPI-1\n\n## Requirements\n\n"
+    "- FR-001 The system shall answer 429 past 100 requests a minute per client.\n\n"
+    "## Open questions\n\n[NEEDS CLARIFICATION: per API key or per IP?]"
+)
+SDD_QUESTIONS = "The specification has open questions:\n\n1. Per API key or per IP? (FR-001)"
+
+
+class ByRole:
+    """A fake runtime that answers each agent by its role: the reviewer and the synthesizer read
+    the integration branch, so they call as the orchestrator, as its lead does (6.9)."""
+
+    def __init__(self, scripts: Mapping[str, Script], tools: ToolExecutor | None) -> None:
+        self._scripts, self._tools = scripts, tools
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        script = self._scripts[request.role]
+        return FakeRuntime({request.node_id: script}, tools=self._tools).start(request)
+
+
+def sdd_team(tools: ToolExecutor | None) -> AgentRuntime:
+    """Every agent of the SDD template, scripted by role: one engineer task writes and commits."""
+    plan = {
+        "tasks": [{"id": "limits", "title": "Rate limit", "instructions": "Do T001."}],
+        "reason": "One task.",
+    }
+    verdict = {"verdict": "ok", "feedback": "FR-001 is met and tested."}
+    write = {"path": "gateway/limits.py", "content": "LIMIT = 100\n"}
+    return ByRole(
+        {
+            "Product engineer writing a specification": [Message(text=SDD_SPEC), ECHO_USAGE],
+            "Product engineer asking the team": [Message(text=SDD_QUESTIONS), ECHO_USAGE],
+            "Software architect": [Message(text="# Implementation plan: Rate limit"), ECHO_USAGE],
+            "Tech lead writing tasks": [
+                Message(text="# Tasks\n\n- [ ] T001 Add gateway/limits.py (FR-001)"),
+                ECHO_USAGE,
+            ],
+            "Lead engineer": [Message(text=json.dumps(plan)), ECHO_USAGE],
+            "Software engineer": [
+                CallTool("repo.write_file", write),
+                CallTool("repo.commit", {"message": "Rate limit the public endpoints"}),
+                Message(text="Did T001: gateway/limits.py."),
+                ECHO_USAGE,
+                Completed(),
+            ],
+            "Release writer": [Message(text="API-1: rate limit the public endpoints."), ECHO_USAGE],
+            "Senior reviewer": [Message(text=json.dumps(verdict)), ECHO_USAGE],
+        },
+        tools,
+    )
+
+
+async def wait_for_gate(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID, gate_id: str
+) -> None:
+    """Until the run waits at `gate_id`."""
+    for _ in range(600):
+        events = await list_run_events(sessions, run_id)
+        if any(e.type == "gate_waiting" and e.node_id == gate_id for e in events):
+            await wait_for_status(sessions, run_id, "waiting")
+            return
+        ended = [e for e in events if e.type in {"run_failed", "run_completed", "run_cancelled"}]
+        failed = [e.payload for e in events if e.type == "node_failed"]
+        assert not ended, f"the run ended before {gate_id}: {failed}"
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"the run never waited at {gate_id}")
+
+
+async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    master_key: Path,
+) -> None:
+    """AC-5 on fakes: a run of "Build from a Jira issue" on API-1 writes the spec, posts its open
+    question after its gate, plans, builds on the integration branch, commits the Spec Kit files
+    there, and after the last gate opens one pull request, comments on the issue with links to
+    the pull request and the files in it, and moves the issue."""
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    remote = bare_remote(repos / "hello", tmp_path / "remote.git")
+    github = FakeGithub(GITHUB_TOKEN)
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+    atlassian = FakeAtlassian("")
+    workspace_id = await jira_workspace(sessions, atlassian, master_key)
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=sdd_team,
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: remote,
+        master_key_file=master_key,
+        jira=atlassian,
+        web_base_url="https://agentic.example",
+    ):
+        run_id = await create_run(
+            sessions,
+            build_sdd_spec(SddParams(move_to="In Progress")),
+            "API-1",
+            RepoSource(url=GITHUB_URL),
+            workspace_id=workspace_id,
+            jira_issue={
+                "cloud_id": "fake-cloud-acme",
+                "site": "acme.atlassian.net",
+                "key": "API-1",
+                "url": "https://acme.atlassian.net/browse/API-1",
+            },
+        )
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+            for gate in ("approve_spec", "post_questions", "approve_pr"):
+                await wait_for_gate(sessions, run_id, gate)
+                if gate == "approve_pr":
+                    assert github.pulls == [] and len(atlassian.posted) == 1
+                await record_approval(sessions, run_id, gate, GateDecision(decision="approve"))
+                await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+
+    branch = f"agent/{run_id}/implement"
+    files = remote_files(tmp_path / "remote.git", branch)
+    assert "gateway/limits.py" in files
+    assert {f"{SDD_FOLDER}/{name}" for name in ("spec.md", "plan.md", "tasks.md")} <= set(files)
+    [pull] = github.pulls
+    assert pull["title"] == "Spec-driven change from a Jira issue"
+    pr_url = "https://github.com/acme/hello/pull/1"
+    asked, linked = atlassian.posted
+    assert asked.key == "API-1" and asked.body.startswith(SDD_QUESTIONS)
+    assert linked.body.startswith("A pull request for this issue is open for review.")
+    assert f"- Pull request: {pr_url}" in linked.body
+    assert linked.body.count(f"{pr_url}/files#diff-") == 3
+    assert [(m.key, m.transition_id) for m in atlassian.moved] == [("API-1", "11")]
+    events = await list_run_events(sessions, run_id)
+    stored = await get_run(sessions, run_id)
+    assert stored is not None and stored.jira_brief is not None
+    assert stored.jira_brief["key"] == "API-1"
+    waiting = next(e for e in events if e.type == "gate_waiting" and e.node_id == "approve_pr")
+    shown = {c["path"] for c in waiting.payload["changes"]}
+    assert {"gateway/limits.py", f"{SDD_FOLDER}/spec.md"} <= shown

@@ -69,7 +69,7 @@ _SPEC_WRITER = (
     "- `## User scenarios`: who does what and why, as short scenarios, each with acceptance "
     "scenarios in a Given / When / Then form.\n"
     "- `## Requirements`: functional requirements, one per line, numbered `FR-001`, `FR-002`, "
-    "…, each testable (\"The system shall …\"). Keep every acceptance criterion of the issue as "
+    '…, each testable ("The system shall …"). Keep every acceptance criterion of the issue as '
     "a requirement, in the team's own words where you can.\n"
     "- `## Success criteria`: how anyone can check the change works, numbered `SC-001`, ….\n"
     "- `## Out of scope`: what this change does not do.\n"

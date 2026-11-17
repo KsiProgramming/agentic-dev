@@ -24,6 +24,7 @@ from agentic_store import (
     JiraWebhook,
     Run,
     create_jira_trigger,
+    put_github_connection,
     record_jira_own_move,
     set_run_jira_brief,
 )
@@ -663,3 +664,21 @@ async def test_a_run_by_hand_from_an_issue_needs_jira(
 
     assert started.status_code == 409
     assert str(started.json()["detail"]).startswith("jira_not_connected")
+
+
+async def test_moving_an_issue_starts_the_sdd_template_on_it(
+    client: AsyncClient, workspace: str, atlassian: FakeAtlassian, sessions: Sessions
+) -> None:
+    """AC-5's start (7.5): a rule for "Build from a Jira issue" starts it on the moved issue."""
+    await connected(client, workspace)
+    await put_github_connection(sessions, workspace_id(workspace), 42, "acme")
+    await rule(client, workspace, template_id="sdd")
+
+    status = await deliver(client, atlassian.delivery(ACME, "API-1", status_to="In Progress"))
+
+    assert status == 202
+    [run] = await runs_of(sessions, workspace)
+    assert (run.trigger, run.input, run.template_id) == ("jira", "API-1", "sdd")
+    assert run.jira_issue is not None and run.jira_issue["key"] == "API-1"
+    steps = [step["id"] for step in run.spec["root"]["steps"]]
+    assert steps[:3] == ["spec_writer", "approve_spec", "clarify"]
