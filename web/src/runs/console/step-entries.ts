@@ -423,6 +423,7 @@ export function stepOutline(step: Step): string | null {
   if (step.subflow) return subflowOutline(step.subflow, step.status);
   if (step.router) {
     if (step.router.chosen) return `Routed to ${step.router.chosen}`;
+    if (step.router.skipped) return "No route matched, so nothing ran";
     return step.status === "running" ? "Choosing a route" : null;
   }
   if (step.merged) {

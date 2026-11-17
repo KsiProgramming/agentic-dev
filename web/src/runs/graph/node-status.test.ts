@@ -244,6 +244,7 @@ describe("router statuses (4.6)", () => {
         mode: "rule",
         chosen,
         reason: null,
+        skipped: false,
         steps: inner,
       },
     };

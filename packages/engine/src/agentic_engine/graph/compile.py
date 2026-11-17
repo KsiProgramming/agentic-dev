@@ -83,7 +83,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import TypedDict, cast
+from typing import Final, TypedDict, cast
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
@@ -539,8 +539,9 @@ def compile_workflow(
                     route_id: add(route, done)
                     for route_id, _, route in router_routes(node, node.id)
                 }
+                ends = [*starts.values(), END] + ([done] if node.otherwise == "skip" else [])
                 builder.add_conditional_edges(
-                    node.id, _to_route(node, starts), list(dict.fromkeys([*starts.values(), END]))
+                    node.id, _to_route(node, starts), list(dict.fromkeys(ends))
                 )
                 builder.add_node(done, _router_done(node, log))
                 go_on(done, node.id, then)
@@ -1714,20 +1715,38 @@ def _router_entry(
     return enter
 
 
+SKIPPED_ROUTE = ""
+"""What a router chose when no route matched and it skips (`otherwise: "skip"`, 7.5): not a
+route id (a route id is a `NodeId`), so it never names one."""
+
+
 def _chosen(choice: AgentNodeResult) -> str | None:
-    """The route a router's choice names, if it made one."""
-    route = (choice.data or {}).get("route") if choice.status == "completed" else None
+    """The route a router's choice names, `SKIPPED_ROUTE` if it skips, or `None` if it made no
+    choice."""
+    if choice.status != "completed":
+        return None
+    data = choice.data or {}
+    if data.get("skipped") is True:
+        return SKIPPED_ROUTE
+    route = data.get("route")
     return route if isinstance(route, str) else None
 
 
 def _to_route(router: RouterNode, starts: Mapping[str, str]) -> Callable[[RunState], str]:
-    """To the first node of the route `router` chose; to `END` if it chose none."""
+    """To the first node of the route `router` chose; to its end if it skipped (7.5); to `END`
+    if it chose none."""
 
     def route(state: RunState) -> str:
         chosen = state.get("routes", {}).get(router.id)
+        if chosen == SKIPPED_ROUTE:
+            return router_done_node_id(router)
         return starts[chosen] if chosen is not None else END
 
     return route
+
+
+_SKIPPED_END: Final[dict[str, JsonValue]] = {"route": None, "skipped": True}
+"""The `node_completed` payload of a router that skipped (7.5)."""
 
 
 def _router_done(
@@ -1738,7 +1757,12 @@ def _router_done(
     outputs = {route_id: _output_id(route) for route_id, _, route in router_routes(router, "")}
 
     async def done(state: RunState) -> RunUpdate:
-        chosen = state.get("routes", {}).get(router.id) or DEFAULT_ROUTE
+        chosen = state.get("routes", {}).get(router.id)
+        if chosen == SKIPPED_ROUTE:
+            await log.emit(NODE_COMPLETED, node_id=router.id, payload=_SKIPPED_END)
+            skipped = AgentNodeResult(status="completed", text=state["last_text"], usage=None)
+            return _update(router.id, skipped)
+        chosen = chosen or DEFAULT_ROUTE
         source = state["results"].get(outputs[chosen])
         await log.emit(NODE_COMPLETED, node_id=router.id, payload={"route": chosen})
         data = source.data if source is not None else None
@@ -1764,6 +1788,13 @@ async def _router_inline(
     if route_id is None:
         scope.ran[router.id] = choice
         return router.id, choice
+    if route_id == SKIPPED_ROUTE:
+        await scope.log.emit(
+            NODE_COMPLETED, node_id=router.id, payload=_SKIPPED_END, **scope.tag()
+        )
+        skipped = AgentNodeResult(status="completed", text=input, usage=None)
+        scope.ran[router.id] = skipped
+        return router.id, skipped
     ended, result = await _run_inline(router.route(route_id), input, scope)
     log, tag = scope.log, scope.tag()
     end: dict[str, JsonValue] = {"route": route_id}
@@ -1809,6 +1840,11 @@ async def _choose(
             route, reason = await _rule(router, input, results, refs, scope.limits)
         except ExpressionError as e:
             return await _not_routed(router, "failed", str(e), input, None, None, scope)
+        if route is None and router.otherwise == "skip":
+            skipped: dict[str, JsonValue] = {"route": None, "mode": mode, "reason": reason}
+            await log.emit(ROUTE_CHOSEN, node_id=router.id, payload=skipped, **tag)
+            data = {**skipped, "skipped": True}
+            return AgentNodeResult(status="completed", text=input, usage=None, data=data)
         if route is None:
             error = f"no route of {router.id!r} matched, and it has no default"
             return await _not_routed(router, "failed", error, input, None, None, scope)
@@ -1857,7 +1893,7 @@ async def _rule(
         if met:
             return route.id, when
     if router.default is None:
-        return None, ""
+        return None, "no route matched"
     return DEFAULT_ROUTE, "no route matched"
 
 

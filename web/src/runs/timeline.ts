@@ -210,6 +210,8 @@ export interface RouterInfo {
   chosen: string | null;
   /** Why: the condition that held, `no route matched`, or the classifier's reason. */
   reason: string | null;
+  /** No route matched and it ran nothing (`otherwise: "skip"`, 7.5). */
+  skipped: boolean;
   /** The steps of the route it took. */
   steps: Step[];
 }
@@ -699,6 +701,7 @@ class Builder {
           mode: payload.mode === "classifier" ? "classifier" : "rule",
           chosen: null,
           reason: null,
+          skipped: false,
           steps: [],
         };
         if (!this.open.includes(step)) this.open.push(step);
@@ -733,6 +736,7 @@ class Builder {
         step.port = parsePort(payload.port);
         step.merged = parseMerged(payload.merged);
         if (step.router) step.router.chosen ??= str(payload.route);
+        if (step.router && payload.skipped === true) step.router.skipped = true;
         this.open = this.open.filter((s) => s !== step);
         return;
       case "route_chosen":

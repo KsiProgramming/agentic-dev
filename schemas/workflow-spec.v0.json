@@ -1116,7 +1116,7 @@
     },
     "RouterNode": {
       "additionalProperties": false,
-      "description": "Runs exactly one of its routes, on the router's input, and outputs what that route outputs.\n\nIn rule mode every route has `when`, a CEL condition over `last` (the router's input),\n`results` and `artifacts` (as for a loop's `until`); the first route whose condition is true\nruns, else `default`. In classifier mode no route has `when`: one agent (`classifier`)\nchooses a route id, `default` included when there is one, and says why. A router with no\nmatching route and no `default` fails. The routes not taken never start. A route is one\n`agent`, `tool` or `sequence` node, and it may hold what the router's own place allows.",
+      "description": "Runs exactly one of its routes, on the router's input, and outputs what that route outputs.\n\nIn rule mode every route has `when`, a CEL condition over `last` (the router's input),\n`results` and `artifacts` (as for a loop's `until`); the first route whose condition is true\nruns, else `default`. In classifier mode no route has `when`: one agent (`classifier`)\nchooses a route id, `default` included when there is one, and says why. A router with no\nmatching route and no `default` fails, unless `otherwise` is `\"skip\"` (7.5): then it runs\nnothing and passes its input on. The routes not taken never start. A route is one `agent`,\n`tool` or `sequence` node, and it may hold what the router's own place allows.",
       "properties": {
         "classifier": {
           "anyOf": [
@@ -1196,6 +1196,16 @@
         "id": {
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "title": "Id",
+          "type": "string"
+        },
+        "otherwise": {
+          "default": "fail",
+          "description": "Rule mode with no `default`: what happens when no route matches. \"fail\" fails the router; \"skip\" runs nothing and passes its input on, for a step that only runs when its condition holds.",
+          "enum": [
+            "fail",
+            "skip"
+          ],
+          "title": "Otherwise",
           "type": "string"
         },
         "routes": {

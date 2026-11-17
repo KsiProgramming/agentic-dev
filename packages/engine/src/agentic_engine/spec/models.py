@@ -422,13 +422,20 @@ class RouterNode(_Base):
     `results` and `artifacts` (as for a loop's `until`); the first route whose condition is true
     runs, else `default`. In classifier mode no route has `when`: one agent (`classifier`)
     chooses a route id, `default` included when there is one, and says why. A router with no
-    matching route and no `default` fails. The routes not taken never start. A route is one
-    `agent`, `tool` or `sequence` node, and it may hold what the router's own place allows."""
+    matching route and no `default` fails, unless `otherwise` is `"skip"` (7.5): then it runs
+    nothing and passes its input on. The routes not taken never start. A route is one `agent`,
+    `tool` or `sequence` node, and it may hold what the router's own place allows."""
 
     type: Literal["router"]
     id: NodeId
     routes: list[Route] = Field(min_length=1, max_length=MAX_ROUTES)
     default: "Node | None" = Field(default=None, description="What runs when no route is chosen.")
+    otherwise: Literal["fail", "skip"] = Field(
+        default="fail",
+        description='Rule mode with no `default`: what happens when no route matches. "fail" '
+        'fails the router; "skip" runs nothing and passes its input on, for a step that only '
+        "runs when its condition holds.",
+    )
     classifier: RouterClassifier | None = Field(
         default=None, description="Classifier mode: the agent that chooses the route."
     )
@@ -452,6 +459,11 @@ class RouterNode(_Base):
             raise ValueError(f"no route may be named {DEFAULT_ROUTE!r}; use `default`")
         if len(set(ids)) != len(ids):
             raise ValueError("two routes have the same id")
+        if self.otherwise == "skip" and (self.default is not None or self.classifier):
+            raise ValueError(
+                '`otherwise: "skip"` is for a rule router with no `default`: a default or a '
+                "classifier always chooses a route"
+            )
         if self.classifier is None:
             if missing := [route.id for route in self.routes if route.when is None]:
                 raise ValueError(
@@ -1841,6 +1853,8 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                 # it. Its typed producer is the routes' writer when they all type it alike;
                 # otherwise a reader of it has none.
                 wrote = [visit(r, at, seen) for _, at, r in router_routes(node, path)]
+                if node.otherwise == "skip":
+                    wrote.append({})  # skipped: no route wrote anything
                 after = dict(seen)
                 for name, writer in wrote[0].items():
                     writers = [w.get(name) for w in wrote]
