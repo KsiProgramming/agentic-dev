@@ -138,7 +138,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByTestId("github-status")).toBeVisible();
       await page.getByRole("button", { name: /repositories accessible/ }).click();
       await expectNoSeriousIssues(page);
-      await page.getByRole("button", { name: "Disconnect" }).click();
+      await page.getByTestId("github-card").getByRole("button", { name: "Disconnect" }).click();
       await expect(page.getByRole("alertdialog")).toBeVisible();
       await expectNoSeriousIssues(page);
       await page.keyboard.press("Escape");
