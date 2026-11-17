@@ -254,6 +254,17 @@ async def test_a_command_from_a_writer_starts_a_follow_up_of_the_review_loop(
     assert received.details["pr_url"] == pr.url
     assert received.details["follows"] == str(pr.run_id)
     assert await outcome(sessions, delivery) == "started"
+    detail = (await client.get(f"/runs/{follow_up.id}")).json()
+    assert detail["trigger"] == "github"
+    assert detail["rerun_of"] == str(pr.run_id)
+    assert detail["pr_review"] == {
+        "pr_url": pr.url,
+        "number": pr.number,
+        "kind": "issue_comment",
+        "comment_url": f"{pr.url}#issuecomment-{comment_id}",
+        "author": "alice",
+    }
+    assert detail["pr_review_brief"] is None  # read by the worker, before the first step
     # The comment's text is nowhere: not in the run, the audit log, the delivery or the logs.
     stored = json.dumps([follow_up.pr_review, follow_up.input, received.details])
     assert "SECRET-TEXT-42" not in stored
@@ -433,9 +444,7 @@ async def test_the_workspace_s_review_rounds_limit_follow_ups(
     await replace_policy_overrides(sessions, pr.workspace_id, PolicyOverrides(review_rounds=1))
     await deliver(client, comment_event(pr))
     async with sessions.begin() as session:  # the follow-up ended without pushing
-        await session.execute(
-            update(Run).where(Run.rerun_of == pr.run_id).values(status="failed")
-        )
+        await session.execute(update(Run).where(Run.rerun_of == pr.run_id).values(status="failed"))
 
     _, delivery = await deliver(client, comment_event(pr))
 

@@ -94,7 +94,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Collection, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import FrameType
 from typing import Any, Literal
@@ -106,7 +106,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from agentic_engine.agent import IssueBrief, RunContext
+from agentic_engine.agent import IssueBrief, ReviewBrief, ReviewComment, RunContext
 from agentic_engine.artifacts import ArtifactStore
 from agentic_engine.branches import BranchSaver
 from agentic_engine.events import (
@@ -152,10 +152,12 @@ from agentic_github import (
     GithubConfigError,
     GithubPlatform,
     InstallationNotFoundError,
+    ReviewItem,
     auth_env,
     fixture_path,
     repo_full_name,
 )
+from agentic_github.review import read_review
 from agentic_jira import (
     AtlassianApp,
     AtlassianAppConfig,
@@ -213,6 +215,7 @@ from agentic_store import (
     max_event_seq,
     open_checkpointer,
     pending_decision,
+    prune_github_deliveries,
     prune_jira_deliveries,
     reclaim_expired_run,
     record_base_sha,
@@ -224,12 +227,18 @@ from agentic_store import (
     rerun_branches,
     run_ended,
     set_run_jira_brief,
+    set_run_pr_review_brief,
     waiting_run_ids,
     workspace_price_table,
 )
 from agentic_store.sink import SANDBOX_KEPT_UNTIL
 from agentic_tools.artifacts import open_artifact_tools
-from agentic_tools.github import GithubPublisher, GithubTarget, open_github_tools
+from agentic_tools.github import (
+    GithubPublisher,
+    GithubTarget,
+    PullRequestTarget,
+    open_github_tools,
+)
 from agentic_tools.jira import IssueOut, IssueReadError, open_jira_tools, read_issue
 from agentic_tools.repo import WRITE_TOOL_NAMES, open_repo_tools
 from agentic_tools.routing import RunTools
@@ -782,8 +791,9 @@ async def _sweep_sandboxes(worker: Worker) -> None:
 
 async def _sweep_jira_webhooks(worker: Worker) -> None:
     """Every `jira_webhook_sweep_s`, renew the workspaces' Jira trigger webhooks that expire
-    within 10 days, register again those Jira dropped, and prune deliveries past their
-    retention (7.3). Does nothing without an Atlassian app and a master key."""
+    within 10 days, register again those Jira dropped, and prune Jira's and GitHub's (7.6)
+    deliveries past their retention (7.3). Renews nothing without an Atlassian app and a master
+    key."""
     while True:
         if worker.jira is not None and worker.keys is not None:
             try:
@@ -801,8 +811,9 @@ async def _sweep_jira_webhooks(worker: Worker) -> None:
                 log.warning("could not renew the Jira trigger webhooks", exc_info=True)
         try:
             await prune_jira_deliveries(worker.sessions)
+            await prune_github_deliveries(worker.sessions)
         except Exception:
-            log.warning("could not prune old Jira deliveries", exc_info=True)
+            log.warning("could not prune old webhook deliveries", exc_info=True)
         await asyncio.sleep(worker.settings.jira_webhook_sweep_s)
 
 
@@ -886,6 +897,7 @@ async def _attempt(
         jira = await _jira_access(worker, run)
         if first:
             run = await _with_issue_brief(worker, run)
+            run = await _with_review_brief(worker, run, target)
     except RunSetupError as e:
         log.warning("run %s cannot start: %s", run.id, e)
         await _fail(run, sink, last_seq, str(e))
@@ -1005,7 +1017,9 @@ async def _attempt(
 async def _saved_branches(worker: Worker, run: StoredRun, last_seq: int) -> list[BranchBundle]:
     """The branches a fresh sandbox of `run` gets back: its own latest saved ones once it has run
     (12.2), or, for the first attempt of a rerun from a step, the original's as they were before
-    that step, with that step's uncommitted work if asked (12.4). Raises `RerunBranchesError`."""
+    that step, with that step's uncommitted work if asked (12.4), or, for a follow-up of a pull
+    request review, the original's latest ones, what the pull request holds (7.6). Raises
+    `RerunBranchesError`."""
     if last_seq:
         return await latest_branches(worker.sessions, run.id)
     origin = run.rerun_from
@@ -1017,6 +1031,7 @@ async def _saved_branches(worker: Worker, run: StoredRun, last_seq: int) -> list
         run.id,
         steps_before(run.spec, origin.node_id),
         origin.node_id if origin.use_wip else None,
+        latest=run.pr_review is not None,
     )
 
 
@@ -1150,6 +1165,86 @@ async def _github_target(worker: Worker, run: StoredRun) -> GithubTarget | None:
         base=run.repo.ref,
         remote_url=worker.github_remote(full_name) if worker.github_remote else None,
         run_created_at=run.created_at,
+        review=_review_target(worker, run),
+    )
+
+
+def _review_target(worker: Worker, run: StoredRun) -> PullRequestTarget | None:
+    """Where a follow-up of a pull request review publishes (7.6): onto that pull request."""
+    review = run.pr_review
+    if review is None:
+        return None
+    web = worker.settings.web_base_url
+    return PullRequestTarget(
+        number=int(str(review["number"])),
+        url=str(review["pr_url"]),
+        head_branch=str(review["head_branch"]),
+        after_sha=str(review["after_sha"]),
+        author=str(review.get("author") or ""),
+        run_url=f"{web.rstrip('/')}/runs/{run.id}" if web else None,
+    )
+
+
+async def _with_review_brief(
+    worker: Worker, run: StoredRun, target: GithubTarget | None
+) -> StoredRun:
+    """`run` with the review of the pull request it follows up (7.6), read once before its first
+    step and stored, so its resumes tell every agent the same review. First the pull request's
+    head must still be the commit the run before pushed: else someone else pushed to it, and the
+    run fails `pr_head_moved` before doing anything. A run that is not a follow-up, or whose
+    brief is stored already, is returned as it is. Raises `RunSetupError`."""
+    review = run.pr_review
+    if review is None or run.pr_review_brief is not None:
+        return run
+    if worker.github is None or target is None:
+        raise RunSetupError("the run follows up a pull request, but GitHub is not reachable")
+    number = int(str(review["number"]))
+    try:
+        pull = await worker.github.pull_request(target.installation_id, target.full_name, number)
+        if pull is None or not pull.is_open:
+            raise RunSetupError(f"pr_closed: pull request #{number} is closed")
+        if pull.head_sha != review.get("after_sha"):
+            raise RunSetupError(
+                f"pr_head_moved: pull request #{number} is no longer at the commit the run "
+                "before pushed; someone else pushed to it"
+            )
+        after = review.get("after_at")
+        read = await read_review(
+            worker.github,
+            target.installation_id,
+            target.full_name,
+            number,
+            after=datetime.fromisoformat(after) if isinstance(after, str) else None,
+            trigger_kind=str(review.get("kind")),
+            trigger_id=int(str(review.get("comment_id"))),
+        )
+    except (GithubApiError, InstallationNotFoundError) as e:
+        raise RunSetupError(
+            f"github_unavailable: cannot read pull request #{number}: {e}"
+        ) from None
+    brief = ReviewBrief(
+        pr_url=str(review["pr_url"]),
+        number=number,
+        author=str(review.get("author") or ""),
+        request=_review_comment(read.trigger) if read.trigger is not None else None,
+        comments=tuple(_review_comment(item) for item in read.items),
+    )
+    stored = await set_run_pr_review_brief(worker.sessions, run.id, brief.model_dump(mode="json"))
+    log.info("run %s: read the review of pull request #%d", run.id, number)
+    return replace(run, pr_review_brief=stored)
+
+
+def _review_comment(item: ReviewItem) -> ReviewComment:
+    kind = item.kind if item.kind in ("issue_comment", "review", "review_comment") else "review"
+    return ReviewComment(
+        kind=kind,  # pyright: ignore[reportArgumentType]
+        author=item.author,
+        body=item.body,
+        url=item.url,
+        created_at=item.created_at,
+        path=item.path,
+        line=item.line,
+        diff_hunk=item.diff_hunk,
     )
 
 
@@ -1171,16 +1266,23 @@ async def _clone_token(
 def run_context(run: StoredRun) -> RunContext | None:
     """What every agent of `run` is told about it: the repository it works on, by its
     `owner/name` when it is on GitHub, else its URL, what the person who started it asked for
-    (its input, 6.8) and the Jira issue a trigger started it on, once read (7.4)."""
+    (its input, 6.8), the Jira issue a trigger started it on, once read (7.4), and, for a
+    follow-up, the review of its pull request (7.6)."""
     request = run.input if run.input.strip() else None
     issue = IssueBrief.model_validate(run.jira_brief) if run.jira_brief is not None else None
+    review = (
+        ReviewBrief.model_validate(run.pr_review_brief) if run.pr_review_brief is not None else None
+    )
     if run.repo is None:
-        return RunContext(request=request, issue=issue) if request or issue else None
+        if request or issue or review:
+            return RunContext(request=request, issue=issue, review=review)
+        return None
     return RunContext(
         repo=repo_full_name(run.repo.url) or run.repo.url,
         repo_url=run.repo.url,
         request=request,
         issue=issue,
+        review=review,
     )
 
 

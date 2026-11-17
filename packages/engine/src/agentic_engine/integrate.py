@@ -5,7 +5,8 @@ merge the branches of the tasks that completed, in plan order, into `agent/<run>
 That branch is what a gate after the orchestrator shows and edits and what `github.openPR`
 publishes. An orchestrator in a loop (6.9) keeps the one branch across iterations: from the
 second, its tasks start from that branch (`start_tasks`), so they build on the work merged so
-far. The worker implements it over the run's sandbox, so the engine never runs git.
+far; so does a follow-up's first pass (7.6), whose run restored the branch. The worker
+implements it over the run's sandbox, so the engine never runs git.
 """
 
 from collections.abc import Sequence

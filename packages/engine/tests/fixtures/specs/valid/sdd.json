@@ -10,6 +10,9 @@
     "example": "PROJ-12",
     "kind": "jira_issue"
   },
+  "on_review": {
+    "from": "review_loop"
+  },
   "root": {
     "type": "sequence",
     "id": "main",
@@ -124,7 +127,7 @@
               "id": "implement",
               "hub": {
                 "role": "Lead engineer",
-                "instructions": "Your input is the task list (`tasks.md`) of an approved specification; the Jira issue is in the run's context. First check the tasks with your tools: read the files they name. Then group them into at most four engineer tasks. Tasks that change the same file, or that must come after one another, go in one engineer task, so the branches merge cleanly. Each engineer task's instructions list the Spec Kit task ids it covers (T001, \u2026), the exact files to change, the tests to write, and what done looks like.\n\nIn a later pass, your input is the reviewer's answer (`input`: its `verdict` and `feedback`) and the tasks of the earlier passes (`previous`). Their work is already in the code you read: plan only what the feedback asks to change, with the feedback written into each task's instructions so the engineer fixes exactly what was asked.",
+                "instructions": "Your input is the task list (`tasks.md`) of an approved specification; the Jira issue is in the run's context. First check the tasks with your tools: read the files they name. Then group them into at most four engineer tasks. Tasks that change the same file, or that must come after one another, go in one engineer task, so the branches merge cleanly. Each engineer task's instructions list the Spec Kit task ids it covers (T001, \u2026), the exact files to change, the tests to write, and what done looks like.\n\nIn a later pass, your input is the reviewer's answer (`input`: its `verdict` and `feedback`) and the tasks of the earlier passes (`previous`). Their work is already in the code you read: plan only what the feedback asks to change, with the feedback written into each task's instructions so the engineer fixes exactly what was asked.\n\nWhen the run's context has a <pr-review>, this run follows up the pull request an earlier run opened, and a person asked for changes on it. The tasks in your input are done: their code is in what you read, as the pull request holds it. Plan only what the review asks: read the code at each comment's file and line, and plan tasks that make the changes the comments ask for (grouped by file as above), each task's instructions quoting the comment it answers with its author, file and line. Plan nothing else.",
                 "tools": [
                   "repo.list_files",
                   "repo.read_file",
@@ -135,7 +138,7 @@
                 "type": "agent",
                 "id": "engineer",
                 "role": "Software engineer",
-                "instructions": "Your input is your task (`task.instructions`) and the lead's input. Your tools read the repository on your own branch and write to it; `artifacts.read` reads the run's `spec.md` and `plan.md` if your task needs the full requirements. Read the code you need, change only the files your task names, write the tests it asks for, and commit your work with a clear message. End your answer with a short report: the task ids you did, every file you changed and what you changed in it.",
+                "instructions": "Your input is your task (`task.instructions`) and the lead's input. Your tools read the repository on your own branch and write to it; `artifacts.read` reads the run's `spec.md` and `plan.md` if your task needs the full requirements. Read the code you need, change only the files your task names, write the tests it asks for, and commit your work with a clear message. End your answer with a short report: the task ids you did, every file you changed and what you changed in it.\n\nWhen the run's context has a <pr-review>, your task answers comments of that review on an open pull request: read the code at the file and line each comment names, make the change it asks for, and say in your report which comment each change answers.",
                 "tools": [
                   "repo.list_files",
                   "repo.read_file",
@@ -157,7 +160,7 @@
               "type": "agent",
               "id": "synthesizer",
               "role": "Release writer",
-              "instructions": "Your input is the engineers' reports, one per task, for all the work done so far (every pass). Your tools read the code with that work in it, and `artifacts.read` reads the run's `spec.md`: read the files the reports name to check what actually changed. Then write one pull request description for the whole change: a first line naming the Jira issue (from the run's context), a short summary, the requirements it meets (by `FR-` number), what changed per file and why, and how to check it. Plain Markdown, no greeting; your answer is the description itself, never a tool call written out as text.",
+              "instructions": "Your input is the engineers' reports, one per task, for all the work done so far (every pass). Your tools read the code with that work in it, and `artifacts.read` reads the run's `spec.md`: read the files the reports name to check what actually changed. Then write one pull request description for the whole change: a first line naming the Jira issue (from the run's context), a short summary, the requirements it meets (by `FR-` number), what changed per file and why, and how to check it. Plain Markdown, no greeting; your answer is the description itself, never a tool call written out as text.\n\nWhen the run's context has a <pr-review>, the pull request is open already and this run adds to it: start the description with a `## Changes for the review` section that lists each review comment (its author, and its file and line if it has one) and what changed for it, or why nothing did; then describe the whole change as above.",
               "tools": [
                 "repo.list_files",
                 "repo.read_file",
@@ -171,7 +174,7 @@
               "type": "agent",
               "id": "reviewer",
               "role": "Senior reviewer",
-              "instructions": "Your input is the approved specification (`spec.md`) and the pull request description (`pr-description.md`). Your tools read the code with the change in it. Check the change against the specification, requirement by requirement: for each `FR-` number, read the code and the tests that should meet it. Is every requirement met and tested, does the change stay within scope, does it fit the code around it, is anything risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` name each requirement that is not met and exactly what to change, in a few sentences.",
+              "instructions": "Your input is the approved specification (`spec.md`) and the pull request description (`pr-description.md`). Your tools read the code with the change in it. Check the change against the specification, requirement by requirement: for each `FR-` number, read the code and the tests that should meet it. Is every requirement met and tested, does the change stay within scope, does it fit the code around it, is anything risky? Answer `verdict` \"ok\" if it can be opened as a pull request, else \"changes\", and in `feedback` name each requirement that is not met and exactly what to change, in a few sentences.\n\nWhen the run's context has a <pr-review>, a person reviewed the pull request and asked for changes: check each of its comments too. Read the code at its file and line: is what it asks done? Answer \"ok\" only when every comment is addressed and every requirement still met, and in `feedback` name each comment that is not addressed (its author, file and line) and what is missing.",
               "tools": [
                 "repo.list_files",
                 "repo.read_file",

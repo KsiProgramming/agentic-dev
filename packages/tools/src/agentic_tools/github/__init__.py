@@ -17,8 +17,10 @@ from agentic_tools.github.server import (
     GithubPublisher,
     GithubTarget,
     PullRequestOut,
+    PullRequestTarget,
     PushBranch,
     build_github_server,
+    review_reply,
 )
 from agentic_tools.mcp_bridge import McpToolExecutor
 
@@ -56,7 +58,9 @@ __all__ = [
     "GithubPublisher",
     "GithubTarget",
     "PullRequestOut",
+    "PullRequestTarget",
     "PushBranch",
     "build_github_server",
     "open_github_tools",
+    "review_reply",
 ]

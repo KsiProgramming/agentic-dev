@@ -10,6 +10,10 @@ and the GitHub App installation of its workspace. It has two tools:
   2. It pushes the bundle from the worker with a fresh installation token.
   3. It opens a pull request.
 
+  In a follow-up of a pull request review (7.6, `GithubTarget.review`) it pushes onto that pull
+  request's branch instead, as a fast-forward from the commit the run before pushed, opens no pull
+  request, and posts one fixed comment on it saying what was pushed for whom.
+
 The sandbox never sees the token, and logs redact it while it is held. The spec rules
 (`agentic_engine.spec`) put a gate before both. Errors raise `ToolError`; their messages never
 hold a token or a host path.
@@ -29,17 +33,26 @@ from agentic_github import (
     GITIGNORE_TEMPLATES,
     LICENSE_TEMPLATES,
     GithubApiError,
+    GithubReviews,
     InstallationNotFoundError,
     PullRequestError,
     PullRequestInfo,
     PushError,
+    PushOnto,
     RepoCreationNotAllowedError,
     RepoExistsError,
     RepoInfo,
     github_remote,
     push_bundle,
 )
-from agentic_sandbox import GIT_SAFETY, Sandbox, SandboxError, branch_name, export_branch
+from agentic_sandbox import (
+    GIT_SAFETY,
+    BranchBundle,
+    Sandbox,
+    SandboxError,
+    branch_name,
+    export_branch,
+)
 from agentic_secrets import registered
 from agentic_tools.strict import strict_tool
 
@@ -56,8 +69,9 @@ assert get_args(Gitignore) == GITIGNORE_TEMPLATES
 assert get_args(License) == LICENSE_TEMPLATES
 
 
-class GithubPublisher(Protocol):
-    """What the server needs from the platform's GitHub App (`agentic_github.GithubApp`)."""
+class GithubPublisher(GithubReviews, Protocol):
+    """What the server needs from the platform's GitHub App (`agentic_github.GithubApp`), with
+    the review calls a follow-up's worker and `openPR` make (7.6)."""
 
     async def installation_token(self, installation_id: int) -> SecretStr: ...
 
@@ -85,6 +99,19 @@ type PushBranch = Callable[..., Awaitable[str]]
 
 
 @dataclass(frozen=True)
+class PullRequestTarget:
+    """The pull request a follow-up of its review publishes to (7.6): its branch, the commit the
+    run before pushed there, who asked, and the run's page for the comment."""
+
+    number: int
+    url: str
+    head_branch: str
+    after_sha: str
+    author: str
+    run_url: str | None = None
+
+
+@dataclass(frozen=True)
 class GithubTarget:
     """Where a run publishes: its repo on GitHub, through its workspace's installation."""
 
@@ -97,6 +124,8 @@ class GithubTarget:
     # When the run was created: `createRepo` takes over an existing repo of the run's name only
     # if it is newer (an earlier attempt of the run created it).
     run_created_at: datetime | None = None
+    # A follow-up of a pull request review (7.6): `openPR` pushes onto this pull request.
+    review: PullRequestTarget | None = None
 
 
 class PullRequestOut(BaseModel):
@@ -107,6 +136,11 @@ class PullRequestOut(BaseModel):
     head: str
     base: str
     commit: str = Field(description="The commit the pushed branch points at.")
+    updated: bool = Field(
+        default=False,
+        description="True when a follow-up of a review pushed to an open pull request (7.6) "
+        "instead of opening one.",
+    )
 
 
 class CreatedRepoOut(BaseModel):
@@ -217,6 +251,8 @@ class _GithubTools:
         except SandboxError as e:
             raise ToolError(f"node {from_node} has nothing to publish: {e}") from None
         into = base or target.base or await self._clone_branch(self._sandbox)
+        if target.review is not None:
+            return await self._update(bundle, into, target.review)
         try:
             token = await self._github.installation_token(target.installation_id)
             with registered(token):
@@ -241,6 +277,53 @@ class _GithubTools:
             raise ToolError(str(e)) from None
         return PullRequestOut(
             url=pull.url, number=pull.number, head=pull.head, base=pull.base, commit=commit
+        )
+
+    async def _update(
+        self, bundle: BranchBundle, into: str, review: PullRequestTarget
+    ) -> PullRequestOut:
+        """Push onto the follow-up's pull request and say so on it, once."""
+        target = self._target
+        try:
+            token = await self._github.installation_token(target.installation_id)
+            with registered(token):
+                commit = await self._push(
+                    bundle.data,
+                    remote_url=target.remote_url or github_remote(target.full_name),
+                    base_sha=bundle.base_sha,
+                    branch=bundle.branch,
+                    token=token,
+                    onto=PushOnto(branch=review.head_branch, expected=review.after_sha),
+                )
+            await self._reply(review, commit)
+        except InstallationNotFoundError:
+            raise ToolError("the workspace's GitHub App installation is gone") from None
+        except (GithubApiError, PushError) as e:
+            raise ToolError(str(e)) from None
+        return PullRequestOut(
+            url=review.url,
+            number=review.number,
+            head=review.head_branch,
+            base=into,
+            commit=commit,
+            updated=True,
+        )
+
+    async def _reply(self, review: PullRequestTarget, commit: str) -> None:
+        """The fixed comment on the pull request, unless this run posted it already (a step
+        run again)."""
+        target = self._target
+        marker = str(self._run_id)
+        posted = await self._github.review_items(
+            target.installation_id, target.full_name, review.number
+        )
+        if any(item.from_bot and marker in item.body for item in posted):
+            return
+        await self._github.comment_on_pull_request(
+            target.installation_id,
+            target.full_name,
+            review.number,
+            review_reply(commit, review.author, self._run_id, review.run_url),
         )
 
     @staticmethod
@@ -297,6 +380,15 @@ def build_github_server(
         ),
         tools=served,
     )
+
+
+def review_reply(commit: str, author: str, run_id: UUID, run_url: str | None) -> str:
+    """The one comment a follow-up posts on its pull request (7.6): platform text, never an
+    agent's. It holds the run's full id, so a step run again finds it."""
+    run = f"[{str(run_id)[:8]}]({run_url})" if run_url else f"`{run_id}`"
+    if run_url and str(run_id) not in run_url:
+        run += f" (`{run_id}`)"
+    return f"Pushed `{commit[:7]}` for @{author}'s review, run {run}."
 
 
 def _created(repo: RepoInfo, *, created: bool) -> CreatedRepoOut:

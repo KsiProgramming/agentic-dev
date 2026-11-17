@@ -119,7 +119,7 @@ def parse_review_event(
         return None
     if event == "issue_comment":
         issue = _object(data.get("issue"))
-        if not issue.get("pull_request"):
+        if not isinstance(issue.get("pull_request"), dict):
             return None  # a comment on an issue, not on a pull request
         number = issue.get("number")
         comment = _object(data.get("comment"))

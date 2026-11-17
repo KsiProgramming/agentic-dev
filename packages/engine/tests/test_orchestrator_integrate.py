@@ -76,7 +76,9 @@ class Merger:
         )
 
     async def start_tasks(self, orchestrator_id: str, keys: Sequence[str]) -> None:
-        self.started.append(list(keys))
+        # As in the sandbox: nothing until the integration branch exists (its first merge).
+        if self.calls:
+            self.started.append(list(keys))
 
     @property
     def keys(self) -> list[list[str]]:

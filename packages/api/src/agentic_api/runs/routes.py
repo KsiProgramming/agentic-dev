@@ -27,6 +27,7 @@ from agentic_api.runs.models import (
     GateBranch,
     JiraIssueRef,
     PolicyErrorDetail,
+    PrReviewRef,
     RerunFrom,
     RerunFromRef,
     RerunRequest,
@@ -48,7 +49,7 @@ from agentic_api.runs.models import (
     uses_jira,
 )
 from agentic_api.workspaces.models import to_usd
-from agentic_engine.agent import IssueBrief
+from agentic_engine.agent import IssueBrief, ReviewBrief
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import StepNotFoundError
@@ -207,6 +208,7 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "trigger": row.trigger,
         "branch": row.branch,
         "jira_issue": JiraIssueRef.model_validate(row.jira_issue) if row.jira_issue else None,
+        "pr_review": PrReviewRef.model_validate(row.pr_review) if row.pr_review else None,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
         "active_ms": active_ms,
         "waiting_ms": waiting_ms,
@@ -356,6 +358,9 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
         spec=WorkflowSpec.model_validate(row.spec),
         calls=_calls(row.spec, row.subflows),
         jira_brief=IssueBrief.model_validate(row.jira_brief) if row.jira_brief else None,
+        pr_review_brief=(
+            ReviewBrief.model_validate(row.pr_review_brief) if row.pr_review_brief else None
+        ),
     )
 
 
