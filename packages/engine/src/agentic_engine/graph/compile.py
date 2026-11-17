@@ -78,6 +78,7 @@ end the run.
 
 import asyncio
 import functools
+import hashlib
 import json
 import logging
 import re
@@ -655,7 +656,15 @@ def _step(
             refs = state.get("artifacts", {})
             reads = _reads_as(node, _integrated_reader(state))
             return _run_step(
-                node, runtime, tools, log, limits, state["last_text"], refs, route_as=reads
+                node,
+                runtime,
+                tools,
+                log,
+                limits,
+                state["last_text"],
+                refs,
+                route_as=reads,
+                results=state["results"],
             )
 
         if isinstance(node, AgentNode):
@@ -730,6 +739,7 @@ async def _run_step(
     item: int | None = None,
     branch: int | None = None,
     route_as: str | None = None,
+    results: Mapping[str, AgentNodeResult] | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
     a map or an orchestrator's task, `branch` inside a parallel). `route_as` is what the node is
@@ -763,6 +773,7 @@ async def _run_step(
             case ToolNode():
                 try:
                     called = await _with_body_from(node, limits.artifacts, refs)
+                    called = _with_links(called, results or {})
                     called = _with_issue_from(called, limits.request)
                 except (ArtifactError, ToolArgsError) as e:
                     return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
@@ -846,6 +857,36 @@ ISSUE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-[1-9][0-9]{0,9}$")
 
 class ToolArgsError(Exception):
     """A tool node's arguments could not be resolved from the run (`issue_from`)."""
+
+
+def _with_links(node: ToolNode, results: Mapping[str, AgentNodeResult]) -> ToolNode:
+    """`node` with its `links_from` (7.5, a Jira comment's argument) put in place: a "Links" list
+    at the end of its `body`, with the pull request the `pr` step opened and, for each file the
+    `files` step committed, its diff in that pull request (`<pr>/files#diff-<sha256 of path>`,
+    which still works once the branch is deleted). The links are made by the platform from the
+    steps' `results`, never by a model. The tool never sees `links_from`; with no pull request,
+    there is no list."""
+    links = node.args.get("links_from")
+    if not isinstance(links, dict):
+        return node
+    pr = results.get(str(links.get("pr")))
+    url = (pr.data or {}).get("url") if pr is not None else None
+    lines: list[str] = []
+    if isinstance(url, str) and url:
+        lines.append(f"- Pull request: {url}")
+        done = results.get(str(links.get("files")))
+        paths = (done.data or {}).get("paths") if done is not None else None
+        for path in paths if isinstance(paths, list) else []:
+            if isinstance(path, str):
+                anchor = hashlib.sha256(path.encode()).hexdigest()
+                lines.append(f"- [{path}]({url}/files#diff-{anchor})")
+    args = {k: v for k, v in node.args.items() if k != "links_from"}
+    if lines:
+        static = args.get("body")
+        head = static if isinstance(static, str) and static else ""
+        listed = "**Links**\n" + "\n".join(lines)
+        args["body"] = f"{head}\n\n{listed}" if head else listed
+    return node.model_copy(update={"args": args})
 
 
 def _with_issue_from(node: ToolNode, request: str | None) -> ToolNode:

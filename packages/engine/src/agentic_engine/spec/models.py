@@ -1083,6 +1083,8 @@ def _jira_write_issue(
     to = args.get("to")
     if tool == "jira.transition" and not (isinstance(to, str) and to.strip()):
         return "reference", f"node {node.id!r}: {tool} needs `to`, the transition or status"
+    if "links_from" in args and (problem := _links_problem(node, tool, path, seen)) is not None:
+        return "reference", problem
     earlier = [(at, n) for at, n in seen if within(path, scope_of(at))]
     gates = [i for i, (_, n) in enumerate(earlier) if isinstance(n, GateNode)]
     if not gates:
@@ -1104,6 +1106,45 @@ def _jira_write_issue(
             "approver reads the comment that is posted",
         )
     return None
+
+
+LINKS_FROM_KEYS = frozenset({"pr", "files"})
+"""What a Jira comment's `links_from` names (7.5): the publisher whose pull request it links
+(`pr`), and the step whose committed files it links in that pull request (`files`)."""
+
+
+def _links_problem(
+    node: ToolNode, tool: str, path: str, seen: list[tuple[str, Node]]
+) -> str | None:
+    """Why `node`'s `links_from` cannot be resolved, or `None`: only a `jira.comment` of the root
+    sequence takes it, naming an earlier root step that publishes (`pr`) and one that commits
+    artifacts (`repo.commitArtifacts`, `files`), the latter only with `pr`, since its links are
+    into that pull request."""
+    links = node.args["links_from"]
+    if tool != "jira.comment":
+        return f"node {node.id!r}: only jira.comment takes `links_from`"
+    if not _is_root_step(path):
+        return f"node {node.id!r}: `links_from` needs the comment to be a step of the root sequence"
+    if not isinstance(links, dict) or not links or set(links) - LINKS_FROM_KEYS:
+        return f"node {node.id!r}: `links_from` takes `pr` and `files`, each a step's id"
+    if "files" in links and "pr" not in links:
+        return f"node {node.id!r}: `links_from.files` links into a pull request; name it in `pr`"
+    earlier = {n.id: n for at, n in seen if _is_root_step(at)}
+    pr, files = earlier.get(str(links.get("pr"))), earlier.get(str(links.get("files")))
+    if "pr" in links and not (isinstance(pr, ToolNode) and pr.tool in PUBLISH_TOOLS):
+        return (
+            f"node {node.id!r}: `links_from.pr` must name an earlier step that opens a pull request"
+        )
+    if "files" in links and (files is None or commits_into(files) is None):
+        return (
+            f"node {node.id!r}: `links_from.files` must name an earlier repo.commitArtifacts step"
+        )
+    return None
+
+
+def _is_root_step(path: str) -> bool:
+    """Whether the node at `path` is a step of the root sequence."""
+    return re.fullmatch(r"root\.steps\[\d+\]", path) is not None
 
 
 def _previous_step(path: str, at_path: Mapping[str, Node]) -> Node | None:

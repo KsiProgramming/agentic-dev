@@ -1,8 +1,10 @@
 """`repo.commitArtifacts` (7.5): the run artifacts a tool node reads are committed onto an earlier
 writer's branch, as `<dir>/<name>`, so the pull request carries them and its gate shows them."""
 
+import hashlib
 from collections.abc import Sequence
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -11,11 +13,11 @@ from agentic_engine.agent import IssueBrief, RunContext
 from agentic_engine.artifacts import InMemoryArtifactStore
 from agentic_engine.commit import commit_folder, issue_folder, summary_slug
 from agentic_engine.events import InMemoryEventSink
-from agentic_engine.gate import FileChange, FileEdit, GateReviewError
-from agentic_engine.graph import checkpoint_serde, run_workflow
+from agentic_engine.gate import FileChange, FileEdit, GateDecision, GateReviewError
+from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.policy import PLATFORM_POLICY
 from agentic_engine.spec import parse_spec, validate_workflow
-from agentic_runtime import AgentRequest, AgentRun, Message
+from agentic_runtime import AgentRequest, AgentRun, Message, ToolDefinition, ToolOutput
 from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
 
 BRIEF = IssueBrief(
@@ -216,3 +218,110 @@ async def test_a_commit_the_sandbox_refuses_fails_the_step() -> None:
 
     assert result.status == "failed"
     assert "could not commit on agent/x/writer" in (result.results["commit_specs"].error or "")
+
+
+# --- links_from on jira.comment ------------------------------------------------------------------
+
+PR_URL = "https://github.com/acme/shop/pull/7"
+COMMENT: dict[str, Any] = {
+    "type": "tool",
+    "id": "jira_update",
+    "tool": "jira.comment",
+    "args": {
+        "issue_from": "request",
+        "body": "The change is ready for review.",
+        "links_from": {"pr": "publish", "files": "commit_specs"},
+    },
+}
+
+
+def with_links(links: Any) -> dict[str, Any]:
+    return {**COMMENT, "args": {**COMMENT["args"], "links_from": links}}
+
+
+def test_a_comment_after_the_publish_links_it_with_no_second_gate() -> None:
+    assert issues(steps(SPEC, PLAN, WRITER, commit(), GATE, PUBLISH, COMMENT)) == []
+
+
+@pytest.mark.parametrize(
+    ("links", "message"),
+    [
+        ({"pr": "nobody"}, "`links_from.pr` must name an earlier step"),
+        ({"pr": "writer"}, "`links_from.pr` must name an earlier step"),
+        ({"files": "commit_specs"}, "name it in `pr`"),
+        ({"pr": "publish", "files": "planner"}, "earlier repo.commitArtifacts step"),
+        ({"pr": "publish", "other": "x"}, "takes `pr` and `files`"),
+        ("publish", "takes `pr` and `files`"),
+    ],
+)
+def test_links_name_an_earlier_publish_and_commit(links: Any, message: str) -> None:
+    found = issues(steps(SPEC, PLAN, WRITER, commit(), GATE, PUBLISH, with_links(links)))
+    assert [(code, path) for code, path, _ in found] == [("reference", "root.steps[6]")]
+    assert message in found[0][2]
+
+
+def test_only_a_root_comment_takes_links() -> None:
+    routed = {
+        "type": "router",
+        "id": "maybe",
+        "otherwise": "skip",
+        "routes": [{"id": "yes", "when": "true", "then": COMMENT}],
+    }
+    found = issues(steps(SPEC, PLAN, WRITER, commit(), GATE, PUBLISH, routed))
+    assert any("step of the root sequence" in message for _, _, message in found)
+
+
+class Tools:
+    """`github.openPR` and `jira.comment` as a fake executor: records the calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def definitions(self) -> Sequence[ToolDefinition]:
+        return [ToolDefinition(name="github.openPR"), ToolDefinition(name="jira.comment")]
+
+    async def call(
+        self, name: str, arguments: dict[str, Any], *, node_id: str | None = None
+    ) -> ToolOutput:
+        self.calls.append((name, arguments))
+        if name == "github.openPR":
+            return ToolOutput(text=PR_URL, data={"url": PR_URL, "number": 7})
+        return ToolOutput(text="posted", data={"key": "PROJ-12", "created": True})
+
+
+async def test_the_comment_carries_links_the_platform_makes() -> None:
+    tools, review = Tools(), Review()
+    common: dict[str, Any] = {
+        "run_id": uuid4(),
+        "sink": InMemoryEventSink(),
+        "checkpointer": InMemorySaver(serde=checkpoint_serde()),
+        "tools": tools,
+        "review": review,
+        "artifacts": InMemoryArtifactStore(),
+        "context": RunContext(request="PROJ-12", issue=BRIEF),
+    }
+    workflow = parse_spec(steps(SPEC, PLAN, WRITER, commit(), GATE, PUBLISH, COMMENT))
+
+    first = await run_workflow(workflow, Answers(), "PROJ-12", **common)
+    assert first.status == "waiting"
+    done = await resume_workflow(
+        workflow,
+        Answers(),
+        "PROJ-12",
+        next_seq=common["sink"].events[-1].seq + 1,
+        attempt=2,
+        decision=GateDecision(decision="approve"),
+        **common,
+    )
+
+    assert done.status == "completed"
+    [(_, args)] = [call for call in tools.calls if call[0] == "jira.comment"]
+    folder = "specs/PROJ-12-add-csv-export"
+    spec_md, plan_md = f"{folder}/spec.md", f"{folder}/plan.md"
+    assert args == {
+        "issue": "PROJ-12",
+        "body": "The change is ready for review.\n\n**Links**\n"
+        f"- Pull request: {PR_URL}\n"
+        f"- [{spec_md}]({PR_URL}/files#diff-{hashlib.sha256(spec_md.encode()).hexdigest()})\n"
+        f"- [{plan_md}]({PR_URL}/files#diff-{hashlib.sha256(plan_md.encode()).hexdigest()})",
+    }
