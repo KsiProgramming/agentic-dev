@@ -19,8 +19,14 @@ const DEFAULTS: RunLimits = {
   budget_usd: null,
   sandbox_ttl_s: 86_400,
   branch_retention_days: 30,
+  review_rounds: 3,
 };
-const CEILINGS: RunLimits = { ...DEFAULTS, sandbox_ttl_s: 259_200, branch_retention_days: 90 };
+const CEILINGS: RunLimits = {
+  ...DEFAULTS,
+  sandbox_ttl_s: 259_200,
+  branch_retention_days: 90,
+  review_rounds: 10,
+};
 const UNSET: RunLimitOverrides = {
   agents_alive: null,
   agents_spawned: null,
@@ -31,6 +37,7 @@ const UNSET: RunLimitOverrides = {
   budget_usd: null,
   sandbox_ttl_s: null,
   branch_retention_days: null,
+  review_rounds: null,
 };
 
 afterEach(() => {

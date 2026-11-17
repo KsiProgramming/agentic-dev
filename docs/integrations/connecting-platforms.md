@@ -22,7 +22,7 @@ Each deployment registers its own App. It never shares one with another deployme
    | Homepage URL | Your web app, e.g. `https://app.example.com` |
    | Setup URL | `https://api.example.com/github/setup` (the **API**), with **Redirect on update** ticked |
    | Request user authorization (OAuth) during installation | Off (not used yet) |
-   | Webhook | **Active unticked** (webhooks arrive with roadmap phase 7.6) |
+   | Webhook | **Active** ticked, URL `https://api.example.com/github/webhooks` (the **API**), and a **Webhook secret** you generate (the same value as `GITHUB_WEBHOOK_SECRET`). Leave it unticked if you do not want review follow-ups (7.6). |
    | Where can this App be installed? | Only on this account |
 
 3. **Repository permissions.** Grant only what the workflows you run need:
@@ -32,15 +32,18 @@ Each deployment registers its own App. It never shares one with another deployme
    | Metadata | Read | Listing repositories (always) |
    | Contents | Read | Cloning private repositories |
    | Contents | Read and write | Pushing agent branches (`github.openPR`) |
-   | Pull requests | Read and write | Opening pull requests |
+   | Pull requests | Read and write | Opening pull requests, reading review comments and reacting to them, pushing review follow-ups (7.6) |
+   | Issues | Read and write | Reading a pull request's conversation comments and posting the follow-up's reply (7.6) |
    | Administration | Read and write | Creating repositories (`github.createRepo`, "New repo"). Leave off if you don't need it. |
 
+   With the webhook on, **subscribe to events** `Issue comment`, `Pull request review` and `Pull request review comment` (7.6). Nothing else is needed: every other event is ignored.
 4. Create the App, note its **App ID**, and **Generate a private key**.
 5. Give the key to the API and the worker as a read-only file, and set the variables (see [configuration](../operations/configuration.md)):
    ```dotenv
    GITHUB_APP_ID=123456
    GITHUB_APP_SLUG=acme-agentic-dev
    GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/github-app.pem   # compose: .secrets/github-app.pem
+   GITHUB_WEBHOOK_SECRET=…   # the App's webhook secret, on the API only; unset, /github/webhooks answers 503
    ```
 6. In the web app, open **Settings → Integrations → Install GitHub App**, choose the account and **only the repositories** agents should work on. GitHub sends you back to Settings, which lists them.
 
@@ -100,6 +103,18 @@ What to know:
 
 The links in that comment are made by the platform from the pull request it opened, never written by an agent. Everything it posts appears as written by the connected Jira account.
 
+**Review comments that start a follow-up (7.6).** On a pull request a **Build from a Jira issue** run opened, anyone with write access to the repo can write `@<your app's slug> fix this` (for example `@acme-agentic-dev fix this`) in a comment, a review or an inline comment. The platform:
+
+1. reacts 👀 to the comment and starts a follow-up run, listed as "GitHub · PR #42 review" and linked as "Follow-up of <id>";
+2. checks that nobody else pushed to the pull request since the run pushed, reads the review once (the comment that asked, and the comments, reviews and inline comments people with write access left since the last push; bots are left out) and gives it to every agent as data;
+3. runs the review loop again on the pull request's code: the lead plans only what the review asks, and the reviewer checks each comment;
+4. waits for you to approve the diff, then pushes the new commits to the same pull request (a fast-forward, never a force push), replies once "Pushed `<sha>` for @author's review, run <id>", and comments the links on the Jira issue again.
+
+- **Only the command starts anything.** Other comments, bots and people without write access start nothing; a command while a run on the pull request is still going, past the workspace's **Follow-ups per pull request** (3 by default, at most 10, in Settings → Run limits) or on a closed pull request gets 😕. Every command is in the audit log with what came of it.
+- **A person's commits are never overwritten.** If someone pushed to the pull request's branch after the run, the follow-up fails `pr_head_moved` before it does anything; rebase or merge by hand, then ask again.
+- **GitHub must reach the API.** The webhook URL must be public. In development, open a tunnel to the API (`ngrok http 8000`) and set the App's webhook URL to `<tunnel>/github/webhooks`. GitHub's **Recent Deliveries** tab on the App shows each delivery and lets you redeliver one; a redelivery is recognised and starts nothing twice.
+- Other templates do not follow up reviews yet. A stored workflow can, with `on_review: {"from": "<the step to start at>"}`: that step must come before its one `github.openPR`, with a gate between them.
+
 ### 5. Calling the platform from your systems
 
 The API is described by OpenAPI at `/docs` (Swagger UI) and `/openapi.json`. Typical integrations are CI jobs, chat bots or internal portals that start runs and wait for the result.
@@ -123,7 +138,7 @@ curl -s https://api.example.com/runs/<id>
 curl -s https://api.example.com/runs/<id>/artifacts/report.md
 ```
 
-Check the exact request shapes in `/docs`: the snippets above show the flow, the OpenAPI document is the contract. Your proxy must authenticate these calls too (for example with a service account at the identity-aware proxy). Inbound webhooks (Jira, GitHub PR comments) come later in roadmap Milestone 7.
+Check the exact request shapes in `/docs`: the snippets above show the flow, the OpenAPI document is the contract. Your proxy must authenticate these calls too (for example with a service account at the identity-aware proxy). Inbound webhooks are Jira's (`/jira/webhooks`, 7.3) and the GitHub App's (`/github/webhooks`, 7.6): they are signed by the sender, so your proxy must let them through unauthenticated.
 
 ---
 

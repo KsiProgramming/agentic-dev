@@ -14,12 +14,49 @@ import { AgentMessage } from "./agent-message";
 import type { StepRow } from "./step-entries";
 
 type IssueBrief = components["schemas"]["IssueBrief"];
+type ReviewBrief = components["schemas"]["ReviewBrief"];
+type ReviewComment = components["schemas"]["ReviewComment"];
 
-/** What the platform tells every agent of the run (`RunContext`, 6.8, 6.9, 7.4). */
+/** What the platform tells every agent of the run (`RunContext`, 6.8, 6.9, 7.4, 7.6). */
 export interface RunContextView {
   repoUrl: string | null;
   request: string | null;
   issue: IssueBrief | null;
+  review?: ReviewBrief | null;
+}
+
+const HUNK_LINES = 12;
+
+function reviewCommentMarkdown(comment: ReviewComment): string {
+  let where =
+    comment.kind === "issue_comment"
+      ? "on the pull request"
+      : comment.kind === "review"
+        ? "in a review"
+        : `inline on \`${comment.path ?? "?"}\`${comment.line != null ? ` line ${comment.line}` : ""}`;
+  where = `### @${comment.author}, ${where}`;
+  const parts = [where];
+  if (comment.diff_hunk) {
+    const hunk = comment.diff_hunk.split("\n").slice(-HUNK_LINES).join("\n");
+    parts.push("```diff\n" + hunk + "\n```");
+  }
+  parts.push(comment.body.trim() || "(no text)");
+  return parts.join("\n\n");
+}
+
+/** The pull request review as a follow-up's agents read it (`ReviewBrief.text`, without its
+ * cut: the console shows all of it). */
+export function reviewBriefMarkdown(review: ReviewBrief): string {
+  const parts = [
+    `# Review of pull request #${review.number}\n\n- URL: ${review.pr_url}\n- Asked for by: @${review.author}`,
+    "## The request",
+    review.request ? reviewCommentMarkdown(review.request) : "(deleted)",
+    review.comments.length > 0
+      ? "## Comments since the last push"
+      : "No other comment since the last push.",
+    ...review.comments.map(reviewCommentMarkdown),
+  ];
+  return parts.join("\n\n");
 }
 
 /** The Jira issue as its agents read it, the same fields in the same order (`IssueBrief.text`). */
@@ -42,8 +79,10 @@ export function issueBriefMarkdown(issue: IssueBrief): string {
   return lines.join("\n");
 }
 
-/** The run's context as every agent was told it: the repo, the request and, for a run Jira
- * started, the issue. Issue text is Jira's: sanitised Markdown, no HTML or images. */
+/** The run's context as every agent was told it: the repo, the request, for a run Jira
+ * started, the issue and, for a follow-up of a pull request review, the review. Issue and
+ * review text are what people wrote in Jira and on GitHub: sanitised Markdown, no HTML or
+ * images. */
 function RunContextFields({
   context,
   sameAsInput,
@@ -52,7 +91,7 @@ function RunContextFields({
   /** The request is the run input shown above (the first step): said, not repeated. */
   sameAsInput: boolean;
 }) {
-  if (!context.repoUrl && !context.request && !context.issue) return null;
+  if (!context.repoUrl && !context.request && !context.issue && !context.review) return null;
   return (
     <section aria-labelledby="run-context-title" className="flex min-w-0 flex-col gap-3">
       <h3 id="run-context-title" className="text-section font-medium text-foreground">
@@ -83,6 +122,16 @@ function RunContextFields({
               data-testid="run-context-issue"
             >
               <AgentMessage text={issueBriefMarkdown(context.issue)} />
+            </div>
+          </Field>
+        ) : null}
+        {context.review ? (
+          <Field label="Pull request review">
+            <div
+              className="rounded-lg border bg-surface-subtle p-3"
+              data-testid="run-context-review"
+            >
+              <AgentMessage text={reviewBriefMarkdown(context.review)} />
             </div>
           </Field>
         ) : null}

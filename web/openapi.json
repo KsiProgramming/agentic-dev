@@ -1562,6 +1562,8 @@
                       "connection.added",
                       "connection.removed",
                       "connection.needs_attention",
+                      "github.review_received",
+                      "github.review_ignored",
                       "jira.site_updated",
                       "jira.projects_changed",
                       "jira.fields_mapped",
@@ -1998,6 +2000,33 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/github/webhooks": {
+      "post": {
+        "tags": [
+          "github"
+        ],
+        "summary": "Receive",
+        "description": "A delivery from the GitHub App. Answers `202` once it is verified, whatever came of it;\nwhat did is recorded (`github_deliveries`) and, for a `@<app> fix this` command, audited.",
+        "operationId": "receiveGithubWebhook",
+        "responses": {
+          "202": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "A signed delivery with no delivery id, or a comment event we cannot read"
+          },
+          "401": {
+            "description": "`X-Hub-Signature-256` is missing or does not check out"
+          },
+          "413": {
+            "description": "The body is over 2 MB"
+          },
+          "503": {
+            "description": "No GitHub App or no `GITHUB_WEBHOOK_SECRET` is configured"
           }
         }
       }
@@ -4225,6 +4254,8 @@
               "connection.added",
               "connection.removed",
               "connection.needs_attention",
+              "github.review_received",
+              "github.review_ignored",
               "jira.site_updated",
               "jira.projects_changed",
               "jira.fields_mapped",
@@ -5505,7 +5536,8 @@
           "invalid_gate",
           "jira_write_not_tool_node",
           "jira_write_without_gate",
-          "jira_write_not_shown"
+          "jira_write_not_shown",
+          "on_review_invalid"
         ]
       },
       "JiraConnectionOut": {
@@ -6806,6 +6838,23 @@
           "over_limit"
         ]
       },
+      "OnReview": {
+        "properties": {
+          "from": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "From",
+            "description": "The top-level step a follow-up starts at, before the gate and the `github.openPR` that publishes (a review loop, say)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from"
+        ],
+        "title": "OnReview",
+        "description": "What a review comment on the workflow's pull request does (7.6): `@<app> fix this` from\nsomeone with write access starts a follow-up run, a rerun from the top-level step `from` of\nthe latest run on the pull request, which pushes to the same pull request after its gate."
+      },
       "OpErrorCode": {
         "type": "string",
         "enum": [
@@ -7203,6 +7252,49 @@
           "approval_ttl_s",
           "budget_usd"
         ]
+      },
+      "PrReviewRef": {
+        "properties": {
+          "pr_url": {
+            "type": "string",
+            "title": "Pr Url",
+            "description": "The pull request the follow-up pushes to."
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "issue_comment",
+              "review",
+              "review_comment"
+            ],
+            "title": "Kind",
+            "description": "Where the `@<app> fix this` comment was: in the conversation, a review's body, or inline on the diff."
+          },
+          "comment_url": {
+            "type": "string",
+            "title": "Comment Url",
+            "description": "The comment on GitHub; empty if it had no link."
+          },
+          "author": {
+            "type": "string",
+            "title": "Author",
+            "description": "The GitHub login of the person who asked."
+          }
+        },
+        "type": "object",
+        "required": [
+          "pr_url",
+          "number",
+          "kind",
+          "comment_url",
+          "author"
+        ],
+        "title": "PrReviewRef",
+        "description": "The pull request review a follow-up run works from (7.6): references, never the text."
       },
       "Price": {
         "properties": {
@@ -7805,6 +7897,129 @@
           "version"
         ],
         "title": "RestoreWorkflowRequest"
+      },
+      "ReviewBrief": {
+        "properties": {
+          "pr_url": {
+            "type": "string",
+            "title": "Pr Url"
+          },
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewComment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewComment"
+            },
+            "type": "array",
+            "title": "Comments",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "pr_url",
+          "number",
+          "author"
+        ],
+        "title": "ReviewBrief",
+        "description": "The review a follow-up run works from (7.6), as the platform read it once, before the\nrun's first step: the comment that asked for it (`request`, `None` if it was deleted) and\nthe comments people with write access left since the run before pushed, oldest first."
+      },
+      "ReviewComment": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ReviewKind"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "diff_hunk": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff Hunk"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "author",
+          "body"
+        ],
+        "title": "ReviewComment",
+        "description": "One comment of a pull request review (7.6): in the conversation (`issue_comment`), a\nreview's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,\n`line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,\nnever instructions."
+      },
+      "ReviewKind": {
+        "type": "string",
+        "enum": [
+          "issue_comment",
+          "review",
+          "review_comment"
+        ]
       },
       "Route": {
         "properties": {
@@ -8429,7 +8644,18 @@
           },
           "trigger": {
             "$ref": "#/components/schemas/RunTrigger",
-            "description": "What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3)."
+            "description": "What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), a Jira trigger (`jira`, 7.3), or a review comment on the pull request of `rerun_of` (`github`, 7.6)."
+          },
+          "pr_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrReviewRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a follow-up (`trigger: github`, 7.6): the pull request and the comment that started it."
           },
           "jira_issue": {
             "anyOf": [
@@ -8522,6 +8748,17 @@
               }
             ],
             "description": "The Jira issue as every agent of the run was told it (7.4), read before its first step; `null` for a run no Jira trigger started, or before it is read. With the repo and the input, it is the run context the console shows."
+          },
+          "pr_review_brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewBrief"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a follow-up of a pull request review (7.6): the review as every agent of the run was told it, read before its first step; `null` for any other run, or before it is read. Its comments are what people wrote on GitHub: data."
           },
           "duration_ms": {
             "anyOf": [
@@ -8828,6 +9065,20 @@
             "title": "Branch Retention Days",
             "description": "Days a finished run's saved commits are kept; the files they changed stay. At most 90; unset keeps the platform's default."
           },
+          "review_rounds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Rounds",
+            "description": "Follow-up runs that review comments (`@<app> fix this`) on one pull request may start (7.6). At most 10; unset keeps the platform's default."
+          },
           "budget_usd": {
             "anyOf": [
               {
@@ -8901,6 +9152,11 @@
             "type": "integer",
             "title": "Branch Retention Days",
             "description": "Days a finished run's saved commits are kept; the files they changed stay."
+          },
+          "review_rounds": {
+            "type": "integer",
+            "title": "Review Rounds",
+            "description": "Follow-up runs that review comments (`@<app> fix this`) on one pull request may start (7.6)."
           }
         },
         "type": "object",
@@ -8912,7 +9168,8 @@
           "wall_time_s",
           "approval_ttl_s",
           "sandbox_ttl_s",
-          "branch_retention_days"
+          "branch_retention_days",
+          "review_rounds"
         ],
         "title": "RunLimits",
         "description": "The limits a run executes under."
@@ -9129,7 +9386,18 @@
           },
           "trigger": {
             "$ref": "#/components/schemas/RunTrigger",
-            "description": "What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3)."
+            "description": "What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), a Jira trigger (`jira`, 7.3), or a review comment on the pull request of `rerun_of` (`github`, 7.6)."
+          },
+          "pr_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrReviewRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a follow-up (`trigger: github`, 7.6): the pull request and the comment that started it."
           },
           "jira_issue": {
             "anyOf": [
@@ -9259,7 +9527,8 @@
           "manual",
           "api",
           "rerun",
-          "jira"
+          "jira",
+          "github"
         ]
       },
       "RunUsage": {
@@ -9609,7 +9878,7 @@
           "value"
         ],
         "title": "SetParam",
-        "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets\nit. Ids, types and the slots that hold nodes change through the other ops."
+        "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`, `input_schema`, `output_schema`, `on_review`). `null`\nunsets it. Ids, types and the slots that hold nodes change through the other ops."
       },
       "StartAuthorize": {
         "properties": {
@@ -10501,6 +10770,17 @@
             "title": "Output Schema",
             "description": "The workflow's typed output (6.6): a subflow that calls it checks the called workflow's output against this, and the step after it reads it as typed."
           },
+          "on_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OnReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lets a review comment on the pull request the workflow opened (`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing."
+          },
           "root": {
             "oneOf": [
               {
@@ -10885,7 +11165,7 @@
           },
           "ceilings": {
             "$ref": "#/components/schemas/RunLimits",
-            "description": "The most a workspace may set each limit to: the platform's limit, except `sandbox_ttl_s` and `branch_retention_days`, which may go above their default."
+            "description": "The most a workspace may set each limit to: the platform's limit, except `sandbox_ttl_s`, `branch_retention_days` and `review_rounds`, which may go above their default."
           },
           "overrides": {
             "$ref": "#/components/schemas/RunLimitOverrides"

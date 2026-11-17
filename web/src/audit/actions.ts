@@ -11,6 +11,8 @@ import {
   FolderPlusIcon,
   GaugeIcon,
   ListChecksIcon,
+  MessageSquareIcon,
+  MessageSquareOffIcon,
   PackageXIcon,
   PlayIcon,
   PlugIcon,
@@ -74,6 +76,16 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
     label: "Connection needs attention",
     icon: PlugZapIcon,
     category: "settings",
+  },
+  "github.review_received": {
+    label: "Started from a review",
+    icon: MessageSquareIcon,
+    category: "runs",
+  },
+  "github.review_ignored": {
+    label: "Review comment not followed up",
+    icon: MessageSquareOffIcon,
+    category: "runs",
   },
   "jira.site_updated": { label: "Jira site changed", icon: ToggleLeftIcon, category: "settings" },
   "jira.projects_changed": {
@@ -158,6 +170,25 @@ const ATTENTION: Record<string, string> = {
   scopes: "a permission is missing",
 };
 
+/** Why a `@<app> fix this` comment started nothing (7.6). */
+const REVIEW_IGNORED: Record<string, string> = {
+  not_allowed: "the author has no write access",
+  no_run: "no run opened this pull request",
+  not_enabled: "its workflow does not follow up reviews",
+  busy: "a run on it has not ended",
+  limit: "it had all its follow-ups",
+  pr_closed: "the pull request is closed",
+  no_head: "the run pushed nothing to follow up",
+  start_failed: "the follow-up could not start",
+};
+
+/** "PR #42" from a pull request URL in an entry's details. */
+function pullRequest(d: Details): string | null {
+  const url = text(d, "pr_url");
+  const number = url?.match(/\/pull\/(\d+)$/)?.[1];
+  return number ? `PR #${number}` : url;
+}
+
 const LIMITS: [key: string, label: string][] = [
   ["agents_alive", "agents alive"],
   ["agents_spawned", "agents spawned"],
@@ -168,6 +199,7 @@ const LIMITS: [key: string, label: string][] = [
   ["budget_usd", "budget"],
   ["sandbox_ttl_s", "sandbox kept (s)"],
   ["branch_retention_days", "saved commits kept (days)"],
+  ["review_rounds", "follow-ups per pull request"],
 ];
 
 const END_STATUS: Record<string, string> = {
@@ -345,6 +377,12 @@ export function describe(event: AuditEvent): string {
         `When an issue in ${project} ${when}`,
         d.enabled === false && event.action !== "jira.trigger_deleted" && "off",
       );
+    }
+    case "github.review_received":
+      return join(pullRequest(d), text(d, "author") && `by @${text(d, "author")}`);
+    case "github.review_ignored": {
+      const reason = text(d, "reason");
+      return join(pullRequest(d), reason && (REVIEW_IGNORED[reason] ?? reason));
     }
     case "jira.trigger_fired":
       return text(d, "issue_key") ?? "An issue moved";

@@ -621,6 +621,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/github/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive
+         * @description A delivery from the GitHub App. Answers `202` once it is verified, whatever came of it;
+         *     what did is recorded (`github_deliveries`) and, for a `@<app> fix this` command, audited.
+         */
+        post: operations["receiveGithubWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/connections/jira/authorize": {
         parameters: {
             query?: never;
@@ -1275,7 +1296,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1845,7 +1866,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -2352,6 +2373,19 @@ export interface components {
         };
         /** @enum {string} */
         NotEditable: "binary" | "too_large" | "deleted" | "renamed" | "over_limit";
+        /**
+         * OnReview
+         * @description What a review comment on the workflow's pull request does (7.6): `@<app> fix this` from
+         *     someone with write access starts a follow-up run, a rerun from the top-level step `from` of
+         *     the latest run on the pull request, which pushes to the same pull request after its gate.
+         */
+        OnReview: {
+            /**
+             * From
+             * @description The top-level step a follow-up starts at, before the gate and the `github.openPR` that publishes (a review loop, say).
+             */
+            from: string;
+        };
         /** @enum {string} */
         OpErrorCode: "unknown_node" | "duplicate_node_id" | "root_node" | "invalid_placement" | "slot_taken" | "invalid_move" | "not_in_sequence" | "not_connected" | "not_a_param" | "invalid_path" | "detached_nodes" | "missing_child" | "invalid_wrap" | "invalid_extract" | "schema";
         /**
@@ -2503,6 +2537,35 @@ export interface components {
         };
         /** @enum {string} */
         PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "approval_ttl_s" | "budget_usd";
+        /**
+         * PrReviewRef
+         * @description The pull request review a follow-up run works from (7.6): references, never the text.
+         */
+        PrReviewRef: {
+            /**
+             * Pr Url
+             * @description The pull request the follow-up pushes to.
+             */
+            pr_url: string;
+            /** Number */
+            number: number;
+            /**
+             * Kind
+             * @description Where the `@<app> fix this` comment was: in the conversation, a review's body, or inline on the diff.
+             * @enum {string}
+             */
+            kind: "issue_comment" | "review" | "review_comment";
+            /**
+             * Comment Url
+             * @description The comment on GitHub; empty if it had no link.
+             */
+            comment_url: string;
+            /**
+             * Author
+             * @description The GitHub login of the person who asked.
+             */
+            author: string;
+        };
         /**
          * Price
          * @description USD per million tokens.
@@ -2784,6 +2847,55 @@ export interface components {
              */
             version: number;
         };
+        /**
+         * ReviewBrief
+         * @description The review a follow-up run works from (7.6), as the platform read it once, before the
+         *     run's first step: the comment that asked for it (`request`, `None` if it was deleted) and
+         *     the comments people with write access left since the run before pushed, oldest first.
+         */
+        ReviewBrief: {
+            /** Pr Url */
+            pr_url: string;
+            /** Number */
+            number: number;
+            /** Author */
+            author: string;
+            request?: components["schemas"]["ReviewComment"] | null;
+            /**
+             * Comments
+             * @default []
+             */
+            comments: components["schemas"]["ReviewComment"][];
+        };
+        /**
+         * ReviewComment
+         * @description One comment of a pull request review (7.6): in the conversation (`issue_comment`), a
+         *     review's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,
+         *     `line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,
+         *     never instructions.
+         */
+        ReviewComment: {
+            kind: components["schemas"]["ReviewKind"];
+            /** Author */
+            author: string;
+            /** Body */
+            body: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Line */
+            line?: number | null;
+            /** Diff Hunk */
+            diff_hunk?: string | null;
+        };
+        /** @enum {string} */
+        ReviewKind: "issue_comment" | "review" | "review_comment";
         /**
          * Route
          * @description One way a router can go: `then` runs when this route is chosen.
@@ -3073,8 +3185,10 @@ export interface components {
             rerun_of: string | null;
             /** @description Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again. */
             rerun_from?: components["schemas"]["RerunFromRef"] | null;
-            /** @description What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3). */
+            /** @description What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), a Jira trigger (`jira`, 7.3), or a review comment on the pull request of `rerun_of` (`github`, 7.6). */
             trigger: components["schemas"]["RunTrigger"];
+            /** @description For a follow-up (`trigger: github`, 7.6): the pull request and the comment that started it. */
+            pr_review?: components["schemas"]["PrReviewRef"] | null;
             /** @description The Jira issue a trigger started the run on (7.3); a rerun keeps it. */
             jira_issue?: components["schemas"]["JiraIssueRef"] | null;
             /**
@@ -3119,6 +3233,8 @@ export interface components {
             };
             /** @description The Jira issue as every agent of the run was told it (7.4), read before its first step; `null` for a run no Jira trigger started, or before it is read. With the repo and the input, it is the run context the console shows. */
             jira_brief?: components["schemas"]["IssueBrief"] | null;
+            /** @description For a follow-up of a pull request review (7.6): the review as every agent of the run was told it, read before its first step; `null` for any other run, or before it is read. Its comments are what people wrote on GitHub: data. */
+            pr_review_brief?: components["schemas"]["ReviewBrief"] | null;
             /**
              * Duration Ms
              * @deprecated
@@ -3235,6 +3351,11 @@ export interface components {
              */
             branch_retention_days?: number | null;
             /**
+             * Review Rounds
+             * @description Follow-up runs that review comments (`@<app> fix this`) on one pull request may start (7.6). At most 10; unset keeps the platform's default.
+             */
+            review_rounds?: number | null;
+            /**
              * Budget Usd
              * @description The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget.
              */
@@ -3290,6 +3411,11 @@ export interface components {
              * @description Days a finished run's saved commits are kept; the files they changed stay.
              */
             branch_retention_days: number;
+            /**
+             * Review Rounds
+             * @description Follow-up runs that review comments (`@<app> fix this`) on one pull request may start (7.6).
+             */
+            review_rounds: number;
         };
         /**
          * RunSandbox
@@ -3385,8 +3511,10 @@ export interface components {
             rerun_of: string | null;
             /** @description Set for a rerun from a step of `rerun_of` (12.4): the steps before it were not run again. */
             rerun_from?: components["schemas"]["RerunFromRef"] | null;
-            /** @description What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), or a Jira trigger (`jira`, 7.3). */
+            /** @description What started the run: a person in the web app (`manual`), another client (`api`), a rerun of `rerun_of` (`rerun`), a Jira trigger (`jira`, 7.3), or a review comment on the pull request of `rerun_of` (`github`, 7.6). */
             trigger: components["schemas"]["RunTrigger"];
+            /** @description For a follow-up (`trigger: github`, 7.6): the pull request and the comment that started it. */
+            pr_review?: components["schemas"]["PrReviewRef"] | null;
             /** @description The Jira issue a trigger started the run on (7.3); a rerun keeps it. */
             jira_issue?: components["schemas"]["JiraIssueRef"] | null;
             /**
@@ -3430,7 +3558,7 @@ export interface components {
             next_cursor: string | null;
         };
         /** @enum {string} */
-        RunTrigger: "manual" | "api" | "rerun" | "jira";
+        RunTrigger: "manual" | "api" | "rerun" | "jira" | "github";
         /**
          * RunUsage
          * @description Totals of the run's usage events, priced when each was logged.
@@ -3571,8 +3699,8 @@ export interface components {
         /**
          * SetParam
          * @description Set one parameter of a node, or of the document without `node_id` (`name`,
-         *     `description`, `budget_usd`, `input`, `input_schema`, `output_schema`). `null` unsets
-         *     it. Ids, types and the slots that hold nodes change through the other ops.
+         *     `description`, `budget_usd`, `input`, `input_schema`, `output_schema`, `on_review`). `null`
+         *     unsets it. Ids, types and the slots that hold nodes change through the other ops.
          */
         SetParam: {
             /**
@@ -3998,6 +4126,8 @@ export interface components {
             output_schema?: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
+            /** @description Lets a review comment on the pull request the workflow opened (`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing. */
+            on_review?: components["schemas"]["OnReview"] | null;
             /** Root */
             root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
         };
@@ -4156,7 +4286,7 @@ export interface components {
         WorkspacePolicyOut: {
             /** @description The platform's limits. */
             defaults: components["schemas"]["RunLimits"];
-            /** @description The most a workspace may set each limit to: the platform's limit, except `sandbox_ttl_s` and `branch_retention_days`, which may go above their default. */
+            /** @description The most a workspace may set each limit to: the platform's limit, except `sandbox_ttl_s`, `branch_retention_days` and `review_rounds`, which may go above their default. */
             ceilings: components["schemas"]["RunLimits"];
             overrides: components["schemas"]["RunLimitOverrides"];
             effective: components["schemas"]["RunLimits"];
@@ -5333,7 +5463,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
@@ -5603,6 +5733,52 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    receiveGithubWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A signed delivery with no delivery id, or a comment event we cannot read */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `X-Hub-Signature-256` is missing or does not check out */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The body is over 2 MB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No GitHub App or no `GITHUB_WEBHOOK_SECRET` is configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

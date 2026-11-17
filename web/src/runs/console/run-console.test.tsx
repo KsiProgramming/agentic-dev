@@ -1094,6 +1094,50 @@ test("a Jira run's Input shows the issue its agents were told, as text", async (
   expect(issue.querySelector("img, script")).toBeNull();
 });
 
+test("a follow-up's Input shows the pull request review its agents were told, as text", async () => {
+  nav.search = "tab=input";
+  api(
+    detail({
+      ...WRITER_RUN,
+      input: "API-1",
+      trigger: "github",
+      pr_review_brief: {
+        pr_url: "https://github.com/acme/hello/pull/42",
+        number: 42,
+        author: "alice",
+        request: {
+          kind: "review_comment",
+          author: "alice",
+          body: "@agentic-dev fix this: the limit is **50**.",
+          url: "",
+          path: "gateway/limits.py",
+          line: 1,
+          diff_hunk: "@@ -0,0 +1 @@\n+LIMIT = 100",
+        },
+        comments: [
+          {
+            kind: "issue_comment",
+            author: "bob",
+            body: "Keep it in one place. <img src=x onerror=alert(1)>\n\n<script>alert(1)</script>",
+            url: "",
+          },
+        ],
+      },
+    }),
+  );
+  longAnswer(show());
+  const panel = await screen.findByTestId("step-panel");
+  const review = await within(panel).findByTestId("run-context-review");
+
+  expect(within(panel).getByText("Pull request review")).toBeTruthy();
+  expect(within(review).getByRole("heading", { name: "Review of pull request #42" })).toBeTruthy();
+  expect(review.textContent).toContain("@alice, inline on gateway/limits.py line 1");
+  expect(review.textContent).toContain("+LIMIT = 100");
+  expect(within(review).getByText("50").tagName).toBe("STRONG");
+  expect(review.textContent).toContain("Keep it in one place.");
+  expect(review.querySelector("img, script")).toBeNull();
+});
+
 test("a step's Usage shows its tokens and cost", async () => {
   nav.search = "tab=usage";
   api(detail(WRITER_RUN));

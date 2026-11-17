@@ -600,5 +600,6 @@ function runContext(run: RunDetail | null | undefined): RunContextView | null {
     repoUrl: run.repo?.url ?? null,
     request: run.input.trim() ? run.input : null,
     issue: run.jira_brief ?? null,
+    review: run.pr_review_brief ?? null,
   };
 }
