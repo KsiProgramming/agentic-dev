@@ -4,9 +4,11 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "agentic-github",
+    "agentic-jira",
     "agentic-runtime",
     "agentic-sandbox",
     "agentic-secrets",
+    "agentic-store",
     "mcp>=2.3",
     "pydantic>=2.11",
 ]
@@ -17,6 +19,8 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 agentic-github = { workspace = true }
+agentic-jira = { workspace = true }
 agentic-sandbox = { workspace = true }
 agentic-runtime = { workspace = true }
 agentic-secrets = { workspace = true }
+agentic-store = { workspace = true }

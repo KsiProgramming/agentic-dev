@@ -257,9 +257,11 @@ version = "0.1.0"
 source = { editable = "packages/tools" }
 dependencies = [
     { name = "agentic-github" },
+    { name = "agentic-jira" },
     { name = "agentic-runtime" },
     { name = "agentic-sandbox" },
     { name = "agentic-secrets" },
+    { name = "agentic-store" },
     { name = "mcp" },
     { name = "pydantic" },
 ]
@@ -267,9 +269,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agentic-github", editable = "packages/github" },
+    { name = "agentic-jira", editable = "packages/jira" },
     { name = "agentic-runtime", editable = "packages/runtime" },
     { name = "agentic-sandbox", editable = "packages/sandbox" },
     { name = "agentic-secrets", editable = "packages/secrets" },
+    { name = "agentic-store", editable = "packages/store" },
     { name = "mcp", specifier = ">=2.3" },
     { name = "pydantic", specifier = ">=2.11" },
 ]

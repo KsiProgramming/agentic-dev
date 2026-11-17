@@ -2,6 +2,7 @@
 grant and its refresh, the sites it reaches and their projects; and (7.2) the issues, comments
 and transitions the platform's `jira` tools use. Agents never see a token."""
 
+from agentic_jira.access import WorkspaceJira
 from agentic_jira.adf import from_markdown, to_markdown
 from agentic_jira.client import API_URL, AUTH_URL, AtlassianApp
 from agentic_jira.config import AtlassianAppConfig
@@ -78,6 +79,7 @@ __all__ = [
     "SearchPage",
     "Site",
     "Transition",
+    "WorkspaceJira",
     "access_token",
     "call",
     "from_markdown",

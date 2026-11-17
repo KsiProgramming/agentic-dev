@@ -20,17 +20,20 @@ from agentic_jira import (
     Grant,
     JiraApiError,
     Site,
+    WorkspaceJira,
     access_token,
     call,
 )
 from agentic_secrets import KEY_BYTES, LocalKeyProvider
 from agentic_store import (
     JiraNeedsAttentionError,
+    JiraProjectRef,
     JiraSiteRef,
     Workspace,
     get_jira_connection,
     put_jira_connection,
     refresh_jira_secret,
+    set_jira_site_projects,
 )
 
 pytestmark = pytest.mark.integration
@@ -174,3 +177,23 @@ async def test_a_call_refused_twice_marks_the_connection(sessions: Sessions) -> 
     assert refused.value.reason == "unauthorized"
     connection = await get_jira_connection(sessions, workspace_id)
     assert connection is not None and connection.needs_attention == "unauthorized"
+
+
+async def test_a_workspace_jira_reads_its_scope_and_calls_with_a_valid_token(
+    sessions: Sessions,
+) -> None:
+    atlassian = FakeAtlassian("http://api.test")
+    workspace_id = await connected(sessions, atlassian)
+    await set_jira_site_projects(
+        sessions, workspace_id, "fake-cloud-acme", [JiraProjectRef("10001", "API", "Public API")]
+    )
+    jira = WorkspaceJira(sessions, KEYS, atlassian, workspace_id)
+
+    info = await jira.connection()
+    issue = await jira.call(lambda token: atlassian.get_issue(token, "fake-cloud-acme", "API-1"))
+
+    assert info is not None
+    assert [p.key for s in info.sites for p in s.projects] == ["API"]
+    assert await jira.allowed("fake-cloud-acme", "api")
+    assert not await jira.allowed("fake-cloud-acme", "OPS")
+    assert issue.key == "API-1"
