@@ -37,6 +37,7 @@ from agentic_engine.spec.models import (
     ValidationIssue,
     WorkflowSpec,
     in_run_order,
+    input_artifacts,
     iter_nodes,
     structure_issues,
     tool_issues,
@@ -112,7 +113,7 @@ def expand_workflow(
     root, called, issues = expand_root(spec.root, resolve, spec.id, drafts)
     if root is spec.root:
         return ExpandedWorkflow(spec)
-    issues += structure_issues(root) + tool_issues(root, known_tools)
+    issues += structure_issues(root, input_artifacts(spec.input)) + tool_issues(root, known_tools)
     expanded = spec.model_copy(update={"root": root})
     return ExpandedWorkflow(expanded, called, on_subflows(root, in_run_order(root, issues)))
 

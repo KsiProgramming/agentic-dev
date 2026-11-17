@@ -55,6 +55,8 @@ class StoredRun:
     # only, and the review as its agents are told it, once read.
     pr_review: dict[str, JsonValue] | None = None
     pr_review_brief: dict[str, JsonValue] | None = None
+    # The spec file the run was given (7.7), with its text.
+    spec_file: dict[str, JsonValue] | None = None
 
 
 async def create_run(
@@ -71,6 +73,7 @@ async def create_run(
     subflows: dict[str, JsonValue] | None = None,
     jira_origin: JiraOrigin | None = None,
     jira_issue: dict[str, JsonValue] | None = None,
+    spec_file: dict[str, JsonValue] | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) or the stored workflow version it was read
@@ -85,7 +88,8 @@ async def create_run(
     and the issue, and the rule's fire and audit entry are committed with it. It raises
     `TriggerRunActiveError` when the rule already has a run going on the issue. Without one,
     `jira_issue` (`{cloud_id, site, key, url}`, 7.5) is the issue a run started by hand works on,
-    which its agents are then told as a triggered run's are."""
+    which its agents are then told as a triggered run's are. `spec_file` (7.7) is the
+    Markdown spec file the run is given (`{source, name, path, ref, size, sha256, text}`)."""
     run_id = uuid4()
     async with sessions.begin() as session:
         if jira_origin is not None:
@@ -108,6 +112,7 @@ async def create_run(
             trigger=trigger,
             branch=repo.ref if repo else None,
             jira_issue=jira_issue,
+            spec_file=spec_file,
         )
         session.add(run)
         audit(
@@ -156,6 +161,7 @@ def stored_run(run: Run) -> StoredRun:
         jira_brief=run.jira_brief,
         pr_review=run.pr_review,
         pr_review_brief=run.pr_review_brief,
+        spec_file=run.spec_file,
     )
 
 

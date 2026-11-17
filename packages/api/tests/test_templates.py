@@ -9,7 +9,7 @@ async def test_lists_the_templates_with_their_options() -> None:
         response = await client.get("/templates")
 
     assert response.status_code == 200
-    docs, audit, team, sdd, jira = response.json()
+    docs, audit, team, sdd, sdd_file, jira = response.json()
     assert (docs["id"], docs["name"]) == ("generate-docs", "Generate docs")
     properties = docs["parameters"]["properties"]
     assert set(properties) == {"output_dir", "include", "extra_instructions"}
@@ -39,3 +39,7 @@ async def test_lists_the_templates_with_their_options() -> None:
         "engineer_model",
         "reviewer_model",
     }
+    assert (sdd_file["id"], sdd_file["name"]) == ("sdd-spec-file", "Build from a spec file")
+    assert sdd_file["requires"] == ["claude", "github"]
+    assert (sdd_file["input"]["required"], sdd_file["input"]["kind"]) == (True, "spec_file")
+    assert "move_to" not in sdd_file["parameters"]["properties"]

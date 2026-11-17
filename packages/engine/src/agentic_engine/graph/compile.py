@@ -99,6 +99,7 @@ from agentic_engine.agent import (
     AgentNodeStatus,
     IssueBrief,
     RunContext,
+    SpecFile,
     run_agent_node,
     sum_usage,
 )
@@ -241,6 +242,7 @@ class _Limits:
     saver: BranchSaver | None = None
     request: str | None = None
     issue: IssueBrief | None = None
+    spec: SpecFile | None = None
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -437,6 +439,7 @@ def compile_workflow(
         saver,
         context.request if context is not None else None,
         context.issue if context is not None else None,
+        context.spec if context is not None else None,
     )
 
     loops: list[LoopNode] = []  # the loops `add` is inside
@@ -771,6 +774,7 @@ async def _run_step(
                     limits.issue,
                     limits.request,
                     on_event,
+                    limits.spec,
                 )
             case ToolNode():
                 try:

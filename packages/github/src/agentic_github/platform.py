@@ -9,6 +9,7 @@ from agentic_github.models import (
     InstallationInfo,
     PullRequestInfo,
     PullRequestState,
+    RepoFile,
     RepoInfo,
     ReviewItem,
 )
@@ -48,6 +49,10 @@ class GithubPlatform(GithubReviews, Protocol):
     async def list_repos(self, installation_id: int) -> list[RepoInfo]: ...
 
     async def get_repo(self, installation_id: int, full_name: str) -> RepoInfo | None: ...
+
+    async def file_at(
+        self, installation_id: int, full_name: str, path: str, ref: str | None = None
+    ) -> RepoFile | None: ...
 
     async def create_org_repo(
         self,

@@ -56,9 +56,11 @@ from agentic_engine.templates import (
     DocsParams,
     JiraIssueAnswerParams,
     NewRepo,
+    SddFileParams,
     SddParams,
     build_docs_spec,
     build_jira_issue_answer_spec,
+    build_sdd_file_spec,
     build_sdd_spec,
     wrap_with_create_repo,
 )
@@ -2689,3 +2691,114 @@ async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
     changes = cast(list[dict[str, Any]], (waiting.payload or {})["changes"])
     shown = {c["path"] for c in changes}
     assert {"gateway/limits.py", f"{SDD_FOLDER}/spec.md"} <= shown
+
+
+# --- Build from a spec file (7.7) ----------------------------------------------------------------
+
+SPEC_FILE_TEXT = (
+    "# Rate limit the public endpoints\n\nClients that send too many requests slow everyone "
+    "down.\n\n## Acceptance\n\n- A client past 100 requests a minute gets 429.\n"
+)
+SPEC_FILE_FOLDER = "specs/rate-limit-the-public-endpoints"
+
+
+class RecordingByRole(ByRole):
+    """`ByRole`, keeping each agent's request."""
+
+    def __init__(self, scripts: Mapping[str, Script], tools: ToolExecutor | None) -> None:
+        super().__init__(scripts, tools)
+        self.requests: dict[str, AgentRequest] = {}
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        self.requests[request.node_id] = request
+        return super().start(request)
+
+
+async def test_done_when_a_spec_file_run_opens_a_pr(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    master_key: Path,
+) -> None:
+    """7.7's "Done when" on fakes: a run of "Build from a spec file" given an uploaded spec, in a
+    workspace with no Jira connection, writes `spec-input.md` before its first step, tells every
+    agent the file, and after its two gates opens one pull request holding the change and the
+    Spec Kit files under `specs/<slug of the file's title>/`. Nothing is sent to Jira."""
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    remote = bare_remote(repos / "hello", tmp_path / "remote.git")
+    github = FakeGithub(GITHUB_TOKEN)
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+    atlassian = FakeAtlassian("")
+    workspace_id = await new_workspace(sessions)  # no Jira connection
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+    teams: list[RecordingByRole] = []
+
+    def team(tools: ToolExecutor | None) -> AgentRuntime:
+        scripts = cast(ByRole, sdd_team(tools))._scripts  # pyright: ignore[reportPrivateUsage]
+        recording = RecordingByRole(scripts, tools)
+        teams.append(recording)
+        return recording
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=team,
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: remote,
+        master_key_file=master_key,
+        jira=atlassian,
+    ):
+        run_id = await create_run(
+            sessions,
+            build_sdd_file_spec(SddFileParams()),
+            "rate-limits.md",
+            RepoSource(url=GITHUB_URL),
+            workspace_id=workspace_id,
+            spec_file={
+                "source": "upload",
+                "name": "rate-limits.md",
+                "path": None,
+                "ref": None,
+                "size": len(SPEC_FILE_TEXT.encode()),
+                "sha256": "-",
+                "text": SPEC_FILE_TEXT,
+            },
+        )
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+            for gate in ("approve_spec", "approve_pr"):
+                await wait_for_gate(sessions, run_id, gate)
+                await record_approval(sessions, run_id, gate, GateDecision(decision="approve"))
+                await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+
+    branch = f"agent/{run_id}/implement"
+    files = remote_files(tmp_path / "remote.git", branch)
+    assert "gateway/limits.py" in files
+    folder = {f"{SPEC_FILE_FOLDER}/{name}" for name in ("spec.md", "plan.md", "tasks.md")}
+    assert folder <= set(files)
+    [pull] = github.opened
+    assert pull["title"] == "Spec-driven change from a spec file"
+    assert atlassian.posted == [] and atlassian.moved == []
+    found = await get_run_artifact(sessions, run_id, "spec-input.md")
+    assert found is not None
+    artifact, _ = found
+    assert (artifact.version, artifact.node_id, artifact.content) == (1, "$input", SPEC_FILE_TEXT)
+    events = await list_run_events(sessions, run_id)
+    first_node = next(i for i, e in enumerate(events) if e.type == "node_started")
+    seeded = [i for i, e in enumerate(events) if (e.payload or {}).get("source") == "input"]
+    assert len(seeded) == 1 and seeded[0] < first_node
+    requests = {k: v for t in teams for k, v in t.requests.items()}
+    assert requests["spec_writer"].input == SPEC_FILE_TEXT
+    for request in requests.values():
+        context = request.context or ""
+        assert "`rate-limits.md`, which they uploaded" in context, request.node_id
+        assert "<spec-file>" in context and "<request>" not in context, request.node_id

@@ -3,10 +3,13 @@
 import type { ReactNode } from "react";
 
 import type { components } from "@/api/schema";
+import { TruncatedPath } from "@/components/display";
 import { JsonView, OutputView } from "@/components/json-view";
-import { LoadingState } from "@/components/states";
+import { ErrorState, LoadingState } from "@/components/states";
 
 import { ArtifactCards } from "../artifacts/artifact-cards";
+import { SPEC_INPUT_ARTIFACT } from "../artifacts/artifacts";
+import { useRunArtifact } from "../artifacts/use-run-artifacts";
 import type { SpecNode, WorkflowSpec } from "../graph/spec-graph";
 import { allSpecNodes } from "../graph/spec-graph";
 import { repoLabel } from "../summaries";
@@ -16,13 +19,16 @@ import type { StepRow } from "./step-entries";
 type IssueBrief = components["schemas"]["IssueBrief"];
 type ReviewBrief = components["schemas"]["ReviewBrief"];
 type ReviewComment = components["schemas"]["ReviewComment"];
+type RunSpecFile = components["schemas"]["RunSpecFile"];
 
-/** What the platform tells every agent of the run (`RunContext`, 6.8, 6.9, 7.4, 7.6). */
+/** What the platform tells every agent of the run (`RunContext`, 6.8, 6.9, 7.4, 7.6, 7.7). */
 export interface RunContextView {
   repoUrl: string | null;
   request: string | null;
   issue: IssueBrief | null;
   review?: ReviewBrief | null;
+  /** The spec file the run was given (7.7); its text is the run artifact `spec-input.md`. */
+  spec?: RunSpecFile | null;
 }
 
 const HUNK_LINES = 12;
@@ -79,19 +85,67 @@ export function issueBriefMarkdown(issue: IssueBrief): string {
   return lines.join("\n");
 }
 
+/** The spec file a run was given (7.7), as its agents were told it: where it came from, and its
+ * text from the run artifact `spec-input.md`, as sanitised Markdown (it is what a person wrote). */
+function SpecFileContext({
+  runId,
+  baseUrl,
+  spec,
+}: {
+  runId: string;
+  baseUrl?: string;
+  spec: RunSpecFile;
+}) {
+  const file = useRunArtifact(runId, SPEC_INPUT_ARTIFACT, 1, { baseUrl });
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-meta text-foreground-secondary">
+        {spec.source === "repo" && spec.path ? (
+          <>
+            <TruncatedPath path={spec.path} className="text-foreground" />
+            <span>
+              from the repository{spec.ref ? `, at ${spec.ref}` : ", on its default branch"}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="font-mono text-foreground">{spec.name}</span>
+            <span>uploaded when the run started</span>
+          </>
+        )}
+      </p>
+      {file.isPending ? (
+        <LoadingState rows={3} label="Loading the spec file…" />
+      ) : file.isError ? (
+        <ErrorState message={file.error.message} onRetry={() => void file.refetch()} />
+      ) : (
+        <div className="rounded-lg border bg-surface-subtle p-3" data-testid="run-context-spec">
+          <AgentMessage text={file.data.content} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The run's context as every agent was told it: the repo, the request, for a run Jira
- * started, the issue and, for a follow-up of a pull request review, the review. Issue and
- * review text are what people wrote in Jira and on GitHub: sanitised Markdown, no HTML or
- * images. */
+ * started, the issue, for a run given a spec file, the file and, for a follow-up of a pull
+ * request review, the review. Issue, spec file and review text are what people wrote in Jira,
+ * in the file and on GitHub: sanitised Markdown, no HTML or images. */
 function RunContextFields({
+  runId,
+  baseUrl,
   context,
   sameAsInput,
 }: {
+  runId: string;
+  baseUrl?: string;
   context: RunContextView;
   /** The request is the run input shown above (the first step): said, not repeated. */
   sameAsInput: boolean;
 }) {
-  if (!context.repoUrl && !context.request && !context.issue && !context.review) return null;
+  if (!context.repoUrl && !context.request && !context.issue && !context.review && !context.spec) {
+    return null;
+  }
   return (
     <section aria-labelledby="run-context-title" className="flex min-w-0 flex-col gap-3">
       <h3 id="run-context-title" className="text-section font-medium text-foreground">
@@ -123,6 +177,11 @@ function RunContextFields({
             >
               <AgentMessage text={issueBriefMarkdown(context.issue)} />
             </div>
+          </Field>
+        ) : null}
+        {context.spec ? (
+          <Field label="Spec file">
+            <SpecFileContext runId={runId} baseUrl={baseUrl} spec={context.spec} />
           </Field>
         ) : null}
         {context.review ? (
@@ -382,6 +441,8 @@ export function StepInput({
       </dl>
       {node?.type === "agent" && runContext ? (
         <RunContextFields
+          runId={runId}
+          baseUrl={baseUrl}
           context={runContext}
           sameAsInput={first && runInput !== null && runInput === runContext.request}
         />

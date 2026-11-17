@@ -24,6 +24,16 @@ class RepoInfo:
 
 
 @dataclass(frozen=True)
+class RepoFile:
+    """A file of a repo at a ref (7.7): its `path`, its `size` in bytes and its `content`,
+    `None` when GitHub did not send it inline (files over 1 MB)."""
+
+    path: str
+    size: int
+    content: bytes | None
+
+
+@dataclass(frozen=True)
 class PullRequestInfo:
     number: int
     url: str

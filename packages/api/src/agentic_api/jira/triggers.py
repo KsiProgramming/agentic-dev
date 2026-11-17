@@ -49,7 +49,7 @@ _RULE_ERRORS: dict[int | str, dict[str, Any]] = {
         "description": "The rule cannot start a run: `project_not_allowed` (the project is not "
         "picked on an enabled site of a working Jira connection), `cannot_run` (the checks "
         "`POST /runs` makes refuse it), or `no_input` (its workflow declares no required "
-        "input to receive the issue key).",
+        "input to receive the issue key, or its input is a spec file, 7.7).",
         "model": JiraErrorDetail,
     },
 }
@@ -118,6 +118,11 @@ async def _check(request: Request, workspace_id: UUID, rule: JiraTriggerFields) 
         raise _refused(
             "no_input",
             "the workflow must declare a required input: the run gets the issue key there",
+        )
+    if prepared.spec.input.kind == "spec_file":
+        raise _refused(
+            "no_input",
+            "the workflow is given a spec file, but a trigger gives its run the issue key",
         )
 
 

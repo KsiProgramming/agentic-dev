@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -36,6 +36,58 @@ from agentic_engine.spec import (
 from agentic_engine.templates import NewRepo, get_template
 from agentic_github import repo_full_name
 from agentic_sandbox import RepoSource
+
+MAX_SPEC_FILE_BYTES = 256 * 1024
+"""The largest spec file a run may be given (7.7), as UTF-8."""
+
+SPEC_FILE_EXTENSIONS = (".md", ".markdown")
+"""What a spec file's name may end with."""
+
+
+class SpecFileUpload(BaseModel):
+    """A Markdown spec file the person starting the run uploads (7.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["upload"]
+    name: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The file's name, ending in `.md` or `.markdown`, with no folder.",
+        examples=["csv-export.md"],
+    )
+    content: str = Field(description="The file's text, at most 256 KB as UTF-8, not empty.")
+
+
+class SpecFileFromRepo(BaseModel):
+    """A Markdown spec file in the run's repo, read at the run's ref when it is created (7.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["repo"]
+    path: str = Field(
+        min_length=1,
+        max_length=1024,
+        description="The file's path from the repo's root, ending in `.md` or `.markdown`.",
+        examples=["docs/spec.md"],
+    )
+
+
+type SpecFileSource = Annotated[SpecFileUpload | SpecFileFromRepo, Field(discriminator="source")]
+
+
+class RunSpecFile(BaseModel):
+    """The spec file a run was given (7.7), without its text: that is the run artifact
+    `spec-input.md`."""
+
+    source: Literal["upload", "repo"]
+    name: str = Field(description="The file's name: the uploaded one, or the path's last part.")
+    path: str | None = Field(default=None, description="Its path in the repo, if read from it.")
+    ref: str | None = Field(
+        default=None, description="The branch it was read at; `null` for the default branch."
+    )
+    size: int = Field(description="Its size in bytes, as UTF-8.")
+    sha256: str
 
 
 class TemplateRun(BaseModel):
@@ -102,6 +154,12 @@ class CreateRunRequest(BaseModel):
         "it. Give this, `workflow` or `template`, only one.",
     )
     input: str = ""
+    spec_file: SpecFileSource | None = Field(
+        default=None,
+        description="The Markdown spec file the run is given (7.7), uploaded or read from the "
+        "repo, when the workflow's `input` has `kind: \"spec_file\"`; the run's `input` is then "
+        "the file's name or path.",
+    )
     repo: RepoSource | None = Field(
         default=None,
         description="The repo the run works on, cloned into its sandbox. Needed by `repo.*` "
@@ -587,6 +645,11 @@ class RunDetail(RunSummary):
         description="For a follow-up of a pull request review (7.6): the review as every agent "
         "of the run was told it, read before its first step; `null` for any other run, or before "
         "it is read. Its comments are what people wrote on GitHub: data.",
+    )
+    spec_file: RunSpecFile | None = Field(
+        default=None,
+        description="The spec file the run was given (7.7), without its text (the run artifact "
+        "`spec-input.md` holds it); `null` for a run given none.",
     )
 
 

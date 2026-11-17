@@ -22,11 +22,12 @@ from urllib.parse import urlencode
 
 from pydantic import SecretStr
 
-from agentic_github.errors import InstallationNotFoundError, RepoExistsError
+from agentic_github.errors import InstallationNotFoundError, NotAFileError, RepoExistsError
 from agentic_github.models import (
     InstallationInfo,
     PullRequestInfo,
     PullRequestState,
+    RepoFile,
     RepoInfo,
     ReviewItem,
 )
@@ -176,6 +177,8 @@ class FakeGithubApp(FakeReviews):
         self._api_base_url = api_base_url.rstrip("/")
         self._fixtures_root = fixtures_root
         self._numbers = itertools.count(1)
+        self.files: dict[tuple[str, str], str] = {}
+        """Files a test puts in a repo, by `(full_name, path)`, whatever the ref."""
         if fixtures_root is not None:
             self.head_of = lambda full_name, branch: branch_sha(
                 fixture_path(fixtures_root, full_name), branch
@@ -201,6 +204,23 @@ class FakeGithubApp(FakeReviews):
         self._check(installation_id)
         fixed = next((r for r in FAKE_REPOS if r.full_name == full_name), None)
         return fixed or await asyncio.to_thread(self._created_repo, full_name)
+
+    async def file_at(
+        self, installation_id: int, full_name: str, path: str, ref: str | None = None
+    ) -> RepoFile | None:
+        """A file put in `files`, else the file in the repo's bare repo at `ref` (`main`
+        without one)."""
+        self._check(installation_id)
+        if (text := self.files.get((full_name, path))) is not None:
+            data = text.encode()
+            return RepoFile(path=path, size=len(data), content=data)
+        folders = {p.rsplit("/", 1)[0] for (name, p) in self.files if name == full_name}
+        if path in folders:
+            raise NotAFileError(f"{path} is a folder, not a file")
+        if self._fixtures_root is None:
+            return None
+        bare = fixture_path(self._fixtures_root, full_name)
+        return await asyncio.to_thread(_file_in_bare_repo, bare, path, ref or "main")
 
     async def create_org_repo(
         self,
@@ -318,6 +338,23 @@ def _create_bare_repo(bare: Path, files: dict[str, str], *, private: bool) -> No
     _git(bare, "config", _ID, str(2000 + sum(1 for _ in bare.parent.glob("*.git"))))
     # Last: a bare repo with this mark is a complete one.
     _git(bare, "config", _CREATED_AT, datetime.now(UTC).isoformat())
+
+
+def _file_in_bare_repo(bare: Path, path: str, ref: str) -> RepoFile | None:
+    """`path` at `ref` in the bare repo `bare`, as the contents API gives it."""
+    if not bare.is_dir():
+        return None
+    kind = subprocess.run(
+        ["git", "cat-file", "-t", f"{ref}:{path}"], cwd=bare, capture_output=True, check=False
+    )
+    if kind.returncode != 0:
+        return None
+    if kind.stdout.strip() != b"blob":
+        raise NotAFileError(f"{path} is a folder, not a file")
+    blob = subprocess.run(
+        ["git", "cat-file", "blob", f"{ref}:{path}"], cwd=bare, capture_output=True, check=True
+    )
+    return RepoFile(path=path, size=len(blob.stdout), content=blob.stdout)
 
 
 def branch_sha(bare: Path, branch: str) -> str | None:

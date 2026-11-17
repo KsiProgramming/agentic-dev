@@ -14,10 +14,15 @@ from typing import Final
 
 from pydantic import JsonValue
 
-from agentic_engine.agent import AgentNodeResult, IssueBrief, OnAgentEvent
+from agentic_engine.agent import AgentNodeResult, IssueBrief, OnAgentEvent, SpecFile
 from agentic_engine.artifacts import ArtifactRef, ArtifactStore
 from agentic_engine.gate import FileEdit, GateReview, GateReviewError
-from agentic_engine.spec import COMMIT_DIR_PLACEHOLDER, ToolNode, commit_dir_problem
+from agentic_engine.spec import (
+    COMMIT_DIR_PLACEHOLDER,
+    COMMIT_DIR_SPEC,
+    ToolNode,
+    commit_dir_problem,
+)
 from agentic_runtime import ToolCall, ToolResult
 
 MAX_SLUG = 40
@@ -50,11 +55,33 @@ def issue_folder(issue: IssueBrief | None, request: str | None) -> str | None:
     return key.upper() if _ISSUE_KEY.match(key) else None
 
 
-def commit_folder(folder: str, issue: IssueBrief | None, request: str | None) -> str:
+_HEADING: Final = re.compile(r"^#[ \t]+(.+?)[ \t#]*$", re.MULTILINE)
+
+
+def spec_folder(spec: SpecFile) -> str:
+    """The run's spec file as a folder name (7.7): the slug of its first `# ` heading, else of
+    its file name without the extension, else `spec`."""
+    heading = _HEADING.search(spec.text)
+    if heading is not None and (slug := summary_slug(heading.group(1))):
+        return slug
+    stem = spec.name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return summary_slug(stem) or "spec"
+
+
+def commit_folder(
+    folder: str, issue: IssueBrief | None, request: str | None, spec: SpecFile | None = None
+) -> str:
     """`dir` with its placeholder put in place, without leading or trailing slashes. Raises
-    `ValueError` when it names the issue and the run has none, or is not a safe folder."""
+    `ValueError` when it names the issue or the spec file and the run has none, or is not a safe
+    folder."""
     if (problem := commit_dir_problem(folder)) is not None:
         raise ValueError(problem)
+    if COMMIT_DIR_SPEC in folder:
+        if spec is None:
+            raise ValueError(
+                f"`dir` names {COMMIT_DIR_SPEC}, but the run was not given a spec file"
+            )
+        folder = folder.replace(COMMIT_DIR_SPEC, spec_folder(spec))
     if COMMIT_DIR_PLACEHOLDER in folder:
         named = issue_folder(issue, request)
         if named is None:
@@ -66,9 +93,13 @@ def commit_folder(folder: str, issue: IssueBrief | None, request: str | None) ->
     return folder.strip("/")
 
 
-def commit_message(issue: IssueBrief | None, request: str | None) -> str:
-    """The message of the commit: names the issue when the run has one."""
+def commit_message(
+    issue: IssueBrief | None, request: str | None, spec: SpecFile | None = None
+) -> str:
+    """The message of the commit: names the issue when the run has one, else its spec file."""
     named = issue.key if issue is not None else issue_folder(None, request)
+    if named is None and spec is not None:
+        named = spec.label
     return f"Add Spec Kit files for {named}" if named else "Add the run's spec files"
 
 
@@ -80,6 +111,7 @@ async def run_commit_node(
     issue: IssueBrief | None,
     request: str | None,
     on_event: OnAgentEvent | None = None,
+    spec: SpecFile | None = None,
 ) -> AgentNodeResult:
     """Commit the artifacts `node` reads onto the branch of `into`, as `<dir>/<name>`, and report
     it as a `tool_call` and a `tool_result`, as any tool node. Its `data` is `{into, dir, paths,
@@ -93,7 +125,7 @@ async def run_commit_node(
     try:
         if review is None:
             raise ValueError("this run has no repository to commit to")
-        folder = commit_folder(str(node.args.get("dir", "")), issue, request)
+        folder = commit_folder(str(node.args.get("dir", "")), issue, request, spec)
         edits: list[FileEdit] = []
         for name in node.reads:
             ref = refs.get(name)
@@ -101,7 +133,7 @@ async def run_commit_node(
             if stored is None:
                 raise ValueError(f"artifact {name!r} was not written")
             edits.append(FileEdit(node_id=into, path=f"{folder}/{name}", content=stored.content))
-        tips = await review.commit(edits, commit_message(issue, request))
+        tips = await review.commit(edits, commit_message(issue, request, spec))
         paths: list[JsonValue] = [edit.path for edit in edits]
         data = {"into": into, "dir": folder, "paths": paths, "commit": tips.get(into)}
         text = f"Committed {', '.join(e.path for e in edits)} on the branch of {into!r}."

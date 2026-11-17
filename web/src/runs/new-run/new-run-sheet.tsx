@@ -59,6 +59,14 @@ import {
 } from "./new-repo-fields";
 import { isReady, useReadiness, type Readiness } from "./readiness";
 import { RepoCombobox } from "./repo-combobox";
+import {
+  EMPTY_SPEC_FILE,
+  SpecFileField,
+  specFileError,
+  specFileRefusal,
+  toSpecFile,
+  type SpecFileValues,
+} from "./spec-file-field";
 
 /** A Jira issue key, as the API checks it for an input of kind `jira_issue` (7.5). */
 const ISSUE_KEY = /^[A-Za-z][A-Za-z0-9_]*-[1-9][0-9]{0,9}$/;
@@ -73,6 +81,8 @@ interface Values {
   params: FormValues;
   /** What the first step is given: a stored workflow's, or a template's that asks for it. */
   input: string;
+  /** The spec file, for a workflow whose input is one (7.7). */
+  specFile: SpecFileValues;
   /** "" runs with the workspace's default budget. */
   budget: string;
 }
@@ -84,8 +94,8 @@ export interface RunInputSpec {
   label: string;
   description?: string | null;
   example?: string | null;
-  /** Free text, or a Jira issue's key (7.5). */
-  kind?: "text" | "jira_issue";
+  /** Free text, a Jira issue's key (7.5) or a Markdown spec file (7.7). */
+  kind?: "text" | "jira_issue" | "spec_file";
 }
 
 /** A version of a stored workflow to run (5.7), the connections it needs and what it says about
@@ -155,6 +165,8 @@ function NewRunForm({
   const inputRequired = declared?.required === true;
   // A Jira issue's key (7.5): one line, in the mono font, checked before the run starts.
   const issueInput = declared?.kind === "jira_issue";
+  // A Markdown spec file (7.7), uploaded or a path in the repo, instead of text.
+  const specInput = declared?.kind === "spec_file";
   const schema = useMemo(
     () =>
       z
@@ -170,10 +182,21 @@ function NewRunForm({
           }),
           params: toZod(fields),
           input: z.string().max(20_000, "Keep it under 20,000 characters."),
+          specFile: z.object({
+            source: z.enum(["upload", "repo"]),
+            name: z.string(),
+            size: z.number(),
+            content: z.string(),
+            path: z.string(),
+          }),
           budget: budgetSchema(),
         })
         .superRefine((values, ctx) => {
-          if (inputRequired && values.input.trim() === "") {
+          const specProblem = specInput ? specFileError(values.specFile) : null;
+          if (specProblem && (inputRequired || values.specFile.name || values.specFile.path)) {
+            ctx.addIssue({ code: "custom", path: ["specFile"], message: specProblem });
+          }
+          if (!specInput && inputRequired && values.input.trim() === "") {
             ctx.addIssue({
               code: "custom",
               path: ["input"],
@@ -197,7 +220,7 @@ function NewRunForm({
             ctx.addIssue({ code: "custom", path: ["newRepo", "name"], message: nameError });
           }
         }),
-    [fields, needsRepo, inputRequired, issueInput],
+    [fields, needsRepo, inputRequired, issueInput, specInput],
   );
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -207,6 +230,7 @@ function NewRunForm({
       newRepo: EMPTY_NEW_REPO,
       params: defaultValues(fields),
       input: "",
+      specFile: EMPTY_SPEC_FILE,
       budget: "",
     },
   });
@@ -243,7 +267,10 @@ function NewRunForm({
             : {
                 stored_workflow: { id: source.workflow.id, version: source.workflow.version },
               }),
-          input: values.input,
+          input: specInput ? "" : values.input,
+          ...(specInput && specFileError(values.specFile) === null
+            ? { spec_file: toSpecFile(values.specFile) }
+            : {}),
           repo: needsRepo && !creating ? { url: values.repo } : null,
           ...(creating ? { new_repo: toNewRepo(values.newRepo) } : {}),
           workspace_id: workspaceId,
@@ -262,6 +289,11 @@ function NewRunForm({
       const budgetProblems = policyErrors(error)?.filter(isBudgetError) ?? [];
       if (response.status === 422 && (budgetIssue || budgetProblems.length > 0)) {
         form.setError("budget", { message: budgetIssue?.msg ?? budgetProblems.join(" ") });
+        return;
+      }
+      const refusal = specInput && response.status === 422 ? specFileRefusal(message) : null;
+      if (refusal) {
+        form.setError("specFile", { message: refusal });
         return;
       }
       if (response.status === 422 && message) {
@@ -368,7 +400,15 @@ function NewRunForm({
         prefix="params"
         disabled={isSubmitting}
       />
-      {showInput ? (
+      {showInput && specInput ? (
+        <SpecFileField
+          control={form.control}
+          label={declared?.label ?? "Spec file"}
+          description={declared?.description}
+          example={declared?.example}
+          disabled={isSubmitting}
+        />
+      ) : showInput ? (
         <Controller
           name="input"
           control={form.control}

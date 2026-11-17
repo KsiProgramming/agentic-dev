@@ -598,8 +598,10 @@ function runContext(run: RunDetail | null | undefined): RunContextView | null {
   if (!run) return null;
   return {
     repoUrl: run.repo?.url ?? null,
-    request: run.input.trim() ? run.input : null,
+    // A spec file run's input is only the file's name; its agents are told the file instead.
+    request: run.input.trim() && !run.spec_file ? run.input : null,
     issue: run.jira_brief ?? null,
     review: run.pr_review_brief ?? null,
+    spec: run.spec_file ?? null,
   };
 }

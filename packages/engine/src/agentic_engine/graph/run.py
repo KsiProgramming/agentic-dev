@@ -13,10 +13,18 @@ from langgraph.types import Command
 from pydantic import JsonValue
 
 from agentic_engine.agent import AgentNodeResult, RunContext, sum_usage
-from agentic_engine.artifacts import ArtifactRef, ArtifactStore, GateArtifact
+from agentic_engine.artifacts import (
+    ArtifactRef,
+    ArtifactStore,
+    GateArtifact,
+    InMemoryArtifactStore,
+    ref_of,
+    write_artifact,
+)
 from agentic_engine.branches import BranchSaver
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
+    ARTIFACT_WRITTEN,
     GATE_WAITING,
     NODE_STARTED,
     POLICY_LIMIT_EXCEEDED,
@@ -46,7 +54,7 @@ from agentic_engine.graph.state import (
 )
 from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
-from agentic_engine.spec import WorkflowSpec
+from agentic_engine.spec import INPUT_WRITER, WorkflowSpec
 from agentic_runtime import AgentRuntime, ToolExecutor
 
 RUN_END = {"completed": RUN_COMPLETED, "failed": RUN_FAILED, "cancelled": RUN_CANCELLED}
@@ -68,6 +76,7 @@ async def run_workflow(
     integrator: BranchIntegrator | None = None,
     context: RunContext | None = None,
     saver: BranchSaver | None = None,
+    inputs: Mapping[str, str] | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -91,6 +100,9 @@ async def run_workflow(
     A run that created its repo ends the attempt `suspended`, with no event: `resume_workflow`
     continues it, in an attempt that has the repo cloned.
 
+    `inputs` are the run artifacts the run is given from its input (name → content, 7.7: its
+    spec file as `spec-input.md`): written before the first step (`seed_inputs`).
+
     Every step is written to `sink` in order: `run_started`, then per node `node_started`, its
     agent events and `node_<status>`, then `run_<status>`. An exception from the graph is logged
     as `run_failed` and re-raised.
@@ -105,7 +117,10 @@ async def run_workflow(
     """
     log = RunEventLog(run_id or uuid4(), sink or NullEventSink())
     budget = budget_meter(policy, spent)
+    if inputs and artifacts is None:
+        artifacts = InMemoryArtifactStore()
     await _start(log, spec, input)
+    start = await _initial(log, input, artifacts, inputs)
     return await _finish(
         log,
         lambda: compile_workflow(
@@ -122,7 +137,7 @@ async def run_workflow(
             context=context,
             saver=saver,
         ),
-        initial_state(input),
+        start,
         _config(spec, log.run_id),
         budget,
         review,
@@ -148,6 +163,7 @@ async def resume_workflow(
     integrator: BranchIntegrator | None = None,
     context: RunContext | None = None,
     saver: BranchSaver | None = None,
+    inputs: Mapping[str, str] | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -166,6 +182,8 @@ async def resume_workflow(
     """
     log = RunEventLog(run_id, sink, next_seq=next_seq)
     budget = budget_meter(policy, spent)
+    if inputs and artifacts is None:
+        artifacts = InMemoryArtifactStore()
     graph = compile_workflow(
         spec,
         runtime,
@@ -188,7 +206,8 @@ async def resume_workflow(
     completed = [n for n in ran if results[n].status == "completed"]
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
     if not saved:
-        return await _finish(log, lambda: graph, initial_state(input), config, budget, review)
+        first = await _initial(log, input, artifacts, inputs)
+        return await _finish(log, lambda: graph, first, config, budget, review)
     # A step cut off once its tasks had all saved their results has no `next`, but its tasks are
     # still in the checkpoint: the graph has not applied them, so it goes on. Only a graph that
     # ended has neither.
@@ -224,6 +243,7 @@ async def rerun_workflow(
     context: RunContext | None = None,
     saver: BranchSaver | None = None,
     on_seeded: Callable[[dict[str, int]], Awaitable[None]] | None = None,
+    inputs: Mapping[str, str] | None = None,
 ) -> WorkflowRunResult:
     """Start `run_id`, a rerun of `source_run` from its top-level step `from_node` (12.4), as
     `run_workflow` would, but from `source_run`'s checkpoint taken before that step
@@ -236,9 +256,12 @@ async def rerun_workflow(
     run did not run again. A rerun from the first step carries nothing and starts from `input`.
     A thread already seeded (an attempt cut off before `run_started`) is not seeded again.
     Its events start at `next_seq` (after the `branches_restored` of its sandbox). Raises
-    `StepNotFoundError` or `StepNotReachedError` before any event is written."""
+    `StepNotFoundError` or `StepNotReachedError` before any event is written. A rerun from the
+    first step is given `inputs` as `run_workflow` is; a later step's carries them."""
     log = RunEventLog(run_id, sink, next_seq=next_seq)
     budget = budget_meter(policy, spent)
+    if inputs and artifacts is None:
+        artifacts = InMemoryArtifactStore()
     graph = compile_workflow(
         spec,
         runtime,
@@ -270,8 +293,45 @@ async def rerun_workflow(
             "carried": list(dict.fromkeys(seeded.get("order", []))),
         },
     )
-    start = None if seeded else initial_state(input)
+    start = None if seeded else await _initial(log, input, artifacts, inputs)
     return await _finish(log, lambda: graph, start, config, budget, review)
+
+
+async def seed_inputs(
+    log: RunEventLog, store: ArtifactStore, inputs: Mapping[str, str]
+) -> dict[str, ArtifactRef]:
+    """Write the run artifacts the run is given from its input (7.7), each as version 1 by
+    `INPUT_WRITER`, and log `artifact_written` for it (no node, `source: "input"`). One the store
+    already holds from the input (an attempt cut off before its first checkpoint) is not written
+    or logged again."""
+    refs: dict[str, ArtifactRef] = {}
+    for name, content in inputs.items():
+        stored = await store.get(name)
+        if stored is not None and stored.node_id == INPUT_WRITER:
+            refs[name] = ref_of(stored)
+            continue
+        ref = await write_artifact(store, name, INPUT_WRITER, content)
+        payload: dict[str, JsonValue] = ref.model_dump(
+            mode="json", include={"name", "version", "media_type", "size", "sha256"}
+        )
+        payload["source"] = "input"
+        await log.emit(ARTIFACT_WRITTEN, payload=payload)
+        refs[name] = ref
+    return refs
+
+
+async def _initial(
+    log: RunEventLog,
+    input: str,
+    artifacts: ArtifactStore | None,
+    inputs: Mapping[str, str] | None,
+) -> RunState:
+    """The state a run starts from: `input` for its first step and, with `inputs`, the artifacts
+    it is given (`seed_inputs`)."""
+    state = initial_state(input)
+    if inputs and artifacts is not None:
+        state["artifacts"] = await seed_inputs(log, artifacts, inputs)
+    return state
 
 
 def artifact_versions(values: Mapping[str, Any]) -> dict[str, int]:

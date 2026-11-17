@@ -109,9 +109,9 @@ function SheetBody({ workspaceId, sites, baseUrl, onOpenChange }: SheetProps) {
   const repos = useRepos({ workspaceId, baseUrl });
   const create = useCreateJiraTrigger({ workspaceId, baseUrl });
 
-  // Only a workflow that takes an input can receive the issue key.
+  // Only a workflow that takes a text input can receive the issue key: not a spec file (7.7).
   const runnable = useMemo(
-    () => (templates.data ?? []).filter((t) => t.input?.required),
+    () => (templates.data ?? []).filter((t) => t.input?.required && t.input.kind !== "spec_file"),
     [templates.data],
   );
 

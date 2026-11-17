@@ -133,6 +133,8 @@ async def create_rerun(
                 jira_brief=original.jira_brief if from_step is not None else None,
                 branch=original.repo.get("ref") if original.repo else None,
                 pr_review=follow_up.pr_review if follow_up is not None else None,
+                # The spec file as the run was given it (7.7): never read again.
+                spec_file=original.spec_file,
             )
         )
         if follow_up is not None:

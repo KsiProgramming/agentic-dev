@@ -218,7 +218,7 @@
           "runs"
         ],
         "summary": "Create",
-        "description": "Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored\nworkflow (`stored_workflow`, which the run records), with `input` for its first node,\nworking on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.\n\nA workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read\nfrom the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not\nallowed where it is called) is refused with `422` and the issues. A workflow whose `input` is\n`required` is refused with `422` when `input` is empty: \"This workflow needs an input: \u2026\".",
+        "description": "Queue a run of `workflow`, of the workflow `template` builds, or of a version of a stored\nworkflow (`stored_workflow`, which the run records), with `input` for its first node,\nworking on `repo` if given. Stream it from `events_url`. A workflow that publishes\n(`github.openPR`) must have a gate between the writer and the publishing node, or it is\nrefused with `422`. So is one above the workspace's run limits (`GET\n/workspaces/{id}/policy`), with a `PolicyErrorDetail`; the run keeps the limits it was\ncreated with. Its budget is `budget_usd`, else the workflow's own (`budget_usd` in the spec),\nelse the workspace's default; with a budget, every agent's model must have a price (`GET\n/workspaces/{id}/pricing`), or the run is refused the same way.\n\nWith `new_repo`, the run works on a repo it creates in the organisation the workspace's GitHub\nApp is installed on: two steps come before the workflow's own, a gate (`approve_repo`) and\n`github.createRepo` (`create_repo`), and the run's `repo` is the new repo's URL from the\nstart.\n\nA workflow that calls other stored workflows (`subflow`, 6.5) runs the versions it names, read\nfrom the workspace now and kept with the run; one it cannot call (unknown, a cycle, or not\nallowed where it is called) is refused with `422` and the issues. A workflow whose `input` is\n`required` is refused with `422` when `input` is empty: \"This workflow needs an input: \u2026\".\n\nA workflow whose `input` is a spec file (`kind: \"spec_file\"`, 7.7) is given one with\n`spec_file`: uploaded, or a path read from `repo` at its ref now. It is refused with `422`:\n`spec_file_required`, `spec_file_invalid` (its name does not end in `.md` or `.markdown`, it\nis empty, over 256 KB or not UTF-8), `path_invalid`, `path_not_found` or `not_a_file`; and\n`spec_file_unexpected` for another workflow. The run's `input` is the file's name or path.",
         "operationId": "createRun",
         "requestBody": {
           "required": true,
@@ -2873,7 +2873,7 @@
             "description": "No such workspace, or no such rule in it"
           },
           "422": {
-            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key).",
+            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key, or its input is a spec file, 7.7).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2940,7 +2940,7 @@
             "description": "No such workspace, or no such rule in it"
           },
           "422": {
-            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key).",
+            "description": "The rule cannot start a run: `project_not_allowed` (the project is not picked on an enabled site of a working Jira connection), `cannot_run` (the checks `POST /runs` makes refuse it), or `no_input` (its workflow declares no required input to receive the issue key, or its input is a spec file, 7.7).",
             "content": {
               "application/json": {
                 "schema": {
@@ -4707,6 +4707,17 @@
             "type": "string",
             "title": "Input",
             "default": ""
+          },
+          "spec_file": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpecFileSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Markdown spec file the run is given (7.7), uploaded or read from the repo, when the workflow's `input` has `kind: \"spec_file\"`; the run's `input` is then the file's name or path."
           },
           "repo": {
             "anyOf": [
@@ -8760,6 +8771,17 @@
             ],
             "description": "For a follow-up of a pull request review (7.6): the review as every agent of the run was told it, read before its first step; `null` for any other run, or before it is read. Its comments are what people wrote on GitHub: data."
           },
+          "spec_file": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSpecFile"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The spec file the run was given (7.7), without its text (the run artifact `spec-input.md` holds it); `null` for a run given none."
+          },
           "duration_ms": {
             "anyOf": [
               {
@@ -9220,6 +9242,65 @@
         ],
         "title": "RunSandbox",
         "description": "What became of the run's sandbox (12.3). A failed or cancelled run keeps it for its\npolicy's `sandbox_ttl_s`, then a worker removes it; a run that completed loses it when it\nends. What its writers changed is kept either way (`GET /runs/{id}/changes`)."
+      },
+      "RunSpecFile": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "upload",
+              "repo"
+            ],
+            "title": "Source"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The file's name: the uploaded one, or the path's last part."
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path",
+            "description": "Its path in the repo, if read from it."
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref",
+            "description": "The branch it was read at; `null` for the default branch."
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size",
+            "description": "Its size in bytes, as UTF-8."
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "name",
+          "size",
+          "sha256"
+        ],
+        "title": "RunSpecFile",
+        "description": "The spec file a run was given (7.7), without its text: that is the run artifact\n`spec-input.md`."
       },
       "RunStatus": {
         "type": "string",
@@ -9879,6 +9960,83 @@
         ],
         "title": "SetParam",
         "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`, `input_schema`, `output_schema`, `on_review`). `null`\nunsets it. Ids, types and the slots that hold nodes change through the other ops."
+      },
+      "SpecFileFromRepo": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "const": "repo",
+            "title": "Source"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path",
+            "description": "The file's path from the repo's root, ending in `.md` or `.markdown`.",
+            "examples": [
+              "docs/spec.md"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "path"
+        ],
+        "title": "SpecFileFromRepo",
+        "description": "A Markdown spec file in the run's repo, read at the run's ref when it is created (7.7)."
+      },
+      "SpecFileSource": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SpecFileUpload"
+          },
+          {
+            "$ref": "#/components/schemas/SpecFileFromRepo"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "source",
+          "mapping": {
+            "repo": "#/components/schemas/SpecFileFromRepo",
+            "upload": "#/components/schemas/SpecFileUpload"
+          }
+        }
+      },
+      "SpecFileUpload": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "const": "upload",
+            "title": "Source"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "description": "The file's name, ending in `.md` or `.markdown`, with no folder.",
+            "examples": [
+              "csv-export.md"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "The file's text, at most 256 KB as UTF-8, not empty."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "name",
+          "content"
+        ],
+        "title": "SpecFileUpload",
+        "description": "A Markdown spec file the person starting the run uploads (7.7)."
       },
       "StartAuthorize": {
         "properties": {
@@ -10624,10 +10782,11 @@
             "type": "string",
             "enum": [
               "text",
-              "jira_issue"
+              "jira_issue",
+              "spec_file"
             ],
             "title": "Kind",
-            "description": "What the input is: free text, or the key of a Jira issue (\"jira_issue\", 7.5). A run started by hand with an issue key is then told the issue, as a run a Jira trigger started is.",
+            "description": "What the input is: free text, the key of a Jira issue (\"jira_issue\", 7.5), or a Markdown spec file (\"spec_file\", 7.7), uploaded or read from the repo. A run started by hand with an issue key is then told the issue, as a run a Jira trigger started is; a run given a spec file has it as the run artifact `spec-input.md` and every agent is told it.",
             "default": "text"
           }
         },

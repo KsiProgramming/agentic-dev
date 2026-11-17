@@ -218,6 +218,22 @@ async def test_a_workflow_with_no_input_cannot_be_a_rule(
     assert (await client.post(f"{workspace}/jira/triggers", json=body)).status_code == 201
 
 
+async def test_a_workflow_given_a_spec_file_cannot_be_a_rule(
+    client: AsyncClient, workspace: str, sessions: Sessions
+) -> None:
+    """7.7: a trigger gives its run the issue key, which a spec file workflow cannot take."""
+    await connected(client, workspace)
+    await put_github_connection(sessions, workspace_id(workspace), 42, "acme")
+
+    refused = await client.post(
+        f"{workspace}/jira/triggers", json=STATUS_RULE | {"template_id": "sdd-spec-file"}
+    )
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["code"] == "no_input"
+    assert "spec file" in refused.json()["detail"]["message"]
+
+
 async def test_a_rule_body_is_checked(client: AsyncClient, workspace: str) -> None:
     both = STATUS_RULE | {"workflow": {"id": "wf"}}
     spaced = STATUS_RULE | {"on": "label", "value": "two words"}

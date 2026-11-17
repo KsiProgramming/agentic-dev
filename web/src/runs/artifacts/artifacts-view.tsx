@@ -8,7 +8,7 @@ import { RelativeTime } from "@/components/display";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 
 import { ArtifactSheet, artifactFacts } from "./artifact-cards";
-import { artifactKind, type ArtifactVersion } from "./artifacts";
+import { INPUT_WRITER, artifactKind, type ArtifactVersion } from "./artifacts";
 import { useRunArtifacts, type RunArtifact } from "./use-run-artifacts";
 
 export function versionOf(artifact: RunArtifact): ArtifactVersion {
@@ -90,13 +90,18 @@ export function ArtifactsView({
               </button>
               <span className="flex items-center gap-2 text-caption text-muted-foreground">
                 <span>by</span>
-                <button
-                  type="button"
-                  onClick={() => onOpenStep(artifact.node_id)}
-                  className="rounded-sm font-mono text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
-                >
-                  {artifact.node_id}
-                </button>
+                {artifact.node_id === INPUT_WRITER ? (
+                  // Given with the run (7.7): no step wrote it.
+                  <span className="text-foreground-secondary">the run input</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onOpenStep(artifact.node_id)}
+                    className="rounded-sm font-mono text-foreground underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+                  >
+                    {artifact.node_id}
+                  </button>
+                )}
                 <RelativeTime iso={artifact.created_at} now={now} focusable={false} />
               </span>
             </li>
