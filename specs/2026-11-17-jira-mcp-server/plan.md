@@ -25,7 +25,7 @@ Order chosen in the interview: client → tools → engine → worker and templa
 
 ## 4. Worker, API and the template
 - [ ] Worker: open the `jira` tools when the spec names any `jira.*` tool (with or without a sandbox), with `access_token` per call from the store; refuse to start with `jira_not_connected` (a `failure_reason`) if the connection changed since `POST /runs`.
-- [ ] API: `POST /runs` answers `422 jira_not_connected` for a spec that names a `jira.*` tool when the workspace's connection is not `connected`; `Requirement` gains `jira`, and `GET /templates` lists it.
+- [ ] API: `POST /runs` and rerun answer `409 jira_not_connected` (as for a missing GitHub connection) for a spec that names a `jira.*` tool when the workspace's connection is not `connected`; `Requirement` gains `jira`, and `GET /templates` lists it.
 - [ ] `agentic_engine/templates/jira_issue_answer.py`: required `input` ("Which Jira issue?", example `PROJ-12`). Steps: an analyst with `jira.getIssue`, `jira.listTransitions` and the repo read tools writes `comment.md`; a gate shows `comment.md`; `jira.comment` posts it with `issue_from: "request"` and `body_from: comment.md`. Instructions follow lessons.md's rules for writing workflows (what the input is, what the tools read, Markdown only).
 - [ ] Tests: the template validates; the e2e stack's fake run reads the seeded issue and the fake records the comment after approval; `POST /runs` refusals.
 

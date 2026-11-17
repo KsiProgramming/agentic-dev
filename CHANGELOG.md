@@ -9,6 +9,14 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 7.2 `jira` MCP server: read issue, comment, transition:
+  - **Agents read Jira.** `jira.getIssue` (fields, description and latest comments as Markdown), `jira.search` (JQL, always within the picked projects) and `jira.listTransitions`, on the platform's `jira` MCP server. Every call checks the project allowlist before calling Jira and on the project Jira returns; issue text is data, never instructions; errors are fixed codes, never Jira's words or a token.
+  - **Writes only after a gate.** `jira.comment` (with a last line linking the run; a step that runs again does not post twice) and `jira.transition` (by transition id, name or target status) are tool nodes only. Validation adds `jira_write_not_tool_node`, `jira_write_without_gate` and `jira_write_not_shown` (the gate must show the comment it approves); `issue_from: "request"` takes the issue from the run's input and `body_from` the text from an artifact.
+  - **Template "Answer a Jira issue"** (`jira-issue-answer`): an agent reads the issue and the code, you approve its comment, and it is posted on the issue.
+  - **Runs need a usable Jira.** `POST /runs` and rerun answer `409 jira_not_connected` for a workflow that uses `jira.*` tools when the Jira connection is missing or needs attention; the worker checks again and needs `ATLASSIAN_CLIENT_ID` (compose sets it, with `WEB_BASE_URL`).
+  - **Start screen.** Templates show a Jira chip in their "Requires" line, and the New run sheet's "Before you start" connects or reconnects Jira and comes back to the sheet.
+  - **`packages/jira`.** Issues, search, comments and transitions on Jira's REST API v3 with one wait on `429`, Atlassian Document Format to and from Markdown, `WorkspaceJira`, and seeded issues in the fake.
+  - Docs: what runs can do in Jira (connecting platforms) and the security model. Specs: tech-stack (Jira tools contract, the template, validation codes, the start screen, seven decisions) and the 7.2 plan (`specs/2026-11-17-jira-mcp-server/`).
 - Phase 7.1 Atlassian OAuth 3LO per workspace, project scoping ([#237](https://github.com/KsiProgramming/agentic-dev/pull/237)):
   - **Connect Jira.** A workspace connects one Atlassian account through the deployment's own OAuth 2.0 (3LO) app (`ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET_FILE`; callback `<API>/jira/callback`). The grant is stored encrypted under the workspace's data key and renewed under a row lock, since Atlassian's refresh tokens rotate. No token is returned, logged or put in a redirect.
   - **Several sites, picked projects.** Every Jira site the grant reaches is listed and can be turned on or off; on each, the workspace picks the projects its runs may use. Atlassian's consent is per site, so this allowlist is the platform's own (`jira_project_allowed`), the one check the Jira tools make from 7.2.

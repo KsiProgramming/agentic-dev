@@ -68,7 +68,7 @@ Each deployment uses its own Atlassian OAuth 2.0 (3LO) app; a workspace then con
 1. In the [Atlassian developer console](https://developer.atlassian.com/console/myapps/), create an **OAuth 2.0 integration**.
 2. **Permissions:** add the Jira API with the scopes `read:jira-work`, `write:jira-work`, `manage:jira-webhook` and `read:jira-user`, and the User identity API with `read:me`. The platform also asks for `offline_access`, which needs no setup.
 3. **Authorization:** set the callback URL to `<your API's public URL>/jira/callback` (`API_BASE_URL` + `/jira/callback`).
-4. **Settings:** copy the client id into `ATLASSIAN_CLIENT_ID` and save the secret in a file the API can read, named by `ATLASSIAN_CLIENT_SECRET_FILE` (with compose: `.secrets/atlassian-client-secret`). Only the API needs them.
+4. **Settings:** copy the client id into `ATLASSIAN_CLIENT_ID` and save the secret in a file the API can read, named by `ATLASSIAN_CLIENT_SECRET_FILE` (with compose: `.secrets/atlassian-client-secret`). The API and the worker both need them: the worker renews the grant when a run's Jira tools call Atlassian. Set `WEB_BASE_URL` on the worker too, so the comments runs post link back to the run.
 5. In the web app, open **Settings → Integrations → Jira → Connect Jira**, consent on Atlassian, then use **Choose projects** on each site. Nothing on a site is usable until projects are picked; a site can be turned off without losing its list.
 
 What to know:
@@ -79,7 +79,9 @@ What to know:
 - **Disconnect** forgets the tokens and the picked projects. To remove the app's access as well, open the Atlassian account's [connected apps](https://id.atlassian.com/manage-profile/apps).
 - To try the screens without Atlassian, set `AGENTIC_JIRA=fake` (refused with `AGENTIC_ENV=production`).
 
-Agents get Jira tools, and issues start runs, in the next phases of roadmap Milestone 7.
+**What runs can do in Jira (7.2).** Agents may be given `jira.getIssue`, `jira.search` and `jira.listTransitions`: they read issues, their comments and the transitions their workflow offers, only in the projects you picked. A workflow writes to Jira only from a step after an approval gate: `jira.comment` posts a comment (ending with a line that links the run) and `jira.transition` moves an issue. The **Answer a Jira issue** template is the simplest example: an agent reads the issue and the code, you approve its comment, and it is posted. Issue text is given to agents as data, never as instructions.
+
+Issues start runs from a webhook in the next phase of roadmap Milestone 7.
 
 ### 5. Calling the platform from your systems
 

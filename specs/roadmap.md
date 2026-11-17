@@ -149,7 +149,7 @@ Principle 9 says nothing is lost, and AC-8 holds for the graph but not yet for t
 | # | Phase | Done when | Status |
 |---|---|---|---|
 | 7.1 | Atlassian OAuth 3LO per workspace, project scoping | Jira connection stored encrypted | ✅ Done ([#237](https://github.com/KsiProgramming/agentic-dev/pull/237)) |
-| 7.2 | `jira` MCP server: read issue, comment, transition | Agent reads an issue and posts a comment | — |
+| 7.2 | `jira` MCP server: read issue, comment, transition (reads for agents, writes only from a tool node after a gate, scoped to the picked projects). [Plan](2026-11-17-jira-mcp-server/requirements.md) | Agent reads an issue and posts a comment | — |
 | 7.3 | Jira webhook trigger on configured status/label | Moving an issue starts a run | — |
 | 7.4 | Per-project field mapping (acceptance criteria, components) | Spec-writer receives mapped fields | — |
 | 7.5 | SDD template: spec → gate → plan/tasks → orchestrator implement → review loop → gate → PR → Jira update (Spec Kit compatible) | AC-5 | — |

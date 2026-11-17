@@ -14,8 +14,8 @@ This document is for security reviewers, platform operators and contributors. It
 | Model provider API keys | `connections`, AES-256-GCM encrypted; in worker memory during a run | Spend on the victim's account; access to their provider data |
 | Master key | Key file (`MASTER_KEY_FILE`) / KMS | Decrypts every stored model key |
 | GitHub App private key | `GITHUB_APP_PRIVATE_KEY_FILE` on API and worker | Mint tokens for every installation: read and write all granted repos |
-| Jira grants (access and refresh tokens) | `connections`, AES-256-GCM encrypted, one per workspace; in API memory during a call | Read and write every project of the sites the consenting account reaches, as that person (the platform's project allowlist does not bind a stolen token) |
-| Atlassian OAuth client secret | `ATLASSIAN_CLIENT_SECRET_FILE` on the API | Exchange codes and renew grants as the deployment's app |
+| Jira grants (access and refresh tokens) | `connections`, AES-256-GCM encrypted, one per workspace; in API or worker memory during a call | Read and write every project of the sites the consenting account reaches, as that person (the platform's project allowlist does not bind a stolen token) |
+| Atlassian OAuth client secret | `ATLASSIAN_CLIENT_SECRET_FILE` on the API and the worker | Exchange codes and renew grants as the deployment's app |
 | Source code of connected repos | Worker clone, sandbox volume, model provider requests, run events and artifacts | Code disclosure |
 | Pull requests and branches | GitHub | Malicious code proposed under the App's identity |
 | Run history, artifacts, audit log | Postgres | Disclosure; loss of accountability |
@@ -96,6 +96,7 @@ flowchart LR
 - **Redaction.** `RedactingFilter` on log handlers and `redact()` on event payloads replace any live secret (8+ characters) with `[REDACTED]`. A test fails the build if a key appears in a run's events or logs (`test_no_secret_leak.py`).
 - **No personal tokens.** GitHub uses an App; installation tokens are short-lived and minted on demand. The token reaches git through environment variables only, never argv, URLs or files.
 - **Jira grants.** A workspace's Atlassian grant is stored like a model key, with no hint (its tokens rotate). Its tokens are never returned by the API, put in a redirect, an audit entry or a log line; the client's errors carry a status code, never a response body. Atlassian's consent is per site, so the platform keeps its own list of allowed projects per site and checks it on every Jira call. The consent's `state` is random, single use and expires after 10 minutes.
+- **Jira tools (7.2).** Agents only read Jira; a comment or a transition is a tool step after an approval gate, and validation refuses a workflow that gives an agent a Jira write or puts no gate before one (and, for a comment, a gate that does not show its text). Every call checks the project allowlist before calling Jira and again on the project Jira returns; a search is wrapped in the picked projects and its results filtered again. Issue text reaches agents as tool results (data), converted to Markdown with no HTML. Tool errors carry a fixed code, never Jira's response or a token. The worker holds a token only for the length of a call.
 - **Fakes are refused in production.** `AGENTIC_ENV=production` refuses the fake GitHub App, the fake Atlassian and the fake key check.
 
 ### 4.2 Agents and prompt injection
