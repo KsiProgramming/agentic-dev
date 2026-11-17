@@ -42,6 +42,7 @@ from agentic_api.runs.models import (
     WaitingGate,
     WorkflowRef,
     uses_github,
+    uses_jira,
 )
 from agentic_api.workspaces.models import to_usd
 from agentic_engine.events import RUN_END_STATUS
@@ -83,6 +84,7 @@ from agentic_store import (
     create_run,
     enqueue_run,
     get_github_installation,
+    get_jira_connection,
     get_run,
     get_run_artifact,
     get_run_summary,
@@ -420,7 +422,8 @@ def _calls(spec: dict[str, Any] | None, subflows: dict[str, Any] | None) -> dict
         404: {"description": "No workspace with this id, or no such stored workflow or version"},
         409: {
             "description": "The workflow uses `github.*` tools, but the workspace has no "
-            "GitHub connection. With `new_repo`, a `GithubErrorDetail`: `no_connection`, "
+            "GitHub connection; or `jira.*` tools, but its Jira connection is missing or needs "
+            "attention. With `new_repo`, a `GithubErrorDetail`: `no_connection`, "
             "`installation_gone`, `personal_account` (repos are created in organisations only) "
             "or `repo_exists`."
         },
@@ -481,6 +484,8 @@ async def create(body: CreateRunRequest, request: Request) -> CreateRunResponse:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from None
         if body.uses_github() and await get_github_installation(sessions, workspace_id) is None:
             raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
+    if uses_jira(spec) and not await _jira_ready(sessions, workspace_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _NO_JIRA)
     try:
         run_id = await create_run(
             sessions,
@@ -585,6 +590,17 @@ _NO_GITHUB = (
     "install the GitHub App first"
 )
 
+_NO_JIRA = (
+    "jira_not_connected: the workflow uses jira.* tools, but the workspace's Jira connection "
+    "is missing or needs attention; connect it in Settings > Integrations"
+)
+
+
+async def _jira_ready(sessions: async_sessionmaker[AsyncSession], workspace_id: UUID) -> bool:
+    """Whether the workspace's Jira connection can be used by a run's `jira.*` tools (7.2)."""
+    connection = await get_jira_connection(sessions, workspace_id)
+    return connection is not None and connection.needs_attention is None
+
 
 @router.post(
     "/{run_id}/rerun",
@@ -629,6 +645,8 @@ async def rerun(
         await get_github_installation(sessions, original.workspace_id) is None
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, _NO_GITHUB)
+    if uses_jira(original.spec) and not await _jira_ready(sessions, original.workspace_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _NO_JIRA)
     try:
         new_id = await create_rerun(
             sessions,

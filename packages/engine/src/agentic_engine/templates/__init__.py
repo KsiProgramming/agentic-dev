@@ -14,6 +14,10 @@ from pydantic import BaseModel, JsonValue
 from agentic_engine.spec import WorkflowSpec
 from agentic_engine.templates.audit import AuditParams, build_audit_spec
 from agentic_engine.templates.docs import DocsParams, build_docs_spec
+from agentic_engine.templates.jira_issue_answer import (
+    JiraIssueAnswerParams,
+    build_jira_issue_answer_spec,
+)
 from agentic_engine.templates.new_repo import (
     APPROVE_NODE_ID,
     CREATE_NODE_ID,
@@ -27,9 +31,10 @@ from agentic_engine.templates.plan_build_review import (
     build_plan_build_review_spec,
 )
 
-type Requirement = Literal["claude", "github"]
+type Requirement = Literal["claude", "github", "jira"]
 """A connection a workspace needs before it can run a template: `claude` for its agents,
-`github` for a repo picked from the GitHub App's installation and for `github.*` tools."""
+`github` for a repo picked from the GitHub App's installation and for `github.*` tools, `jira`
+for `jira.*` tools (7.2)."""
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,15 @@ TEMPLATES: tuple[Template[Any], ...] = (
         build=build_plan_build_review_spec,
         requires=("claude", "github"),
     ),
+    Template(
+        id="jira-issue-answer",
+        name="Answer a Jira issue",
+        description="Reads a Jira issue and the code it is about, then posts a comment on the "
+        "issue after you approve it.",
+        params=JiraIssueAnswerParams,
+        build=build_jira_issue_answer_spec,
+        requires=("claude", "github", "jira"),
+    ),
 )
 
 
@@ -94,6 +108,7 @@ __all__ = [
     "AuditParams",
     "DocsParams",
     "Gitignore",
+    "JiraIssueAnswerParams",
     "License",
     "NewRepo",
     "PlanBuildReviewParams",
@@ -101,6 +116,7 @@ __all__ = [
     "Template",
     "build_audit_spec",
     "build_docs_spec",
+    "build_jira_issue_answer_spec",
     "build_plan_build_review_spec",
     "get_template",
     "wrap_with_create_repo",

@@ -1,6 +1,7 @@
 import {
   FileTextIcon,
   LayoutTemplateIcon,
+  MessageSquareTextIcon,
   ScanSearchIcon,
   UsersIcon,
   type LucideIcon,
@@ -11,6 +12,7 @@ const ICONS: Record<string, LucideIcon> = {
   "generate-docs": FileTextIcon,
   "audit-codebase": ScanSearchIcon,
   "plan-build-review": UsersIcon,
+  "jira-issue-answer": MessageSquareTextIcon,
 };
 
 /** The icon of template `id`: on its gallery card and in the header of its runs. */

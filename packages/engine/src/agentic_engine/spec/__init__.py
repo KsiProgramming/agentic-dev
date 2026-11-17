@@ -5,9 +5,13 @@ resolving the workflows a spec calls (`expand_workflow`, 6.5)."""
 
 from agentic_engine.spec.models import (
     ARTIFACT_TOOLS,
+    BODY_FROM_TOOLS,
     CREATE_TOOLS,
     DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
+    JIRA_ISSUE_FROM,
+    JIRA_READ_TOOLS,
+    JIRA_WRITE_TOOLS,
     MAX_AGENTS_ALIVE,
     MAX_AGENTS_SPAWNED,
     MAX_LOOP_ITERATIONS,
@@ -61,6 +65,7 @@ from agentic_engine.spec.models import (
     create_repo_issues,
     creates_repo,
     iter_nodes,
+    jira_write_issues,
     loop_errors,
     map_errors,
     merge_sources,
@@ -124,9 +129,13 @@ from agentic_engine.spec.validate import document_port_issues, schema_issues, va
 
 __all__ = [
     "ARTIFACT_TOOLS",
+    "BODY_FROM_TOOLS",
     "CREATE_TOOLS",
     "DEFAULT_ROUTE",
     "FINDINGS_SCHEMA",
+    "JIRA_ISSUE_FROM",
+    "JIRA_READ_TOOLS",
+    "JIRA_WRITE_TOOLS",
     "MAX_AGENTS_ALIVE",
     "MAX_AGENTS_SPAWNED",
     "MAX_LOOP_ITERATIONS",
@@ -205,6 +214,7 @@ __all__ = [
     "expand_workflow",
     "expression_views",
     "iter_nodes",
+    "jira_write_issues",
     "loop_errors",
     "map_errors",
     "merge_sources",

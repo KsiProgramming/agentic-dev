@@ -13,12 +13,15 @@ from pydantic_core import ErrorDetails
 from agentic_engine.policy import Policy
 from agentic_engine.ports import schema_problem
 from agentic_engine.spec.models import (
+    JIRA_WRITE_TOOLS,
     PLATFORM_TOOLS,
     Node,
+    ToolNode,
     ValidationIssue,
     WorkflowSpec,
     budget_issues,
     in_run_order,
+    iter_nodes,
     policy_issues,
     structure_issues,
     tool_issues,
@@ -59,7 +62,7 @@ def validate_workflow(
     root, _, issues = expand_root(
         root, resolve, workflow_id if isinstance(workflow_id, str) else None, drafts
     )
-    issues = document_port_issues(document) + issues
+    issues = document_port_issues(document) + issues + issue_from_issues(document, root)
     issues += structure_issues(root) + tool_issues(root, known_tools)
     issues += policy_issues(root, policy)
     issues += budget_issues(root, policy, priced, default_model)
@@ -83,6 +86,31 @@ def document_port_issues(document: Mapping[str, object]) -> list[ValidationIssue
                 )
             )
     return issues
+
+
+def issue_from_issues(document: Mapping[str, object], root: Node) -> list[ValidationIssue]:
+    """`reference` on each Jira write that takes its issue from the run's request
+    (`issue_from: "request"`, 7.2) when the workflow does not declare a required `input`: a run
+    could start without the issue key it needs."""
+    declared = document.get("input")
+    required = isinstance(declared, Mapping) and (
+        cast(Mapping[str, object], declared).get("required") is True
+    )
+    if required:
+        return []
+    return [
+        ValidationIssue(
+            code="reference",
+            path=f"{path}.args.issue_from",
+            node_id=node.id,
+            message=f'node {node.id!r}: `issue_from: "request"` needs the workflow to declare a '
+            "required `input`, the issue key a run is started with",
+        )
+        for path, node in iter_nodes(root)
+        if isinstance(node, ToolNode)
+        and node.tool in JIRA_WRITE_TOOLS
+        and node.args.get("issue_from") is not None
+    ]
 
 
 def schema_issues(raw: object) -> list[ValidationIssue]:

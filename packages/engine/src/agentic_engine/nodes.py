@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_serializer
 
 from agentic_engine.spec import (
     CREATE_TOOLS,
+    JIRA_WRITE_TOOLS,
     PLATFORM_TOOLS,
     PUBLISH_TOOLS,
     READ_TOOLS,
@@ -40,9 +41,12 @@ step the node is added after."""
 
 _NODE = TypeAdapter[Node](Node)
 
-AGENT_TOOLS: tuple[str, ...] = tuple(sorted(PLATFORM_TOOLS - PUBLISH_TOOLS - CREATE_TOOLS))
-"""The tools an agent may be granted: publishing and creating a repo are irreversible, so only a
-tool node may call those (`publish_not_tool_node`, `create_not_tool_node`)."""
+AGENT_TOOLS: tuple[str, ...] = tuple(
+    sorted(PLATFORM_TOOLS - PUBLISH_TOOLS - CREATE_TOOLS - JIRA_WRITE_TOOLS)
+)
+"""The tools an agent may be granted: publishing, creating a repo and writing to Jira are
+irreversible, so only a tool node may call those (`publish_not_tool_node`,
+`create_not_tool_node`, `jira_write_not_tool_node`)."""
 
 UI_WIDGETS = frozenset({"textarea", "checkboxes"})
 """The `ui:widget`s a manifest's `ui` may name; the side panel draws each."""

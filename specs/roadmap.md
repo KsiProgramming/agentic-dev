@@ -8,7 +8,7 @@ Strategy: **walking skeleton first**, then grow outward. The milestones follow t
 
 Milestones 12 to 20, and phases 7.7, 7.8, 9.11 and 10.6, were promoted from [`ideas.md`](ideas.md) on 2026-11-10. They are listed in the order we work them: Milestone 12 (Nothing is lost) right after Milestone 6, then the v1 milestones (Jira and SDD, then verification before the second provider and the Architect), then what grows the product after them. Ideas that need a mission change stay in `ideas.md`, parked with the AI software factory vision: earned autonomy (it would auto-approve writes, against principle 3), and the deploy shepherd, production feedback loops and ticket-to-production (they reach production, beyond v1's reviewable PR). No phase adds users, sign-in and roles yet (an idea in `ideas.md`); until one does, the phases that name a person (14.1, 15.2, 20.1, 20.3) work with the workspace as the actor. A phase that changes what agents receive is done only once a real run with Claude has been read step by step in the console ([`lessons.md`](lessons.md), rule 1), whether or not its row says so.
 
-**Next up: Milestone 6 (Dynamic orchestration and composites), at 6.7, then Milestone 12 (Nothing is lost), then Milestone 7.** The `plan-feature` skill plans the first unplanned phase of the first milestone named here before any other. Milestones 4, 5 and 11 are done. Change this line, in its own PR with a changelog entry, when the priority changes.
+**Next up: Milestone 7 (Jira and Spec-Driven Development), at 7.3, then Milestone 13 (Verification and guardrails).** The `plan-feature` skill plans the first unplanned phase of the first milestone named here before any other. Milestones 4, 5, 6, 11 and 12 are done. Change this line, in its own PR with a changelog entry, when the priority changes.
 
 ---
 
@@ -149,7 +149,7 @@ Principle 9 says nothing is lost, and AC-8 holds for the graph but not yet for t
 | # | Phase | Done when | Status |
 |---|---|---|---|
 | 7.1 | Atlassian OAuth 3LO per workspace, project scoping | Jira connection stored encrypted | ✅ Done ([#237](https://github.com/KsiProgramming/agentic-dev/pull/237)) |
-| 7.2 | `jira` MCP server: read issue, comment, transition | Agent reads an issue and posts a comment | — |
+| 7.2 | `jira` MCP server: read issue, comment, transition (reads for agents, writes only from a tool node after a gate, scoped to the picked projects). [Plan](2026-11-17-jira-mcp-server/requirements.md) | Agent reads an issue and posts a comment | ✅ Done ([#238](https://github.com/KsiProgramming/agentic-dev/pull/238)) |
 | 7.3 | Jira webhook trigger on configured status/label | Moving an issue starts a run | — |
 | 7.4 | Per-project field mapping (acceptance criteria, components) | Spec-writer receives mapped fields | — |
 | 7.5 | SDD template: spec → gate → plan/tasks → orchestrator implement → review loop → gate → PR → Jira update (Spec Kit compatible) | AC-5 | — |

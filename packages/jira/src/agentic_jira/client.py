@@ -1,21 +1,44 @@
 """The deployment's Atlassian OAuth 2.0 (3LO) app, talking to Atlassian.
 
-Five calls, all JSON: the authorization-code exchange and the refresh (`auth.atlassian.com`),
-the consenting account and the sites the grant reaches (`api.atlassian.com`), and a site's
-projects (`api.atlassian.com/ex/jira/<cloud id>`). No token, code or response body is ever put
-in a log line or an exception message: errors carry a status code or a kind."""
+All JSON: the authorization-code exchange and the refresh (`auth.atlassian.com`), the
+consenting account and the sites the grant reaches (`api.atlassian.com`), and, on a site's REST
+API v3 (`api.atlassian.com/ex/jira/<cloud id>`), its projects (7.1) and its issues, their
+comments and transitions (7.2). No token, code or response body is ever put in a log line or an
+exception message: errors carry a status code or a kind. Rich text is converted to and from
+Markdown here (`agentic_jira.adf`), so nothing above the client sees ADF."""
 
-from collections.abc import Mapping, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx2
 from pydantic import SecretStr
 
+from agentic_jira.adf import from_markdown, to_markdown
 from agentic_jira.config import AtlassianAppConfig
-from agentic_jira.errors import JiraApiError, JiraAuthError, JiraUnauthorizedError
-from agentic_jira.models import SCOPES, Account, Grant, Project, ProjectPage, Site
+from agentic_jira.errors import (
+    JiraApiError,
+    JiraAuthError,
+    JiraBadRequestError,
+    JiraNotFoundError,
+    JiraRateLimitedError,
+    JiraUnauthorizedError,
+)
+from agentic_jira.models import (
+    SCOPES,
+    Account,
+    Grant,
+    Issue,
+    IssueComment,
+    IssueSummary,
+    Project,
+    ProjectPage,
+    SearchPage,
+    Site,
+    Transition,
+)
 
 AUTH_URL = "https://auth.atlassian.com"
 API_URL = "https://api.atlassian.com"
@@ -23,18 +46,32 @@ TIMEOUT_S = 10.0
 PAGE_SIZE = 50
 # Jira's project search takes at most this many `id` parameters.
 MAX_IDS = 50
+MAX_RETRY_AFTER_S = 10.0
+"""A `429` asking for a longer wait than this is not retried (`JiraRateLimitedError`)."""
+ISSUE_COMMENTS = 20
+"""How many of an issue's latest comments `get_issue` reads."""
+ISSUE_FIELDS = (
+    "summary,status,issuetype,priority,labels,components,assignee,reporter,created,updated,"
+    "description,project"
+)
+SEARCH_FIELDS = "summary,status,issuetype,assignee,updated,project"
 
 type _Json = dict[str, Any]
 
 
 class AtlassianApp:
-    """Has `JiraPlatform`'s interface. `transport` is for tests."""
+    """Has `JiraPlatform`'s interface. `transport` and `sleep` are for tests."""
 
     def __init__(
-        self, config: AtlassianAppConfig, *, transport: httpx2.AsyncBaseTransport | None = None
+        self,
+        config: AtlassianAppConfig,
+        *,
+        transport: httpx2.AsyncBaseTransport | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._config = config
         self._http = httpx2.AsyncClient(timeout=TIMEOUT_S, transport=transport)
+        self._sleep = sleep
 
     def authorize_url(self, state: str) -> str:
         query = urlencode(
@@ -135,6 +172,84 @@ class AtlassianApp:
             )
         return found
 
+    async def get_issue(self, token: SecretStr, cloud_id: str, key: str) -> Issue:
+        """The issue's standard fields and its latest `ISSUE_COMMENTS` comments, oldest first.
+        `JiraNotFoundError` when it does not exist or the account cannot see it."""
+        url = _issue_url(cloud_id, key)
+        body = _object(await self._get(token, url, [("fields", ISSUE_FIELDS)]))
+        page = _object(
+            await self._get(
+                token,
+                f"{url}/comment",
+                [("orderBy", "-created"), ("maxResults", str(ISSUE_COMMENTS))],
+            )
+        )
+        return _issue(body, page)
+
+    async def search(
+        self,
+        token: SecretStr,
+        cloud_id: str,
+        jql: str,
+        *,
+        limit: int,
+        page_token: str | None = None,
+    ) -> SearchPage:
+        """Issues matching `jql`, as given (the caller scopes it). `JiraBadRequestError` for a
+        query Jira cannot run."""
+        params = [("jql", jql), ("maxResults", str(limit)), ("fields", SEARCH_FIELDS)]
+        if page_token:
+            params.append(("nextPageToken", page_token))
+        body = _object(await self._get(token, f"{_site_api(cloud_id)}/search/jql", params))
+        raw = body.get("issues")
+        if not isinstance(raw, list):
+            raise JiraApiError("Atlassian answered with an unexpected body")
+        issues = tuple(_summary(_object(entry)) for entry in cast(list[Any], raw))
+        next_token = body.get("nextPageToken")
+        last = body.get("isLast") is True or not isinstance(next_token, str) or not next_token
+        return SearchPage(issues=issues, next_page_token=None if last else str(next_token))
+
+    async def transitions(self, token: SecretStr, cloud_id: str, key: str) -> list[Transition]:
+        """The transitions the issue's workflow offers from its current status."""
+        body = _object(await self._get(token, f"{_issue_url(cloud_id, key)}/transitions"))
+        raw = body.get("transitions")
+        if not isinstance(raw, list):
+            raise JiraApiError("Atlassian answered with an unexpected body")
+        found: list[Transition] = []
+        for entry in cast(list[Any], raw):
+            t = _object(entry)
+            found.append(
+                Transition(
+                    id=str(t.get("id", "")),
+                    name=str(t.get("name", "")),
+                    to_status=_name(t.get("to")) or "",
+                )
+            )
+        return found
+
+    async def add_comment(self, token: SecretStr, cloud_id: str, key: str, body: str) -> str:
+        """Posts Markdown `body` as a comment (converted to ADF); its id."""
+        answer = _object(
+            await self._send(
+                "POST",
+                token,
+                f"{_issue_url(cloud_id, key)}/comment",
+                json={"body": from_markdown(body)},
+            )
+        )
+        return str(answer.get("id", ""))
+
+    async def transition(
+        self, token: SecretStr, cloud_id: str, key: str, transition_id: str
+    ) -> None:
+        """Moves the issue through the transition `transition_id`."""
+        await self._send(
+            "POST",
+            token,
+            f"{_issue_url(cloud_id, key)}/transitions",
+            json={"transition": {"id": transition_id}},
+        )
+
     async def aclose(self) -> None:
         await self._http.aclose()
 
@@ -158,22 +273,55 @@ class AtlassianApp:
     async def _get(
         self, token: SecretStr, url: str, params: Sequence[tuple[str, str]] = ()
     ) -> object:
+        return await self._send("GET", token, url, params=params)
+
+    async def _send(
+        self,
+        method: str,
+        token: SecretStr,
+        url: str,
+        *,
+        params: Sequence[tuple[str, str]] = (),
+        json: object = None,
+    ) -> object:
+        """One call with the bearer token. A `429` is retried once after its `Retry-After`
+        (at most `MAX_RETRY_AFTER_S`); a `204` is `None`."""
         headers = {
             "Authorization": f"Bearer {token.get_secret_value()}",
             "Accept": "application/json",
         }
-        try:
-            response = await self._http.get(url, headers=headers, params=list(params))
-        except httpx2.HTTPError as exc:
-            raise JiraApiError(f"Atlassian could not be reached: {type(exc).__name__}") from None
-        if response.status_code == 401:
-            raise JiraUnauthorizedError("Atlassian did not accept the access token")
-        return _json(response)
+        retried = False
+        while True:
+            try:
+                response = await self._http.request(
+                    method, url, headers=headers, params=list(params), json=json
+                )
+            except httpx2.HTTPError as exc:
+                raise JiraApiError(
+                    f"Atlassian could not be reached: {type(exc).__name__}"
+                ) from None
+            if response.status_code == 401:
+                raise JiraUnauthorizedError("Atlassian did not accept the access token")
+            if response.status_code == 429:
+                wait = _retry_after(response)
+                if retried or wait is None:
+                    raise JiraRateLimitedError("Atlassian answered 429")
+                retried = True
+                await self._sleep(wait)
+                continue
+            if response.status_code == 204:
+                return None
+            return _json(response)
 
 
 def _json(response: httpx2.Response) -> object:
-    if response.status_code >= 400:
-        raise JiraApiError(f"Atlassian answered {response.status_code}")
+    status = response.status_code
+    if status == 404:
+        raise JiraNotFoundError("Atlassian answered 404")
+    if status == 400:
+        raise JiraBadRequestError("Atlassian answered 400")
+    if status >= 400:
+        raise JiraApiError(f"Atlassian answered {status}")
     try:
         return cast(object, response.json())
     except ValueError:
@@ -216,3 +364,109 @@ def _projects(body: _Json) -> tuple[Project, ...]:
             )
         )
     return tuple(projects)
+
+
+def _retry_after(response: httpx2.Response) -> float | None:
+    """The wait a `429` asks for, if we take it: seconds only (not an HTTP date); 1 s when it
+    names none; `None` past `MAX_RETRY_AFTER_S`."""
+    raw = response.headers.get("Retry-After")
+    if raw is None:
+        return 1.0
+    try:
+        wait = float(raw)
+    except ValueError:
+        return None
+    return max(wait, 0.0) if wait <= MAX_RETRY_AFTER_S else None
+
+
+def _site_api(cloud_id: str) -> str:
+    return f"{API_URL}/ex/jira/{quote(cloud_id, safe='')}/rest/api/3"
+
+
+def _issue_url(cloud_id: str, key: str) -> str:
+    return f"{_site_api(cloud_id)}/issue/{quote(key, safe='')}"
+
+
+def _name(value: object, field: str = "name") -> str | None:
+    """`value[field]` when `value` is an object with a non-empty string there."""
+    if isinstance(value, dict):
+        found = cast(_Json, value).get(field)
+        if isinstance(found, str) and found:
+            return found
+    return None
+
+
+def _person(value: object) -> str | None:
+    return _name(value, "displayName")
+
+
+def _strings(value: object, field: str | None = None) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    out: list[str] = []
+    for item in cast(list[Any], value):
+        text = _name(item, field) if field else (item if isinstance(item, str) else None)
+        if text:
+            out.append(text)
+    return tuple(out)
+
+
+def _fields(body: _Json) -> _Json:
+    fields = body.get("fields")
+    return cast(_Json, fields) if isinstance(fields, dict) else {}
+
+
+def _project_key(key: str, fields: _Json) -> str:
+    return _name(fields.get("project"), "key") or key.rsplit("-", 1)[0]
+
+
+def _issue(body: _Json, comments: _Json) -> Issue:
+    key = str(body.get("key", ""))
+    fields = _fields(body)
+    raw = comments.get("comments")
+    found: list[IssueComment] = []
+    if isinstance(raw, list):
+        for entry in cast(list[Any], raw):
+            c = _object(entry)
+            found.append(
+                IssueComment(
+                    id=str(c.get("id", "")),
+                    author=_person(c.get("author")) or "Unknown",
+                    created=str(c.get("created", "")),
+                    body=to_markdown(c.get("body")),
+                )
+            )
+    found.reverse()  # read newest first, shown oldest first
+    total = comments.get("total")
+    return Issue(
+        id=str(body.get("id", "")),
+        key=key,
+        project_key=_project_key(key, fields),
+        summary=str(fields.get("summary") or ""),
+        status=_name(fields.get("status")) or "",
+        type=_name(fields.get("issuetype")) or "",
+        priority=_name(fields.get("priority")),
+        labels=_strings(fields.get("labels")),
+        components=_strings(fields.get("components"), "name"),
+        assignee=_person(fields.get("assignee")),
+        reporter=_person(fields.get("reporter")),
+        created=str(fields.get("created") or ""),
+        updated=str(fields.get("updated") or ""),
+        description=to_markdown(fields.get("description")),
+        comments=tuple(found),
+        comment_count=total if isinstance(total, int) else len(found),
+    )
+
+
+def _summary(body: _Json) -> IssueSummary:
+    key = str(body.get("key", ""))
+    fields = _fields(body)
+    return IssueSummary(
+        key=key,
+        project_key=_project_key(key, fields),
+        summary=str(fields.get("summary") or ""),
+        status=_name(fields.get("status")) or "",
+        type=_name(fields.get("issuetype")) or "",
+        assignee=_person(fields.get("assignee")),
+        updated=str(fields.get("updated") or ""),
+    )

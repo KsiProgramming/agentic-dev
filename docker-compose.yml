@@ -180,6 +180,12 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_APP_PRIVATE_KEY_FILE: /github/github-app.pem
+      # The same Atlassian app as the API: the jira.* tools (7.2) refresh the workspace's Jira
+      # grant with it. Left blank, runs that use jira.* tools fail.
+      ATLASSIAN_CLIENT_ID: ${ATLASSIAN_CLIENT_ID:-}
+      ATLASSIAN_CLIENT_SECRET_FILE: /github/atlassian-client-secret
+      # A Jira comment a run posts ends with a link to the run here.
+      WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
     # The Docker socket gives the worker control of the host's Docker (dev only; phase 10.2
     # replaces it). DOCKER_GID is the socket's group: 0 on Docker Desktop, `docker` on Linux.
     group_add:

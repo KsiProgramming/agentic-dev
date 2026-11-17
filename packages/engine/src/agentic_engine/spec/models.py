@@ -807,8 +807,29 @@ SCAN_TOOLS = frozenset({"scan.lint", "scan.secrets", "scan.dependencies"})
 """Deterministic scanners over the run's repo in the sandbox (4.4): read-only, so allowed
 everywhere. Each returns a findings report (`agentic_runtime.findings.FindingsReport`)."""
 
+JIRA_READ_TOOLS = frozenset({"jira.getIssue", "jira.search", "jira.listTransitions"})
+"""Tools that read the workspace's Jira (7.2), scoped to its picked projects: allowed everywhere.
+A run naming any `jira.*` tool needs a connected Jira, not a repo."""
+
+JIRA_WRITE_TOOLS = frozenset({"jira.comment", "jira.transition"})
+"""Tools that change a Jira issue (7.2). A comment is read by people as soon as it is posted and a
+status change is named in principle 3, so only a tool node may call one, after a gate."""
+
+JIRA_ISSUE_FROM = frozenset({"request"})
+"""What a Jira write's `issue_from` may name: the run's request, which holds one issue key."""
+
+BODY_FROM_TOOLS = frozenset({"github.openPR", "jira.comment"})
+"""Tool nodes that may take their `body` from a run artifact (`body_from`, 6.7 and 7.2)."""
+
 PLATFORM_TOOLS = (
-    READ_TOOLS | WRITE_TOOLS | PUBLISH_TOOLS | CREATE_TOOLS | ARTIFACT_TOOLS | SCAN_TOOLS
+    READ_TOOLS
+    | WRITE_TOOLS
+    | PUBLISH_TOOLS
+    | CREATE_TOOLS
+    | ARTIFACT_TOOLS
+    | SCAN_TOOLS
+    | JIRA_READ_TOOLS
+    | JIRA_WRITE_TOOLS
 )
 """Every tool a node may name. The tool servers register exactly these (checked in tests)."""
 
@@ -840,6 +861,9 @@ type IssueCode = Literal[
     "subflow_cycle",
     "subflow_unpublished",
     "invalid_gate",
+    "jira_write_not_tool_node",
+    "jira_write_without_gate",
+    "jira_write_not_shown",
 ]
 
 
@@ -971,6 +995,104 @@ def _publish_issue(
             "a human approves what is published",
         )
     return None
+
+
+def jira_write_issues(root: Node) -> list[ValidationIssue]:
+    """Why the Jira writes under `root` (`jira.comment`, `jira.transition`, 7.2) are not safe to
+    run, in run order; empty if they are. Each must be a tool node (`jira_write_not_tool_node`)
+    after a gate in its scope (`jira_write_without_gate`), and name its issue (`issue`, or
+    `issue_from: "request"`) and, for a comment, its text (`body` or `body_from`), else
+    `reference`. A comment whose text comes from an artifact (`body_from`) must be shown at that
+    gate: the gate directly follows the step that writes it (a gate shows its input, the step
+    before it), and nothing writes it again after the gate (`jira_write_not_shown`)."""
+    issues: list[ValidationIssue] = []
+    seen: list[tuple[str, Node]] = []
+    loops: set[str] = set()
+    at_path = dict(iter_nodes(root))
+    for path, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            loops.add(path)
+        for tool in sorted(JIRA_WRITE_TOOLS.intersection(node_tools(node))):
+            found = _jira_write_issue(node, tool, path, seen, at_path)
+            if found is not None:
+                code, message = found
+                issues.append(
+                    ValidationIssue(code=code, path=path, node_id=node.id, message=message)
+                )
+        seen.append((_runs_in(path, loops), node))
+    return issues
+
+
+def _jira_write_issue(
+    node: Node,
+    tool: str,
+    path: str,
+    seen: list[tuple[str, Node]],
+    at_path: Mapping[str, Node],
+) -> tuple[IssueCode, str] | None:
+    if not isinstance(node, ToolNode):
+        return (
+            "jira_write_not_tool_node",
+            f"node {node.id!r}: {tool} can only be called by a tool node, after a gate",
+        )
+    args = node.args
+    issue, issue_from = args.get("issue"), args.get("issue_from")
+    if (issue is None) == (issue_from is None) or (
+        issue is not None and not (isinstance(issue, str) and issue.strip())
+    ):
+        return (
+            "reference",
+            f"node {node.id!r}: {tool} needs either `issue` (a key such as PROJ-12) or "
+            '`issue_from: "request"`',
+        )
+    if issue_from is not None and issue_from not in JIRA_ISSUE_FROM:
+        return (
+            "reference",
+            f'node {node.id!r}: `issue_from` can only be "request", the run\'s request',
+        )
+    body, body_from = args.get("body"), args.get("body_from")
+    if tool == "jira.comment" and not (
+        (isinstance(body, str) and body.strip()) or isinstance(body_from, str)
+    ):
+        return "reference", f"node {node.id!r}: {tool} needs `body` or `body_from`"
+    to = args.get("to")
+    if tool == "jira.transition" and not (isinstance(to, str) and to.strip()):
+        return "reference", f"node {node.id!r}: {tool} needs `to`, the transition or status"
+    earlier = [(at, n) for at, n in seen if within(path, scope_of(at))]
+    gates = [i for i, (_, n) in enumerate(earlier) if isinstance(n, GateNode)]
+    if not gates:
+        return (
+            "jira_write_without_gate",
+            f"node {node.id!r}: {tool} must come after a gate, so a human approves what is "
+            "written to Jira",
+        )
+    if tool != "jira.comment" or not isinstance(body_from, str):
+        return None
+    gate_at, gate = earlier[gates[-1]]
+    shown = _previous_step(gate_at, at_path)
+    rewritten = [n for _, n in earlier[gates[-1] + 1 :] if _artifact_written(n) == body_from]
+    if shown is None or _artifact_written(shown) != body_from or rewritten:
+        return (
+            "jira_write_not_shown",
+            f"node {node.id!r}: the gate {gate.id!r} before it must directly follow the step "
+            f"that writes {body_from!r}, and nothing may write it again after the gate, so the "
+            "approver reads the comment that is posted",
+        )
+    return None
+
+
+def _previous_step(path: str, at_path: Mapping[str, Node]) -> Node | None:
+    """The step before the node at `path` in its sequence (whose output is that node's input),
+    or `None` when it is the first."""
+    head, sep, tail = path.rpartition("[")
+    index = tail.removesuffix("]")
+    if not sep or not tail.endswith("]") or not index.isdigit() or int(index) == 0:
+        return None
+    return at_path.get(f"{head}[{int(index) - 1}]")
+
+
+def _artifact_written(node: Node) -> str | None:
+    return node.writes if isinstance(node, AgentNode | ToolNode | ReduceNode) else None
 
 
 def create_repo_issues(root: Node) -> list[ValidationIssue]:
@@ -1106,6 +1228,8 @@ def _not_in_loop(node: Node) -> str | None:
             return None  # 6.9: planned afresh each iteration, on one integration branch
         case _ if tools & PUBLISH_TOOLS:
             return "publisher"
+        case _ if tools & JIRA_WRITE_TOOLS:
+            return "Jira write"
         case _ if tools & CREATE_TOOLS:
             return "repo creator"
         case _ if tools & WRITE_TOOLS:
@@ -1303,6 +1427,8 @@ def _not_in_orchestrator(node: Node) -> str | None:
         case AgentNode() | ToolNode() | SequenceNode():
             if tools & PUBLISH_TOOLS:
                 return "publisher"
+            if tools & JIRA_WRITE_TOOLS:
+                return "Jira write"
             if tools & CREATE_TOOLS:
                 return "repo creator"
             return None
@@ -1645,7 +1771,7 @@ def _walk_artifacts(root: Node) -> _ArtifactFlow:
                     flow.writers[node.id] = found
                 body_from = (
                     node.args.get("body_from")
-                    if isinstance(node, ToolNode) and node.tool == "github.openPR"
+                    if isinstance(node, ToolNode) and node.tool in BODY_FROM_TOOLS
                     else None
                 )
                 if isinstance(body_from, str) and body_from not in seen:
@@ -1943,7 +2069,7 @@ def structure_issues(root: Node) -> list[ValidationIssue]:
     rules for creating the repo, typed ports and run artifacts."""
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
-    issues += publish_gate_issues(root) + create_repo_issues(root)
+    issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
     issues += port_issues(root) + artifact_issues(root) + subflow_issues(root)
     issues += gate_issues(root)
     return in_run_order(root, issues)

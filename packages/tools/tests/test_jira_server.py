@@ -1,0 +1,297 @@
+"""The `jira` MCP server (7.2): reads scoped to the picked projects, gated writes, fixed errors."""
+
+import json
+from collections.abc import Awaitable, Callable
+from dataclasses import replace
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+import pytest
+from mcp import Client
+from pydantic import SecretStr
+
+from agentic_jira import FakeAtlassian, JiraUnauthorizedError
+from agentic_store import (
+    JiraConnectionInfo,
+    JiraNeedsAttentionError,
+    JiraProjectRef,
+    JiraSiteInfo,
+)
+from agentic_tools.jira import (
+    JIRA_READ_TOOL_NAMES,
+    JIRA_WRITE_TOOL_NAMES,
+    balanced,
+    build_jira_server,
+    open_jira_tools,
+)
+
+RUN = UUID("12345678-0000-0000-0000-000000000000")
+ACME = JiraSiteInfo(
+    cloud_id="fake-cloud-acme",
+    url="https://acme.atlassian.net",
+    name="Acme",
+    enabled=True,
+    projects=(
+        JiraProjectRef("10001", "API", "Public API"),
+        JiraProjectRef("10002", "DOCS", "Documentation"),
+    ),
+)
+LABS = JiraSiteInfo(
+    cloud_id="fake-cloud-labs",
+    url="https://acme-labs.atlassian.net",
+    name="Acme Labs",
+    enabled=False,
+    projects=(JiraProjectRef("20001", "LAB", "Experiments"),),
+)
+
+
+class Access:
+    """A workspace's Jira over `FakeAtlassian`, with the allowlist the store would answer."""
+
+    def __init__(self, *sites: JiraSiteInfo, needs_attention: str | None = None) -> None:
+        self.platform = FakeAtlassian("http://api.test")
+        self.info: JiraConnectionInfo | None = JiraConnectionInfo(
+            id=uuid4(),
+            workspace_id=uuid4(),
+            account="Ada Example",
+            scopes=(),
+            needs_attention=needs_attention,
+            sites=sites or (ACME, LABS),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        self.tokens_used: list[str] = []
+
+    async def connection(self) -> JiraConnectionInfo | None:
+        return self.info
+
+    async def allowed(self, cloud_id: str, project_key: str) -> bool:
+        if self.info is None or self.info.needs_attention:
+            return False
+        return any(
+            site.cloud_id == cloud_id
+            and site.enabled
+            and any(p.key == project_key.upper() for p in site.projects)
+            for site in self.info.sites
+        )
+
+    async def call[T](self, request: Callable[[SecretStr], Awaitable[T]]) -> T:
+        if self.info is not None and self.info.needs_attention:
+            raise JiraNeedsAttentionError(self.info.needs_attention)
+        grant = await self.platform.exchange("fake-code")
+        self.tokens_used.append(grant.access_token.get_secret_value())
+        try:
+            return await request(grant.access_token)
+        except JiraUnauthorizedError:
+            raise JiraNeedsAttentionError("unauthorized") from None
+
+
+async def call(access: Access, tool: str, **args: Any) -> Any:
+    server = build_jira_server(access, run_id=RUN, run_url="https://app.test/runs/x")
+    async with Client(server) as client:
+        result = await client.call_tool(tool, args)
+    text = "\n".join(c.text for c in result.content if c.type == "text")
+    for token in access.tokens_used:
+        assert token not in text
+    if result.is_error:
+        return "error: " + text
+    assert json.loads(text) == result.structured_content
+    return result.structured_content
+
+
+async def test_the_server_offers_exactly_the_jira_tools() -> None:
+    async with open_jira_tools(Access(), run_id=RUN) as tools:
+        names = {d.name for d in tools.definitions()}
+
+    assert names == JIRA_READ_TOOL_NAMES | JIRA_WRITE_TOOL_NAMES
+    assert {"jira.getIssue", "jira.search", "jira.listTransitions"} == JIRA_READ_TOOL_NAMES
+    assert {"jira.comment", "jira.transition"} == JIRA_WRITE_TOOL_NAMES
+
+
+async def test_an_issue_is_read_as_markdown_with_its_comments() -> None:
+    issue = await call(Access(), "getIssue", issue="api-1", description="Read it")
+
+    assert issue["key"] == "API-1"
+    assert issue["url"] == "https://acme.atlassian.net/browse/API-1"
+    assert issue["site"] == "acme.atlassian.net"
+    assert issue["project"] == "API"
+    assert issue["status"] == "To Do"
+    assert "## Acceptance criteria" in issue["description"]
+    assert issue["description_truncated"] is False
+    assert [c["body"] for c in issue["comments"]] == ["Per API key?"]
+    assert issue["comment_count"] == 1
+
+
+async def test_long_text_is_cut() -> None:
+    access = Access()
+    issue = access.platform.issues["fake-cloud-acme"]["API-2"]
+    access.platform.issues["fake-cloud-acme"]["API-2"] = replace(issue, description="x" * 40_000)
+
+    found = await call(access, "getIssue", issue="API-2")
+
+    assert len(found["description"]) == 32_000
+    assert found["description_truncated"] is True
+
+
+@pytest.mark.parametrize(
+    ("issue", "why"),
+    [
+        ("OPS-1", "project OPS"),  # never picked
+        ("DOCS-9", "project OPS"),  # moved from a picked project to OPS
+        ("LAB-1", "is not a Jira site"),  # its site is off
+    ],
+)
+async def test_a_project_not_picked_is_refused(issue: str, why: str) -> None:
+    site = "acme-labs.atlassian.net" if issue.startswith("LAB") else None
+    answer = await call(Access(), "getIssue", issue=issue, **({"site": site} if site else {}))
+
+    assert answer.startswith("error: ")
+    assert why in answer
+    if issue == "DOCS-9":
+        assert "project_not_allowed" in answer
+
+
+async def test_an_off_list_key_is_refused_before_jira_is_called() -> None:
+    access = Access()
+    answer = await call(access, "getIssue", issue="OPS-1")
+
+    assert "project_not_allowed" in answer
+    assert access.tokens_used == []
+
+
+async def test_bad_keys_and_missing_issues() -> None:
+    assert "issue_invalid" in await call(Access(), "getIssue", issue="../myself")
+    assert "issue_not_found" in await call(Access(), "getIssue", issue="API-999")
+
+
+async def test_sites_are_chosen_or_named() -> None:
+    both = Access(ACME, replace(LABS, enabled=True))
+    assert "site_required" in await call(both, "getIssue", issue="API-1")
+    assert (await call(both, "getIssue", issue="API-1", site="acme.atlassian.net"))["key"] == (
+        "API-1"
+    )
+    assert (await call(both, "getIssue", issue="LAB-1", site="fake-cloud-labs"))["key"] == "LAB-1"
+    assert "site_unknown" in await call(both, "getIssue", issue="API-1", site="evil.example")
+    assert "site_unknown" in await call(Access(replace(ACME, enabled=False)), "search")
+
+
+async def test_a_connection_that_is_missing_or_needs_attention_is_refused() -> None:
+    gone = Access()
+    gone.info = None
+    assert "jira_not_connected" in await call(gone, "getIssue", issue="API-1")
+
+    marked = Access(needs_attention="invalid_grant")
+    assert "needs_attention" in await call(marked, "getIssue", issue="API-1")
+
+
+async def test_a_search_is_limited_to_the_picked_projects() -> None:
+    access = Access()
+    found = await call(
+        access, "search", jql='status = "To Do" OR project = OPS', order_by="updated DESC"
+    )
+
+    assert found["jql"] == (
+        'project in ("API", "DOCS") AND (status = "To Do" OR project = OPS) ORDER BY updated DESC'
+    )
+    assert {i["project"] for i in found["issues"]} <= {"API", "DOCS"}
+    assert found["issues"][0]["url"].startswith("https://acme.atlassian.net/browse/")
+
+
+async def test_search_results_are_filtered_even_when_jira_returns_more() -> None:
+    access = Access()
+    access.platform.leak_search = True
+
+    found = await call(access, "search", jql="")
+
+    assert {i["project"] for i in found["issues"]} == {"API", "DOCS"}
+
+
+@pytest.mark.parametrize(
+    "jql",
+    [
+        "x) OR (project = OPS",
+        'summary ~ "open',
+        "project = API ORDER BY key",
+        "a)",
+    ],
+)
+async def test_a_query_that_could_escape_its_scope_is_refused(jql: str) -> None:
+    access = Access()
+    answer = await call(access, "search", jql=jql)
+
+    assert "invalid_jql" in answer
+    assert access.platform.searches == []
+
+
+async def test_an_invalid_query_and_order_are_reported() -> None:
+    assert "invalid_jql" in await call(Access(), "search", jql="!!")
+    assert "invalid_jql" in await call(Access(), "search", order_by="key; DROP")
+
+
+def test_balanced_ignores_brackets_in_strings() -> None:
+    assert balanced('summary ~ "a ) b" AND (x = 1)')
+    assert balanced(r'summary ~ "say \"hi\" )"')
+    assert not balanced("(a")
+    assert not balanced(")(")
+
+
+async def test_transitions_are_listed() -> None:
+    found = await call(Access(), "listTransitions", issue="API-1")
+
+    assert found["status"] == "To Do"
+    assert [t["name"] for t in found["transitions"]] == ["Start progress", "Done"]
+
+
+async def test_a_comment_is_posted_with_the_run_link_once() -> None:
+    access = Access()
+
+    posted = await call(access, "comment", issue="API-1", body="The limit is **per key**.")
+    again = await call(access, "comment", issue="API-1", body="The limit is **per key**.")
+
+    assert posted["created"] is True
+    assert posted["url"].startswith("https://acme.atlassian.net/browse/API-1?focusedCommentId=")
+    assert again == posted | {"created": False}
+    assert [p.body for p in access.platform.posted] == [
+        "The limit is **per key**.\n\n_Posted by agentic-dev run [12345678](https://app.test/runs/x)_"
+    ]
+
+
+async def test_a_comment_on_a_project_not_picked_is_not_posted() -> None:
+    access = Access()
+
+    assert "project_not_allowed" in await call(access, "comment", issue="DOCS-9", body="hi")
+    assert access.platform.posted == []
+
+
+async def test_a_transition_moves_the_issue_by_name_id_or_status() -> None:
+    access = Access()
+
+    moved = await call(access, "transition", issue="API-1", to="start progress")
+    assert moved == {
+        "key": "API-1",
+        "from_status": "To Do",
+        "to_status": "In Progress",
+        "changed": True,
+    }
+    assert (await call(access, "transition", issue="API-1", to="Done"))["to_status"] == "Done"
+    assert (await call(access, "transition", issue="API-1", to="done"))["changed"] is False
+    assert [m.transition_id for m in access.platform.moved] == ["11", "31"]
+
+
+async def test_a_transition_the_workflow_does_not_offer_is_refused() -> None:
+    answer = await call(Access(), "transition", issue="API-1", to="Reopen")
+
+    assert "transition_unavailable" in answer
+    assert "Start progress, Done" in answer
+
+
+async def test_unknown_arguments_are_refused() -> None:
+    assert (await call(Access(), "getIssue", issue="API-1", jql="x")).startswith("error: ")
+
+
+async def test_rate_limits_and_outages_are_fixed_errors() -> None:
+    access = Access()
+    access.platform.unavailable = True
+
+    assert "jira_unavailable" in await call(access, "getIssue", issue="API-1")

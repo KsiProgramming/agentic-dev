@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useId, useState } from "react";
 
-import { useStartGithubInstall, type Requirement } from "@/api/queries";
+import { useStartGithubInstall, useStartJiraAuthorize, type Requirement } from "@/api/queries";
 import { ErrorState } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -36,11 +36,18 @@ const ROW: Record<ConnectionState, { icon: LucideIcon; className: string; text: 
 const WHY: Record<Requirement, string> = {
   claude: "Agents run on Claude with your API key.",
   github: "The run works on a repository the GitHub App can reach, and opens a pull request.",
+  jira: "The run reads issues in the projects you picked, and writes to Jira only after you approve.",
+};
+
+const ATTENTION: Record<Requirement, string> = {
+  claude: "The Claude key needs attention.",
+  github: "The GitHub App was uninstalled or lost access.",
+  jira: "Atlassian no longer accepts the Jira connection.",
 };
 
 /** "Before you start": the connections a template needs, each with its fix in place. A Claude
- * key is entered right here; GitHub is installed on github.com, which comes back to
- * `returnTo`. */
+ * key is entered right here; GitHub is installed on github.com and Jira connected on
+ * Atlassian (7.2), both of which come back to `returnTo`. */
 export function ConnectionChecklist({
   requires,
   readiness,
@@ -59,6 +66,7 @@ export function ConnectionChecklist({
   const headingId = useId();
   const [addingKey, setAddingKey] = useState(false);
   const install = useStartGithubInstall({ workspaceId, baseUrl, navigate });
+  const authorize = useStartJiraAuthorize({ workspaceId, baseUrl, navigate });
 
   if (readiness.error && requires.some((r) => readiness.state[r] === "error")) {
     return <ErrorState message={readiness.error} onRetry={readiness.retry} />;
@@ -93,8 +101,10 @@ export function ConnectionChecklist({
                     {state === "ready"
                       ? "Connected."
                       : state === "attention"
-                        ? "The GitHub App was uninstalled or lost access."
-                        : WHY[requirement]}
+                        ? ATTENTION[requirement]
+                        : requirement === "jira" && !readiness.jiraConfigured
+                          ? "Jira is not configured on this server: an administrator registers an Atlassian app first."
+                          : WHY[requirement]}
                   </span>
                 </div>
                 {requirement === "claude" && state === "missing" && !addingKey ? (
@@ -110,6 +120,18 @@ export function ConnectionChecklist({
                     disabled={install.isPending}
                   >
                     {state === "attention" ? "Reconnect GitHub" : "Connect GitHub"}
+                  </Button>
+                ) : null}
+                {requirement === "jira" &&
+                (state === "missing" || state === "attention") &&
+                readiness.jiraConfigured ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => authorize.mutate(returnTo)}
+                    disabled={authorize.isPending}
+                  >
+                    {state === "attention" ? "Reconnect Jira" : "Connect Jira"}
                   </Button>
                 ) : null}
               </div>
@@ -128,6 +150,11 @@ export function ConnectionChecklist({
       {install.error ? (
         <Alert variant="destructive">
           <AlertDescription>{install.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+      {authorize.error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{authorize.error.message}</AlertDescription>
         </Alert>
       ) : null}
     </section>
