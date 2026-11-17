@@ -47,6 +47,7 @@ from agentic_api.runs.models import (
     uses_jira,
 )
 from agentic_api.workspaces.models import to_usd
+from agentic_engine.agent import IssueBrief
 from agentic_engine.events import RUN_END_STATUS
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import StepNotFoundError
@@ -352,6 +353,7 @@ async def get(run_id: UUID, request: Request) -> RunDetail:
         sandbox=_sandbox(row.sandbox),
         spec=WorkflowSpec.model_validate(row.spec),
         calls=_calls(row.spec, row.subflows),
+        jira_brief=IssueBrief.model_validate(row.jira_brief) if row.jira_brief else None,
     )
 
 
