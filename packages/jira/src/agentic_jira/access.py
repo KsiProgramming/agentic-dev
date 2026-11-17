@@ -1,10 +1,11 @@
 """`WorkspaceJira`: one workspace's Jira as the platform's `jira` tools use it (7.2).
 
-It reads the connection (sites and picked projects), answers the one allowlist check
+It reads the connection (sites and picked projects) and the projects' field mappings (7.4),
+answers the one allowlist check
 (`agentic_store.jira_project_allowed`), and calls Atlassian with a valid token (`call`: a refresh
 under the row lock, one retry on `401`). Tokens never leave it."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from uuid import UUID
 
 from pydantic import SecretStr
@@ -17,6 +18,7 @@ from agentic_store import (
     JiraConnectionInfo,
     get_jira_connection,
     jira_project_allowed,
+    jira_site_field_mappings,
     record_jira_own_move,
 )
 
@@ -39,6 +41,10 @@ class WorkspaceJira:
 
     async def allowed(self, cloud_id: str, project_key: str) -> bool:
         return await jira_project_allowed(self._sessions, self._workspace_id, cloud_id, project_key)
+
+    async def field_mappings(self, cloud_id: str) -> Mapping[str, Mapping[str, str]]:
+        """The picked projects' mapped fields on the site (7.4): key → role → field id."""
+        return await jira_site_field_mappings(self._sessions, self._workspace_id, cloud_id)
 
     async def call[T](self, request: Callable[[SecretStr], Awaitable[T]]) -> T:
         return await call(self._sessions, self._keys, self.platform, self._workspace_id, request)
