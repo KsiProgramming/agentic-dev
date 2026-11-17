@@ -9,11 +9,11 @@ Contract first, then engine, API and web, then a real run. Each group leaves the
 
 ## 2. Spec model and validation (engine)
 - [ ] `agentic_engine/spec/models.py`: `kind` gains `"spec_file"`; JSON Schema export and the web's generated types updated
-- [ ] Validation: `spec-input.md` counts as written before the first step when `input.kind == "spec_file"`; a node writing it is `artifact_conflict`; `{spec}` accepted in `repo.commitArtifacts.dir` (and refused when the workflow's input is not a spec file)
+- [ ] Validation: `spec-input.md` counts as written before the first step when `input.kind == "spec_file"`; a node writing it is `artifact_conflict`; `{spec}` accepted in `repo.commitArtifacts.dir` (a run with no spec file fails the step at run time, as `{issue}` does)
 - [ ] Engine tests for the three rules; `schemas/fixtures` updated if the port-check fixtures need it
 
 ## 3. Engine: seed artifact, run context, `{spec}`
-- [ ] The run's start writes `spec-input.md` v1 through the `ArtifactStore` with `node_id: null` and logs `artifact_written` (`source: "input"`) before the first step; a resume or a rerun from a step finds it and writes nothing
+- [ ] The run's start writes `spec-input.md` v1 through the `ArtifactStore` by the writer `$input` and logs `artifact_written` (`source: "input"`) before the first step; a resume or a rerun from a step finds it and writes nothing
 - [ ] `agentic_engine/agent.py`: `SpecFile` model (`source`, `name`, `path`, `text`) and `RunContext.spec`, with `_spec_text()` (tags, data wording, cap and the "full file is `spec-input.md`" note); the Claude adapter needs no change beyond `RunContext.text()`
 - [ ] `agentic_engine/commit.py`: `{spec}` slug (first `# ` heading, else file stem; reuse the `{issue}` slug helper)
 - [ ] Tests: run-context text with and without a cut; slug cases; seed artifact written once across a resume
@@ -26,7 +26,7 @@ Contract first, then engine, API and web, then a real run. Each group leaves the
 
 ## 5. API and worker
 - [ ] Alembic migration: `runs.spec_file` (JSONB, nullable)
-- [ ] `POST /runs`: parse `spec_file`, check the caps, read a repo path through the GitHub App contents API at the ref (fake GitHub in tests), store the seed artifact and `runs.spec_file` in the run's transaction; the refusals of requirements.md
+- [ ] `POST /runs`: parse `spec_file`, check the caps, read a repo path through the GitHub App contents API at the ref (fake GitHub in tests), store `runs.spec_file` (with the text) in the run's transaction, for the worker to give the engine; the refusals of requirements.md
 - [ ] Rerun (`POST /runs/{id}/rerun` and from a step): copy the stored artifact and `runs.spec_file`, never read the repo again
 - [ ] Worker: build `RunContext.spec` from the stored artifact; `GET /runs/{id}` returns `spec_file` (without the content) so the console can show the source
 - [ ] **AC test** `test_done_when_a_spec_file_run_opens_a_pr` (worker, fakes): an uploaded spec, no Jira connection in the workspace, fake GitHub; approve both gates through the API; the run opens a PR whose diff holds `specs/<slug>/spec.md`, `plan.md` and `tasks.md`

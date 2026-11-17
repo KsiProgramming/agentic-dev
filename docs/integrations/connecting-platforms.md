@@ -103,6 +103,13 @@ What to know:
 
 The links in that comment are made by the platform from the pull request it opened, never written by an agent. Everything it posts appears as written by the connected Jira account.
 
+**Spec files instead of Jira (7.7).** The **Build from a spec file** template does the same from a Markdown file, with no Jira connection (it needs Claude and GitHub). In its New run sheet, under **Which spec?**, choose:
+
+- **Upload**: a `.md` or `.markdown` file from your computer, up to 256 KB; or
+- **From the repo**: a path from the repository's root, such as `docs/spec.md`, read from the run's branch when the run starts.
+
+The run keeps the file (a rerun uses the same one, even if the repo changed since) and every agent is told it as data, never as instructions. The spec writer rewrites it in Spec Kit's layout, keeping every requirement it states; its open questions (`[NEEDS CLARIFICATION: …]`) are for you to answer at the spec gate: approve to build with the assumptions it makes, or reject, change your file and start again. The specification, plan and tasks are committed to `specs/<your file's title>/` (its first `# ` heading as a slug, else the file's name), and after you approve the diff one pull request opens. Nothing is posted anywhere else.
+
 **Review comments that start a follow-up (7.6).** On a pull request a **Build from a Jira issue** run opened, anyone with write access to the repo can write `@<your app's slug> fix this` (for example `@acme-agentic-dev fix this`) in a comment, a review or an inline comment. The platform:
 
 1. reacts 👀 to the comment and starts a follow-up run, listed as "GitHub · PR #42 review" and linked as "Follow-up of <id>";

@@ -4,8 +4,9 @@
 > An SDD run started from an uploaded spec file, with no Jira connection, opens a PR that implements it
 
 ## Automated checks
-- [ ] **AC test** (worker, on the fake GitHub, no Atlassian connection in the workspace): `test_done_when_a_spec_file_run_opens_a_pr` starts `sdd-spec-file` with an uploaded spec through `POST /runs`, approves `approve_spec` and `approve_pr` through the API, and the run completes with a PR whose diff holds `specs/<slug>/spec.md`, `plan.md` and `tasks.md`, `<slug>` taken from the file's first heading
+- [ ] **AC test** (worker, on the fake GitHub, no Atlassian connection in the workspace): `test_done_when_a_spec_file_run_opens_a_pr` creates a run of `sdd-spec-file` with an uploaded spec (as `POST /runs` stores it), approves `approve_spec` and `approve_pr` as the API records them, and the run completes with a PR whose diff holds `specs/<slug>/spec.md`, `plan.md` and `tasks.md`, `<slug>` taken from the file's first heading
 - [ ] **What agents receive** (engine, lessons rule 1, required by the repo): the spec writer's request holds the file between `<spec-file>` tags and reads `spec-input.md`; every later agent has it in its run context; no agent of the file flavour has a `jira` tool
+- [ ] **`POST /runs` with a spec file** (API, `test_spec_file_runs.py`): an upload and a repo path at the run's ref are kept on the run, `GET /runs/{id}` returns the file without its text, a rerun keeps it, and each refusal answers its code
 - [ ] `sdd`'s existing tests (AC-5, 7.6 follow-up) pass unchanged
 - [ ] Python lint, type check and tests green (`uv run`); `cd web && pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e` (axe and layout screenshots) green, as `CLAUDE.md` requires for a web change
 
