@@ -698,4 +698,4 @@ async def test_moving_an_issue_starts_the_sdd_template_on_it(
     assert run.jira_issue is not None and run.jira_issue["key"] == "API-1"
     spec = cast(dict[str, Any], run.spec)
     steps = [step["id"] for step in spec["root"]["steps"]]
-    assert steps[:3] == ["spec_writer", "approve_spec", "clarify"]
+    assert steps[:2] == ["spec_loop", "clarify"]

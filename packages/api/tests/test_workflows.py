@@ -324,7 +324,13 @@ async def test_applying_ops_produces_a_new_immutable_version(
 
 async def test_a_version_is_stored_with_its_issues(client: AsyncClient, workspace: UUID) -> None:
     await create(client, workspace, spec_json("valid/review-loop.json"))
-    gate = {"type": "gate", "id": "check", "title": "Looks right?"}
+    gate = {
+        "type": "loop",
+        "id": "check",
+        "until": "true",
+        "max_iterations": 2,
+        "body": {"type": "agent", "id": "inner", "role": "R", "instructions": "Go."},
+    }
 
     response = await patch(
         client,

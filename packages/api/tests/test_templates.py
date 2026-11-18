@@ -33,6 +33,7 @@ async def test_lists_the_templates_with_their_options() -> None:
     assert (sdd["input"]["required"], sdd["input"]["kind"]) == (True, "jira_issue")
     assert set(sdd["parameters"]["properties"]) == {
         "max_passes",
+        "max_revisions",
         "move_to",
         "spec_model",
         "planner_model",

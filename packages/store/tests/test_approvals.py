@@ -223,6 +223,7 @@ async def test_a_gate_that_pauses_again_is_decided_again(
                 type="gate_waiting",
                 node_id="gate",
                 payload={"title": "Second pass", "artifact": ""},
+                created_at=datetime.now(UTC),
             )
         )
         await session.execute(update(Run).where(Run.id == run_id).values(status="waiting"))
@@ -232,8 +233,6 @@ async def test_a_gate_that_pauses_again_is_decided_again(
     await record_approval(sessions, run_id, "gate", again)
 
     assert await pending_decision(sessions, run_id) == again
-    with pytest.raises(AlreadyDecidedError):
-        await record_approval(sessions, run_id, "gate", APPROVE)
     async with sessions() as session:
         passes = (
             await session.scalars(

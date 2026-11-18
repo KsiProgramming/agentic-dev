@@ -13,7 +13,7 @@ The plan assumed a gate could sit in a loop; the validator refuses it (`loop_iss
 ## 1. Gate decision "changes" (engine and API)
 - [ ] Read the gate primitive, `POST /runs/{id}/approvals`, the approval models and the gate's output shape (`packages/engine`, `packages/api`) before changing them.
 - [x] Workflow spec: `GateNode.on_changes` (optional; set means Request changes is offered), validation that it is only allowed on a gate inside a loop (it needs a pass to go back to), distinct from `on_reject`. Regenerate the JSON Schema.
-- [x] Approvals API (store, `POST /runs/{id}/approvals` and `GET` gate view with `changes_left`, `iteration`; store and API tests need Docker and were written, not run, on this machine): `decision: "approve" | "reject" | "changes"`; `changes` requires comments (each tagged with the item it concerns: `spec`, `plan`, `prototype`), refused with `422` on a gate without `on_changes`. Approvals row and audit entry record the decision and the comments.
+- [x] Approvals API (store, `POST /runs/{id}/approvals` and `GET` gate view with `changes_left`, `iteration`; store, API and worker tests run against Postgres): `decision: "approve" | "reject" | "changes"`; `changes` requires comments (each tagged with the item it concerns: `spec`, `plan`, `prototype`), refused with `422` on a gate without `on_changes`. Approvals row and audit entry record the decision and the comments.
 - [x] Engine: a `changes` decision completes the gate with `{decision: "changes", comments}` and the loop continues; events (`gate_changes_requested`) carry the comments; waiting time is counted as for an approval (11.2).
 - [x] Policy: `on_changes` is the number of requests the gate takes (validated below the loop's `max_iterations`); the store refuses one past it and the gate view shows `changes_left`.
 
@@ -33,10 +33,10 @@ The plan assumed a gate could sit in a loop; the validator refuses it (`loop_iss
 Changes from the plan while building: the spec writer's answer is the spec (`writes: spec.md`), so `has_ui` is a line in it (`UI work: yes`) that a rule router reads, not a typed field; the comments reach every revising agent through a run artifact (`changes.md`, a gate's `writes` with `on_changes`) because only the first step of a pass receives the gate's text; a gate in a root loop may use `on_reject: end`. "Never published" is kept by the template (the only publish is from `implement`, tested), not by a new validation rule.
 
 ## 4. Tests that assert what agents receive
-- [ ] Engine tests: gate `changes` flow, comments in the next pass's context, cap on revisions, no Request changes past the cap, validation errors.
-- [ ] Template tests: the spec writer's request holds the comments as data after a request for changes; the prototype writer runs only when `has_ui`; no agent but `engineer` and `commit_specs` writes to the integration branch; the prototype branch cannot be published.
-- [ ] Worker AC test on the fake GitHub and Atlassian: a comment sends the spec back, the revised spec is approved and the build runs from it (extends `test_done_when_an_issue_gets_its_spec_plan_and_pr_links`).
-- [ ] Web unit tests for Request changes in the dock and Inbox.
+- [x] Engine tests: gate `changes` flow, comments in the next pass's context, cap on revisions, no Request changes past the cap, validation errors.
+- [x] Template tests: the spec writer's request holds the comments as data after a request for changes; the prototype writer runs only when `has_ui`; no agent but `engineer` and `commit_specs` writes to the integration branch; the prototype branch cannot be published.
+- [x] Worker AC test on the fake GitHub and Atlassian: a comment sends the spec back, the revised spec is approved and the build runs from it (extends `test_done_when_an_issue_gets_its_spec_plan_and_pr_links`).
+- [x] Web unit tests for Request changes in the dock and Inbox.
 
 ## 5. Real run, docs and specs
 - [ ] A real Claude run of SDD on a UI task, read step by step in the console: the gate shows spec, plan and prototype diff; a comment revises; approval drives the build. Add findings to `specs/lessons.md`.
