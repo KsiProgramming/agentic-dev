@@ -18,7 +18,7 @@ from typing import Any, cast
 import jwt
 
 from agentic_jira.errors import JiraDeliveryError
-from agentic_jira.models import DeliveryClaims, IssueEvent
+from agentic_jira.models import COMMENT_CREATED, DeliveryClaims, IssueEvent
 
 ALGORITHM = "HS256"
 LEEWAY_S = 30
@@ -91,6 +91,8 @@ def parse_event(headers: Mapping[str, str], body: bytes) -> IssueEvent:
     if not isinstance(event, str) or not isinstance(issue, dict):
         raise JiraDeliveryError("payload")
     issue = cast(_Json, issue)
+    if event == COMMENT_CREATED:
+        return _comment_event(delivery_id, data, issue, event)
     fields = issue.get("fields")
     fields = cast(_Json, fields) if isinstance(fields, dict) else {}
     issue_id, key = issue.get("id"), issue.get("key")
@@ -118,6 +120,35 @@ def parse_event(headers: Mapping[str, str], body: bytes) -> IssueEvent:
         project_key=project_key,
         status_to=status_to,
         labels_added=labels_added,
+    )
+
+
+def _comment_event(delivery_id: str, data: _Json, issue: _Json, event: str) -> IssueEvent:
+    """A `comment_created` delivery: the issue's key and id, the comment's id and its author's
+    account id. The comment's text is not read. Its payload may carry no project, so the project
+    is the key's prefix."""
+    issue_id, key = issue.get("id"), issue.get("key")
+    comment = data.get("comment")
+    comment = cast(_Json, comment) if isinstance(comment, dict) else {}
+    comment_id = comment.get("id")
+    author = comment.get("author")
+    author_id = cast(_Json, author).get("accountId") if isinstance(author, dict) else None
+    if not (isinstance(issue_id, str) and isinstance(key, str) and isinstance(comment_id, str)):
+        raise JiraDeliveryError("payload")
+    if not _ISSUE_KEY.match(key) or len(delivery_id) > 64 or not comment_id.isdigit():
+        raise JiraDeliveryError("payload")
+    return IssueEvent(
+        delivery_id=delivery_id,
+        event=event,
+        webhook_ids=_ids(data.get("matchedWebhookIds")),
+        account_id=None,
+        issue_id=issue_id,
+        issue_key=key,
+        project_key=key.rsplit("-", 1)[0],
+        status_to=None,
+        labels_added=(),
+        comment_id=comment_id,
+        comment_author_id=author_id if isinstance(author_id, str) else None,
     )
 
 

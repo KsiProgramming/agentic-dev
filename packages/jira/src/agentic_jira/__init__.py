@@ -38,6 +38,7 @@ from agentic_jira.fake import (
     sign_delivery,
 )
 from agentic_jira.models import (
+    COMMENT_CREATED,
     ROLE_SUGGESTED_NAMES,
     ROLES,
     SCOPES,
@@ -77,6 +78,7 @@ from agentic_jira.webhooks import DELIVERY_HEADER, MAX_BODY_BYTES, parse_event, 
 __all__ = [
     "API_URL",
     "AUTH_URL",
+    "COMMENT_CREATED",
     "DELIVERY_HEADER",
     "FAKE_ACCOUNT",
     "FAKE_AC_FIELD",
