@@ -165,9 +165,7 @@ async def test_done_when_a_review_comment_starts_a_follow_up_on_the_same_pr(
             jira_issue=ISSUE,
         )
         await queue(redis_url, original)
-        await through_gates(
-            sessions, redis_url, original, "approve_spec", "post_questions", "approve_pr"
-        )
+        await through_gates(sessions, redis_url, original, "approve_spec", "approve_pr")
         await wait_for_status(sessions, original, "completed")
         branch = f"agent/{original}/implement"
         opened_at = branch_sha(bare, branch)
@@ -226,10 +224,9 @@ async def test_done_when_a_review_comment_starts_a_follow_up_on_the_same_pr(
     opened = next(e for e in events if e.type == "pr_opened")
     assert opened.payload["url"] == PR_URL and opened.payload["updated"] is True
     # Jira: the follow-up commented the links again; the issue was already where it moves to.
-    asked_q, linked, relinked = atlassian.posted
+    linked, relinked = atlassian.posted
     assert relinked.key == "API-1" and f"- Pull request: {PR_URL}" in relinked.body
     assert linked.body.split("\n")[0] == relinked.body.split("\n")[0]
-    assert asked_q.key == "API-1"
     # The second follow-up failed before its first step, and pushed nothing.
     failed = await get_run(sessions, second)
     assert failed is not None and failed.pr_review_brief is None
