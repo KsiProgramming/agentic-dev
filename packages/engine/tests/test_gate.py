@@ -268,3 +268,39 @@ async def test_gate_first_shows_the_run_input() -> None:
 def test_gate_needs_a_checkpointer() -> None:
     with pytest.raises(CompileError, match="gate 'gate' needs a checkpointer"):
         compile_workflow(gated("gate"), FakeRuntime())
+
+
+async def test_a_gate_in_a_loop_pauses_on_every_pass() -> None:
+    """Phase 7.8: a loop's body may hold a gate; it pauses once per pass and the loop goes on."""
+    spec = parse_spec(
+        {
+            "spec_version": "0",
+            "id": "gate-in-loop",
+            "name": "Gate in a loop",
+            "root": {
+                "type": "loop",
+                "id": "revise",
+                "until": "iteration >= 2",
+                "max_iterations": 3,
+                "body": {
+                    "type": "sequence",
+                    "id": "round",
+                    "steps": [
+                        {"type": "agent", "id": "writer", "role": "W", "instructions": "Go."},
+                        {"type": "gate", "id": "check", "title": "Right?"},
+                    ],
+                },
+            },
+        }
+    )
+    run = Run(spec, FakeRuntime({"writer": [Message(text="draft"), ECHO_USAGE] * 2}))
+
+    first = await run.start()
+    second = await run.resume(APPROVE)
+    done = await run.resume(APPROVE)
+
+    assert [first.status, second.status, done.status] == ["waiting", "waiting", "completed"]
+    assert (first.waiting_at, second.waiting_at) == ("check", "check")
+    assert [e.type for e in run.sink.events].count("gate_waiting") == 2
+    assert [e.type for e in run.sink.events].count("gate_decided") == 2
+    assert [r.node_id for r in run.runtime.requests] == ["writer", "writer"]
