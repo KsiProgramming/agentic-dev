@@ -33,7 +33,8 @@
               "router": "#/$defs/RouterNode",
               "sequence": "#/$defs/SequenceNode",
               "subflow": "#/$defs/SubflowNode",
-              "tool": "#/$defs/ToolNode"
+              "tool": "#/$defs/ToolNode",
+              "wait_for": "#/$defs/WaitForNode"
             },
             "propertyName": "type"
           },
@@ -46,6 +47,9 @@
             },
             {
               "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/WaitForNode"
             },
             {
               "$ref": "#/$defs/SequenceNode"
@@ -643,7 +647,8 @@
               "router": "#/$defs/RouterNode",
               "sequence": "#/$defs/SequenceNode",
               "subflow": "#/$defs/SubflowNode",
-              "tool": "#/$defs/ToolNode"
+              "tool": "#/$defs/ToolNode",
+              "wait_for": "#/$defs/WaitForNode"
             },
             "propertyName": "type"
           },
@@ -656,6 +661,9 @@
             },
             {
               "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/WaitForNode"
             },
             {
               "$ref": "#/$defs/SequenceNode"
@@ -737,7 +745,8 @@
               "router": "#/$defs/RouterNode",
               "sequence": "#/$defs/SequenceNode",
               "subflow": "#/$defs/SubflowNode",
-              "tool": "#/$defs/ToolNode"
+              "tool": "#/$defs/ToolNode",
+              "wait_for": "#/$defs/WaitForNode"
             },
             "propertyName": "type"
           },
@@ -750,6 +759,9 @@
             },
             {
               "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/WaitForNode"
             },
             {
               "$ref": "#/$defs/SequenceNode"
@@ -889,7 +901,8 @@
               "router": "#/$defs/RouterNode",
               "sequence": "#/$defs/SequenceNode",
               "subflow": "#/$defs/SubflowNode",
-              "tool": "#/$defs/ToolNode"
+              "tool": "#/$defs/ToolNode",
+              "wait_for": "#/$defs/WaitForNode"
             },
             "propertyName": "type"
           },
@@ -902,6 +915,9 @@
             },
             {
               "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/WaitForNode"
             },
             {
               "$ref": "#/$defs/SequenceNode"
@@ -1041,7 +1057,8 @@
                 "router": "#/$defs/RouterNode",
                 "sequence": "#/$defs/SequenceNode",
                 "subflow": "#/$defs/SubflowNode",
-                "tool": "#/$defs/ToolNode"
+                "tool": "#/$defs/ToolNode",
+                "wait_for": "#/$defs/WaitForNode"
               },
               "propertyName": "type"
             },
@@ -1054,6 +1071,9 @@
               },
               {
                 "$ref": "#/$defs/GateNode"
+              },
+              {
+                "$ref": "#/$defs/WaitForNode"
               },
               {
                 "$ref": "#/$defs/SequenceNode"
@@ -1335,7 +1355,8 @@
               "router": "#/$defs/RouterNode",
               "sequence": "#/$defs/SequenceNode",
               "subflow": "#/$defs/SubflowNode",
-              "tool": "#/$defs/ToolNode"
+              "tool": "#/$defs/ToolNode",
+              "wait_for": "#/$defs/WaitForNode"
             },
             "propertyName": "type"
           },
@@ -1348,6 +1369,9 @@
             },
             {
               "$ref": "#/$defs/GateNode"
+            },
+            {
+              "$ref": "#/$defs/WaitForNode"
             },
             {
               "$ref": "#/$defs/SequenceNode"
@@ -1475,7 +1499,8 @@
                   "router": "#/$defs/RouterNode",
                   "sequence": "#/$defs/SequenceNode",
                   "subflow": "#/$defs/SubflowNode",
-                  "tool": "#/$defs/ToolNode"
+                  "tool": "#/$defs/ToolNode",
+                  "wait_for": "#/$defs/WaitForNode"
                 },
                 "propertyName": "type"
               },
@@ -1488,6 +1513,9 @@
                 },
                 {
                   "$ref": "#/$defs/GateNode"
+                },
+                {
+                  "$ref": "#/$defs/WaitForNode"
                 },
                 {
                   "$ref": "#/$defs/SequenceNode"
@@ -1584,7 +1612,8 @@
                 "router": "#/$defs/RouterNode",
                 "sequence": "#/$defs/SequenceNode",
                 "subflow": "#/$defs/SubflowNode",
-                "tool": "#/$defs/ToolNode"
+                "tool": "#/$defs/ToolNode",
+                "wait_for": "#/$defs/WaitForNode"
               },
               "propertyName": "type"
             },
@@ -1597,6 +1626,9 @@
               },
               {
                 "$ref": "#/$defs/GateNode"
+              },
+              {
+                "$ref": "#/$defs/WaitForNode"
               },
               {
                 "$ref": "#/$defs/SequenceNode"
@@ -1850,6 +1882,138 @@
         "tool"
       ],
       "title": "ToolNode",
+      "type": "object"
+    },
+    "WaitForNode": {
+      "additionalProperties": false,
+      "description": "A step that holds the run until an answer arrives (7.9), in the waiting state of a gate\n(checkpointed, no active time, expires after `ttl_s`) but continued by the platform when the\nanswer is found, never by a person's decision. `jira_comment`: a comment on the run's Jira\nissue, made after the comment the tool node `after_from` posted, by someone other than the\nplatform's account. Every rule about a gate (where it may sit) applies to it.",
+      "properties": {
+        "after_from": {
+          "description": "The `jira.comment` tool node whose comment is the question: only newer comments answer it.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "After From",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "on_changes": {
+          "anyOf": [
+            {
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.",
+          "title": "On Changes"
+        },
+        "on_reject": {
+          "anyOf": [
+            {
+              "enum": [
+                "cancel",
+                "end"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).",
+          "title": "On Reject"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "More guidance for the approver, shown with the input.",
+          "title": "Prompt"
+        },
+        "select": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateSelect"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items."
+        },
+        "title": {
+          "description": "What the approver is asked to decide.",
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "ttl_s": {
+          "anyOf": [
+            {
+              "maximum": 2592000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds to wait for an answer before the run ends as `waiting for answers expired`; 7 days when unset.",
+          "title": "Ttl S"
+        },
+        "type": {
+          "const": "wait_for",
+          "title": "Type",
+          "type": "string"
+        },
+        "wait_for": {
+          "const": "jira_comment",
+          "default": "jira_comment",
+          "title": "Wait For",
+          "type": "string"
+        },
+        "writes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.",
+          "title": "Writes"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "title",
+        "after_from"
+      ],
+      "title": "WaitForNode",
       "type": "object"
     },
     "WorkflowRef": {

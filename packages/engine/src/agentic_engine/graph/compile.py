@@ -150,7 +150,7 @@ from agentic_engine.expr import (
     compile_list,
     compile_value,
 )
-from agentic_engine.gate import GateReview, run_gate_node
+from agentic_engine.gate import GateReview, run_gate_node, run_wait_node
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.graph.state import (
@@ -191,6 +191,7 @@ from agentic_engine.spec import (
     SequenceNode,
     SubflowNode,
     ToolNode,
+    WaitForNode,
     WorkflowSpec,
     agents_spawned,
     classifier_schema,
@@ -784,6 +785,17 @@ async def _run_step(
                 except (ArtifactError, ToolArgsError) as e:
                     return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
                 return await run_tool_node(called, tools, on_event, route_as)
+            case WaitForNode():
+                asked = (results or {}).get(node.after_from) or None
+                comment = (asked.data or {}).get("comment_id") if asked else None
+                brief = limits.issue
+                return await run_wait_node(
+                    node,
+                    input,
+                    brief.key if brief else None,
+                    brief.url if brief else "",
+                    str(comment) if comment else None,
+                )
             case GateNode():
                 return await run_gate_node(
                     node,

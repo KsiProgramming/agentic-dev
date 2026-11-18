@@ -486,6 +486,159 @@
     "composite": null
   },
   {
+    "kind": "wait_for",
+    "label": "Wait for answer",
+    "description": "Holds the run until someone answers a question posted on the Jira issue.",
+    "category": "step",
+    "icon": "hourglass",
+    "parameters": {
+      "$defs": {
+        "GateSelect": {
+          "additionalProperties": false,
+          "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key.",
+          "properties": {
+            "artifact": {
+              "description": "A `.json` run artifact written before the gate, whose items are shown.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "title": "Artifact",
+              "type": "string"
+            },
+            "items": {
+              "default": "findings",
+              "description": "The top-level array field of the artifact that holds the items.",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Items",
+              "type": "string"
+            },
+            "key": {
+              "default": "fingerprint",
+              "description": "The field of each item that names it; items without one cannot be chosen.",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Key",
+              "type": "string"
+            },
+            "preselect": {
+              "minLength": 1,
+              "type": "string",
+              "description": "A CEL condition over `item`: the items checked when the gate opens.",
+              "title": "Preselect"
+            },
+            "min": {
+              "default": 1,
+              "description": "The fewest items an approval selects.",
+              "maximum": 1000,
+              "minimum": 0,
+              "title": "Min",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "artifact"
+          ],
+          "title": "GateSelect",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A step that holds the run until an answer arrives (7.9), in the waiting state of a gate\n(checkpointed, no active time, expires after `ttl_s`) but continued by the platform when the\nanswer is found, never by a person's decision. `jira_comment`: a comment on the run's Jira\nissue, made after the comment the tool node `after_from` posted, by someone other than the\nplatform's account. Every rule about a gate (where it may sit) applies to it.",
+      "properties": {
+        "title": {
+          "description": "What the approver is asked to decide.",
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "More guidance for the approver, shown with the input.",
+          "title": "Prompt"
+        },
+        "ttl_s": {
+          "maximum": 2592000,
+          "minimum": 1,
+          "type": "integer",
+          "description": "Seconds to wait for an answer before the run ends as `waiting for answers expired`; 7 days when unset.",
+          "title": "Time to live (seconds)"
+        },
+        "select": {
+          "$ref": "#/$defs/GateSelect",
+          "description": "Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items.",
+          "title": "Select"
+        },
+        "on_reject": {
+          "enum": [
+            "cancel",
+            "end"
+          ],
+          "type": "string",
+          "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).",
+          "title": "On reject"
+        },
+        "on_changes": {
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer",
+          "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.",
+          "title": "On changes"
+        },
+        "writes": {
+          "description": "With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "type": "string",
+          "title": "Writes"
+        },
+        "wait_for": {
+          "default": "jira_comment",
+          "title": "Wait for",
+          "type": "string",
+          "enum": [
+            "jira_comment"
+          ]
+        },
+        "after_from": {
+          "description": "The `jira.comment` tool node whose comment is the question: only newer comments answer it.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "After from",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "after_from"
+      ],
+      "title": "WaitForNode",
+      "type": "object"
+    },
+    "slots": [],
+    "default": {
+      "type": "wait_for",
+      "id": "wait",
+      "title": "Wait for answers",
+      "wait_for": "jira_comment",
+      "after_from": "ask"
+    },
+    "fill": {},
+    "ui": {
+      "prompt": {
+        "ui:widget": "textarea"
+      },
+      "ttl_s": {
+        "ui:options": {
+          "advanced": true
+        }
+      }
+    },
+    "composite": null
+  },
+  {
     "kind": "sequence",
     "label": "Sequence",
     "description": "Runs its steps in order.",
