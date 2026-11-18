@@ -37,6 +37,8 @@ export function toInboxGate(body: RunGate): InboxGate {
     runArtifacts: parseArtifacts(body.run_artifacts),
     select: parseSelection(body.select),
     onReject: body.on_reject === "end" ? "end" : "cancel",
+    changesLeft: body.changes_left ?? 0,
+    iteration: body.iteration ?? 1,
     repoUrl: body.repo?.url ?? null,
     base: body.base ?? null,
     branches: body.branches.map((b) => ({ nodeId: b.node_id, branch: b.branch })),
@@ -48,10 +50,11 @@ export function toInboxGate(body: RunGate): InboxGate {
 export function useRunGate(
   runId: string,
   nodeId: string | undefined,
-  { baseUrl }: { baseUrl: string },
+  { baseUrl, since }: { baseUrl: string; since?: string | null },
 ) {
   return useQuery({
-    queryKey: ["run-gate", runId, nodeId],
+    // `since` (when the gate expires) tells one pass of a gate in a loop from the next (7.8).
+    queryKey: ["run-gate", runId, nodeId, since ?? null],
     queryFn: async () => {
       let result;
       try {

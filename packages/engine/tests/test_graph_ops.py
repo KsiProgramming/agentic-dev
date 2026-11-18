@@ -427,10 +427,10 @@ def test_failing_op_names_its_index_and_changes_nothing() -> None:
 
 
 def test_result_may_have_structure_issues() -> None:
-    # Only the schema is enforced: a gate inside a loop is for `validate_workflow` to report,
+    # Only the schema is enforced: a loop inside a loop is for `validate_workflow` to report,
     # and the canvas shows it.
     doc = spec(seq("main", loop("l", agent("a"))))
-    gate = {"type": "gate", "id": "g", "title": "Go?"}
+    gate = loop("g", agent("inner"))
     result = apply(
         doc,
         {"op": "addNode", "node": gate},

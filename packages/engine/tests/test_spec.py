@@ -88,11 +88,8 @@ INVALID: dict[str, Rejection] = {
         (), "value_error", "loop 'revise' at root: invalid until: syntax error at column 15"
     ),
     "loop-too-many-iterations": Rejection(("root", "loop", "max_iterations"), "less_than_equal"),
-    "loop-with-gate": Rejection(
-        (), "value_error", "gate 'check' at root.body.steps[1] cannot be inside a loop"
-    ),
-    "loop-with-writer": Rejection(
-        (), "value_error", "writer 'writer' at root.body cannot be inside a loop"
+    "loop-with-publisher": Rejection(
+        (), "value_error", "publisher 'publish' at root.body.steps[2] cannot be inside a loop"
     ),
     "nested-loop": Rejection(
         (), "value_error", "loop 'outer' at root: loop 'inner' at root.body cannot be inside"

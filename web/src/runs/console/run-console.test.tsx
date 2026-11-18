@@ -496,6 +496,65 @@ test("rejecting asks first, with an optional comment sent with the decision", as
   });
 });
 
+test("a gate that takes requests for changes sends comments on what it showed", async () => {
+  const fetch = api(detail({ status: "waiting" }), async () =>
+    json({ run_id: RUN_ID, node_id: "gate", decision: "changes", status: "queued" }, 202),
+  );
+  const source = show();
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({ ...runEvent(2, "node_started"), node_id: "gate" });
+    source.emit({
+      ...runEvent(3, "gate_waiting", {
+        title: "Approve the spec?",
+        artifact: "# Spec",
+        on_changes: 2,
+        run_artifacts: [
+          {
+            name: "spec.md",
+            version: 1,
+            writer: "spec",
+            size: 10,
+            created_at: "2026-11-18T10:00:00Z",
+          },
+          {
+            name: "plan.md",
+            version: 1,
+            writer: "spec",
+            size: 10,
+            created_at: "2026-11-18T10:00:00Z",
+          },
+        ],
+      }),
+      node_id: "gate",
+    });
+  });
+  const dock = screen.getByRole("region", { name: "Approval needed" });
+
+  fireEvent.click(within(dock).getByRole("button", { name: /Request changes/ }));
+  const dialog = await screen.findByRole("dialog", { name: /Request changes/ });
+  const send = within(dialog).getByRole("button", { name: "Send comments" });
+  expect((send as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(within(dialog).getByLabelText("plan.md"), {
+    target: { value: "  List the risks.  " },
+  });
+  fireEvent.click(send);
+
+  await within(dock).findByText(/Changes requested\. The run carries on/);
+  expect(await approvals(fetch)[0]!.json()).toEqual({
+    node_id: "gate",
+    decision: "changes",
+    comments: [{ item: "plan.md", text: "List the risks." }],
+  });
+});
+
+test("a gate that takes no request for changes has no such button", async () => {
+  api(detail({ status: "waiting" }));
+  waitAtGate(show());
+  const dock = screen.getByRole("region", { name: "Approval needed" });
+  expect(within(dock).queryByRole("button", { name: /Request changes/ })).toBeNull();
+});
+
 test("Review details shows the gate's artifact as Markdown, without its HTML", async () => {
   api(detail({ status: "waiting" }));
   const source = show();

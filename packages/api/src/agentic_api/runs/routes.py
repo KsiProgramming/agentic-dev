@@ -948,6 +948,8 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
         branches=[GateBranch(node_id=w, branch=branch_name(run_id, w)) for w in writers],
         select=pending.select,
         on_reject="end" if pending.on_reject == "end" else "cancel",
+        changes_left=pending.changes_left,
+        iteration=pending.iteration,
     )
 
 
@@ -1055,9 +1057,16 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
     stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision. A
     selection gate's approval names the items chosen (`selection`, 6.7); with `on_reject: end`
     a rejection completes the run instead of cancelling it."""
-    decision = GateDecision(
-        decision=body.decision, comment=body.comment, edits=body.edits, selection=body.selection
-    )
+    try:
+        decision = GateDecision(
+            decision=body.decision,
+            comment=body.comment,
+            comments=body.comments,
+            edits=body.edits,
+            selection=body.selection,
+        )
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     try:
         recorded = await record_approval(_sessions(request), run_id, body.node_id, decision)
     except RunNotFoundError as e:

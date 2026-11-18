@@ -36,7 +36,7 @@ from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import RunEvent
-from agentic_engine.gate import FileEdit, GateDecision
+from agentic_engine.gate import FileEdit, GateComment, GateDecision
 from agentic_engine.graph import Checkpointer, checkpoint_serde
 from agentic_engine.logging import JsonFormatter
 from agentic_engine.policy import PolicyOverrides
@@ -2691,6 +2691,81 @@ async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
     changes = cast(list[dict[str, Any]], (waiting.payload or {})["changes"])
     shown = {c["path"] for c in changes}
     assert {"gateway/limits.py", f"{SDD_FOLDER}/spec.md"} <= shown
+
+
+async def test_a_comment_at_the_spec_gate_sends_the_spec_back_and_the_revision_is_built(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    master_key: Path,
+) -> None:
+    """Phase 7.8 on fakes: the spec gate takes a request for changes (stored per pass), the run
+    comes back to the same gate, and the revised spec is approved and built."""
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    remote = bare_remote(repos / "hello", tmp_path / "remote.git")
+    github = FakeGithub(GITHUB_TOKEN)
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+    atlassian = FakeAtlassian("")
+    workspace_id = await jira_workspace(sessions, atlassian, master_key)
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+    ask = GateComment(item="plan.md", text="List the risks of the rate limit.")
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=sdd_team,
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: remote,
+        master_key_file=master_key,
+        jira=atlassian,
+        web_base_url="https://agentic.example",
+    ):
+        run_id = await create_run(
+            sessions,
+            build_sdd_spec(SddParams()),
+            "API-1",
+            RepoSource(url=GITHUB_URL),
+            workspace_id=workspace_id,
+            jira_issue={
+                "cloud_id": "fake-cloud-acme",
+                "site": "acme.atlassian.net",
+                "key": "API-1",
+                "url": "https://acme.atlassian.net/browse/API-1",
+            },
+        )
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+            decisions = [
+                ("approve_spec", GateDecision(decision="changes", comments=[ask])),
+                ("approve_spec", GateDecision(decision="approve")),
+                ("post_questions", GateDecision(decision="approve")),
+                ("approve_pr", GateDecision(decision="approve")),
+            ]
+            for gate, decision in decisions:
+                await wait_for_gate(sessions, run_id, gate)
+                await record_approval(sessions, run_id, gate, decision)
+                await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    waits = [e for e in events if e.type == "gate_waiting" and e.node_id == "approve_spec"]
+    assert len(waits) == 2 and waits[0].payload["on_changes"] == 2
+    decided = [e for e in events if e.type == "gate_decided" and e.node_id == "approve_spec"]
+    assert [e.payload["decision"] for e in decided] == ["changes", "approve"]
+    assert decided[0].payload["comments"] == [ask.model_dump()]
+    written = [e for e in events if e.type == "artifact_written" and e.node_id == "approve_spec"]
+    assert [e.payload["name"] for e in written] == ["changes.md"]
+    assert "gateway/limits.py" in remote_files(tmp_path / "remote.git", f"agent/{run_id}/implement")
+    [pull] = github.opened
+    assert pull["title"] == "Spec-driven change from a Jira issue"
 
 
 # --- Build from a spec file (7.7) ----------------------------------------------------------------

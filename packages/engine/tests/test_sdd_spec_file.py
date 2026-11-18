@@ -286,9 +286,7 @@ def test_the_steps_are_sdds_without_the_jira_ones() -> None:
     nodes = _nodes(spec)
 
     assert [step.id for step in spec.root.steps] == [  # type: ignore[union-attr]
-        "spec_writer",
-        "approve_spec",
-        "planner",
+        "spec_loop",
         "tasker",
         "review_loop",
         "commit_specs",
@@ -308,7 +306,7 @@ def test_the_steps_are_sdds_without_the_jira_ones() -> None:
 def test_only_the_engineers_and_the_commit_write_and_the_publish_is_gated() -> None:
     order = [node for _, node in iter_nodes(build_sdd_file_spec(SddFileParams()).root)]
 
-    assert [n.id for n in order if WRITE_TOOLS & set(node_tools(n))] == ["engineer"]
+    assert [n.id for n in order if WRITE_TOOLS & set(node_tools(n))] == ["prototype", "engineer"]
     assert [n.id for n in order if COMMIT_TOOLS & set(node_tools(n))] == ["commit_specs"]
     assert [n.id for n in order if PUBLISH_TOOLS & set(node_tools(n))] == ["publish"]
     assert [n.id for n in order if isinstance(n, GateNode)] == ["approve_spec", "approve_pr"]
@@ -399,10 +397,11 @@ async def test_the_file_is_written_once_before_the_first_step() -> None:
     await run.start()
 
     types = [(e.type, e.node_id) for e in run.sink.events]
-    assert types[:3] == [
+    assert types[:4] == [
         ("run_started", None),
         ("artifact_written", None),
-        ("node_started", "spec_writer"),
+        ("node_started", "spec_loop"),
+        ("loop_iteration_started", "spec_loop"),
     ]
     written = run.sink.events[1].payload
     assert (written["name"], written["version"], written["source"]) == (

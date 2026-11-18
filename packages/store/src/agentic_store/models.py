@@ -617,17 +617,23 @@ class WorkflowPublication(Base):
 
 class Approval(Base):
     """A human decision at a gate of a run, `approve` or `reject`; the paused run continues with
-    it. One per gate and run: gates inside loops and maps will need an iteration key."""
+    it. One per pass of a gate in a run: `iteration` is 1 for a gate that runs once, and counts
+    the pauses of a gate in a loop's body (7.8). Gates in maps will need a further key."""
 
     __tablename__ = "approvals"
     __table_args__ = (
-        UniqueConstraint("run_id", "node_id", name="uq_approvals_run_id_node_id"),
-        CheckConstraint("decision IN ('approve', 'reject')", name="ck_approvals_decision"),
+        UniqueConstraint(
+            "run_id", "node_id", "iteration", name="uq_approvals_run_id_node_id_iteration"
+        ),
+        CheckConstraint(
+            "decision IN ('approve', 'reject', 'changes')", name="ck_approvals_decision"
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id"))
     node_id: Mapped[str] = mapped_column(String(64))
+    iteration: Mapped[int] = mapped_column(Integer, server_default="1")
     decision: Mapped[str] = mapped_column(String(16))
     comment: Mapped[str | None] = mapped_column(Text)
     # Who decided; unset until users and auth exist.
@@ -636,6 +642,8 @@ class Approval(Base):
     edits: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     # A selection gate's approval: the keys of the items chosen (6.7); NULL for other gates.
     selection: Mapped[list[str] | None] = mapped_column(JSONB)
+    # A request for changes' comments (7.8, `GateComment`s as JSON); NULL for other decisions.
+    comments: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

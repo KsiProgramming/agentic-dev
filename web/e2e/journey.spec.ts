@@ -69,6 +69,8 @@ test("connect, start a docs run, reject, rerun and approve, rerun from the list"
   await expect(shown(page, "run-status")).toHaveAttribute("data-status", "cancelled", {
     timeout: 60_000,
   });
+  // The console opens on the last step that finished; the gate's step holds the comment.
+  await page.getByRole("button", { name: /^Cancelled approve/ }).click();
   await expect(page.getByText(/Rejected: Not this time\./)).toBeVisible();
 
   // 4. Rerun it from the console: the rerun links back, waits at its gate, and is approved.

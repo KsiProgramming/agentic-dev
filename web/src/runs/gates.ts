@@ -83,6 +83,11 @@ export interface PendingGate {
   select: GateSelection | null;
   /** What rejecting does: cancel the run, or end it here as completed (6.7). */
   onReject: "cancel" | "end";
+  /** How many more times the approver may send the work back with comments (7.8); 0 offers
+   * Approve and Reject only. */
+  changesLeft: number;
+  /** Which pass of the gate this is: a gate in a loop pauses once per pass (7.8). */
+  iteration: number;
 }
 
 const STATUSES: readonly FileChangeStatus[] = ["added", "modified", "deleted", "renamed"];
@@ -165,7 +170,11 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         run_artifacts,
         select,
         on_reject,
+        on_changes,
       } = event.payload ?? {};
+      const iteration = events
+        .slice(0, i + 1)
+        .filter((e) => e.type === "gate_waiting" && e.node_id === event.node_id).length;
       return {
         nodeId: event.node_id,
         title: typeof title === "string" ? title : "Approve?",
@@ -180,6 +189,8 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         runArtifacts: parseArtifacts(run_artifacts),
         select: parseSelection(select),
         onReject: on_reject === "end" ? "end" : "cancel",
+        changesLeft: typeof on_changes === "number" ? Math.max(on_changes - iteration + 1, 0) : 0,
+        iteration,
       };
     }
   }

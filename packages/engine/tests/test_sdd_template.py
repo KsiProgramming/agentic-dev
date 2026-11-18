@@ -23,7 +23,7 @@ from pydantic import JsonValue, ValidationError
 from agentic_engine.agent import IssueBrief, ReviewBrief, ReviewComment, RunContext
 from agentic_engine.artifacts import InMemoryArtifactStore
 from agentic_engine.events import InMemoryEventSink
-from agentic_engine.gate import FileChange, FileEdit, GateDecision
+from agentic_engine.gate import FileChange, FileEdit, GateComment, GateDecision
 from agentic_engine.graph import checkpoint_serde, rerun_workflow, resume_workflow, run_workflow
 from agentic_engine.policy import PLATFORM_POLICY
 from agentic_engine.spec import (
@@ -114,10 +114,8 @@ def test_the_steps_follow_spec_kit_and_the_roadmap_row() -> None:
     root = build_sdd_spec(SddParams(move_to="In Review")).root
 
     assert [step.id for step in root.steps] == [  # type: ignore[union-attr]
-        "spec_writer",
-        "approve_spec",
+        "spec_loop",
         "clarify",
-        "planner",
         "tasker",
         "review_loop",
         "commit_specs",
@@ -128,6 +126,21 @@ def test_the_steps_follow_spec_kit_and_the_roadmap_row() -> None:
     ]
     nodes = _nodes(build_sdd_spec(SddParams()))
     assert nodes["approve_spec"].on_reject == "end"
+    assert nodes["approve_spec"].on_changes == 2  # 7.8: `max_revisions`
+    assert nodes["approve_spec"].writes == "changes.md"
+    assert nodes["spec_loop"].max_iterations == 3
+    assert nodes["spec_loop"].until == 'results.approve_spec.data.decision != "changes"'
+    assert [n.id for _, n in iter_nodes(nodes["spec_loop"])][1:] == [
+        "spec_round",
+        "spec_writer",
+        "planner",
+        "ui",
+        "prototype",
+        "approve_spec",
+    ]
+    ui: RouterNode = nodes["ui"]
+    assert ui.otherwise == "skip"
+    assert ui.routes[0].when == 'results.spec_writer.text.contains("UI work: yes")'
     clarify: RouterNode = nodes["clarify"]
     assert clarify.otherwise == "skip"
     assert clarify.routes[0].when == 'results.spec_writer.text.contains("[NEEDS CLARIFICATION")'
@@ -139,11 +152,22 @@ def test_the_steps_follow_spec_kit_and_the_roadmap_row() -> None:
     assert nodes["jira_update"].args["links_from"] == {"pr": "publish", "files": "commit_specs"}
 
 
+def publishers_from(spec: WorkflowSpec) -> list[str]:
+    """The writers whose branches the publishing tool nodes of `spec` push."""
+    return [
+        str(n.args["from_node"])
+        for _, n in iter_nodes(spec.root)
+        if isinstance(n, ToolNode) and n.tool in PUBLISH_TOOLS
+    ]
+
+
 def test_only_the_engineers_and_the_commit_write_and_every_irreversible_step_is_gated() -> None:
     spec = build_sdd_spec(SddParams(move_to="Done"))
     order = [node for _, node in iter_nodes(spec.root)]
     writers = [n.id for n in order if WRITE_TOOLS & set(node_tools(n))]
-    assert writers == ["engineer"]
+    assert writers == ["prototype", "engineer"]
+    # The prototype is throwaway (7.8): nothing publishes its branch, only the integration one.
+    assert publishers_from(spec) == ["implement"]
     assert [n.id for n in order if COMMIT_TOOLS & set(node_tools(n))] == ["commit_specs"]
     publishers = [n for n in order if PUBLISH_TOOLS & set(node_tools(n))]
     assert [n.id for n in publishers] == ["publish"]
@@ -155,6 +179,7 @@ def test_only_the_engineers_and_the_commit_write_and_every_irreversible_step_is_
     assert ids.index("commit_specs") < ids.index("approve_pr") < ids.index("publish")
     gates = [n.id for n in order if isinstance(n, GateNode)]
     assert gates == ["approve_spec", "post_questions", "approve_pr"]
+    assert ids.index("planner") < ids.index("approve_spec") < ids.index("tasker")
 
 
 def test_every_agent_that_checks_code_reads_it_and_knows_what_it_is_given() -> None:
@@ -291,7 +316,9 @@ class SddRun:
     async def start(self) -> Any:
         return await run_workflow(self.spec, self.runtime, "PROJ-12", **self.common)
 
-    async def decide(self, decision: str = "approve") -> Any:
+    async def decide(
+        self, decision: str = "approve", comments: list[GateComment] | None = None
+    ) -> Any:
         self.attempt += 1
         return await resume_workflow(
             self.spec,
@@ -299,7 +326,7 @@ class SddRun:
             "PROJ-12",
             next_seq=self.sink.events[-1].seq + 1,
             attempt=self.attempt,
-            decision=GateDecision(decision=decision),  # type: ignore[arg-type]
+            decision=GateDecision(decision=decision, comments=comments or []),  # type: ignore[arg-type]
             **self.common,
         )
 
@@ -335,6 +362,66 @@ async def test_a_run_specs_asks_plans_builds_and_links_the_pr_on_the_issue() -> 
     assert f"- [{folder}/spec.md]({PR_URL}/files#diff-{anchor})" in body
     assert body.count(f"{PR_URL}/files#diff-") == 3
     assert moved == {"issue": "PROJ-12", "to": "In Review"}
+
+
+UI_SPEC = SPEC_TEXT.replace("PROJ-12\n", "PROJ-12\n\nUI work: yes\n")
+
+
+async def test_done_when_the_spec_gate_shows_plan_and_prototype_and_a_comment_revises() -> None:
+    """Phase 7.8: the spec gate follows the spec, the plan and (for UI work) a prototype; a
+    request for changes sends them back with the comments, and the revised spec drives the build."""
+    run = SddRun(spec_writer=UI_SPEC, prototype="Made prototype/index.html.")
+
+    assert (await run.start()).status == "waiting"
+    assert run.waiting_at() == "approve_spec"
+    first = [e.node_id for e in run.sink.events if e.type == "node_completed"]
+    assert first == ["spec_writer", "planner", "prototype", "ui"]
+    comments = [
+        GateComment(item="spec.md", text="Say who exports."),
+        GateComment(item="prototype", text="Add a download button."),
+    ]
+
+    assert (await run.decide("changes", comments)).status == "waiting"
+    assert run.waiting_at() == "approve_spec"
+
+    got = run.runtime.requests
+    asked = "## spec.md\n\n- Say who exports.\n\n## prototype\n\n- Add a download button."
+    assert got["spec_writer"].input == asked
+    stored = await run.common["artifacts"].get("changes.md")
+    assert stored is not None and stored.content == asked
+    assert {"artifacts.list", "artifacts.read"} <= set(got["spec_writer"].tools)
+    assert "changes.md" in got["spec_writer"].instructions
+    assert "changes.md" in got["prototype"].instructions
+    assert [e.type for e in run.sink.events].count("gate_waiting") == 2
+
+    assert (await run.decide()).status == "waiting"
+    assert run.waiting_at() == "post_questions"
+    assert (await run.decide()).status == "waiting"
+    assert (await run.decide()).status == "completed"
+    assert got["tasker"].input
+    # The prototype's branch is never pushed: the only pull request is from the integration one.
+    opened = [args for name, args in run.platform.calls if name == "github.openPR"]
+    assert [a["from_node"] for a in opened] == ["implement"]
+
+
+async def test_a_change_without_a_user_interface_builds_no_prototype() -> None:
+    run = SddRun()
+    await run.start()
+    await run.decide()
+    assert "prototype" not in run.runtime.requests
+    assert run.waiting_at() == "post_questions"
+
+
+async def test_the_gate_takes_only_as_many_requests_for_changes_as_max_revisions() -> None:
+    run = SddRun(SddParams(max_revisions=1))
+    ask = [GateComment(item="spec.md", text="More.")]
+
+    await run.start()
+    assert (await run.decide("changes", ask)).status == "waiting"
+    waits = [e for e in run.sink.events if e.type == "gate_waiting"]
+    assert [w.payload["on_changes"] for w in waits] == [1, 1]
+    # The loop has two passes: a second request would leave no pass to act on it.
+    assert run.spec.root.steps[0].max_iterations == 2  # type: ignore[union-attr]
 
 
 async def test_what_each_agent_receives() -> None:
@@ -386,7 +473,8 @@ async def test_rejecting_the_spec_ends_the_run_before_anything_is_built() -> Non
     ended = await run.decide("reject")
 
     assert ended.status == "completed"
-    assert "planner" not in run.runtime.requests
+    assert "tasker" not in run.runtime.requests
+    assert "engineer" not in run.runtime.requests
     assert run.platform.calls == []
     assert run.review.files == {}
 

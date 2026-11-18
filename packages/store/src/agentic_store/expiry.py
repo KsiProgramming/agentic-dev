@@ -15,8 +15,9 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from agentic_engine.events import GATE_WAITING
 from agentic_store.audit import audit
-from agentic_store.models import Approval, Run
+from agentic_store.models import Approval, Run, RunEventRow
 
 APPROVAL_EXPIRED_REASON: Final = "Approval expired"
 """The `reason` of the `run_cancelled` event of a run whose gate expired."""
@@ -25,8 +26,19 @@ APPROVAL_EXPIRED_REASON: Final = "Approval expired"
 async def expire_gates(sessions: async_sessionmaker[AsyncSession]) -> list[UUID]:
     """Cancel every run waiting at a gate past its expiry with no decision recorded, and return
     their ids, for the caller to enqueue. Each gets a `gate.expired` audit entry."""
+    node = Run.waiting_gate["node_id"].astext
+    # The pass the gate is at: how many times it has paused (7.8), 1 for a gate that runs once.
+    waits = (
+        select(func.greatest(func.count(), 1))
+        .where(
+            RunEventRow.run_id == Run.id,
+            RunEventRow.type == GATE_WAITING,
+            RunEventRow.node_id == node,
+        )
+        .scalar_subquery()
+    )
     decided = select(Approval.run_id).where(
-        Approval.run_id == Run.id, Approval.node_id == Run.waiting_gate["node_id"].astext
+        Approval.run_id == Run.id, Approval.node_id == node, Approval.iteration == waits
     )
     async with sessions.begin() as session:
         runs = (

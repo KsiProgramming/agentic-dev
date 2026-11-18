@@ -44,7 +44,12 @@ test("the API query takes the category's actions and whole local days", () => {
     to: "2026-10-02",
   });
 
-  expect(query.action).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
+  expect(query.action).toEqual([
+    "gate.approved",
+    "gate.rejected",
+    "gate.changes_requested",
+    "gate.expired",
+  ]);
   expect(query.run_id).toBe(RUN);
   expect(query.since).toBe(new Date(2026, 9, 1).toISOString());
   expect(query.until).toBe(new Date(2026, 9, 3).toISOString());

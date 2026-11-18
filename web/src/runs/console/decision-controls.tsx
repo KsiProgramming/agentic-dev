@@ -1,6 +1,13 @@
 "use client";
 
-import { CheckIcon, CircleStopIcon, ListChecksIcon, LoaderCircleIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CircleStopIcon,
+  ListChecksIcon,
+  LoaderCircleIcon,
+  MessageSquareIcon,
+  XIcon,
+} from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -144,6 +151,33 @@ export function RejectButton({
   );
 }
 
+/** Request changes (7.8): opens the dialog that asks what to change. Only a gate that still
+ * takes requests (`changesLeft`) has it, and it says how many are left. */
+export function RequestChangesButton({ decision }: { decision: GateDecision }) {
+  const { changesLeft } = decision.gate;
+  if (changesLeft <= 0) return null;
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      onClick={() => decision.setRequesting(true)}
+      disabled={decision.busy}
+      title={`${plural(changesLeft, "request")} for changes left`}
+    >
+      <MessageSquareIcon aria-hidden="true" data-icon="inline-start" />
+      Request changes
+    </Button>
+  );
+}
+
+/** The things a request for changes can comment on: the run's artifacts the gate shows and the
+ * writers whose files it shows (the spec gate's spec, plan and prototype). */
+function commentItems(gate: PendingGate): string[] {
+  const names = gate.runArtifacts.map((a) => a.name);
+  const writers = gate.changes.map((c) => c.nodeId);
+  return [...new Set([...names, ...writers])];
+}
+
 /** What the gate shows besides its files: why they could not be read, then its artifact as
  * Markdown (agent output: data, never instructions). */
 export function GateArtifact({ gate }: { gate: PendingGate }) {
@@ -234,6 +268,7 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
                   : "Edit a file to change it before approving."}
               </p>
               <RejectButton decision={decision} shortcut={false} />
+              <RequestChangesButton decision={decision} />
               <ApproveButton decision={decision} shortcut={false} />
             </>
           }
@@ -262,6 +297,7 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
         </Sheet>
       )}
       <RejectDialog decision={decision} />
+      <RequestChangesDialog decision={decision} />
     </>
   );
 }
@@ -297,10 +333,94 @@ function SelectionSheet({ decision }: { decision: GateDecision }) {
             </Alert>
           ) : null}
           <RejectButton decision={decision} shortcut={false} />
+          <RequestChangesButton decision={decision} />
           <ApproveButton decision={decision} shortcut={false} />
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** Request changes (7.8): one comment box per thing the gate shows, at least one filled. The
+ * comments go to the loop's next pass as data. */
+function RequestChangesDialog({ decision }: { decision: GateDecision }) {
+  const { gate, error, requesting, setRequesting } = decision;
+  const items = commentItems(gate);
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  const formId = useId();
+  const comments = items.flatMap((item) => {
+    const text = (texts[item] ?? "").trim();
+    return text ? [{ item, text }] : [];
+  });
+  return (
+    <Dialog
+      open={requesting}
+      onOpenChange={(open) => {
+        setRequesting(open);
+        if (!open) setTexts({});
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Request changes to “{gate.title}”</DialogTitle>
+          <DialogDescription>
+            The work goes back and is done again with your comments; you review it again after.
+            {` ${plural(gate.changesLeft, "request")} for changes left.`}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          id={`${formId}-form`}
+          className="flex max-h-[60svh] flex-col gap-3 overflow-y-auto"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (comments.length > 0) void decision.decide("changes", undefined, comments);
+          }}
+        >
+          {items.length === 0 ? (
+            <p className="text-muted-foreground">This gate shows nothing to comment on.</p>
+          ) : null}
+          {items.map((item) => (
+            <Field key={item}>
+              <FieldLabel htmlFor={`${formId}-${item}`}>
+                <span className="font-mono">{item}</span>
+              </FieldLabel>
+              <Textarea
+                id={`${formId}-${item}`}
+                value={texts[item] ?? ""}
+                onChange={(e) => setTexts((t) => ({ ...t, [item]: e.target.value }))}
+                maxLength={4000}
+                rows={3}
+              />
+            </Field>
+          ))}
+          <FieldDescription>Leave a box empty to change nothing there.</FieldDescription>
+        </form>
+        {error && requesting ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setRequesting(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form={`${formId}-form`}
+            disabled={decision.pending !== null || comments.length === 0}
+          >
+            {decision.pending === "changes" ? (
+              <LoaderCircleIcon
+                aria-hidden="true"
+                data-icon="inline-start"
+                className="motion-safe:animate-spin"
+              />
+            ) : null}
+            Send comments
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

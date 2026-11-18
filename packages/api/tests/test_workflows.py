@@ -80,16 +80,16 @@ async def test_a_valid_workflow_has_no_issues_and_shows_the_limits(
 async def test_an_invalid_workflow_is_answered_with_its_issues(
     client: AsyncClient, workspace: UUID
 ) -> None:
-    body = await validate(client, spec_json("invalid/loop-with-gate.json"), workspace)
+    body = await validate(client, spec_json("invalid/loop-with-publisher.json"), workspace)
 
     assert body["valid"] is False
     [issue] = body["issues"]
     assert issue == {
         "code": "not_allowed_in_loop",
-        "path": "root.body.steps[1]",
-        "node_id": "check",
-        "message": "loop 'revise' at root: gate 'check' at root.body.steps[1] cannot be inside "
-        "a loop yet",
+        "path": "root.body.steps[2]",
+        "node_id": "publish",
+        "message": "loop 'revise' at root: publisher 'publish' at root.body.steps[2] cannot be "
+        "inside a loop yet",
         "limit": None,
         "value": None,
         "observed": None,
@@ -108,7 +108,7 @@ async def test_a_spec_off_the_schema_is_answered_not_refused(
 async def test_an_id_other_than_the_specs_is_an_issue_next_to_the_others(
     client: AsyncClient, workspace: UUID
 ) -> None:
-    workflow = spec_json("invalid/loop-with-gate.json")
+    workflow = spec_json("invalid/loop-with-publisher.json")
     response = await client.post(
         "/workflows/other/validate", json={"workflow": workflow, "workspace_id": str(workspace)}
     )
@@ -324,7 +324,13 @@ async def test_applying_ops_produces_a_new_immutable_version(
 
 async def test_a_version_is_stored_with_its_issues(client: AsyncClient, workspace: UUID) -> None:
     await create(client, workspace, spec_json("valid/review-loop.json"))
-    gate = {"type": "gate", "id": "check", "title": "Looks right?"}
+    gate = {
+        "type": "loop",
+        "id": "check",
+        "until": "true",
+        "max_iterations": 2,
+        "body": {"type": "agent", "id": "inner", "role": "R", "instructions": "Go."},
+    }
 
     response = await patch(
         client,

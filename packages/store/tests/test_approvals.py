@@ -8,10 +8,10 @@ from uuid import UUID, uuid4
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_engine.gate import FileChange, FileEdit, GateDecision, GateReview
+from agentic_engine.gate import FileChange, FileEdit, GateComment, GateDecision, GateReview
 from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime import Message
@@ -19,10 +19,12 @@ from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
 from agentic_store import (
     AlreadyDecidedError,
     Approval,
+    ChangesNotAllowedError,
     GateExpiredError,
     InvalidEditsError,
     PostgresEventSink,
     Run,
+    RunEventRow,
     RunNotFoundError,
     RunNotWaitingError,
     WrongGateError,
@@ -201,6 +203,57 @@ async def test_a_gate_is_decided_once(sessions: async_sessionmaker[AsyncSession]
 
     with pytest.raises(AlreadyDecidedError):
         await record_approval(sessions, run_id, "gate", APPROVE)
+
+
+async def test_a_gate_that_pauses_again_is_decided_again(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """A gate in a loop's body (7.8) pauses once per pass, and each pass has its own approval."""
+    run_id = await paused_run(sessions, InMemorySaver(serde=checkpoint_serde()))
+    await record_approval(sessions, run_id, "gate", GateDecision(decision="approve"))
+    # The run goes round the loop and pauses at the same gate again.
+    async with sessions.begin() as session:
+        seq = await session.scalar(
+            select(func.max(RunEventRow.seq)).where(RunEventRow.run_id == run_id)
+        )
+        session.add(
+            RunEventRow(
+                run_id=run_id,
+                seq=(seq or 0) + 1,
+                type="gate_waiting",
+                node_id="gate",
+                payload={"title": "Second pass", "artifact": ""},
+                created_at=datetime.now(UTC),
+            )
+        )
+        await session.execute(update(Run).where(Run.id == run_id).values(status="waiting"))
+    assert await pending_decision(sessions, run_id) is None
+
+    again = GateDecision(decision="reject", comment="not yet")
+    await record_approval(sessions, run_id, "gate", again)
+
+    assert await pending_decision(sessions, run_id) == again
+    async with sessions() as session:
+        passes = (
+            await session.scalars(
+                select(Approval.iteration)
+                .where(Approval.run_id == run_id)
+                .order_by(Approval.iteration)
+            )
+        ).all()
+    assert list(passes) == [1, 2]
+
+
+async def test_a_gate_without_on_changes_takes_no_request_for_changes(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await paused_run(sessions, InMemorySaver(serde=checkpoint_serde()))
+    asked = GateDecision(decision="changes", comments=[GateComment(item="spec", text="More.")])
+
+    with pytest.raises(ChangesNotAllowedError, match="takes no request for changes"):
+        await record_approval(sessions, run_id, "gate", asked)
+
+    assert await pending_decision(sessions, run_id) is None
 
 
 async def test_an_approval_keeps_its_edits_for_the_run(

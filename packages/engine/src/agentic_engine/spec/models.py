@@ -203,17 +203,33 @@ class GateNode(_Base):
         description="What a rejection does: cancel the run (unset), or end it here as completed, "
         "skipping the steps after the gate (a step of the root sequence only).",
     )
+    on_changes: int | None = Field(
+        default=None,
+        ge=1,
+        le=PLATFORM_POLICY.loop_iterations,
+        description="Let the approver send the work back with comments (7.8) at most this many "
+        "times: the gate completes with `data.decision` `changes` and the comments, and the "
+        "loop it is in goes round again. Only a gate in a loop's body.",
+    )
     writes: ArtifactName | None = Field(
         default=None,
-        description="With `select`, store the chosen items as this run artifact.",
+        description="With `select`, store the chosen items as this run artifact. With "
+        "`on_changes` (7.8), store the comments of each request for changes as this artifact "
+        "(Markdown), a new version each time, for the agents that revise to read.",
     )
 
     @model_validator(mode="after")
     def _writes_selection(self) -> Self:
-        if self.writes is not None and self.select is None:
-            raise ValueError(f"gate {self.id!r}: `writes` needs `select`")
-        if self.writes is not None and not self.writes.endswith(".json"):
+        if self.writes is not None and self.select is None and self.on_changes is None:
+            raise ValueError(f"gate {self.id!r}: `writes` needs `select` or `on_changes`")
+        if (
+            self.writes is not None
+            and self.select is not None
+            and not self.writes.endswith(".json")
+        ):
             raise ValueError(f"gate {self.id!r}: `writes` must be a .json artifact")
+        if self.writes is not None and self.select is not None and self.on_changes is not None:
+            raise ValueError(f"gate {self.id!r}: `on_changes` cannot be used with `select`")
         return self
 
 
@@ -236,9 +252,10 @@ class LoopNode(_Base):
     the loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's
     output), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,
     data}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop
-    normally. The body cannot contain gates, writers, publishers or loops: each is keyed by node
-    id, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept
-    per iteration and whose writers all land on its one integration branch."""
+    normally. The body cannot contain publishers, Jira writes or loops: each is keyed by node
+    id, which repeats in every iteration. A gate (7.8: one approval per pass) and a writer (one
+    branch, committed to on every pass) may be in it. It may hold an orchestrator (6.9), whose
+    plans are kept per iteration and whose writers all land on its one integration branch."""
 
     type: Literal["loop"]
     id: NodeId
@@ -1313,10 +1330,11 @@ def _uses_repo(node: Node) -> bool:
 
 def loop_issues(root: Node) -> list[ValidationIssue]:
     """Why the loops under `root` cannot run, in run order (depth first); empty if they can. A
-    loop's `until` must be a valid condition, and its body must not hold a gate, a writer, a
-    publisher, another loop, a map or a parallel: the issue is on that node, which is the one to
-    move. An orchestrator may be in it (6.9): its worker is checked by `orchestrator_issues`, and
-    its writers, which commit on task branches merged into its integration branch, are allowed."""
+    loop's `until` must be a valid condition, and its body must not hold a publisher, a Jira
+    write, a repo creator, another loop, a map or a parallel: the issue is on that node, which
+    is the one to move. A gate (7.8) and a writer may be in it. An orchestrator may be in it
+    (6.9): its worker is checked by `orchestrator_issues`, and its writers, which commit on task
+    branches merged into its integration branch, are allowed."""
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, LoopNode):
@@ -1365,10 +1383,13 @@ def _outside_workers(node: Node, path: str) -> Iterator[tuple[str, Node]]:
 
 
 def _not_in_loop(node: Node) -> str | None:
+    """Why `node` cannot be in a loop's body, or `None`. A gate (7.8: its approval is per pass,
+    `approvals.iteration`) and a writer (it commits onto its one branch each pass, as an
+    orchestrator's integration branch does, 6.9) may be."""
     tools = set(node_tools(node))
     match node:
         case GateNode():
-            return "gate"
+            return None
         case LoopNode():
             return "loop"
         case MapNode():
@@ -1384,9 +1405,20 @@ def _not_in_loop(node: Node) -> str | None:
         case _ if tools & CREATE_TOOLS:
             return "repo creator"
         case _ if tools & WRITE_TOOLS:
-            return "writer"
+            return None
         case _:
             return None
+
+
+def _not_in_map_or_parallel(node: Node) -> str | None:
+    """`_not_in_loop`, and also a gate and a writer, which only a loop's body may hold (7.8)."""
+    if isinstance(node, GateNode):
+        return "gate"
+    if reason := _not_in_loop(node):
+        return reason
+    if not isinstance(node, OrchestratorNode) and set(node_tools(node)) & WRITE_TOOLS:
+        return "writer"
+    return None
 
 
 def map_issues(root: Node) -> list[ValidationIssue]:
@@ -1487,7 +1519,7 @@ def _not_in_map(node: Node) -> str | None:
     match node:
         # A subflow's called nodes are checked as nodes of the map themselves.
         case AgentNode() | ToolNode() | SequenceNode() | RouterNode() | SubflowNode():
-            return _not_in_loop(node)
+            return _not_in_map_or_parallel(node)
         case _:
             return node.type
 
@@ -2247,11 +2279,37 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     return in_run_order(root, issues)
 
 
+def _ending_steps(root: Node) -> set[int]:
+    """The steps where a gate's `on_reject: end` can end the run: those of the root sequence, and
+    (7.8) those of a loop's body that is itself a step there, through nested sequences."""
+    found: set[int] = set()
+
+    def visit(node: Node) -> None:
+        steps = node.steps if isinstance(node, SequenceNode) else [node]
+        for step in steps:
+            found.add(id(step))
+            if isinstance(step, LoopNode):
+                # A loop's body may be one sequence of steps: a gate there ends the run too.
+                visit(step.body)
+
+    visit(root)
+    return found
+
+
 def gate_issues(root: Node) -> list[ValidationIssue]:
     """Why the gates under `root` cannot run (6.7): a `select.preselect` that is not a valid
     condition over `item` (`invalid_expression`), and `on_reject: end` on a gate that is not a
-    step of the root sequence (`invalid_gate`): only there does ending skip to the run's end."""
-    top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else {id(root)}
+    step of the root sequence or of a loop's body there (`invalid_gate`): only there does ending
+    skip to the run's end. An
+    `on_changes` (7.8) needs a gate in a loop's body, with fewer of them than the loop has
+    passes (`invalid_gate`)."""
+    top = _ending_steps(root)
+    in_loop: dict[int, LoopNode] = {}
+    for _, outer in iter_nodes(root):
+        if isinstance(outer, LoopNode):
+            for _, inner in iter_nodes(outer.body):
+                if isinstance(inner, GateNode):
+                    in_loop[id(inner)] = outer
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, GateNode):
@@ -2265,6 +2323,27 @@ def gate_issues(root: Node) -> list[ValidationIssue]:
                     ValidationIssue(
                         code="invalid_expression",
                         path=f"{path}.select.preselect",
+                        node_id=node.id,
+                        message=message,
+                    )
+                )
+        if node.on_changes is not None:
+            loop = in_loop.get(id(node))
+            if loop is None:
+                why = "needs the gate to be in a loop's body, which it sends the work back to"
+            elif node.on_changes >= loop.max_iterations:
+                why = (
+                    f"is at least the {loop.max_iterations} passes of loop {loop.id!r}: it needs "
+                    "a pass left to act on the comments"
+                )
+            else:
+                why = ""
+            if why:
+                message = f"gate {node.id!r} at {path}: on_changes {why}"
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_gate",
+                        path=f"{path}.on_changes",
                         node_id=node.id,
                         message=message,
                     )

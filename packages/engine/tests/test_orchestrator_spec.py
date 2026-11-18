@@ -232,18 +232,14 @@ def test_a_publish_after_the_loop_still_needs_a_gate() -> None:
 @pytest.mark.parametrize(
     ("node", "path"),
     [
-        (agent("plain", tools=["repo.write_file"]), "root.body.steps[2]"),
-        ({"type": "gate", "id": "plain", "title": "Check"}, "root.body.steps[2]"),
         (
             {"type": "tool", "id": "plain", "tool": "github.openPR", "args": {"from_node": "fix"}},
             "root.body.steps[2]",
         ),
     ],
-    ids=["writer", "gate", "publisher"],
+    ids=["publisher"],
 )
-def test_a_plain_writer_gate_or_publisher_in_the_loop_is_still_refused(
-    node: dict[str, Any], path: str
-) -> None:
+def test_a_plain_publisher_in_the_loop_is_still_refused(node: dict[str, Any], path: str) -> None:
     assert ("not_allowed_in_loop", path, "plain") in where(validate(review_loop(node)))
 
 
