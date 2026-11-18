@@ -7,7 +7,7 @@
 - [ ] The run holds after `ask_jira`: status `waiting` at `wait_for_answers`, and `tasker` has not started
 - [ ] Resume by webhook: a `jira:comment_created` from another account resumes the run; a retried delivery does not resume it twice
 - [ ] Resume by direct check: the sweep and `POST /runs/{id}/answers/check` find a newer comment by another account and resume; with none, `found: false` and the run keeps waiting
-- [ ] The platform's own comment (the questions comment, and any later comment ending with its footer); a comment from the connected account without the footer does resume it does not resume the run, by webhook or by check
+- [ ] The platform's own comment (the questions comment, and any later comment ending with its footer) does not resume the run, by webhook or by check; a comment from the connected account without the footer does
 - [ ] A comment on another issue, or in a project not picked, resumes nothing
 - [ ] The timeout: past `answer_ttl_s` the run ends `cancelled` with "Waiting for answers expired" and `tasker` never starts
 - [ ] A restart mid-wait (worker stopped, sandbox kept, checkpoint reloaded) still waits, and still resumes on an answer
