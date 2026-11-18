@@ -2,8 +2,10 @@
 direct check both ask of a run waiting for an answer on an issue.
 
 A comment answers a question when it is newer than the comment the platform posted (Jira's
-comment ids only grow) and its author is not the connected account, the one the platform's
-comments are posted as. The account is asked of Jira when needed; it is not stored."""
+comment ids only grow) and is not itself one of the platform's: those end with the footer line
+`Posted by agentic-dev run …` (`PLATFORM_MARK`). The platform's comments are told apart by that
+line, not by their author: the person who connected Jira is often the one who answers, and an
+answer from the connected account is still an answer."""
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -12,6 +14,9 @@ from agentic_jira.access import WorkspaceJira
 from agentic_jira.platform import JiraPlatform
 from agentic_secrets import KeyProvider
 from agentic_store import WaitingRun, answer_arrived, enqueue_run
+
+PLATFORM_MARK = "Posted by agentic-dev run"
+"""The words every comment the platform posts ends with (`agentic_tools.jira`)."""
 
 
 def newer(comment_id: str, after_comment_id: str) -> bool:
@@ -24,23 +29,21 @@ def newer(comment_id: str, after_comment_id: str) -> bool:
     )
 
 
-async def own_account_id(access: WorkspaceJira) -> str:
-    """The account id the workspace's Jira connection acts as."""
-    account = await access.call(access.platform.account)
-    return account.account_id
+def is_platforms(body: str) -> bool:
+    """Whether `body` is a comment the platform posted: it carries the platform's footer."""
+    return PLATFORM_MARK in body
 
 
 async def answer_found(
     access: WorkspaceJira, cloud_id: str, issue_key: str, after_comment_id: str
 ) -> bool:
     """The direct check: whether the issue's latest comments (`get_issue` reads 20) hold one
-    newer than `after_comment_id` by someone other than the connected account. More than 20
+    newer than `after_comment_id` that is not the platform's own. More than 20
     newer comments cannot all be seen, and at most one of them is ours (the questions), so the
     latest 20 holding none of theirs means no answer."""
-    own = await own_account_id(access)
     issue = await access.call(lambda token: access.platform.get_issue(token, cloud_id, issue_key))
     return any(
-        newer(comment.id, after_comment_id) and comment.author_id != own
+        newer(comment.id, after_comment_id) and not is_platforms(comment.body)
         for comment in issue.comments
     )
 

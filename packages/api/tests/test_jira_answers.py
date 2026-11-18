@@ -19,7 +19,7 @@ from agentic_engine.agent import IssueBrief, RunContext
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.spec import WorkflowSpec, parse_spec
-from agentic_jira import FakeAtlassian
+from agentic_jira import PLATFORM_MARK, FakeAtlassian
 from agentic_runtime import ToolOutput
 from agentic_runtime.fake import FakeRuntime
 from agentic_runtime.testing import ScriptedToolExecutor
@@ -218,12 +218,40 @@ async def test_a_comment_from_someone_else_resumes_the_run(
 async def test_the_platforms_own_comment_does_not_resume_the_run(
     asked: Asked, client: AsyncClient, atlassian: FakeAtlassian, sessions: Sessions
 ) -> None:
-    own = await atlassian.add_comment(SecretStr("fake-jira-access-0001"), ACME, KEY, "more")
+    own = await atlassian.add_comment(
+        SecretStr("fake-jira-access-0001"), ACME, KEY, f"more\n\n_{PLATFORM_MARK} `abc12345`_"
+    )
 
     assert await deliver(client, atlassian, own, "fake-account-1") == 202
 
     assert await asked.status() == "waiting"
     assert (await outcomes(sessions, asked.workspace_id))[-1] == "own_comment"
+
+
+async def test_an_answer_from_the_connected_account_still_resumes_the_run(
+    asked: Asked, client: AsyncClient, atlassian: FakeAtlassian, sessions: Sessions
+) -> None:
+    """The person who connected Jira is often the one who answers: only the platform's footer
+    marks a comment as its own, never its author."""
+    answer = await atlassian.add_comment(
+        SecretStr("fake-jira-access-0001"), ACME, KEY, "Per API key, written by me."
+    )
+
+    assert await deliver(client, atlassian, answer, "fake-account-1") == 202
+
+    assert (await outcomes(sessions, asked.workspace_id))[-1] == "answered"
+    assert await asked.status() == "queued"
+
+
+async def test_check_now_counts_an_answer_from_the_connected_account(
+    asked: Asked, client: AsyncClient, atlassian: FakeAtlassian
+) -> None:
+    await atlassian.add_comment(SecretStr("fake-jira-access-0001"), ACME, KEY, "Per API key.")
+
+    checked = await client.post(f"/runs/{asked.run_id}/answers/check")
+
+    assert checked.json()["found"] is True
+    assert await asked.status() == "queued"
 
 
 async def test_a_comment_older_than_the_question_does_not_resume_the_run(
@@ -265,7 +293,12 @@ async def test_check_now_finds_an_answer_without_a_webhook(
 async def test_check_now_ignores_the_platforms_own_comments(
     asked: Asked, client: AsyncClient, atlassian: FakeAtlassian
 ) -> None:
-    await atlassian.add_comment(SecretStr("fake-jira-access-0001"), ACME, KEY, "a second note")
+    await atlassian.add_comment(
+        SecretStr("fake-jira-access-0001"),
+        ACME,
+        KEY,
+        f"a second note\n\n_{PLATFORM_MARK} `abc12345`_",
+    )
 
     checked = await client.post(f"/runs/{asked.run_id}/answers/check")
 

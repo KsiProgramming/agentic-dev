@@ -18,7 +18,6 @@ A bug in 7.5: `clarify` posts the spec's open questions with `ask_jira` and the 
 
 ### Out of scope
 - Answers from anywhere but Jira comments (Slack, e-mail); "build from a spec file" has no Jira and keeps answering at `approve_spec`.
-- Telling a person's comment from the connected account's own when a person uses that same account (documented in the decisions log).
 - Reminders and @-mentions of the people asked (a later idea).
 
 ## Decisions

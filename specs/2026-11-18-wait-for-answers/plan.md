@@ -16,7 +16,7 @@ Roadmap phase: 7.9. Work in this order; each group ends green (`uv run ruff chec
 
 ## 3. Jira
 - `agentic_jira`: `WEBHOOK_EVENTS` gains `jira:comment_created`; `parse_event` reads only ids (issue key, comment id, author `accountId`); `IssueComment.author_id`; `JiraPlatform.get_issue` unchanged; the fake gets comment events and an author id; existing webhooks are re-registered with the new event on their next renewal (a migration note, and a one-off refresh on start).
-- `api/jira/webhooks.py`: a comment delivery is recorded and deduplicated, dropped for a not-picked project or the connected account's own comment (`own_comment`), else `answer_arrived` for each waiting run on that issue. It never starts a run.
+- `api/jira/webhooks.py`: a comment delivery is recorded and deduplicated, dropped for a not-picked project, else it triggers the same check as "Check now", which ignores the platform's own comments (footer, not account); then `answer_arrived` for each waiting run on that issue. It never starts a run.
 - `api/runs`: `POST /runs/{id}/answers/check` (Check now): `get_issue`, count newer comments by others, resume if any; `409` if the run is not at a `wait_for`.
 
 ## 4. SDD template (`sdd.py`)

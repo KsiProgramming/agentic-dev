@@ -27,16 +27,13 @@ from agentic_jira import (
     IssueEvent,
     JiraDeliveryError,
     JiraPlatform,
-    WorkspaceJira,
+    check_and_answer,
     newer,
-    own_account_id,
     parse_event,
 )
 from agentic_store import (
     JiraOrigin,
     TriggerRunActiveError,
-    answer_arrived,
-    enqueue_run,
     get_jira_connection,
     is_jira_own_move,
     jira_project_allowed,
@@ -47,6 +44,7 @@ from agentic_store import (
     set_jira_delivery_outcome,
     waiting_runs,
 )
+from agentic_store.jira_triggers import DeliveryOutcome
 
 router = APIRouter(tags=["jira"])
 log = logging.getLogger(__name__)
@@ -200,23 +198,23 @@ async def _deliver_comment(
         return "no_waiting_run"
     jira: JiraPlatform | None = request.app.state.jira
     keys = request.app.state.keys
+    # The delivery only says that a comment was made: its text is never read from it. Whether it
+    # is an answer or the platform's own comment is judged from the issue's comments, as the
+    # direct check does.
+    answered = False
     try:
         if jira is None or keys is None:
             raise RuntimeError("no Jira access")
-        own = await own_account_id(WorkspaceJira(sessions, keys, jira, workspace_id))
+        for run in waiting:
+            answered |= await check_and_answer(sessions, keys, jira, request.app.state.redis, run)
     except Exception:
         # The worker's check finds the answer within minutes; guessing could end a wait early.
-        log.warning("could not tell whose comment %s is", comment_id, exc_info=True)
+        log.warning("could not check comment %s for an answer", comment_id, exc_info=True)
         await set_jira_delivery_outcome(sessions, row, "unverified")
         return "unverified"
-    if event.comment_author_id is None or event.comment_author_id == own:
-        await set_jira_delivery_outcome(sessions, row, "own_comment")
-        return "own_comment"
-    await set_jira_delivery_outcome(sessions, row, "answered")
-    for run in waiting:
-        if await answer_arrived(sessions, run.run_id, run.node_id):
-            await enqueue_run(request.app.state.redis, run.run_id)
-    return "answered"
+    outcome: DeliveryOutcome = "answered" if answered else "own_comment"
+    await set_jira_delivery_outcome(sessions, row, outcome)
+    return outcome
 
 
 async def _issue(
