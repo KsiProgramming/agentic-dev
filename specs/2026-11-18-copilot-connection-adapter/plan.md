@@ -7,12 +7,13 @@
 - [ ] Record the results in `specs/2026-11-18-copilot-sdk-terms/findings.md` (a "Spike results" section replacing "Not run") and as decisions-log rows in `specs/tech-stack.md`. If headless use does not work, stop here and record a no-go.
 
 ## 2. Copilot adapter on a fake SDK
-- [ ] Add the pinned SDK to `packages/runtime`; add `packages/runtime/src/agentic_runtime/copilot.py` with `CopilotRuntime` implementing `AgentRuntime`.
-- [ ] Put the SDK behind a small `CopilotClientProtocol` so tests use a fake client (`copilot_fake.py`, as `fake.py` fakes the runtime).
-- [ ] Register the platform's MCP tools as custom tools with the same names, schemas and tool-intent argument as `claude.py` (reuse `tools.py`); turn off built-in tools; answer permission requests from the node's grants and deny and log the rest.
-- [ ] Map SDK events to `text_delta`, `reasoning_delta`, tool call and result events, and the normalised usage event (estimated and flagged when the SDK reports none); support cancel.
-- [ ] Run `contract.py`'s shared tests against `CopilotRuntime` with the fake client, beside the Claude adapter's.
-- [ ] Tests: what the agent receives (system prompt with "# The run", tool schemas, `TOOL_INTENT_INSTRUCTION` or `NO_TOOLS_INSTRUCTION`, `<input>` and `<request>` tags), a denied permission, cancel, and that a token string given to the fake never appears in any emitted event, log record or error text.
+- [x] Add the pinned SDK to `packages/runtime`; add `packages/runtime/src/agentic_runtime/copilot.py` with `CopilotRuntime` implementing `AgentRuntime`.
+- [x] Put the SDK behind a small `CopilotClientProtocol` so tests use a fake client (`copilot_fake.py`, as `fake.py` fakes the runtime).
+- [x] Register the platform's MCP tools as custom tools with the same names, schemas and tool-intent argument as `claude.py` (reuse `tools.py`); turn off built-in tools; answer permission requests from the node's grants and deny and log the rest.
+- [x] Map SDK events to `text_delta`, `reasoning_delta`, tool call and result events, and the normalised usage event (estimated and flagged when the SDK reports none); support cancel.
+- [x] Run `contract.py`'s shared tests against `CopilotRuntime` with the fake client, beside the Claude adapter's.
+- [x] Tests: what the agent receives (system prompt with "# The run", tool schemas, `TOOL_INTENT_INSTRUCTION` or `NO_TOOLS_INSTRUCTION`, `<input>` and `<request>` tags), a denied permission, cancel, and that a token string given to the fake never appears in any emitted event, log record or error text.
+- Notes from building it: the adapter is `copilot.py`, the fake `copilot_fake.py`, the real connector `copilot_sdk.py` (written from the SDK's API, **not yet run against GitHub**; the live spike in group 1 still has to confirm it). The SDK sits behind `CopilotConnector`/`CopilotSession` rather than a single client protocol, so the connector holds the token and nothing else sees it. The `estimated` flag on usage is not added: Copilot has no price table, so `estimated_usd` is `None` ("no price"), and a stream with no usage report gets a zero-token `usage` event; `cost` from the SDK is not mapped until the spike shows what it means. `SdkConnector` is not exported from the package root, so importing `agentic_runtime` does not import the SDK.
 
 ## 3. The personal connection (API)
 - [ ] Migration: the personal connection as a `connections` row (`provider: "github_user"`, one per person, labelled by login) and `runs.copilot_connection_id`.
