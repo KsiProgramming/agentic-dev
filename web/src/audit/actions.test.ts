@@ -308,7 +308,12 @@ test("each category has its actions", () => {
     "jira.trigger_fired",
     "jira.trigger_failed",
   ]);
-  expect(actionsOf("approvals")).toEqual(["gate.approved", "gate.rejected", "gate.expired"]);
+  expect(actionsOf("approvals")).toEqual([
+    "gate.approved",
+    "gate.rejected",
+    "gate.changes_requested",
+    "gate.expired",
+  ]);
   expect(actionsOf("workflows")).toEqual([
     "workflow.created",
     "workflow.updated",

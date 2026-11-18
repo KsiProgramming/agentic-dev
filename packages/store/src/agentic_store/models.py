@@ -625,7 +625,9 @@ class Approval(Base):
         UniqueConstraint(
             "run_id", "node_id", "iteration", name="uq_approvals_run_id_node_id_iteration"
         ),
-        CheckConstraint("decision IN ('approve', 'reject')", name="ck_approvals_decision"),
+        CheckConstraint(
+            "decision IN ('approve', 'reject', 'changes')", name="ck_approvals_decision"
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -640,6 +642,8 @@ class Approval(Base):
     edits: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     # A selection gate's approval: the keys of the items chosen (6.7); NULL for other gates.
     selection: Mapped[list[str] | None] = mapped_column(JSONB)
+    # A request for changes' comments (7.8, `GateComment`s as JSON); NULL for other decisions.
+    comments: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

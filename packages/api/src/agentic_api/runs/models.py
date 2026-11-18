@@ -16,10 +16,12 @@ from agentic_api.workspaces.models import budget_field
 from agentic_engine.agent import IssueBrief, ReviewBrief
 from agentic_engine.artifacts import GateArtifact
 from agentic_engine.gate import (
+    MAX_CHANGE_COMMENTS,
     MAX_REVIEW_FILES,
     EditErrorCode,
     FileChange,
     FileEdit,
+    GateComment,
     SelectionErrorCode,
     SelectionShown,
 )
@@ -304,11 +306,19 @@ class ApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node_id: str = Field(description="The gate the run is waiting at.")
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "reject", "changes"]
     comment: str | None = Field(
         default=None,
         max_length=2000,
         description="Why, recorded with the decision; a rejection's becomes the run's reason.",
+    )
+    comments: list[GateComment] = Field(
+        default_factory=list[GateComment],
+        max_length=MAX_CHANGE_COMMENTS,
+        description="A request for changes (7.8): what to change, each comment on one of the "
+        "things the gate showed; at least one, and only with `changes`. The gate completes and "
+        "the loop it is in goes round again with them. Refused (`409`) on a gate that takes none "
+        "or has taken as many as its `changes_left` allowed.",
     )
     edits: list[FileEdit] = Field(
         default_factory=list[FileEdit],
@@ -327,7 +337,7 @@ class ApprovalRequest(BaseModel):
 class ApprovalResponse(BaseModel):
     run_id: UUID
     node_id: str
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "reject", "changes"]
     status: Literal["queued"] = "queued"
     edited_files: int = Field(
         default=0, description="Files the approval changes: its edits that change a file."
@@ -452,6 +462,14 @@ class RunGate(BaseModel):
     on_reject: Literal["cancel", "end"] = Field(
         default="cancel",
         description="What rejecting does: cancel the run, or end it here as completed.",
+    )
+    changes_left: int = Field(
+        default=0,
+        description="How many more requests for changes the gate takes (7.8): 0 means the "
+        "approver can only approve or reject.",
+    )
+    iteration: int = Field(
+        default=1, description="Which pass of the gate this is: it pauses once per pass in a loop."
     )
 
 

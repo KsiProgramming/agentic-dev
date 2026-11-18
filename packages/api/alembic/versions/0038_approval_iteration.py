@@ -2,6 +2,8 @@
 
 A gate that runs again (in a loop's body) pauses once per pass; its n-th `gate_waiting` event
 is pass n, and the approval that answers it has `iteration` n. Existing rows are pass 1.
+A gate may also be answered with a request for changes: the decision `changes`, with its
+`comments`.
 
 Revision ID: 0038_approval_iteration
 Revises: 0037_run_spec_file
@@ -12,6 +14,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "0038_approval_iteration"
 down_revision: str | None = "0037_run_spec_file"
@@ -23,13 +26,24 @@ def upgrade() -> None:
     op.add_column(
         "approvals", sa.Column("iteration", sa.Integer(), nullable=False, server_default="1")
     )
+    op.add_column("approvals", sa.Column("comments", postgresql.JSONB()))
     op.drop_constraint("uq_approvals_run_id_node_id", "approvals", type_="unique")
     op.create_unique_constraint(
         "uq_approvals_run_id_node_id_iteration", "approvals", ["run_id", "node_id", "iteration"]
     )
+    op.drop_constraint("ck_approvals_decision", "approvals", type_="check")
+    op.create_check_constraint(
+        "ck_approvals_decision", "approvals", "decision IN ('approve', 'reject', 'changes')"
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("ck_approvals_decision", "approvals", type_="check")
+    op.execute("DELETE FROM approvals WHERE decision = 'changes'")
+    op.create_check_constraint(
+        "ck_approvals_decision", "approvals", "decision IN ('approve', 'reject')"
+    )
+    op.drop_column("approvals", "comments")
     op.drop_constraint("uq_approvals_run_id_node_id_iteration", "approvals", type_="unique")
     op.execute(
         "DELETE FROM approvals a USING approvals b "

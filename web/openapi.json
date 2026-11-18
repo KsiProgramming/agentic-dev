@@ -1556,6 +1556,7 @@
                       "repo.created",
                       "gate.approved",
                       "gate.rejected",
+                      "gate.changes_requested",
                       "gate.expired",
                       "sandbox.remove_requested",
                       "sandbox.removed",
@@ -4107,7 +4108,8 @@
             "type": "string",
             "enum": [
               "approve",
-              "reject"
+              "reject",
+              "changes"
             ],
             "title": "Decision"
           },
@@ -4123,6 +4125,15 @@
             ],
             "title": "Comment",
             "description": "Why, recorded with the decision; a rejection's becomes the run's reason."
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/GateComment"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Comments",
+            "description": "A request for changes (7.8): what to change, each comment on one of the things the gate showed; at least one, and only with `changes`. The gate completes and the loop it is in goes round again with them. Refused (`409`) on a gate that takes none or has taken as many as its `changes_left` allowed."
           },
           "edits": {
             "items": {
@@ -4173,7 +4184,8 @@
             "type": "string",
             "enum": [
               "approve",
-              "reject"
+              "reject",
+              "changes"
             ],
             "title": "Decision"
           },
@@ -4248,6 +4260,7 @@
               "repo.created",
               "gate.approved",
               "gate.rejected",
+              "gate.changes_requested",
               "gate.expired",
               "sandbox.remove_requested",
               "sandbox.removed",
@@ -5177,6 +5190,30 @@
         ],
         "title": "GateBranch"
       },
+      "GateComment": {
+        "properties": {
+          "item": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Item"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "item",
+          "text"
+        ],
+        "title": "GateComment",
+        "description": "One comment of a request for changes (7.8): on `item`, one of the things the gate showed\n(for the spec gate `spec`, `plan` or `prototype`), and what to change. Data for the agent\nthat revises, never instructions to the platform."
+      },
       "GateNode": {
         "properties": {
           "type": {
@@ -5246,6 +5283,20 @@
             ],
             "title": "On Reject",
             "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only)."
+          },
+          "on_changes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Changes",
+            "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body."
           },
           "writes": {
             "anyOf": [
@@ -6436,7 +6487,7 @@
           "max_iterations"
         ],
         "title": "LoopNode",
-        "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id \u2192 `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain gates, writers, publishers or loops: each is keyed by node\nid, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept\nper iteration and whose writers all land on its one integration branch."
+        "description": "Runs its body again and again until `until` is true, at most `max_iterations` times.\n\nIteration 1 gets the loop's input; each later one gets the previous iteration's output, and\nthe loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's\noutput), `iteration` (iterations completed, from 1) and `results` (node id \u2192 `{status, text,\ndata}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop\nnormally. The body cannot contain publishers, Jira writes or loops: each is keyed by node\nid, which repeats in every iteration. A gate (7.8: one approval per pass) and a writer (one\nbranch, committed to on every pass) may be in it. It may hold an orchestrator (6.9), whose\nplans are kept per iteration and whose writers all land on its one integration branch."
       },
       "MapNode": {
         "properties": {
@@ -8954,6 +9005,18 @@
             "title": "On Reject",
             "description": "What rejecting does: cancel the run, or end it here as completed.",
             "default": "cancel"
+          },
+          "changes_left": {
+            "type": "integer",
+            "title": "Changes Left",
+            "description": "How many more requests for changes the gate takes (7.8): 0 means the approver can only approve or reject.",
+            "default": 0
+          },
+          "iteration": {
+            "type": "integer",
+            "title": "Iteration",
+            "description": "Which pass of the gate this is: it pauses once per pass in a loop.",
+            "default": 1
           }
         },
         "type": "object",

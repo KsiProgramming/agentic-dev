@@ -12,10 +12,10 @@ The plan assumed a gate could sit in a loop; the validator refuses it (`loop_iss
 
 ## 1. Gate decision "changes" (engine and API)
 - [ ] Read the gate primitive, `POST /runs/{id}/approvals`, the approval models and the gate's output shape (`packages/engine`, `packages/api`) before changing them.
-- [ ] Workflow spec: `GateNode.on_changes` (optional; set means Request changes is offered), validation that it is only allowed on a gate inside a loop (it needs a pass to go back to), distinct from `on_reject`. Regenerate the JSON Schema.
-- [ ] Approvals API: `decision: "approve" | "reject" | "changes"`; `changes` requires comments (each tagged with the item it concerns: `spec`, `plan`, `prototype`), refused with `422` on a gate without `on_changes`. Approvals row and audit entry record the decision and the comments.
-- [ ] Engine: a `changes` decision completes the gate with `{decision: "changes", comments}` and the loop continues; events (`gate_changes_requested`) carry the comments; waiting time is counted as for an approval (11.2).
-- [ ] Policy: the loop's `max_iterations` caps revisions; past the last pass the gate is built without Request changes.
+- [x] Workflow spec: `GateNode.on_changes` (optional; set means Request changes is offered), validation that it is only allowed on a gate inside a loop (it needs a pass to go back to), distinct from `on_reject`. Regenerate the JSON Schema.
+- [x] Approvals API (store, `POST /runs/{id}/approvals` and `GET` gate view with `changes_left`, `iteration`; store and API tests need Docker and were written, not run, on this machine): `decision: "approve" | "reject" | "changes"`; `changes` requires comments (each tagged with the item it concerns: `spec`, `plan`, `prototype`), refused with `422` on a gate without `on_changes`. Approvals row and audit entry record the decision and the comments.
+- [x] Engine: a `changes` decision completes the gate with `{decision: "changes", comments}` and the loop continues; events (`gate_changes_requested`) carry the comments; waiting time is counted as for an approval (11.2).
+- [x] Policy: `on_changes` is the number of requests the gate takes (validated below the loop's `max_iterations`); the store refuses one past it and the gate view shows `changes_left`.
 
 ## 2. Gate shows more than one thing
 - [ ] Let a gate review show several items (spec artifact, plan artifact, a writer branch's diff), each as a tab, without changing gates that show one.

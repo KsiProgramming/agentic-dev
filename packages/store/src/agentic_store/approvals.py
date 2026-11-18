@@ -31,7 +31,7 @@ from agentic_engine.gate import (
     check_edits,
     check_selection,
 )
-from agentic_store.audit import audit
+from agentic_store.audit import AuditAction, audit
 from agentic_store.models import Approval, Run, RunEventRow
 
 
@@ -67,6 +67,11 @@ class InvalidEditsError(ApprovalError):
         super().__init__(message)
         self.code: EditErrorCode = code
         self.path = path
+
+
+class ChangesNotAllowedError(ApprovalError):
+    """The gate takes no request for changes, or has taken as many as its `on_changes` allows
+    (7.8)."""
 
 
 class InvalidSelectionError(ApprovalError):
@@ -107,6 +112,15 @@ async def record_approval(
             if gate != node_id:
                 raise WrongGateError(f"run {run_id} is waiting at gate {gate!r}, not {node_id!r}")
             iteration = await _pass(session, run_id, node_id)
+            if decision.decision == "changes":
+                allowed = payload.get("on_changes")
+                if not isinstance(allowed, int) or iteration > allowed:
+                    why = (
+                        "takes no request for changes"
+                        if not isinstance(allowed, int)
+                        else f"has no more requests for changes (at most {allowed})"
+                    )
+                    raise ChangesNotAllowedError(f"gate {node_id!r} {why}")
             if await _approval(session, run_id, node_id, iteration) is not None:
                 raise AlreadyDecidedError(f"gate {node_id!r} of run {run_id} was already decided")
             try:
@@ -129,6 +143,7 @@ async def record_approval(
                     decided_by=decision.decided_by,
                     edits=[e.model_dump(mode="json") for e in edits] or None,
                     selection=decision.selection,
+                    comments=[c.model_dump(mode="json") for c in decision.comments] or None,
                 )
             )
             await session.execute(
@@ -145,7 +160,7 @@ async def record_approval(
             audit(
                 session,
                 workspace_id,
-                "gate.approved" if decision.decision == "approve" else "gate.rejected",
+                _AUDIT_ACTION[decision.decision],
                 run_id=run_id,
                 node_id=node_id,
                 # Paths only: the edited contents stay in the approval and the run's events.
@@ -154,6 +169,13 @@ async def record_approval(
     except IntegrityError as e:
         raise AlreadyDecidedError(f"gate {node_id!r} of run {run_id} was already decided") from e
     return decision
+
+
+_AUDIT_ACTION: dict[str, AuditAction] = {
+    "approve": "gate.approved",
+    "reject": "gate.rejected",
+    "changes": "gate.changes_requested",
+}
 
 
 def _audit_details(decision: GateDecision, edited: list[str]) -> dict[str, JsonValue]:
@@ -166,6 +188,8 @@ def _audit_details(decision: GateDecision, edited: list[str]) -> dict[str, JsonV
     }
     if decision.selection is not None:
         details["selected"] = len(decision.selection)
+    if decision.comments:
+        details["comments"] = len(decision.comments)
     return details
 
 
@@ -187,6 +211,9 @@ class PendingGate:
     # What a selection gate shows (6.7), and what a rejection does.
     select: SelectionShown | None = None
     on_reject: str = "cancel"
+    # Requests for changes the gate may still take (7.8), and which pass of it this is.
+    changes_left: int = 0
+    iteration: int = 1
 
 
 async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> PendingGate:
@@ -202,9 +229,11 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         if run.gate_expires_at is not None and run.gate_expires_at <= await _now(session):
             raise GateExpiredError(f"the approval of run {run_id} expired")
         row = await _last_gate_waiting(session, run_id)
+        passes = 1 if row is None else await _pass(session, run_id, row[0])
     if row is None:
         raise RunNotWaitingError(f"run {run_id} has not paused at a gate")
     node_id, payload = row
+    allowed = payload.get("on_changes")
     return PendingGate(
         node_id=node_id,
         title=_text(payload.get("title")),
@@ -216,6 +245,8 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         run_artifacts=_shown_artifacts(payload),
         select=_shown_selection(payload),
         on_reject=_text(payload.get("on_reject")) or "cancel",
+        changes_left=max(allowed - passes + 1, 0) if isinstance(allowed, int) else 0,
+        iteration=passes,
     )
 
 
@@ -253,6 +284,7 @@ async def pending_decision(
             "decided_by": approval.decided_by,
             "edits": approval.edits or [],
             "selection": approval.selection,
+            "comments": approval.comments or [],
         }
     )
 

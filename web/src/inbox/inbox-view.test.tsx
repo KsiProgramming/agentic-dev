@@ -48,6 +48,8 @@ function gateOf(runId: string, overrides: Partial<RunGate> = {}): RunGate {
     expires_at: LATER,
     select: null,
     on_reject: "cancel",
+    changes_left: 0,
+    iteration: 1,
     repo: { url: "https://github.com/acme/docs", ref: null },
     base: "main",
     branches: [],

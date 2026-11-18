@@ -61,6 +61,11 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "sandbox.removed": { label: "Sandbox removed", icon: PackageXIcon, category: "runs" },
   "gate.approved": { label: "Gate approved", icon: CircleCheckIcon, category: "approvals" },
   "gate.rejected": { label: "Gate rejected", icon: CircleXIcon, category: "approvals" },
+  "gate.changes_requested": {
+    label: "Changes requested",
+    icon: MessageSquareIcon,
+    category: "approvals",
+  },
   "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
   "workflow.created": { label: "Workflow created", icon: FilePlusIcon, category: "workflows" },
   "workflow.updated": { label: "Workflow changed", icon: FilePenIcon, category: "workflows" },
@@ -268,6 +273,10 @@ export function describe(event: AuditEvent): string {
       const name = text(d, "full_name");
       const visibility = d.private === true ? "private " : d.private === false ? "public " : "";
       return `Created the ${visibility}repo ${name ?? "of the run"}`;
+    }
+    case "gate.changes_requested": {
+      const comments = count(d, "comments");
+      return `Asked for changes at ${event.node_id ?? "a gate"} (${plural(comments, "comment")})`;
     }
     case "gate.approved":
     case "gate.rejected": {

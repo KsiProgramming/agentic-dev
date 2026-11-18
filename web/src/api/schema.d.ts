@@ -1228,12 +1228,17 @@ export interface components {
              * Decision
              * @enum {string}
              */
-            decision: "approve" | "reject";
+            decision: "approve" | "reject" | "changes";
             /**
              * Comment
              * @description Why, recorded with the decision; a rejection's becomes the run's reason.
              */
             comment?: string | null;
+            /**
+             * Comments
+             * @description A request for changes (7.8): what to change, each comment on one of the things the gate showed; at least one, and only with `changes`. The gate completes and the loop it is in goes round again with them. Refused (`409`) on a gate that takes none or has taken as many as its `changes_left` allowed.
+             */
+            comments?: components["schemas"]["GateComment"][];
             /**
              * Edits
              * @description An approval's new text for files of the gate's `changes` (editable ones only); the gate commits them on the writers' branches before the run goes on.
@@ -1258,7 +1263,7 @@ export interface components {
              * Decision
              * @enum {string}
              */
-            decision: "approve" | "reject";
+            decision: "approve" | "reject" | "changes";
             /**
              * Status
              * @default queued
@@ -1302,7 +1307,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1691,6 +1696,18 @@ export interface components {
             branch: string;
         };
         /**
+         * GateComment
+         * @description One comment of a request for changes (7.8): on `item`, one of the things the gate showed
+         *     (for the spec gate `spec`, `plan` or `prototype`), and what to change. Data for the agent
+         *     that revises, never instructions to the platform.
+         */
+        GateComment: {
+            /** Item */
+            item: string;
+            /** Text */
+            text: string;
+        };
+        /**
          * GateNode
          * @description A human decision point: the run pauses here until someone approves or rejects. Its input
          *     (the previous node's output) is shown to the approver and passes through unchanged, unless
@@ -1726,6 +1743,11 @@ export interface components {
              * @description What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).
              */
             on_reject?: ("cancel" | "end") | null;
+            /**
+             * On Changes
+             * @description Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.
+             */
+            on_changes?: number | null;
             /**
              * Writes
              * @description With `select`, store the chosen items as this run artifact.
@@ -2195,9 +2217,10 @@ export interface components {
          *     the loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's
          *     output), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,
          *     data}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop
-         *     normally. The body cannot contain gates, writers, publishers or loops: each is keyed by node
-         *     id, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept
-         *     per iteration and whose writers all land on its one integration branch.
+         *     normally. The body cannot contain publishers, Jira writes or loops: each is keyed by node
+         *     id, which repeats in every iteration. A gate (7.8: one approval per pass) and a writer (one
+         *     branch, committed to on every pass) may be in it. It may hold an orchestrator (6.9), whose
+         *     plans are kept per iteration and whose writers all land on its one integration branch.
          */
         LoopNode: {
             /**
@@ -3314,6 +3337,18 @@ export interface components {
              * @enum {string}
              */
             on_reject: "cancel" | "end";
+            /**
+             * Changes Left
+             * @description How many more requests for changes the gate takes (7.8): 0 means the approver can only approve or reject.
+             * @default 0
+             */
+            changes_left: number;
+            /**
+             * Iteration
+             * @description Which pass of the gate this is: it pauses once per pass in a loop.
+             * @default 1
+             */
+            iteration: number;
         };
         /**
          * RunLimitOverrides
@@ -5547,7 +5582,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

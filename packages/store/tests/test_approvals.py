@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from agentic_engine.gate import FileChange, FileEdit, GateDecision, GateReview
+from agentic_engine.gate import FileChange, FileEdit, GateComment, GateDecision, GateReview
 from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime import Message
@@ -19,6 +19,7 @@ from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
 from agentic_store import (
     AlreadyDecidedError,
     Approval,
+    ChangesNotAllowedError,
     GateExpiredError,
     InvalidEditsError,
     PostgresEventSink,
@@ -242,6 +243,18 @@ async def test_a_gate_that_pauses_again_is_decided_again(
             )
         ).all()
     assert list(passes) == [1, 2]
+
+
+async def test_a_gate_without_on_changes_takes_no_request_for_changes(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await paused_run(sessions, InMemorySaver(serde=checkpoint_serde()))
+    asked = GateDecision(decision="changes", comments=[GateComment(item="spec", text="More.")])
+
+    with pytest.raises(ChangesNotAllowedError, match="takes no request for changes"):
+        await record_approval(sessions, run_id, "gate", asked)
+
+    assert await pending_decision(sessions, run_id) is None
 
 
 async def test_an_approval_keeps_its_edits_for_the_run(

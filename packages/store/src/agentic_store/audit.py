@@ -23,6 +23,7 @@ AuditAction = Literal[
     "repo.created",
     "gate.approved",
     "gate.rejected",
+    "gate.changes_requested",
     "gate.expired",
     "sandbox.remove_requested",
     "sandbox.removed",

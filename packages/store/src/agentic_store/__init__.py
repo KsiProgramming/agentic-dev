@@ -3,6 +3,7 @@
 from agentic_store.approvals import (
     AlreadyDecidedError,
     ApprovalError,
+    ChangesNotAllowedError,
     GateExpiredError,
     InvalidEditsError,
     InvalidSelectionError,
@@ -264,6 +265,7 @@ __all__ = [
     "Base",
     "BranchKind",
     "BundleTooLargeError",
+    "ChangesNotAllowedError",
     "ClaimedRun",
     "Connection",
     "ConnectionInfo",
