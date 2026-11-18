@@ -317,6 +317,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/answers/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Answers
+         * @description "Check now" (7.9): look on the Jira issue for an answer to the question the run is
+         *     waiting on, without waiting for the webhook or the worker's next check. An answer is a comment
+         *     newer than the platform's question by someone other than the connected account; the run then
+         *     goes on, as it would from the webhook.
+         */
+        post: operations["checkRunAnswers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{run_id}/approvals": {
         parameters: {
             query?: never;
@@ -1149,7 +1172,7 @@ export interface components {
              */
             op: "addNode";
             /** Node */
-            node: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
+            node: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /**
              * At
              * @description Where it goes; unset: detached.
@@ -1216,6 +1239,22 @@ export interface components {
              * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
              */
             writes?: string | null;
+        };
+        /**
+         * AnswerCheckResponse
+         * @description What "Check now" found (7.9).
+         */
+        AnswerCheckResponse: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Found
+             * @description True when someone other than the platform has answered on the issue: the run is queued again and builds on. False: the run keeps waiting.
+             */
+            found: boolean;
         };
         /** ApprovalRequest */
         ApprovalRequest: {
@@ -2231,7 +2270,7 @@ export interface components {
             /** Id */
             id: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /**
              * Until
              * @description CEL condition checked after each iteration; true stops the loop.
@@ -2267,7 +2306,7 @@ export interface components {
              */
             over: string;
             /** Body */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /** Max Concurrency */
             max_concurrency: number;
         };
@@ -2489,7 +2528,7 @@ export interface components {
              * Body
              * @description The worker: what runs once per task.
              */
-            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
+            body: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
             /**
              * Max Workers
              * @description The most tasks the hub may plan.
@@ -2549,7 +2588,7 @@ export interface components {
             /** Id */
             id: string;
             /** Branches */
-            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"])[];
+            branches: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"])[];
             /**
              * Join
              * @enum {string}
@@ -2952,7 +2991,7 @@ export interface components {
              * Then
              * @description What runs on this route: one agent, tool or sequence node.
              */
-            then: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
+            then: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
         };
         /**
          * RouterClassifier
@@ -2997,7 +3036,7 @@ export interface components {
              * Default
              * @description What runs when no route is chosen.
              */
-            default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"]) | null;
+            default?: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"]) | null;
             /**
              * Otherwise
              * @description Rule mode with no `default`: what happens when no route matches. "fail" fails the router; "skip" runs nothing and passes its input on, for a step that only runs when its condition holds.
@@ -3773,7 +3812,7 @@ export interface components {
             /** Id */
             id: string;
             /** Steps */
-            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"])[];
+            steps: (components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"])[];
         };
         /**
          * SetParam
@@ -4090,6 +4129,88 @@ export interface components {
              */
             observed?: number | null;
         };
+        /**
+         * WaitForNode
+         * @description A step that holds the run until an answer arrives (7.9), in the waiting state of a gate
+         *     (checkpointed, no active time, expires after `ttl_s`) but continued by the platform when the
+         *     answer is found, never by a person's decision. `jira_comment`: a comment on the run's Jira
+         *     issue, made after the comment the tool node `after_from` posted, by someone other than the
+         *     platform's account. Every rule about a gate (where it may sit) applies to it.
+         */
+        WaitForNode: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "wait_for";
+            /** Id */
+            id: string;
+            /**
+             * Title
+             * @description What the approver is asked to decide.
+             */
+            title: string;
+            /**
+             * Prompt
+             * @description More guidance for the approver, shown with the input.
+             */
+            prompt?: string | null;
+            /**
+             * Ttl S
+             * @description Seconds to wait for an answer before the run ends as `waiting for answers expired`; 7 days when unset.
+             */
+            ttl_s?: number | null;
+            /** @description Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items. */
+            select?: components["schemas"]["GateSelect"] | null;
+            /**
+             * On Reject
+             * @description What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).
+             */
+            on_reject?: ("cancel" | "end") | null;
+            /**
+             * On Changes
+             * @description Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.
+             */
+            on_changes?: number | null;
+            /**
+             * Writes
+             * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
+             */
+            writes?: string | null;
+            /**
+             * Wait For
+             * @default jira_comment
+             * @constant
+             */
+            wait_for: "jira_comment";
+            /**
+             * After From
+             * @description The `jira.comment` tool node whose comment is the question: only newer comments answer it.
+             */
+            after_from: string;
+        };
+        /**
+         * WaitingFor
+         * @description What a run paused at a `wait_for` (7.9) waits for: a comment on `issue` made after the
+         *     one the platform posted (`after_comment_id`).
+         */
+        WaitingFor: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "jira_comment";
+            issue: components["schemas"]["WaitingForIssue"];
+            /** After Comment Id */
+            after_comment_id: string;
+        };
+        /** WaitingForIssue */
+        WaitingForIssue: {
+            /** Key */
+            key: string;
+            /** Url */
+            url: string;
+        };
         /** WaitingGate */
         WaitingGate: {
             /**
@@ -4097,6 +4218,8 @@ export interface components {
              * @description The gate node the run is paused at.
              */
             node_id: string;
+            /** @description Set when the run waits for an answer on Jira, not for a decision: the console shows "Waiting for answers" and Check now, and the Inbox no Approve. */
+            wait_for?: components["schemas"]["WaitingFor"] | null;
             /** Title */
             title?: string | null;
             /**
@@ -4248,7 +4371,7 @@ export interface components {
             /** @description Lets a review comment on the pull request the workflow opened (`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing. */
             on_review?: components["schemas"]["OnReview"] | null;
             /** Root */
-            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
+            root: components["schemas"]["AgentNode"] | components["schemas"]["ToolNode"] | components["schemas"]["GateNode"] | components["schemas"]["WaitForNode"] | components["schemas"]["SequenceNode"] | components["schemas"]["LoopNode"] | components["schemas"]["MapNode"] | components["schemas"]["ReduceNode"] | components["schemas"]["ParallelNode"] | components["schemas"]["RouterNode"] | components["schemas"]["OrchestratorNode"] | components["schemas"]["SubflowNode"];
         };
         /** WorkflowSummary */
         WorkflowSummary: {
@@ -5097,6 +5220,65 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    checkRunAnswers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnswerCheckResponse"];
+                };
+            };
+            /** @description No run with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The run is not waiting for an answer on a Jira issue */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Jira could not be read */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Jira is not configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

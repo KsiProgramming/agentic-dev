@@ -1268,3 +1268,70 @@ test("the ⋯ menu downloads the run's events", async () => {
   );
   click.mockRestore();
 });
+
+// --- a run that asked the team waits for the answer (7.9) ------------------------------------
+
+function waitForAnswers(source: FakeEventSource, url = "https://acme.atlassian.net/browse/KAN-5") {
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit({
+      ...runEvent(2, "gate_waiting", {
+        title: "Waiting for answers on the issue",
+        wait_for: {
+          kind: "jira_comment",
+          issue: { key: "KAN-5", url },
+          after_comment_id: "10001",
+        },
+        expires_at: new Date(Date.now() + 6 * 86_400_000).toISOString(),
+      }),
+      node_id: "wait_for_answers",
+    });
+  });
+}
+
+test("a run waiting for answers says so, links the issue and has no approval dock", async () => {
+  api(detail({ status: "waiting" }));
+  waitForAnswers(show());
+
+  const banner = await screen.findByTestId("run-banner");
+  expect(banner.dataset.kind).toBe("answers");
+  expect(banner.textContent).toContain("Waiting for answers on KAN-5");
+  expect(
+    within(banner).getByRole("link", { name: "Open KAN-5 in Jira" }).getAttribute("href"),
+  ).toBe("https://acme.atlassian.net/browse/KAN-5");
+  expect(within(banner).getByRole("button", { name: "Check now" })).toBeTruthy();
+  // Nobody approves a wait: no dock, no Approve.
+  expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+});
+
+test("an issue address that is not https is not made a link", async () => {
+  api(detail({ status: "waiting" }));
+  waitForAnswers(show(), "javascript:alert(1)");
+
+  const banner = await screen.findByTestId("run-banner");
+  expect(within(banner).queryByRole("link")).toBeNull();
+});
+
+test("Check now asks the API to look for an answer and says what it found", async () => {
+  const answers = vi.fn((_: Request) => json({ run_id: RUN_ID, found: false }));
+  api(detail({ status: "waiting" }), async (request) => {
+    if (request.url.endsWith(`/runs/${RUN_ID}/answers/check`)) return answers(request);
+    throw new Error(`unexpected ${request.method} ${request.url}`);
+  });
+  waitForAnswers(show());
+
+  fireEvent.click(await screen.findByRole("button", { name: "Check now" }));
+
+  await waitFor(() => expect(answers).toHaveBeenCalledTimes(1));
+  expect(answers.mock.calls[0]![0].method).toBe("POST");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Check now" })).toBeTruthy());
+});
+
+test("Check now says when Jira could not be read", async () => {
+  api(detail({ status: "waiting" }), async () => json({ detail: "Jira could not be read" }, 502));
+  waitForAnswers(show());
+
+  fireEvent.click(await screen.findByRole("button", { name: "Check now" }));
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "Check now" })).toBeTruthy());
+});

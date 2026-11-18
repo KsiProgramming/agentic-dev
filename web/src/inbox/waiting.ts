@@ -18,9 +18,14 @@ export function useWaitingRuns({ workspaceId, baseUrl }: { workspaceId: string; 
 /** The gates an approver works through, oldest run first: a gate past its time to live is left
  * out, even before the worker has cancelled its run. */
 export function inboxRuns(runs: readonly RunSummary[], now: number): RunSummary[] {
-  return runs
-    .filter((run) => run.status === "waiting" && !gateExpired(run, now))
-    .sort(
-      (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id.localeCompare(b.id),
-    );
+  return (
+    runs
+      // A run waiting for an answer on Jira (7.9) has nothing for an approver to decide.
+      .filter(
+        (run) => run.status === "waiting" && !run.waiting_gate?.wait_for && !gateExpired(run, now),
+      )
+      .sort(
+        (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || a.id.localeCompare(b.id),
+      )
+  );
 }

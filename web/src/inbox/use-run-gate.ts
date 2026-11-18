@@ -39,6 +39,7 @@ export function toInboxGate(body: RunGate): InboxGate {
     onReject: body.on_reject === "end" ? "end" : "cancel",
     changesLeft: body.changes_left ?? 0,
     iteration: body.iteration ?? 1,
+    waitFor: null, // a wait is not reviewed in the Inbox (7.9)
     repoUrl: body.repo?.url ?? null,
     base: body.base ?? null,
     branches: body.branches.map((b) => ({ nodeId: b.node_id, branch: b.branch })),

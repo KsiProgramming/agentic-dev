@@ -137,6 +137,26 @@ describe("inboxRuns", () => {
     const now = Date.parse("2026-10-23T00:00:00Z");
     expect(inboxRuns([newer, expired, older], now).map((r) => r.id)).toEqual(["r-old", "r-new"]);
   });
+
+  test("leaves out a run that waits for an answer on Jira: nobody decides it (7.9)", () => {
+    const waiting = runSummary({
+      id: "r-wait",
+      status: "waiting",
+      created_at: "2026-10-19T00:00:00Z",
+      waiting_gate: {
+        node_id: "wait_for_answers",
+        title: "Waiting for answers",
+        expires_at: null,
+        wait_for: {
+          kind: "jira_comment",
+          issue: { key: "KAN-5", url: "https://acme.atlassian.net/browse/KAN-5" },
+          after_comment_id: "10001",
+        },
+      },
+    });
+    const now = Date.parse("2026-10-23T00:00:00Z");
+    expect(inboxRuns([waiting, older], now).map((r) => r.id)).toEqual(["r-old"]);
+  });
 });
 
 test("the waiting gates are listed oldest first, with their waiting time and expiry", async () => {
