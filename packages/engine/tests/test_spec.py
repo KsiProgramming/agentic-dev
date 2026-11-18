@@ -226,6 +226,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "#/$defs/AgentNode",
         "#/$defs/ToolNode",
         "#/$defs/GateNode",
+        "#/$defs/WaitForNode",
         "#/$defs/SequenceNode",
         "#/$defs/LoopNode",
         "#/$defs/MapNode",
