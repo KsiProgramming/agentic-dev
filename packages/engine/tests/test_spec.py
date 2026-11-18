@@ -212,6 +212,7 @@ def test_exported_schema_has_discriminated_node_union() -> None:
         "agent",
         "tool",
         "gate",
+        "wait_for",
         "sequence",
         "loop",
         "map",
