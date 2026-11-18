@@ -2874,7 +2874,7 @@ async def test_a_restart_in_the_middle_of_the_wait_still_waits_and_an_answer_sti
         make_runtime=lambda tools: sdd_team(tools, asks=True),
         sandboxes=sandboxes,
         github=github,
-        github_remote=lambda _full_name: remote,
+        github_remote=lambda _full_name: str(remote),
         master_key_file=master_key,
         jira=atlassian,
         web_base_url="https://agentic.example",
@@ -2930,7 +2930,7 @@ async def test_an_unanswered_wait_expires_and_builds_nothing(
         make_runtime=lambda tools: sdd_team(tools, asks=True),
         sandboxes=sandboxes,
         github=github,
-        github_remote=lambda _full_name: tmp_path / "remote.git",
+        github_remote=lambda _full_name: str(tmp_path / "remote.git"),
         master_key_file=master_key,
         jira=atlassian,
     ):

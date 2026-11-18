@@ -325,7 +325,7 @@ class Review:
 
 
 class SddRun:
-    def __init__(self, params: SddParams | None = None, **answers: str) -> None:
+    def __init__(self, params: SddParams | None = None, **answers: str | list[str]) -> None:
         self.spec = build_sdd_spec(params or SddParams(move_to="In Review"))
         self.runtime = Answers(**answers)
         self.platform = Platform()
@@ -675,6 +675,8 @@ async def test_the_comment_is_not_posted_before_the_post_gate_is_approved() -> N
 
     assert run.waiting_at() == "post_questions"
     assert run.platform.calls == []
-    prompt = next(n for _, n in iter_nodes(run.spec.root) if n.id == "post_questions").prompt
+    gate = next(n for _, n in iter_nodes(run.spec.root) if n.id == "post_questions")
+    assert isinstance(gate, GateNode)
+    prompt = gate.prompt
     assert prompt is not None and "Nothing is built after it" in prompt
     assert "assumptions" not in prompt
