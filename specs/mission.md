@@ -13,7 +13,7 @@ Teams need AI agents that work on their real codebases: writing docs, auditing c
 - **Three day-one outcomes** on an existing or newly created GitHub repo: generated docs, a codebase audit, and spec-driven development (SDD) from Jira.
 - **Open orchestration.** A small set of engine primitives (`agent`, `tool`, `sequence`, `parallel`, `map`, `reduce`, `orchestrator`, `router`, `loop`, `gate`, `subflow`). Every pattern is a graph built from them. Users extend the set with composite nodes (no code) and plugin nodes (code), and no engine release is needed.
 - **Flow Architect.** An agent that turns a goal and repo context into graph operations, with a reason for each node. Users run the draft, edit it, or chat about it.
-- **Bring your own model access.** A Claude API key or a GitHub Copilot subscription, chosen per workspace and overridable per workflow and per node.
+- **Bring your own model access.** A Claude API key or a GitHub Copilot subscription, chosen per workspace and overridable per workflow and per node. Copilot runs on the signed-in person's own GitHub account, connected by that person, because a Copilot subscription belongs to one person; the company's GitHub connection is only for repos and PRs.
 - **Traceable delivery.** Every code change becomes a branch and a PR, linked back to the Jira issue that started it.
 
 ## Who we serve
@@ -63,4 +63,4 @@ Teams need AI agents that work on their real codebases: writing docs, auditing c
 ## Open questions (not decided here)
 
 - Pricing: who pays for sandbox compute when users bring their own model access?
-- Copilot SDK terms for use inside a hosted multi-tenant service. We must check these before committing to that adapter.
+- Copilot SDK terms for a hosted multi-tenant service. Checked in 8.1 ([findings](2026-11-18-copilot-sdk-terms/findings.md)): self-hosted use is a conditional go; a hosted multi-tenant service may not offer Copilot until GitHub confirms it in writing.
