@@ -9,6 +9,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 7.9 A run that asks waits for the answer (specs only so far; the build follows in this PR's later commits):
+  - **Bug.** SDD posted its open questions on the Jira issue and built on its own assumptions without waiting for an answer. Specs: tech-stack (the clarify flow rewritten, the `wait_for` step, the comment webhook event, the answer checks, four decisions-log rows), the roadmap (7.9) and lessons (rule 9, "a run that asks a question must wait for the answer"). Plan: `specs/2026-11-18-wait-for-answers/`.
 - Phase 8.1 Verify Copilot SDK terms for hosted multi-tenant use ([#248](https://github.com/KsiProgramming/agentic-dev/pull/248)):
   - **Verdict.** Self-hosted use of the Copilot SDK is a conditional go; a hosted multi-tenant service is a no-go until GitHub confirms in writing. Evidence, quotes and sources are in `specs/2026-11-18-copilot-sdk-terms/findings.md`.
   - **Copilot is per person.** The company's GitHub App stays for repos and PRs; a user who wants Copilot adds a personal GitHub connection, and runs with no starter stay on Claude. Specs: tech-stack (agent runtime table, three decisions), mission (open question closed, provider line), roadmap (8.2 and 8.3 re-scoped).
