@@ -1750,7 +1750,7 @@ export interface components {
             on_changes?: number | null;
             /**
              * Writes
-             * @description With `select`, store the chosen items as this run artifact.
+             * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
              */
             writes?: string | null;
         };
