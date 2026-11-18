@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     # `<API_BASE_URL>/jira/callback`. With no client id, the Jira endpoints answer 503.
     atlassian_client_id: str | None = None
     atlassian_client_secret_file: Path | None = None
+    # The deployment's OAuth app for personal GitHub connections, for Copilot (8.2): a GitHub
+    # OAuth app or a GitHub App's user-token flow. Its callback URL is
+    # `<API_BASE_URL>/github-user/callback`. With no client id, those endpoints answer 503.
+    # `github_user_scopes` is space separated.
+    github_user_client_id: str | None = None
+    github_user_client_secret_file: Path | None = None
+    github_user_scopes: str = ""
     # Where the web app is served: GitHub's install redirect sends the browser back there.
     web_base_url: str = "http://localhost:3000"
     # Where the browser reaches this API; the fake GitHub install flow redirects back to it.

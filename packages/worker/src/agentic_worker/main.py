@@ -147,11 +147,15 @@ from agentic_engine.spec import (
 from agentic_github import (
     FAKE_ACCOUNT,
     FakeGithubApp,
+    FakeGithubUserAuth,
     GithubApiError,
     GithubApp,
     GithubAppConfig,
     GithubConfigError,
     GithubPlatform,
+    GithubUserAuth,
+    GithubUserOAuth,
+    GithubUserOAuthConfig,
     InstallationNotFoundError,
     ReviewItem,
     auth_env,
@@ -249,6 +253,8 @@ from agentic_tools.routing import RunTools
 from agentic_tools.scan import open_scan_tools
 from agentic_worker.artifacts import MirroredArtifactStore
 from agentic_worker.branches import SandboxBranchSaver
+from agentic_worker.copilot import copilot_runtimes, token_loader
+from agentic_worker.errors import RunSetupError
 from agentic_worker.integrate import SandboxIntegrator
 from agentic_worker.review import SandboxGateReview
 
@@ -339,6 +345,13 @@ class WorkerSettings(BaseSettings):
     jira: Literal["app", "fake"] = Field(default="app", validation_alias="agentic_jira")
     # Where the web app is served; a Jira comment a run posts links to the run there.
     web_base_url: str | None = None
+    # The deployment's OAuth app for personal GitHub connections (the same settings as the API's,
+    # 8.2): a run on a person's Copilot refreshes their token with it. Unset, such a run fails with
+    # `copilot_not_configured`. `fake` (env `AGENTIC_GITHUB`) stands in a local one.
+    github_user_client_id: str | None = None
+    github_user_client_secret_file: Path | None = None
+    # The model Copilot runs use; `auto` lets Copilot choose.
+    copilot_model: str = "auto"
 
 
 type RuntimeFactory = Callable[[ToolExecutor | None], AgentRuntime]
@@ -355,11 +368,6 @@ type ClaudeClientFactory = Callable[[SecretStr], anthropic.AsyncAnthropic]
 
 class ConfigError(RuntimeError):
     """The worker settings cannot start a runtime or a sandbox backend."""
-
-
-class RunSetupError(RuntimeError):
-    """A run cannot start on this worker, e.g. its workspace has no key for its provider. The
-    run fails with this message, which is safe to show (it never holds a secret)."""
 
 
 def anthropic_client(key: SecretStr) -> anthropic.AsyncAnthropic:
@@ -408,9 +416,43 @@ def run_runtimes(
     sessions: async_sessionmaker[AsyncSession],
     keys: KeyProvider | None,
     make_client: ClaudeClientFactory = anthropic_client,
+    github_user: GithubUserAuth | None = None,
 ) -> RunRuntimes:
-    """The runtimes this worker's runs use. On Claude, each run gets its own client, made with
-    its workspace's key and closed when the run's attempt ends."""
+    """The runtimes this worker's runs use: Claude (or the stack's fake agents), and, for a run
+    started with a person's GitHub connection (8.2), that person's Copilot."""
+    base = _provider_runtimes(settings, sessions, keys, make_client)
+
+    async def no_token(run: StoredRun) -> SecretStr:
+        raise RunSetupError(
+            "copilot_not_configured: this worker has no master key to read a personal GitHub "
+            "token (set MASTER_KEY_FILE)"
+        )
+
+    copilot = copilot_runtimes(
+        settings,
+        token_loader(sessions, keys, github_user) if keys is not None else no_token,
+        base,
+    )
+
+    @asynccontextmanager
+    async def open_runtime(
+        run: StoredRun, tools: ToolExecutor | None
+    ) -> AsyncGenerator[AgentRuntime]:
+        opener = base if run.copilot_connection_id is None else copilot
+        async with opener(run, tools) as runtime:
+            yield runtime
+
+    return open_runtime
+
+
+def _provider_runtimes(
+    settings: WorkerSettings,
+    sessions: async_sessionmaker[AsyncSession],
+    keys: KeyProvider | None,
+    make_client: ClaudeClientFactory,
+) -> RunRuntimes:
+    """On Claude, each run gets its own client, made with its workspace's key and closed when the
+    run's attempt ends."""
     if settings.runtime != "claude":
         return fixed_runtimes(fake_runtime_factory(settings))
     if keys is None:
@@ -491,6 +533,26 @@ def build_jira(settings: WorkerSettings) -> JiraPlatform | None:
     except JiraConfigError as e:
         raise ConfigError(str(e)) from None
     return AtlassianApp(config)
+
+
+def build_github_user(settings: WorkerSettings) -> GithubUserAuth | None:
+    """The OAuth app for personal GitHub connections, if its client id is set (or the fake one).
+    Only token refreshes go through it here, so its callback URL is never used."""
+    if settings.github == "fake":
+        if settings.env == "production":
+            raise ConfigError("AGENTIC_GITHUB=fake is not allowed with AGENTIC_ENV=production")
+        return FakeGithubUserAuth("")
+    if settings.github_user_client_id is None:
+        return None
+    if settings.github_user_client_secret_file is None:
+        raise ConfigError("GITHUB_USER_CLIENT_SECRET_FILE must be set with GITHUB_USER_CLIENT_ID")
+    try:
+        config = GithubUserOAuthConfig.from_file(
+            settings.github_user_client_id, settings.github_user_client_secret_file, ""
+        )
+    except GithubConfigError as e:
+        raise ConfigError(str(e)) from None
+    return GithubUserOAuth(config)
 
 
 def fake_github_remote(fixtures: Path) -> Callable[[str], str]:
@@ -1479,6 +1541,7 @@ async def run(
     github: GithubPublisher | None = None,
     github_remote: Callable[[str], str] | None = None,
     jira: JiraPlatform | None = None,
+    github_user: GithubUserAuth | None = None,
 ) -> None:
     """Run abandoned and queued runs until `stop` is set; a run still going then is released
     unfinished, for another worker to resume.
@@ -1489,6 +1552,7 @@ async def run(
     keys = build_keys(settings)
     app = build_github(settings) if github is None else None
     atlassian = build_jira(settings) if jira is None else jira
+    user_auth = build_github_user(settings) if github_user is None else github_user
     redis = Redis.from_url(settings.redis_url)  # pyright: ignore[reportUnknownMemberType]
     db = create_async_engine(settings.database_url, pool_pre_ping=True)
     sessions = async_sessionmaker(db, expire_on_commit=False)
@@ -1499,7 +1563,9 @@ async def run(
         elif make_runtime is not None:
             open_runtime = fixed_runtimes(make_runtime)
         else:
-            open_runtime = run_runtimes(settings, sessions, keys, make_client or anthropic_client)
+            open_runtime = run_runtimes(
+                settings, sessions, keys, make_client or anthropic_client, user_auth
+            )
         async with contextlib.AsyncExitStack() as stack:
             if sandboxes is None:
                 keep = (
@@ -1516,6 +1582,8 @@ async def run(
                 stack.callback(app.close)
             if atlassian is not None and jira is None:
                 stack.push_async_callback(atlassian.aclose)
+            if user_auth is not None and github_user is None:
+                stack.push_async_callback(user_auth.aclose)
             fixtures = settings.sandbox_local_root if settings.github == "fake" else None
             worker = Worker(
                 settings,

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from agentic_api.github.routes import router as github_router
 from agentic_api.github.webhooks import router as github_webhooks_router
+from agentic_api.github_user.routes import router as github_user_router
 from agentic_api.health import router as health_router
 from agentic_api.jira.fields import router as jira_fields_router
 from agentic_api.jira.routes import router as jira_router
@@ -37,10 +38,14 @@ from agentic_api.workspaces.routes import router as workspaces_router
 from agentic_engine.events import RunEvent
 from agentic_github import (
     FakeGithubApp,
+    FakeGithubUserAuth,
     GithubApp,
     GithubAppConfig,
     GithubConfigError,
     GithubPlatform,
+    GithubUserAuth,
+    GithubUserOAuth,
+    GithubUserOAuthConfig,
 )
 from agentic_jira import (
     AtlassianApp,
@@ -94,6 +99,8 @@ def create_app(
                 app.state.github.close()
             if app.state.jira is not None:
                 await app.state.jira.aclose()
+            if app.state.github_user is not None:
+                await app.state.github_user.aclose()
 
     app = FastAPI(title="Agentic Dev Platform API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
@@ -103,6 +110,7 @@ def create_app(
     )
     app.state.github = _github_app(settings)
     app.state.jira = _jira_app(settings)
+    app.state.github_user = _github_user_auth(settings)
     app.state.claude_keys = claude_keys or (
         FakeKeyVerifier() if settings.claude_key_check == "fake" else AnthropicKeyVerifier()
     )
@@ -117,6 +125,7 @@ def create_app(
     app.include_router(workspaces_router)
     app.include_router(github_router)
     app.include_router(github_webhooks_router)
+    app.include_router(github_user_router)
     app.include_router(jira_router)
     app.include_router(jira_fields_router)
     app.include_router(jira_triggers_router)
@@ -153,6 +162,28 @@ def _github_app(settings: Settings) -> GithubPlatform | None:
     return GithubApp(
         GithubAppConfig.from_file(
             settings.github_app_id, settings.github_app_slug, settings.github_app_private_key_file
+        )
+    )
+
+
+def _github_user_auth(settings: Settings) -> GithubUserAuth | None:
+    """The OAuth app for personal GitHub connections (8.2), if its client id is set (or the fake
+    one with the fake GitHub App). A missing or unreadable client secret then fails here, at
+    startup."""
+    if settings.github == "fake":
+        return FakeGithubUserAuth(settings.api_base_url)
+    if settings.github_user_client_id is None:
+        return None
+    if settings.github_user_client_secret_file is None:
+        raise GithubConfigError(
+            "GITHUB_USER_CLIENT_SECRET_FILE must be set with GITHUB_USER_CLIENT_ID"
+        )
+    return GithubUserOAuth(
+        GithubUserOAuthConfig.from_file(
+            settings.github_user_client_id,
+            settings.github_user_client_secret_file,
+            f"{settings.api_base_url.rstrip('/')}/github-user/callback",
+            settings.github_user_scopes.split(),
         )
     )
 

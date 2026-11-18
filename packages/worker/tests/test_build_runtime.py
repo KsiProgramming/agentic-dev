@@ -16,9 +16,9 @@ from agentic_runtime.testing import MockClaude
 from agentic_sandbox import FakeSandboxManager
 from agentic_secrets import KEY_BYTES, LocalKeyProvider
 from agentic_store import StoredRun
+from agentic_worker.errors import RunSetupError
 from agentic_worker.main import (
     ConfigError,
-    RunSetupError,
     WorkerSettings,
     build_github,
     build_keys,

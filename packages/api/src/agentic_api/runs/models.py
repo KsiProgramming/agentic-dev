@@ -156,6 +156,13 @@ class CreateRunRequest(BaseModel):
         "it. Give this, `workflow` or `template`, only one.",
     )
     input: str = ""
+    copilot_connection_id: UUID | None = Field(
+        default=None,
+        description="Run on this person's Copilot (8.2): the id of one of the workspace's personal "
+        "GitHub connections (`GET /workspaces/{id}/github-user`). Every agent of the run then "
+        "uses that person's subscription and nobody else's. Unset: the run is on Claude. "
+        "Refused with `422` `copilot_connection_not_found` or `409` `copilot_needs_attention`.",
+    )
     spec_file: SpecFileSource | None = Field(
         default=None,
         description="The Markdown spec file the run is given (7.7), uploaded or read from the "
@@ -570,6 +577,11 @@ class RunSummary(BaseModel):
     jira_issue: JiraIssueRef | None = Field(
         default=None,
         description="The Jira issue a trigger started the run on (7.3); a rerun keeps it.",
+    )
+    copilot_login: str | None = Field(
+        default=None,
+        description="The GitHub login whose Copilot subscription the run uses (8.2), as it was "
+        "when the run started; `null`: the run is on Claude.",
     )
     branch: str | None = Field(
         description="The branch the run works on: the repo's `ref`, else the default branch of a "
