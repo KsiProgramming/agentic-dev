@@ -795,6 +795,7 @@ async def _run_step(
                 return await run_wait_node(
                     node,
                     input,
+                    log,
                     brief.key if brief else None,
                     brief.url if brief else "",
                     str(comment) if comment else None,

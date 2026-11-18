@@ -126,6 +126,9 @@ async def test_an_answer_continues_the_run_to_the_next_step() -> None:
     assert result.status == "completed"
     assert [r.node_id for r in run.runtime.requests] == ["build"]
     assert result.results["wait"].data == {"answered": True}
+    # The wait ends with `gate_decided`, which is how the console learns it is over.
+    decided = [e for e in run.sink.events if e.type == "gate_decided" and e.node_id == "wait"]
+    assert [e.payload["decided_by"] for e in decided] == ["jira:comment"]
 
 
 async def test_a_restart_in_the_middle_of_the_wait_still_waits() -> None:

@@ -483,6 +483,7 @@ async def run_gate_node(
 async def run_wait_node(
     node: WaitForNode,
     input: str,
+    log: RunEventLog,
     issue_key: str | None,
     issue_url: str,
     after_comment_id: str | None,
@@ -513,6 +514,8 @@ async def run_wait_node(
         },
     }
     decision = GateDecision.model_validate(interrupt(request))
+    # The console and the run's summary read the end of a wait from this event, as a gate's.
+    await log.emit(GATE_DECIDED, node_id=node.id, payload=decided_payload(decision, {}))
     if decision.decision == "approve":
         note = (
             f"The team answered the questions asked on {issue_key}: their answers are the "

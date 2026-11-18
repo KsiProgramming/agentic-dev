@@ -223,3 +223,21 @@ test("a wait for answers (7.9) names its issue, and only an https address is a l
   });
   expect(pendingGate([at(runEvent(2, "gate_waiting", { title: "Approve?" }))])?.waitFor).toBeNull();
 });
+
+test("a wait for answers is over once it is decided, and the banner goes with it (7.9)", () => {
+  const waiting = {
+    ...runEvent(2, "gate_waiting", {
+      title: "Waiting",
+      wait_for: {
+        kind: "jira_comment",
+        issue: { key: "KAN-7", url: "https://acme.atlassian.net/browse/KAN-7" },
+        after_comment_id: "1",
+      },
+    }),
+    node_id: "wait",
+  };
+  const decided = { ...runEvent(3, "gate_decided", { decision: "approve" }), node_id: "wait" };
+
+  expect(pendingGate([waiting])?.waitFor?.issueKey).toBe("KAN-7");
+  expect(pendingGate([waiting, decided])).toBeNull();
+});
