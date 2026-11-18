@@ -69,3 +69,15 @@ Ask GitHub in writing whether an operator may run Copilot, through the SDK and e
 ## Spike
 
 Not run. `spike/copilot_probe.py` is a ready-to-run script for 8.2's first task. It is untested: it follows the documented snippet in S4 and has never been executed.
+
+## Spike results (8.2), offline part, 2026-11-18
+
+Run without a token: the SDK was installed in a scratch virtualenv and its public API read (`inspect`) and compared with its documentation (Context7, `/github/copilot-sdk`, the repo's `docs/`). Nothing below was called against GitHub.
+
+- **Package and status.** `github-copilot-sdk` 1.0.34 installs on our Python. Its PyPI classifier is still `3 - Alpha`, so the pre-release question (S8) stays open. The pinned version in 8.2 is 1.0.34 until the owner decides.
+- **Per-person token.** `CopilotClient(github_token=…, use_logged_in_user=False)` is documented for a user token, and `create_session(github_token=…)` and `github_token_provider` exist for a token per session, which the multi-tenancy page recommends for a shared server.
+- **Usage is reported.** `SessionEventType.ASSISTANT_USAGE` ("emitted once per model API call", with `model`, `input_tokens`, `output_tokens`, `cost`; input tokens already include cache reads and writes) and `SESSION_USAGE_INFO` exist. This corrects the first reading above ("usage reporting: not found"). What `cost` means (premium requests or money) is **not yet shown by a call**.
+- **Tools.** `create_session(tools=[…])` takes custom tools; `available_tools` and `excluded_tools` can limit the SDK's built-in ones; `mcp_servers` exists too (a possible way to hand over the platform's MCP servers directly, to be compared with custom tools).
+- **Permissions.** `on_permission_request` is a handler we write; `PermissionHandler.approve_all` is only a helper. Events `PERMISSION_REQUESTED` and `PERMISSION_COMPLETED` exist.
+- **Streaming.** `streaming=True`, with `ASSISTANT_MESSAGE_DELTA`, `ASSISTANT_REASONING_DELTA`, `TOOL_EXECUTION_START` and `TOOL_EXECUTION_COMPLETE` events.
+- **Still open, needs a real token and subscription:** headless run with no signed-in user; a custom tool called and its result returned; built-in tools really off; what the permission handler is asked for; the meaning of `cost`; behaviour with an expired token and with no subscription; the token appearing in no event.
