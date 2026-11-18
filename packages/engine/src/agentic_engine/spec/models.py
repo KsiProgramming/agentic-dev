@@ -233,6 +233,39 @@ class GateNode(_Base):
         return self
 
 
+ANSWER_TTL_S = 7 * 24 * 60 * 60
+"""How long a `wait_for` waits when it sets no `ttl_s` (7.9): 7 days."""
+MAX_ANSWER_TTL_S = 30 * 24 * 60 * 60
+
+
+class WaitForNode(GateNode):
+    """A step that holds the run until an answer arrives (7.9), in the waiting state of a gate
+    (checkpointed, no active time, expires after `ttl_s`) but continued by the platform when the
+    answer is found, never by a person's decision. `jira_comment`: a comment on the run's Jira
+    issue, made after the comment the tool node `after_from` posted, by someone other than the
+    platform's account. Every rule about a gate (where it may sit) applies to it."""
+
+    type: Literal["wait_for"]  # type: ignore[assignment]
+    wait_for: Literal["jira_comment"] = "jira_comment"
+    after_from: NodeId = Field(
+        description="The `jira.comment` tool node whose comment is the question: only newer "
+        "comments answer it."
+    )
+    ttl_s: int | None = Field(  # type: ignore[assignment]
+        default=None,
+        ge=1,
+        le=MAX_ANSWER_TTL_S,
+        description="Seconds to wait for an answer before the run ends as `waiting for answers "
+        "expired`; 7 days when unset.",
+    )
+
+    @model_validator(mode="after")
+    def _plain(self) -> Self:
+        if self.select is not None or self.on_changes is not None or self.writes is not None:
+            raise ValueError(f"wait_for {self.id!r}: takes no `select`, `on_changes` or `writes`")
+        return self
+
+
 class SequenceNode(_Base):
     """Runs its steps in order."""
 
@@ -670,6 +703,7 @@ Node = Annotated[
     AgentNode
     | ToolNode
     | GateNode
+    | WaitForNode
     | SequenceNode
     | LoopNode
     | MapNode
@@ -1400,6 +1434,8 @@ def _not_in_loop(node: Node) -> str | None:
             return None  # 6.9: planned afresh each iteration, on one integration branch
         case _ if tools & PUBLISH_TOOLS:
             return "publisher"
+        case _ if tools == {"jira.comment"}:
+            return None  # 7.9: a question is asked again each round; the tool is idempotent
         case _ if tools & JIRA_WRITE_TOOLS:
             return "Jira write"
         case _ if tools & CREATE_TOOLS:
@@ -1740,7 +1776,11 @@ def policy_issues(root: Node, policy: Policy) -> list[ValidationIssue]:
                     f"{policy.agents_alive} agents alive"
                 )
                 over(node, path, "agents_alive", policy.agents_alive, len(node.branches), why)
-            case GateNode() if node.ttl_s is not None and node.ttl_s > policy.approval_ttl_s:
+            case GateNode() if (
+                not isinstance(node, WaitForNode)
+                and node.ttl_s is not None
+                and node.ttl_s > policy.approval_ttl_s
+            ):
                 why = (
                     f"ttl_s {node.ttl_s} is above the workspace limit of "
                     f"{policy.approval_ttl_s} seconds"

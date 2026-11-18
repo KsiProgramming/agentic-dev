@@ -30,6 +30,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, Field, SecretStr
 
 from agentic_jira import (
+    PLATFORM_MARK,
     ROLES,
     Issue,
     JiraApiError,
@@ -478,7 +479,7 @@ class _JiraTools(_JiraReader):
     def _footer(self) -> str:
         short = str(self._run_id)[:8]
         run = f"[{short}]({self._run_url})" if self._run_url else f"`{short}`"
-        return f"_Posted by agentic-dev run {run}_"
+        return f"_{PLATFORM_MARK} {run}_"
 
     async def comment(
         self,

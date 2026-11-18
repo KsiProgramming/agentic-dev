@@ -19,7 +19,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -65,7 +65,7 @@ from agentic_engine.templates import (
     wrap_with_create_repo,
 )
 from agentic_engine.templates.docs import PAGE_SEPARATOR
-from agentic_jira import FAKE_CODE, FAKE_SITES, FakeAtlassian, JiraPlatform
+from agentic_jira import FAKE_CODE, FAKE_SITES, FakeAtlassian, JiraPlatform, check_and_answer
 from agentic_runtime import (
     AgentRequest,
     AgentRun,
@@ -85,6 +85,7 @@ from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
 from agentic_sandbox.testing import ensure_sandbox_image, make_repo
 from agentic_secrets import LocalKeyProvider, generate_key_file, install_redaction
 from agentic_store import (
+    ANSWERS_EXPIRED_REASON,
     DEFAULT_WORKSPACE_ID,
     JiraProjectRef,
     JiraSiteRef,
@@ -94,6 +95,7 @@ from agentic_store import (
     create_run,
     dequeue_run,
     enqueue_run,
+    expire_gates,
     get_run,
     get_run_artifact,
     get_run_summary,
@@ -112,6 +114,7 @@ from agentic_store import (
     saved_changes,
     set_jira_site_enabled,
     set_jira_site_projects,
+    waiting_runs,
 )
 from agentic_tools.artifacts import ARTIFACT_TOOL_NAMES
 from agentic_tools.github import CREATE_TOOL_NAMES, PUBLISH_TOOL_NAMES, GithubPublisher
@@ -2548,6 +2551,11 @@ SDD_SPEC = (
     "## Open questions\n\n[NEEDS CLARIFICATION: per API key or per IP?]"
 )
 SDD_QUESTIONS = "The specification has open questions:\n\n1. Per API key or per IP? (FR-001)"
+SDD_ANSWERED = (
+    "# Feature specification: Rate limit the public endpoints\n\nAPI-1\n\n## Requirements\n\n"
+    "- FR-001 The system shall answer 429 past 100 requests a minute per API key."
+)
+SPEC_WRITER = "Product engineer writing a specification"
 
 
 class ByRole:
@@ -2559,12 +2567,16 @@ class ByRole:
 
     def start(self, request: AgentRequest) -> AgentRun:
         script = self._scripts[request.role]
+        if request.role == SPEC_WRITER and request.input.startswith("The team answered"):
+            # After the wait (7.9) the spec writer is told the team answered: it rewrites the spec.
+            script = [Message(text=SDD_ANSWERED), ECHO_USAGE]
         return FakeRuntime({request.node_id: script}, tools=self._tools).start(request)
 
 
-def sdd_team(tools: ToolExecutor | None, limit: int = 100) -> AgentRuntime:
+def sdd_team(tools: ToolExecutor | None, limit: int = 100, asks: bool = False) -> AgentRuntime:
     """Every agent of the SDD template, scripted by role: one engineer task writes and commits
-    `LIMIT = <limit>`."""
+    `LIMIT = <limit>`. With `asks`, the first specification has an open question: the
+    run asks the team and waits (7.9); without, it has none."""
     plan = {
         "tasks": [{"id": "limits", "title": "Rate limit", "instructions": "Do T001."}],
         "reason": "One task.",
@@ -2573,7 +2585,7 @@ def sdd_team(tools: ToolExecutor | None, limit: int = 100) -> AgentRuntime:
     write: dict[str, JsonValue] = {"path": "gateway/limits.py", "content": f"LIMIT = {limit}\n"}
     return ByRole(
         {
-            "Product engineer writing a specification": [Message(text=SDD_SPEC), ECHO_USAGE],
+            SPEC_WRITER: [Message(text=SDD_SPEC if asks else SDD_ANSWERED), ECHO_USAGE],
             "Product engineer asking the team": [Message(text=SDD_QUESTIONS), ECHO_USAGE],
             "Software architect": [Message(text="# Implementation plan: Rate limit"), ECHO_USAGE],
             "Tech lead writing tasks": [
@@ -2636,7 +2648,7 @@ async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
     async with worker(
         postgres_url,
         redis_url,
-        make_runtime=sdd_team,
+        make_runtime=lambda tools: sdd_team(tools, asks=True),
         sandboxes=sandboxes,
         github=github,
         github_remote=lambda _full_name: remote,
@@ -2660,7 +2672,22 @@ async def test_done_when_an_issue_gets_its_spec_plan_and_pr_links(
         redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
         try:
             await enqueue_run(redis, run_id)
-            for gate in ("approve_spec", "post_questions", "approve_pr"):
+            for gate in ("approve_spec", "post_questions"):
+                await wait_for_gate(sessions, run_id, gate)
+                await record_approval(sessions, run_id, gate, GateDecision(decision="approve"))
+                await enqueue_run(redis, run_id)
+            # Lessons rule 9: the question is posted and the run holds; nothing is built.
+            await wait_for_gate(sessions, run_id, "wait_for_answers")
+            assert len(atlassian.posted) == 1 and github.opened == []
+            started = {e.node_id for e in await list_run_events(sessions, run_id)}
+            assert "tasker" not in started and "implement" not in started
+            # The platform's own comment is not an answer; someone else's is (Check now's path).
+            keys = LocalKeyProvider.from_file(master_key)
+            [waiting] = [w for w in await waiting_runs(sessions) if w.run_id == run_id]
+            assert not await check_and_answer(sessions, keys, atlassian, redis, waiting)
+            atlassian.reply("fake-cloud-acme", "API-1", "Per API key.")
+            assert await check_and_answer(sessions, keys, atlassian, redis, waiting)
+            for gate in ("approve_spec", "approve_pr"):
                 await wait_for_gate(sessions, run_id, gate)
                 if gate == "approve_pr":
                     assert github.opened == [] and len(atlassian.posted) == 1
@@ -2744,7 +2771,6 @@ async def test_a_comment_at_the_spec_gate_sends_the_spec_back_and_the_revision_i
             decisions = [
                 ("approve_spec", GateDecision(decision="changes", comments=[ask])),
                 ("approve_spec", GateDecision(decision="approve")),
-                ("post_questions", GateDecision(decision="approve")),
                 ("approve_pr", GateDecision(decision="approve")),
             ]
             for gate, decision in decisions:
@@ -2766,6 +2792,163 @@ async def test_a_comment_at_the_spec_gate_sends_the_spec_back_and_the_revision_i
     assert "gateway/limits.py" in remote_files(tmp_path / "remote.git", f"agent/{run_id}/implement")
     [pull] = github.opened
     assert pull["title"] == "Spec-driven change from a Jira issue"
+
+
+async def sdd_waiting_for_answers(
+    sessions: async_sessionmaker[AsyncSession],
+    redis_url: str,
+    tmp_path: Path,
+    master_key: Path,
+    postgres_url: str,
+) -> tuple[UUID, UUID, FakeAtlassian, FakeGithub]:
+    """An SDD run on API-1 asked its question and waits for the answer, its worker stopped (the
+    state a restart finds): the run's id, its workspace's, the fake Jira and the fake GitHub."""
+    repos = tmp_path / "repos"
+    make_repo(repos / "hello")
+    remote = bare_remote(repos / "hello", tmp_path / "remote.git")
+    github = FakeGithub(GITHUB_TOKEN)
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+    atlassian = FakeAtlassian("")
+    workspace_id = await jira_workspace(sessions, atlassian, master_key)
+    await put_github_connection(sessions, workspace_id, 42, "acme")
+    run_id = await create_run(
+        sessions,
+        build_sdd_spec(SddParams()),
+        "API-1",
+        RepoSource(url=GITHUB_URL),
+        workspace_id=workspace_id,
+        jira_issue={
+            "cloud_id": "fake-cloud-acme",
+            "site": "acme.atlassian.net",
+            "key": "API-1",
+            "url": "https://acme.atlassian.net/browse/API-1",
+        },
+    )
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=lambda tools: sdd_team(tools, asks=True),
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: remote,
+        master_key_file=master_key,
+        jira=atlassian,
+        web_base_url="https://agentic.example",
+    ):
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+            for gate in ("approve_spec", "post_questions"):
+                await wait_for_gate(sessions, run_id, gate)
+                await record_approval(sessions, run_id, gate, GateDecision(decision="approve"))
+                await enqueue_run(redis, run_id)
+            await wait_for_gate(sessions, run_id, "wait_for_answers")
+        finally:
+            await redis.aclose()
+    return run_id, workspace_id, atlassian, github
+
+
+async def test_a_restart_in_the_middle_of_the_wait_still_waits_and_an_answer_still_resumes(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    master_key: Path,
+) -> None:
+    """Phase 7.9: the worker that held the run is gone; a new one finds it waiting, builds
+    nothing, and goes on at the spec gate once the answer is there."""
+    run_id, _, atlassian, github = await sdd_waiting_for_answers(
+        sessions, redis_url, tmp_path, master_key, postgres_url
+    )
+    repos = tmp_path / "repos"
+    remote = tmp_path / "remote.git"
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=lambda tools: sdd_team(tools, asks=True),
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: str(remote),
+        master_key_file=master_key,
+        jira=atlassian,
+        web_base_url="https://agentic.example",
+    ):
+        await asyncio.sleep(1)  # a new worker is up; it has nothing to claim
+        assert (await get_run(sessions, run_id)).status == "waiting"  # type: ignore[union-attr]
+        assert len(atlassian.posted) == 1 and github.opened == []
+        [waiting] = [w for w in await waiting_runs(sessions) if w.run_id == run_id]
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            atlassian.reply("fake-cloud-acme", "API-1", "Per API key.")
+            keys = LocalKeyProvider.from_file(master_key)
+            assert await check_and_answer(sessions, keys, atlassian, redis, waiting)
+            await wait_for_gate(sessions, run_id, "approve_spec")  # the rewritten spec's gate
+        finally:
+            await redis.aclose()
+
+    events = await list_run_events(sessions, run_id)
+    assert [e.node_id for e in events if e.type == "gate_waiting"][-3:] == [
+        "post_questions",
+        "wait_for_answers",
+        "approve_spec",
+    ]
+    assert "tasker" not in {e.node_id for e in events}
+
+
+async def test_an_unanswered_wait_expires_and_builds_nothing(
+    sessions: async_sessionmaker[AsyncSession],
+    postgres_url: str,
+    redis_url: str,
+    tmp_path: Path,
+    master_key: Path,
+) -> None:
+    """Phase 7.9: past its time to live the wait ends the run as "Waiting for answers expired";
+    it never goes on to build."""
+    run_id, _, atlassian, github = await sdd_waiting_for_answers(
+        sessions, redis_url, tmp_path, master_key, postgres_url
+    )
+    async with sessions.begin() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.id == run_id)
+            .values(gate_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    repos = tmp_path / "repos"
+    sandboxes = MirroredSandboxes(
+        FakeSandboxManager(local_root=repos), {GITHUB_URL: str(repos / "hello")}
+    )
+
+    async with worker(
+        postgres_url,
+        redis_url,
+        make_runtime=lambda tools: sdd_team(tools, asks=True),
+        sandboxes=sandboxes,
+        github=github,
+        github_remote=lambda _full_name: str(tmp_path / "remote.git"),
+        master_key_file=master_key,
+        jira=atlassian,
+    ):
+        assert run_id in await expire_gates(sessions)
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "cancelled")
+
+    events = await list_run_events(sessions, run_id)
+    cancelled = next(e for e in events if e.type == "run_cancelled")
+    assert (cancelled.payload["reason"], cancelled.payload["expired"]) == (
+        ANSWERS_EXPIRED_REASON,
+        True,
+    )
+    assert "tasker" not in {e.node_id for e in events} and github.opened == []
 
 
 # --- Build from a spec file (7.7) ----------------------------------------------------------------

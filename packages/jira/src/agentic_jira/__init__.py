@@ -5,6 +5,13 @@ the deliveries they send; and (7.4) the site's fields a project maps. Agents nev
 
 from agentic_jira.access import WorkspaceJira
 from agentic_jira.adf import from_markdown, to_markdown
+from agentic_jira.answers import (
+    PLATFORM_MARK,
+    answer_found,
+    check_and_answer,
+    is_platforms,
+    newer,
+)
 from agentic_jira.client import API_URL, AUTH_URL, AtlassianApp, project_filter
 from agentic_jira.config import AtlassianAppConfig
 from agentic_jira.errors import (
@@ -38,6 +45,7 @@ from agentic_jira.fake import (
     sign_delivery,
 )
 from agentic_jira.models import (
+    COMMENT_CREATED,
     ROLE_SUGGESTED_NAMES,
     ROLES,
     SCOPES,
@@ -77,6 +85,7 @@ from agentic_jira.webhooks import DELIVERY_HEADER, MAX_BODY_BYTES, parse_event, 
 __all__ = [
     "API_URL",
     "AUTH_URL",
+    "COMMENT_CREATED",
     "DELIVERY_HEADER",
     "FAKE_ACCOUNT",
     "FAKE_AC_FIELD",
@@ -91,6 +100,7 @@ __all__ = [
     "FAKE_SITES",
     "INVALID_GRANT",
     "MAX_BODY_BYTES",
+    "PLATFORM_MARK",
     "REFRESH_MARGIN",
     "RENEW_WITHIN",
     "ROLES",
@@ -135,10 +145,14 @@ __all__ = [
     "Webhook",
     "WorkspaceJira",
     "access_token",
+    "answer_found",
     "call",
+    "check_and_answer",
     "from_markdown",
+    "is_platforms",
     "mapped_value",
     "missing_scopes",
+    "newer",
     "parse_event",
     "project_filter",
     "remove_jira_webhooks",

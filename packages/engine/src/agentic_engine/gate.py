@@ -27,7 +27,7 @@ from agentic_engine.artifacts import ArtifactRef, ArtifactStore
 from agentic_engine.events import GATE_DECIDED, NODE_STARTED, RunEventLog
 from agentic_engine.expr import ExpressionError, compile_item_condition
 from agentic_engine.policy import APPROVAL_TTL_S
-from agentic_engine.spec import MAX_SELECT_ITEMS, GateNode, GateSelect
+from agentic_engine.spec import ANSWER_TTL_S, MAX_SELECT_ITEMS, GateNode, GateSelect, WaitForNode
 from agentic_runtime.findings import SEVERITIES, FindingsReport
 
 MAX_REVIEW_FILES = 50
@@ -478,3 +478,48 @@ async def run_gate_node(
         return AgentNodeResult(status="completed", text=input, usage=None, ends_run=True)
     reason = f"rejected at gate: {decision.comment}" if decision.comment else "rejected at gate"
     return AgentNodeResult(status="cancelled", text=input, usage=None, error=reason)
+
+
+async def run_wait_node(
+    node: WaitForNode,
+    input: str,
+    log: RunEventLog,
+    issue_key: str | None,
+    issue_url: str,
+    after_comment_id: str | None,
+) -> AgentNodeResult:
+    """Hold the run until the platform continues it (7.9). Like a gate it does nothing before
+    `interrupt()`; the runner announces the wait (`gate_waiting`, with `wait_for`). Continued
+    with an approval (`answer_arrived`) it completes with a note saying where the answers are,
+    which is the next step's input; a rejection cancels it. A wait with no issue, or whose
+    question comment is unknown, fails before it pauses: it could never be answered."""
+    if not issue_key or not after_comment_id:
+        why = (
+            "the run has no Jira issue"
+            if not issue_key
+            else f"{node.after_from!r} posted no comment"
+        )
+        return AgentNodeResult(
+            status="failed", text=input, usage=None, error=f"cannot wait for an answer: {why}"
+        )
+    request: dict[str, JsonValue] = {
+        "title": node.title,
+        "prompt": node.prompt,
+        "artifact": input,
+        "ttl_s": node.ttl_s if node.ttl_s is not None else ANSWER_TTL_S,
+        "wait_for": {
+            "kind": node.wait_for,
+            "issue": {"key": issue_key, "url": issue_url},
+            "after_comment_id": after_comment_id,
+        },
+    }
+    decision = GateDecision.model_validate(interrupt(request))
+    # The console and the run's summary read the end of a wait from this event, as a gate's.
+    await log.emit(GATE_DECIDED, node_id=node.id, payload=decided_payload(decision, {}))
+    if decision.decision == "approve":
+        note = (
+            f"The team answered the questions asked on {issue_key}: their answers are the "
+            f"issue's comments after comment {after_comment_id}."
+        )
+        return AgentNodeResult(status="completed", text=note, usage=None, data={"answered": True})
+    return AgentNodeResult(status="cancelled", text=input, usage=None, error="wait cancelled")

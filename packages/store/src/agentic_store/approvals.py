@@ -51,6 +51,10 @@ class GateExpiredError(RunNotWaitingError):
     """The gate's time to live has passed: the run is being cancelled (`agentic_store.expiry`)."""
 
 
+class NotAGateError(ApprovalError):
+    """The step the run waits at waits for an answer (7.9), not for a decision."""
+
+
 class WrongGateError(ApprovalError):
     pass
 
@@ -111,6 +115,8 @@ async def record_approval(
             changes = _shown_changes(payload)
             if gate != node_id:
                 raise WrongGateError(f"run {run_id} is waiting at gate {gate!r}, not {node_id!r}")
+            if payload.get("wait_for"):
+                raise NotAGateError(f"{node_id!r} waits for an answer on Jira, not for a decision")
             iteration = await _pass(session, run_id, node_id)
             if decision.decision == "changes":
                 allowed = payload.get("on_changes")

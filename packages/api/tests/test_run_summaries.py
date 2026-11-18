@@ -127,6 +127,7 @@ async def test_done_when_the_api_lists_past_runs_with_status_from_the_log(
         "node_id": "gate",
         "title": "Approve the notes",
         "expires_at": None,
+        "wait_for": None,
     }
     done = by_id[str(completed)]
     assert done["repo"] == {"url": DOCS.url, "ref": None}

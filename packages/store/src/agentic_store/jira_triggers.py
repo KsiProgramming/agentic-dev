@@ -32,7 +32,17 @@ from agentic_store.models import (
 
 TriggerOn = Literal["status", "label"]
 FireOutcome = Literal["started", "already_running", "start_failed"]
-DeliveryOutcome = Literal["matched", "project_not_allowed", "own_change", "no_match"]
+DeliveryOutcome = Literal[
+    "matched",
+    "project_not_allowed",
+    "own_change",
+    "no_match",
+    # A comment (7.9): an answer, our own comment, or one on an issue no run waits on.
+    "answered",
+    "own_comment",
+    "no_waiting_run",
+    "unverified",
+]
 
 OWN_MOVE_WINDOW = timedelta(minutes=10)
 """How long a run's own move keeps the delivery it causes from starting a run."""

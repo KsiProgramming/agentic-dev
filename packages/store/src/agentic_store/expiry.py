@@ -21,6 +21,8 @@ from agentic_store.models import Approval, Run, RunEventRow
 
 APPROVAL_EXPIRED_REASON: Final = "Approval expired"
 """The `reason` of the `run_cancelled` event of a run whose gate expired."""
+ANSWERS_EXPIRED_REASON: Final = "Waiting for answers expired"
+"""The same for a run whose `wait_for` (7.9) was not answered in time: it never builds."""
 
 
 async def expire_gates(sessions: async_sessionmaker[AsyncSession]) -> list[UUID]:
@@ -71,10 +73,15 @@ async def expire_gates(sessions: async_sessionmaker[AsyncSession]) -> list[UUID]
                 },
             )
             expired.append(run.id)
-        if expired:
+        for run in runs:
+            reason = (
+                ANSWERS_EXPIRED_REASON
+                if (run.waiting_gate or {}).get("wait_for")
+                else APPROVAL_EXPIRED_REASON
+            )
             await session.execute(
                 update(Run)
-                .where(Run.id.in_(expired))
+                .where(Run.id == run.id)
                 .values(
                     status="queued",
                     worker_id=None,
@@ -82,7 +89,7 @@ async def expire_gates(sessions: async_sessionmaker[AsyncSession]) -> list[UUID]
                     attempt=0,
                     queued_at=func.now(),
                     cancel_requested_at=func.coalesce(Run.cancel_requested_at, func.now()),
-                    cancel_reason=func.coalesce(Run.cancel_reason, APPROVAL_EXPIRED_REASON),
+                    cancel_reason=func.coalesce(Run.cancel_reason, reason),
                 )
             )
     return expired

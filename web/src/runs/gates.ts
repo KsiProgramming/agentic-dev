@@ -88,6 +88,25 @@ export interface PendingGate {
   changesLeft: number;
   /** Which pass of the gate this is: a gate in a loop pauses once per pass (7.8). */
   iteration: number;
+  /** Set when the run waits for an answer on a Jira issue (7.9), not for a decision: nobody
+   * approves it; the platform goes on when the answer is found. */
+  waitFor: WaitFor | null;
+}
+
+/** What a `wait_for` waits for: a comment on the issue after the one the platform posted. */
+export interface WaitFor {
+  issueKey: string;
+  /** The issue's address, only when it is an https URL: it is data, never trusted as a link. */
+  issueUrl: string | null;
+}
+
+/** The `wait_for` of a `gate_waiting` payload; null for a gate or a value of another shape. */
+export function parseWaitFor(value: unknown): WaitFor | null {
+  const issue = record(record(value)?.issue);
+  const key = text(issue?.key);
+  if (!key) return null;
+  const url = text(issue?.url);
+  return { issueKey: key, issueUrl: url && /^https:\/\//.test(url) ? url : null };
 }
 
 const STATUSES: readonly FileChangeStatus[] = ["added", "modified", "deleted", "renamed"];
@@ -171,6 +190,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         select,
         on_reject,
         on_changes,
+        wait_for,
       } = event.payload ?? {};
       const iteration = events
         .slice(0, i + 1)
@@ -191,6 +211,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         onReject: on_reject === "end" ? "end" : "cancel",
         changesLeft: typeof on_changes === "number" ? Math.max(on_changes - iteration + 1, 0) : 0,
         iteration,
+        waitFor: parseWaitFor(wait_for),
       };
     }
   }

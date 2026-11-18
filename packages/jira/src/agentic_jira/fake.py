@@ -423,7 +423,13 @@ class FakeAtlassian:
         self._accepted(token)
         issue = self._find(cloud_id, key)
         comment_id = str(next(self._comment_ids))
-        comment = IssueComment(comment_id, FAKE_ACCOUNT.name, datetime.now(UTC).isoformat(), body)
+        comment = IssueComment(
+            comment_id,
+            FAKE_ACCOUNT.name,
+            datetime.now(UTC).isoformat(),
+            body,
+            FAKE_ACCOUNT.account_id,
+        )
         self.issues[cloud_id][issue.key] = replace(
             issue, comments=(*issue.comments, comment), comment_count=issue.comment_count + 1
         )
@@ -499,6 +505,45 @@ class FakeAtlassian:
         if key not in {project.key for project in self._site_projects(cloud_id)}:
             raise JiraNotFoundError("Atlassian answered 404")
         return list(_WORKFLOW)
+
+    def reply(self, cloud_id: str, key: str, body: str, *, author_id: str = "someone-else") -> str:
+        """Someone else comments on the seeded issue `key` (7.9: an answer); the comment's id."""
+        issue = self._find(cloud_id, key)
+        comment_id = str(next(self._comment_ids))
+        comment = IssueComment(
+            comment_id, "Grace Other", datetime.now(UTC).isoformat(), body, author_id
+        )
+        self.issues[cloud_id][issue.key] = replace(
+            issue, comments=(*issue.comments, comment), comment_count=issue.comment_count + 1
+        )
+        return comment_id
+
+    def comment_delivery(
+        self,
+        cloud_id: str,
+        key: str,
+        comment_id: str,
+        *,
+        author_id: str = "someone-else",
+        delivery_id: str | None = None,
+    ) -> FakeDelivery:
+        """A signed `comment_created` delivery for comment `comment_id` of issue `key`."""
+        issue = self._find(cloud_id, key)
+        payload: dict[str, Any] = {
+            "timestamp": int(datetime.now(UTC).timestamp() * 1000),
+            "webhookEvent": "comment_created",
+            "comment": {"id": comment_id, "author": {"accountId": author_id}, "body": "x"},
+            "issue": {"id": issue.id, "key": issue.key, "fields": {}},
+            "matchedWebhookIds": list(self.webhooks.get(cloud_id, {})),
+        }
+        return FakeDelivery(
+            headers={
+                "Authorization": f"Bearer {sign_delivery(cloud_id)}",
+                "Content-Type": "application/json; charset=UTF-8",
+                DELIVERY_HEADER: delivery_id or str(uuid.uuid4().int)[:19],
+            },
+            body=json.dumps(payload).encode(),
+        )
 
     def delivery(
         self,

@@ -101,6 +101,8 @@ class IssueComment:
     author: str
     created: str
     body: str
+    author_id: str = ""
+    """The author's account id (7.9: told from the platform's own comments); empty if unknown."""
 
 
 @dataclass(frozen=True)
@@ -237,8 +239,10 @@ class Transition:
     to_status: str
 
 
-WEBHOOK_EVENTS: tuple[str, ...] = ("jira:issue_created", "jira:issue_updated")
-"""The events a trigger webhook asks for (7.3)."""
+COMMENT_CREATED = "comment_created"
+"""The event of a new comment (7.9): a run that asked a question waits for one."""
+WEBHOOK_EVENTS: tuple[str, ...] = ("jira:issue_created", "jira:issue_updated", COMMENT_CREATED)
+"""The events the webhook asks for: those a trigger reads (7.3) and new comments (7.9)."""
 WEBHOOK_FIELDS: tuple[str, ...] = ("status", "labels")
 """Its `fieldIdsFilter`: an update is delivered only when it changes one of these."""
 
@@ -279,6 +283,9 @@ class IssueEvent:
     project_key: str
     status_to: str | None
     labels_added: tuple[str, ...]
+    comment_id: str | None = None
+    """A `comment_created` delivery's comment id; its text is never read (principle 5)."""
+    comment_author_id: str | None = None
 
     @property
     def created(self) -> bool:

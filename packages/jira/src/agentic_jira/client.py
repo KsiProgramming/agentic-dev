@@ -551,6 +551,11 @@ def _name(value: object, field: str = "name") -> str | None:
     return None
 
 
+def _account_id(value: object) -> str:
+    account = cast(_Json, value).get("accountId") if isinstance(value, dict) else None
+    return account if isinstance(account, str) else ""
+
+
 def _person(value: object) -> str | None:
     return _name(value, "displayName")
 
@@ -603,6 +608,7 @@ def _issue(body: _Json, comments: _Json, extra_fields: Sequence[str] = ()) -> Is
                 IssueComment(
                     id=str(c.get("id", "")),
                     author=_person(c.get("author")) or "Unknown",
+                    author_id=_account_id(c.get("author")),
                     created=str(c.get("created", "")),
                     body=to_markdown(c.get("body")),
                 )

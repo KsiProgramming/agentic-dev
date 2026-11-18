@@ -31,6 +31,7 @@ test("a gate waits until it is decided", () => {
     onReject: "cancel",
     changesLeft: 0,
     iteration: 1,
+    waitFor: null,
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
@@ -81,6 +82,7 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     onReject: "cancel",
     changesLeft: 0,
     iteration: 1,
+    waitFor: null,
     ...overrides,
   };
 }
@@ -201,4 +203,41 @@ test("a gate that takes requests for changes counts the passes it has paused", (
     iteration: 3,
     changesLeft: 0,
   });
+});
+
+test("a wait for answers (7.9) names its issue, and only an https address is a link", () => {
+  const waiting = (url: string) =>
+    runEvent(2, "gate_waiting", {
+      title: "Waiting",
+      wait_for: { kind: "jira_comment", issue: { key: "KAN-5", url }, after_comment_id: "1" },
+    });
+  const at = (event: ReturnType<typeof runEvent>) => ({ ...event, node_id: "wait" });
+
+  expect(pendingGate([at(waiting("https://acme.atlassian.net/browse/KAN-5"))])?.waitFor).toEqual({
+    issueKey: "KAN-5",
+    issueUrl: "https://acme.atlassian.net/browse/KAN-5",
+  });
+  expect(pendingGate([at(waiting("javascript:alert(1)"))])?.waitFor).toEqual({
+    issueKey: "KAN-5",
+    issueUrl: null,
+  });
+  expect(pendingGate([at(runEvent(2, "gate_waiting", { title: "Approve?" }))])?.waitFor).toBeNull();
+});
+
+test("a wait for answers is over once it is decided, and the banner goes with it (7.9)", () => {
+  const waiting = {
+    ...runEvent(2, "gate_waiting", {
+      title: "Waiting",
+      wait_for: {
+        kind: "jira_comment",
+        issue: { key: "KAN-7", url: "https://acme.atlassian.net/browse/KAN-7" },
+        after_comment_id: "1",
+      },
+    }),
+    node_id: "wait",
+  };
+  const decided = { ...runEvent(3, "gate_decided", { decision: "approve" }), node_id: "wait" };
+
+  expect(pendingGate([waiting])?.waitFor?.issueKey).toBe("KAN-7");
+  expect(pendingGate([waiting, decided])).toBeNull();
 });

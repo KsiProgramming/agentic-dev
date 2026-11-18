@@ -34,6 +34,7 @@ def test_palette_order_and_categories() -> None:
         ("agent", "step"),
         ("tool", "step"),
         ("gate", "step"),
+        ("wait_for", "step"),
         ("sequence", "flow"),
         ("parallel", "flow"),
         ("router", "flow"),

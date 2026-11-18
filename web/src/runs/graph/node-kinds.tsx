@@ -1,6 +1,7 @@
 import {
   BotIcon,
   BoxIcon,
+  HourglassIcon,
   LayersIcon,
   MergeIcon,
   NetworkIcon,
@@ -21,6 +22,7 @@ const KIND: Record<NodeKind, { icon: LucideIcon; label: string }> = {
   agent: { icon: BotIcon, label: "agent" },
   tool: { icon: WrenchIcon, label: "tool" },
   gate: { icon: ShieldCheckIcon, label: "gate" },
+  wait_for: { icon: HourglassIcon, label: "wait" },
   reduce: { icon: MergeIcon, label: "reduce" },
   loop: { icon: RepeatIcon, label: "loop" },
   map: { icon: LayersIcon, label: "map" },

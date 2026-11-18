@@ -28,6 +28,7 @@ from agentic_engine.spec import (
     SequenceNode,
     SubflowNode,
     ToolNode,
+    WaitForNode,
     WorkflowSpec,
 )
 
@@ -317,6 +318,20 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
             "on_reject": _ADVANCED,
             "writes": _ADVANCED,
         },
+    ),
+    _manifest(
+        WaitForNode,
+        label="Wait for answer",
+        description="Holds the run until someone answers a question posted on the Jira issue.",
+        category="step",
+        icon="hourglass",
+        default={
+            "type": "wait_for",
+            "id": "wait",
+            "title": "Wait for answers",
+            "after_from": "ask",
+        },
+        ui={"prompt": _TEXTAREA, "ttl_s": _ADVANCED},
     ),
     _manifest(
         SequenceNode,

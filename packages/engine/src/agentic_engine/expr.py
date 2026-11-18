@@ -36,8 +36,9 @@ LIST_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
 """What a map's `over` can read: `last` (string, the map's input), `results` and `artifacts` (as
 for a condition)."""
 
-ROUTE_VARIABLES: Final = frozenset({"last", "results", "artifacts"})
-"""What a router's `when` can read: `last` (string, the router's input), `results` and
+ROUTE_VARIABLES: Final = frozenset({"last", "iteration", "results", "artifacts"})
+"""What a router's `when` can read: `last` (string, the router's input), `iteration` (int, the
+iteration of the innermost loop the router is in, 7.9; 0 outside a loop), `results` and
 `artifacts` (as for a condition). Inside a map item or a parallel branch, `results` holds the
 nodes that ran in it so far."""
 

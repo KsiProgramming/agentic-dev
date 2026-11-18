@@ -363,6 +363,8 @@ function Console({
         runFailure(events) ??
         "The run failed for a reason it did not log.",
     };
+  } else if (gate?.waitFor) {
+    banner = { kind: "answers", gate, runId, waitingMs: run ? runTimes(run, now).waitingMs : 0 };
   } else if (gate) {
     banner = { kind: "waiting", gate, runId };
   } else if (facts.status.label === "Expired") {
@@ -409,6 +411,7 @@ function Console({
       {banner ? (
         <RunBanner
           banner={banner}
+          baseUrl={baseUrl}
           onGoToStep={(key) => {
             update({ step: key, tab: null });
             showStep(true);
@@ -574,7 +577,9 @@ function Console({
       <div aria-live="polite" className="sr-only">
         {gate ? `Approval needed: ${gate.title}` : ""}
       </div>
-      {gate ? <ApprovalDock key={gate.nodeId} runId={runId} gate={gate} baseUrl={baseUrl} /> : null}
+      {gate && !gate.waitFor ? (
+        <ApprovalDock key={gate.nodeId} runId={runId} gate={gate} baseUrl={baseUrl} />
+      ) : null}
 
       {follow.behind ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--dock-height,0px)+1.5rem)] z-40 flex justify-center">

@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import hashlib
+import logging
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from agentic_api.runs.listener import RunEventListener
 from agentic_api.runs.models import (
     MAX_SPEC_FILE_BYTES,
     SPEC_FILE_EXTENSIONS,
+    AnswerCheckResponse,
     ApprovalRequest,
     ApprovalResponse,
     CancelResponse,
@@ -76,8 +78,10 @@ from agentic_github import (
     github_remote,
     repo_full_name,
 )
+from agentic_jira import check_and_answer
 from agentic_sandbox import ARTIFACT_NAME, RepoSource, branch_name
 from agentic_store import (
+    ANSWERS_EXPIRED_REASON,
     APPROVAL_EXPIRED_REASON,
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
@@ -119,8 +123,10 @@ from agentic_store import (
     resolve_workflow,
     run_spec,
     saved_changes,
+    waiting_runs,
 )
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 # Streams re-read the log this often even with no notification, in case one was lost.
@@ -209,7 +215,7 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "queue_stalled_at": row.queued_at + timedelta(seconds=stale_s) if unclaimed else None,
         "waiting_gate": WaitingGate.model_validate(row.waiting_gate) if row.waiting_gate else None,
         "cancel_reason": cancel_reason,
-        "expired": cancel_reason == APPROVAL_EXPIRED_REASON,
+        "expired": cancel_reason in (APPROVAL_EXPIRED_REASON, ANSWERS_EXPIRED_REASON),
         "rerun_of": row.rerun_of,
         "rerun_from": (
             RerunFromRef(run_id=row.rerun_of, **row.rerun_from)
@@ -1031,6 +1037,39 @@ def _artifact(stored: StoredArtifact) -> RunArtifact:
 def _no_artifact(name: str, version: int | None) -> str:
     which = f"version {version} of " if version is not None else ""
     return f"the run has no {which}artifact {name!r}"
+
+
+@router.post(
+    "/{run_id}/answers/check",
+    operation_id="checkRunAnswers",
+    responses={
+        404: {"description": "No run with this id"},
+        409: {"description": "The run is not waiting for an answer on a Jira issue"},
+        502: {"description": "Jira could not be read"},
+        503: {"description": "Jira is not configured"},
+    },
+)
+async def check_answers(run_id: UUID, request: Request) -> AnswerCheckResponse:
+    """ "Check now" (7.9): look on the Jira issue for an answer to the question the run is
+    waiting on, without waiting for the webhook or the worker's next check. An answer is a comment
+    newer than the platform's question by someone other than the connected account; the run then
+    goes on, as it would from the webhook."""
+    sessions = _sessions(request)
+    [waiting, *_] = await waiting_runs(sessions, run_id=run_id) or [None]
+    if waiting is None:
+        if await get_run_summary(sessions, run_id) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"run {run_id} not found")
+        raise HTTPException(status.HTTP_409_CONFLICT, "the run is not waiting for an answer")
+    jira = request.app.state.jira
+    keys = request.app.state.keys
+    if jira is None or keys is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Jira is not configured")
+    try:
+        found = await check_and_answer(sessions, keys, jira, request.app.state.redis, waiting)
+    except Exception as e:
+        log.warning("could not check run %s for an answer", run_id, exc_info=True)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Jira could not be read") from e
+    return AnswerCheckResponse(run_id=run_id, found=found)
 
 
 @router.post(
