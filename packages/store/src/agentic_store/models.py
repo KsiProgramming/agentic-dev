@@ -95,6 +95,36 @@ class Connection(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class GithubUserConnection(Base):
+    """One person's own GitHub account, connected so a run they start can use their Copilot
+    subscription (8.2). Unlike a workspace's `connections` (one row per provider), a workspace
+    has one of these per person, so they live in their own table.
+
+    `secret_*` is the encrypted grant (access token, and refresh token and expiry when the token
+    kind has them), under the workspace's data key; it is never listed. `github_user_id` is
+    GitHub's stable id, so connecting again as the same person replaces the row; `login` is what
+    is shown. `needs_attention` is a fixed reason (`invalid_grant`, `unauthorized`) why it cannot
+    be used until that person connects again."""
+
+    __tablename__ = "github_user_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "github_user_id", name="uq_github_user_connections_workspace_user"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"))
+    github_user_id: Mapped[int] = mapped_column(BigInteger)
+    login: Mapped[str] = mapped_column(String(255))
+    secret_nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    scopes: Mapped[list[str] | None] = mapped_column(JSONB)
+    needs_attention: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class JiraSite(Base):
     """A Jira Cloud site a workspace's Jira connection reaches (7.1). `enabled` is the
     workspace's choice; nothing on a site is usable until projects are picked (`JiraProject`)."""
@@ -439,6 +469,12 @@ class Run(Base):
     # ref, size, sha256, text}`, uploaded or read from the repo when the run was created;
     # its agents are told it and it is the run artifact `spec-input.md`. A rerun keeps it.
     spec_file: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
+    # The person's GitHub connection whose Copilot the run uses (8.2), and their login as it was
+    # when the run started (it outlives the connection). Null: the run is on Claude.
+    copilot_connection_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("github_user_connections.id", ondelete="SET NULL")
+    )
+    copilot_login: Mapped[str | None] = mapped_column(String(255))
     # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
     branch: Mapped[str | None] = mapped_column(Text)
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):

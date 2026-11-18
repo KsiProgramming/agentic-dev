@@ -27,7 +27,7 @@ from agentic_secrets import (
     new_dek,
 )
 from agentic_store.audit import audit
-from agentic_store.models import Connection, Workspace
+from agentic_store.models import Connection, GithubUserConnection, Workspace
 
 log = logging.getLogger(__name__)
 
@@ -273,6 +273,12 @@ async def workspace_dek(
                 delete(Connection).where(
                     Connection.workspace_id == workspace.id,
                     Connection.secret_ciphertext.is_not(None),
+                )
+            )
+            # A person's GitHub grant (8.2) is protected by the same key, so it is as unreadable.
+            await session.execute(
+                delete(GithubUserConnection).where(
+                    GithubUserConnection.workspace_id == workspace.id
                 )
             )
     dek = new_dek()

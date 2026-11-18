@@ -135,6 +135,12 @@ async def create_rerun(
                 pr_review=follow_up.pr_review if follow_up is not None else None,
                 # The spec file as the run was given it (7.7): never read again.
                 spec_file=original.spec_file,
+                # A person's Copilot goes on with a rerun they ask for, never with a follow-up a
+                # webhook starts: no one's subscription is used for events others cause (8.1).
+                copilot_connection_id=(
+                    original.copilot_connection_id if follow_up is None else None
+                ),
+                copilot_login=original.copilot_login if follow_up is None else None,
             )
         )
         if follow_up is not None:

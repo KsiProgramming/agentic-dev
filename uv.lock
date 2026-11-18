@@ -143,16 +143,20 @@ version = "0.1.0"
 source = { editable = "packages/github" }
 dependencies = [
     { name = "agentic-secrets" },
+    { name = "agentic-store" },
     { name = "cryptography" },
     { name = "githubkit", extra = ["auth-app"] },
+    { name = "httpx2" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "agentic-secrets", editable = "packages/secrets" },
+    { name = "agentic-store", editable = "packages/store" },
     { name = "cryptography", specifier = ">=45" },
     { name = "githubkit", extras = ["auth-app"], specifier = ">=0.13" },
+    { name = "httpx2", specifier = ">=2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
 

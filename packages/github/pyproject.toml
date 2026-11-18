@@ -5,8 +5,10 @@ description = "GitHub App client (installations and repos) for the Agentic Dev P
 requires-python = ">=3.12"
 dependencies = [
     "agentic-secrets",
+    "agentic-store",
     "cryptography>=45",
     "githubkit[auth-app]>=0.13",
+    "httpx2>=2.0,<3",
     "pydantic>=2.11",
 ]
 
