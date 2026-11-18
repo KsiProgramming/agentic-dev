@@ -488,10 +488,10 @@ async def run_wait_node(
     after_comment_id: str | None,
 ) -> AgentNodeResult:
     """Hold the run until the platform continues it (7.9). Like a gate it does nothing before
-    `interrupt()`; the runner announces the wait (`gate_waiting`, with `wait_for`). It completes,
-    passing `input` on, when continued with an approval (`answer_arrived`); a rejection cancels
-    it. A wait with no issue, or whose question comment is unknown, fails before it pauses: it
-    could never be answered."""
+    `interrupt()`; the runner announces the wait (`gate_waiting`, with `wait_for`). Continued
+    with an approval (`answer_arrived`) it completes with a note saying where the answers are,
+    which is the next step's input; a rejection cancels it. A wait with no issue, or whose
+    question comment is unknown, fails before it pauses: it could never be answered."""
     if not issue_key or not after_comment_id:
         why = (
             "the run has no Jira issue"
@@ -514,5 +514,9 @@ async def run_wait_node(
     }
     decision = GateDecision.model_validate(interrupt(request))
     if decision.decision == "approve":
-        return AgentNodeResult(status="completed", text=input, usage=None, data={"answered": True})
+        note = (
+            f"The team answered the questions asked on {issue_key}: their answers are the "
+            f"issue's comments after comment {after_comment_id}."
+        )
+        return AgentNodeResult(status="completed", text=note, usage=None, data={"answered": True})
     return AgentNodeResult(status="cancelled", text=input, usage=None, error="wait cancelled")

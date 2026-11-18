@@ -244,6 +244,8 @@ class _Limits:
     request: str | None = None
     issue: IssueBrief | None = None
     spec: SpecFile | None = None
+    loops: dict[str, str] = field(default_factory=dict[str, str])
+    """Each router in a loop's body → the innermost loop around it (7.9: `iteration` in `when`)."""
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -442,6 +444,7 @@ def compile_workflow(
         context.issue if context is not None else None,
         context.spec if context is not None else None,
     )
+    limits.loops = _enclosing_loops(spec.root)
 
     loops: list[LoopNode] = []  # the loops `add` is inside
     top = top_step_of(spec)  # node id → the top-level step it runs in, for saved branches (12.4)
@@ -1776,8 +1779,10 @@ def _router_entry(
                 "routes": {router.id: None},
             }
         results = _results_for(router.id, state["results"], limits)
+        loop = limits.loops.get(router.id)
+        iteration = state["iterations"].get(loop, 0) if loop is not None else 0
         choice = await _choose(
-            router, state["last_text"], results, state.get("artifacts", {}), scope
+            router, state["last_text"], results, state.get("artifacts", {}), scope, iteration
         )
         update: RunUpdate = {
             "spawned": spawned,
@@ -1824,6 +1829,17 @@ def _to_route(router: RouterNode, starts: Mapping[str, str]) -> Callable[[RunSta
 
 _SKIPPED_END: Final[dict[str, JsonValue]] = {"route": None, "skipped": True}
 """The `node_completed` payload of a router that skipped (7.5)."""
+
+
+def _enclosing_loops(root: Node) -> dict[str, str]:
+    """Each router in a loop's body → the id of the innermost loop around it."""
+    loops: dict[str, str] = {}
+    for _, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            for _, inner in iter_nodes(node.body):
+                if isinstance(inner, RouterNode):
+                    loops[inner.id] = node.id
+    return loops
 
 
 def _router_done(
@@ -1892,6 +1908,7 @@ async def _choose(
     results: dict[str, JsonValue],
     refs: Mapping[str, ArtifactRef],
     scope: _Scope,
+    iteration: int = 0,
 ) -> AgentNodeResult:
     """Start `router` and choose its route: by its rules, or by asking its classifier. Logs
     `route_chosen`, and returns a completed result whose `data` is `{route, mode, reason}` and
@@ -1912,7 +1929,7 @@ async def _choose(
         reason = cast(str, (answer.data or {})["reason"])
     else:
         try:
-            route, reason = await _rule(router, input, results, refs, scope.limits)
+            route, reason = await _rule(router, input, results, refs, scope.limits, iteration)
         except ExpressionError as e:
             return await _not_routed(router, "failed", str(e), input, None, None, scope)
         if route is None and router.otherwise == "skip":
@@ -1952,6 +1969,7 @@ async def _rule(
     results: dict[str, JsonValue],
     refs: Mapping[str, ArtifactRef],
     limits: _Limits,
+    iteration: int = 0,
 ) -> tuple[str | None, str]:
     """The first route of `router` whose `when` holds and that condition, else its default (or
     `None` if it has none). Raises `ExpressionError` naming the route whose condition failed."""
@@ -1961,7 +1979,7 @@ async def _rule(
         when = route.when or "false"
         try:
             met = compile_condition(when, ROUTE_VARIABLES).evaluate(
-                last=input, iteration=0, results=results, artifacts=artifacts
+                last=input, iteration=iteration, results=results, artifacts=artifacts
             )
         except ExpressionError as e:
             raise ExpressionError(when, f"when of route {route.id!r} failed: {e.message}") from e

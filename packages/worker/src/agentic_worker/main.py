@@ -166,6 +166,7 @@ from agentic_jira import (
     JiraConfigError,
     JiraPlatform,
     WorkspaceJira,
+    check_and_answer,
     renew_jira_webhooks,
 )
 from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
@@ -192,6 +193,7 @@ from agentic_secrets import (
     registered,
 )
 from agentic_store import (
+    ANSWERS_EXPIRED_REASON,
     APPROVAL_EXPIRED_REASON,
     PostgresArtifactStore,
     PostgresEventSink,
@@ -230,6 +232,7 @@ from agentic_store import (
     set_run_jira_brief,
     set_run_pr_review_brief,
     waiting_run_ids,
+    waiting_runs,
     workspace_price_table,
 )
 from agentic_store.sink import SANDBOX_KEPT_UNTIL
@@ -313,6 +316,7 @@ class WorkerSettings(BaseSettings):
     # How often the Jira trigger webhooks are renewed before their 30-day expiry, registered
     # again if Jira dropped them, and old deliveries pruned (7.3).
     jira_webhook_sweep_s: float = Field(default=21600.0, gt=0)
+    jira_answer_sweep_s: float = Field(default=300.0, gt=0)
     # Claims of one run before it fails instead of being resumed again (a run that kills workers).
     max_attempts: int = Field(default=3, ge=1)
     # The platform's GitHub App (the same settings as the API's). Unset, runs clone GitHub repos
@@ -739,7 +743,7 @@ async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> Non
             )
         else:
             payload: dict[str, JsonValue] = {"reason": reason}
-            if reason == APPROVAL_EXPIRED_REASON:
+            if reason in (APPROVAL_EXPIRED_REASON, ANSWERS_EXPIRED_REASON):
                 payload["expired"] = True
             await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
                 RUN_CANCELLED, payload=payload
@@ -788,6 +792,28 @@ async def _sweep_sandboxes(worker: Worker) -> None:
         except Exception:
             log.warning("could not drop old saved bundles", exc_info=True)
         await asyncio.sleep(worker.settings.sandbox_sweep_s)
+
+
+async def _sweep_answers(worker: Worker, redis: Redis) -> None:
+    """Every `jira_answer_sweep_s`, look on the Jira issue of each run waiting for an answer
+    (7.9) for one, so a lost webhook only delays the run. A failed check is logged and tried
+    again at the next sweep."""
+    while True:
+        if worker.jira is not None and worker.keys is not None:
+            try:
+                for waiting in await waiting_runs(worker.sessions):
+                    try:
+                        if await check_and_answer(
+                            worker.sessions, worker.keys, worker.jira, redis, waiting
+                        ):
+                            log.info(
+                                "run %s: an answer arrived on %s", waiting.run_id, waiting.issue_key
+                            )
+                    except Exception:
+                        log.warning("could not check run %s for an answer", waiting.run_id)
+            except Exception:
+                log.warning("could not check the runs waiting for answers", exc_info=True)
+        await asyncio.sleep(worker.settings.jira_answer_sweep_s)
 
 
 async def _sweep_jira_webhooks(worker: Worker) -> None:
@@ -1518,6 +1544,8 @@ async def run(
             stack.push_async_callback(_stop_task, kept)
             webhooks = asyncio.create_task(_sweep_jira_webhooks(worker))
             stack.push_async_callback(_stop_task, webhooks)
+            answers = asyncio.create_task(_sweep_answers(worker, redis))
+            stack.push_async_callback(_stop_task, answers)
             while not stop.is_set():
                 run = await _next_run(worker, redis)
                 if isinstance(run, UnloadableRun):

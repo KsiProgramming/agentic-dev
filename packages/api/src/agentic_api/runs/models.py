@@ -334,6 +334,16 @@ class ApprovalRequest(BaseModel):
     )
 
 
+class AnswerCheckResponse(BaseModel):
+    """What "Check now" found (7.9)."""
+
+    run_id: UUID
+    found: bool = Field(
+        description="True when someone other than the platform has answered on the issue: the "
+        "run is queued again and builds on. False: the run keeps waiting."
+    )
+
+
 class ApprovalResponse(BaseModel):
     run_id: UUID
     node_id: str
@@ -412,8 +422,27 @@ class RerunFromRef(BaseModel):
     )
 
 
+class WaitingForIssue(BaseModel):
+    key: str
+    url: str
+
+
+class WaitingFor(BaseModel):
+    """What a run paused at a `wait_for` (7.9) waits for: a comment on `issue` made after the
+    one the platform posted (`after_comment_id`)."""
+
+    kind: Literal["jira_comment"]
+    issue: WaitingForIssue
+    after_comment_id: str
+
+
 class WaitingGate(BaseModel):
     node_id: str = Field(description="The gate node the run is paused at.")
+    wait_for: WaitingFor | None = Field(
+        default=None,
+        description="Set when the run waits for an answer on Jira, not for a decision: the "
+        'console shows "Waiting for answers" and Check now, and the Inbox no Approve.',
+    )
     title: str | None = None
     expires_at: datetime | None = Field(
         default=None,

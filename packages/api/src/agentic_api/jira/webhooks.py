@@ -21,16 +21,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_api.jira.triggers import refusal, run_request
 from agentic_api.runs.routes import start_run
 from agentic_jira import (
+    COMMENT_CREATED,
     MAX_BODY_BYTES,
     WEBHOOK_EVENTS,
     IssueEvent,
     JiraDeliveryError,
     JiraPlatform,
+    WorkspaceJira,
+    newer,
+    own_account_id,
     parse_event,
 )
 from agentic_store import (
     JiraOrigin,
     TriggerRunActiveError,
+    answer_arrived,
+    enqueue_run,
     get_jira_connection,
     is_jira_own_move,
     jira_project_allowed,
@@ -39,6 +45,7 @@ from agentic_store import (
     record_jira_delivery,
     record_jira_trigger_fire,
     set_jira_delivery_outcome,
+    waiting_runs,
 )
 
 router = APIRouter(tags=["jira"])
@@ -81,7 +88,8 @@ async def receive(request: Request) -> Response:
         return Response(status_code=status.HTTP_202_ACCEPTED)
     sessions = _sessions(request)
     for workspace_id in await jira_webhook_workspaces(sessions, claims.cloud_id, event.webhook_ids):
-        outcome = await _deliver(request, workspace_id, claims.cloud_id, event)
+        deliver = _deliver_comment if event.event == COMMENT_CREATED else _deliver
+        outcome = await deliver(request, workspace_id, claims.cloud_id, event)
         log.info(
             "jira delivery %s on %s for workspace %s: %s",
             event.delivery_id,
@@ -162,6 +170,53 @@ async def _deliver(request: Request, workspace_id: UUID, cloud_id: str, event: I
             )
             outcomes.append("start_failed")
     return ", ".join(outcomes)
+
+
+async def _deliver_comment(
+    request: Request, workspace_id: UUID, cloud_id: str, event: IssueEvent
+) -> str:
+    """What one workspace makes of a new comment (7.9): it is an answer when a run waits on the
+    issue after an older comment and its author is not the connected account; then that run
+    goes on. A comment never starts a run. Only ids were read from the delivery."""
+    sessions = _sessions(request)
+    row = await record_jira_delivery(
+        sessions, workspace_id, cloud_id, event.delivery_id, event.issue_key
+    )
+    if row is None:
+        return "duplicate"
+    if not await jira_project_allowed(sessions, workspace_id, cloud_id, event.project_key):
+        await set_jira_delivery_outcome(sessions, row, "project_not_allowed")
+        return "project_not_allowed"
+    comment_id = event.comment_id or ""
+    waiting = [
+        w
+        for w in await waiting_runs(
+            sessions, issue_key=event.issue_key, cloud_id=cloud_id, workspace_id=workspace_id
+        )
+        if newer(comment_id, w.after_comment_id)
+    ]
+    if not waiting:
+        await set_jira_delivery_outcome(sessions, row, "no_waiting_run")
+        return "no_waiting_run"
+    jira: JiraPlatform | None = request.app.state.jira
+    keys = request.app.state.keys
+    try:
+        if jira is None or keys is None:
+            raise RuntimeError("no Jira access")
+        own = await own_account_id(WorkspaceJira(sessions, keys, jira, workspace_id))
+    except Exception:
+        # The worker's check finds the answer within minutes; guessing could end a wait early.
+        log.warning("could not tell whose comment %s is", comment_id, exc_info=True)
+        await set_jira_delivery_outcome(sessions, row, "unverified")
+        return "unverified"
+    if event.comment_author_id is None or event.comment_author_id == own:
+        await set_jira_delivery_outcome(sessions, row, "own_comment")
+        return "own_comment"
+    await set_jira_delivery_outcome(sessions, row, "answered")
+    for run in waiting:
+        if await answer_arrived(sessions, run.run_id, run.node_id):
+            await enqueue_run(request.app.state.redis, run.run_id)
+    return "answered"
 
 
 async def _issue(

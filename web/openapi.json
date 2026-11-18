@@ -892,6 +892,62 @@
         }
       }
     },
+    "/runs/{run_id}/answers/check": {
+      "post": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "Check Answers",
+        "description": "\"Check now\" (7.9): look on the Jira issue for an answer to the question the run is\nwaiting on, without waiting for the webhook or the worker's next check. An answer is a comment\nnewer than the platform's question by someone other than the connected account; the run then\ngoes on, as it would from the webhook.",
+        "operationId": "checkRunAnswers",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerCheckResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No run with this id"
+          },
+          "409": {
+            "description": "The run is not waiting for an answer on a Jira issue"
+          },
+          "502": {
+            "description": "Jira could not be read"
+          },
+          "503": {
+            "description": "Jira is not configured"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/approvals": {
       "post": {
         "tags": [
@@ -3862,6 +3918,9 @@
                 "$ref": "#/components/schemas/GateNode"
               },
               {
+                "$ref": "#/components/schemas/WaitForNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               },
               {
@@ -3900,7 +3959,8 @@
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "subflow": "#/components/schemas/SubflowNode",
-                "tool": "#/components/schemas/ToolNode"
+                "tool": "#/components/schemas/ToolNode",
+                "wait_for": "#/components/schemas/WaitForNode"
               }
             }
           },
@@ -4096,6 +4156,27 @@
         ],
         "title": "AgentNode",
         "description": "One agent turn: a role and instructions run on a provider."
+      },
+      "AnswerCheckResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "found": {
+            "type": "boolean",
+            "title": "Found",
+            "description": "True when someone other than the platform has answered on the issue: the run is queued again and builds on. False: the run keeps waiting."
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "found"
+        ],
+        "title": "AnswerCheckResponse",
+        "description": "What \"Check now\" found (7.9)."
       },
       "ApprovalRequest": {
         "properties": {
@@ -6419,6 +6500,9 @@
                 "$ref": "#/components/schemas/GateNode"
               },
               {
+                "$ref": "#/components/schemas/WaitForNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               },
               {
@@ -6457,7 +6541,8 @@
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "subflow": "#/components/schemas/SubflowNode",
-                "tool": "#/components/schemas/ToolNode"
+                "tool": "#/components/schemas/ToolNode",
+                "wait_for": "#/components/schemas/WaitForNode"
               }
             }
           },
@@ -6522,6 +6607,9 @@
                 "$ref": "#/components/schemas/GateNode"
               },
               {
+                "$ref": "#/components/schemas/WaitForNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               },
               {
@@ -6560,7 +6648,8 @@
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "subflow": "#/components/schemas/SubflowNode",
-                "tool": "#/components/schemas/ToolNode"
+                "tool": "#/components/schemas/ToolNode",
+                "wait_for": "#/components/schemas/WaitForNode"
               }
             }
           },
@@ -7061,6 +7150,9 @@
                 "$ref": "#/components/schemas/GateNode"
               },
               {
+                "$ref": "#/components/schemas/WaitForNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               },
               {
@@ -7100,7 +7192,8 @@
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "subflow": "#/components/schemas/SubflowNode",
-                "tool": "#/components/schemas/ToolNode"
+                "tool": "#/components/schemas/ToolNode",
+                "wait_for": "#/components/schemas/WaitForNode"
               }
             }
           },
@@ -7209,6 +7302,9 @@
                   "$ref": "#/components/schemas/GateNode"
                 },
                 {
+                  "$ref": "#/components/schemas/WaitForNode"
+                },
+                {
                   "$ref": "#/components/schemas/SequenceNode"
                 },
                 {
@@ -7246,7 +7342,8 @@
                   "router": "#/components/schemas/RouterNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "subflow": "#/components/schemas/SubflowNode",
-                  "tool": "#/components/schemas/ToolNode"
+                  "tool": "#/components/schemas/ToolNode",
+                  "wait_for": "#/components/schemas/WaitForNode"
                 }
               }
             },
@@ -8132,6 +8229,9 @@
                 "$ref": "#/components/schemas/GateNode"
               },
               {
+                "$ref": "#/components/schemas/WaitForNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               },
               {
@@ -8171,7 +8271,8 @@
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "subflow": "#/components/schemas/SubflowNode",
-                "tool": "#/components/schemas/ToolNode"
+                "tool": "#/components/schemas/ToolNode",
+                "wait_for": "#/components/schemas/WaitForNode"
               }
             }
           }
@@ -8261,6 +8362,9 @@
                     "$ref": "#/components/schemas/GateNode"
                   },
                   {
+                    "$ref": "#/components/schemas/WaitForNode"
+                  },
+                  {
                     "$ref": "#/components/schemas/SequenceNode"
                   },
                   {
@@ -8298,7 +8402,8 @@
                     "router": "#/components/schemas/RouterNode",
                     "sequence": "#/components/schemas/SequenceNode",
                     "subflow": "#/components/schemas/SubflowNode",
-                    "tool": "#/components/schemas/ToolNode"
+                    "tool": "#/components/schemas/ToolNode",
+                    "wait_for": "#/components/schemas/WaitForNode"
                   }
                 }
               },
@@ -9925,6 +10030,9 @@
                   "$ref": "#/components/schemas/GateNode"
                 },
                 {
+                  "$ref": "#/components/schemas/WaitForNode"
+                },
+                {
                   "$ref": "#/components/schemas/SequenceNode"
                 },
                 {
@@ -9962,7 +10070,8 @@
                   "router": "#/components/schemas/RouterNode",
                   "sequence": "#/components/schemas/SequenceNode",
                   "subflow": "#/components/schemas/SubflowNode",
-                  "tool": "#/components/schemas/ToolNode"
+                  "tool": "#/components/schemas/ToolNode",
+                  "wait_for": "#/components/schemas/WaitForNode"
                 }
               }
             },
@@ -10658,12 +10767,191 @@
         "title": "ValidationIssue",
         "description": "One reason a workflow cannot run: what is wrong (`code`), where (`path`, `node_id`) and\nwhat to change (`message`). A `policy_limit` issue also names the `limit`, its `value` and\nwhat the spec would reach (`observed`)."
       },
+      "WaitForNode": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "wait_for",
+            "title": "Type"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title",
+            "description": "What the approver is asked to decide."
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt",
+            "description": "More guidance for the approver, shown with the input."
+          },
+          "ttl_s": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2592000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl S",
+            "description": "Seconds to wait for an answer before the run ends as `waiting for answers expired`; 7 days when unset."
+          },
+          "select": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateSelect"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ask the approver to choose items of a JSON run artifact; the gate's output is that artifact with only the chosen items."
+          },
+          "on_reject": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cancel",
+                  "end"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Reject",
+            "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only)."
+          },
+          "on_changes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Changes",
+            "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body."
+          },
+          "writes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writes",
+            "description": "With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read."
+          },
+          "wait_for": {
+            "type": "string",
+            "const": "jira_comment",
+            "title": "Wait For",
+            "default": "jira_comment"
+          },
+          "after_from": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+            "title": "After From",
+            "description": "The `jira.comment` tool node whose comment is the question: only newer comments answer it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "title",
+          "after_from"
+        ],
+        "title": "WaitForNode",
+        "description": "A step that holds the run until an answer arrives (7.9), in the waiting state of a gate\n(checkpointed, no active time, expires after `ttl_s`) but continued by the platform when the\nanswer is found, never by a person's decision. `jira_comment`: a comment on the run's Jira\nissue, made after the comment the tool node `after_from` posted, by someone other than the\nplatform's account. Every rule about a gate (where it may sit) applies to it."
+      },
+      "WaitingFor": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "jira_comment",
+            "title": "Kind"
+          },
+          "issue": {
+            "$ref": "#/components/schemas/WaitingForIssue"
+          },
+          "after_comment_id": {
+            "type": "string",
+            "title": "After Comment Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "issue",
+          "after_comment_id"
+        ],
+        "title": "WaitingFor",
+        "description": "What a run paused at a `wait_for` (7.9) waits for: a comment on `issue` made after the\none the platform posted (`after_comment_id`)."
+      },
+      "WaitingForIssue": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "url"
+        ],
+        "title": "WaitingForIssue"
+      },
       "WaitingGate": {
         "properties": {
           "node_id": {
             "type": "string",
             "title": "Node Id",
             "description": "The gate node the run is paused at."
+          },
+          "wait_for": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WaitingFor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the run waits for an answer on Jira, not for a decision: the console shows \"Waiting for answers\" and Check now, and the Inbox no Approve."
           },
           "title": {
             "anyOf": [
@@ -11015,6 +11303,9 @@
                 "$ref": "#/components/schemas/GateNode"
               },
               {
+                "$ref": "#/components/schemas/WaitForNode"
+              },
+              {
                 "$ref": "#/components/schemas/SequenceNode"
               },
               {
@@ -11053,7 +11344,8 @@
                 "router": "#/components/schemas/RouterNode",
                 "sequence": "#/components/schemas/SequenceNode",
                 "subflow": "#/components/schemas/SubflowNode",
-                "tool": "#/components/schemas/ToolNode"
+                "tool": "#/components/schemas/ToolNode",
+                "wait_for": "#/components/schemas/WaitForNode"
               }
             }
           }
