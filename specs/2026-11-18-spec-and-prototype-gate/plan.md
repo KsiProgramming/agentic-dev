@@ -2,9 +2,17 @@
 
 Build order: engine and API first (the gate decision), then the web, then the template, then the tests and the real run.
 
+## 0. Lift the loop rule for gates and writers (found while starting the build)
+The plan assumed a gate could sit in a loop; the validator refuses it (`loop_issues`, `_not_in_loop`) because a gate's approval is unique per `(run, node)` and a decision is found by node id.
+- [ ] `approvals`: add `iteration` (default 1), unique on `(run_id, node_id, iteration)`; Alembic migration; `record_approval`, `pending_decision`, the expiry join (`expiry.py`) and `waiting_gate` carry the iteration.
+- [ ] Engine: a gate in a loop's body knows its pass (`state["iterations"][loop_id]`), puts `iteration` in `gate_waiting` and `gate_decided`; the resume reads the decision of that pass.
+- [ ] Validator: `_not_in_loop` allows a gate and a writer (not a publisher, Jira write, repo creator, loop, map or parallel); `not_allowed_in_map` and `not_allowed_in_parallel` keep refusing them. A writer in a loop commits onto its one branch each pass (as 6.9's integration branch does), and its saved bundle (12.2) is the latest.
+- [ ] Console, Inbox and the audit log show "pass N" for a gate that has run more than once; rerun from a step (12.4) and 7.6's follow-up check the new key.
+- [ ] Tests: a gate in a loop pauses and resumes on each pass, an old pass's approval is not reused, expiry cancels only the waiting pass, the validator's other rules are unchanged. Record the rule change in tech-stack (loop section, decisions log) and `lessons.md` if the real run shows a problem.
+
 ## 1. Gate decision "changes" (engine and API)
 - [ ] Read the gate primitive, `POST /runs/{id}/approvals`, the approval models and the gate's output shape (`packages/engine`, `packages/api`) before changing them.
-- [ ] Workflow spec: `GateNode.on_changes` (optional; set means Request changes is offered), validation that it is only allowed on a gate inside a loop, and that it cannot be combined with `on_reject: end` ambiguity (the three outcomes are distinct). Regenerate the JSON Schema.
+- [ ] Workflow spec: `GateNode.on_changes` (optional; set means Request changes is offered), validation that it is only allowed on a gate inside a loop (it needs a pass to go back to), distinct from `on_reject`. Regenerate the JSON Schema.
 - [ ] Approvals API: `decision: "approve" | "reject" | "changes"`; `changes` requires comments (each tagged with the item it concerns: `spec`, `plan`, `prototype`), refused with `422` on a gate without `on_changes`. Approvals row and audit entry record the decision and the comments.
 - [ ] Engine: a `changes` decision completes the gate with `{decision: "changes", comments}` and the loop continues; events (`gate_changes_requested`) carry the comments; waiting time is counted as for an approval (11.2).
 - [ ] Policy: the loop's `max_iterations` caps revisions; past the last pass the gate is built without Request changes.

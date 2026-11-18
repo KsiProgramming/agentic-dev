@@ -27,6 +27,7 @@ Source: the idea "Spec and prototype together" in `ideas.md` (promoted).
 
 ### Out of scope
 
+- Gates and writers in a **map or a parallel** stay refused (they inherit `_not_in_loop`'s check today and keep their own rule); only a loop's body is lifted. A loop in a loop, a publisher and a Jira write in a loop stay refused.
 - Editing the spec text at the gate (a gate edits branch files, not artifacts; 7.5's finding). The approver comments and the agent revises.
 - A prototype for non-UI work, a running preview served from the sandbox, or keeping the prototype after the run.
 - Checking each acceptance criterion against tests: 13.4. This phase only gives the criteria ids and the testable form.
@@ -43,6 +44,7 @@ Source: the idea "Spec and prototype together" in `ideas.md` (promoted).
 | Criteria form and ids | "When … the system shall …", `AC-001…` | The roadmap's wording; the ids are what 13.4 links to tests. `AC-` is the product spec's id for platform acceptance criteria, so the run's use is read as the spec's own: confirm the prefix in the plan, the alternative is `REQ-` |
 | Plan before the gate | `plan.md` written with the spec; `planner` after the gate refines it from the approved spec and the comments only if it changed | The approver judges the technical plan too; a second plan step must not contradict an approved one |
 | Revision cap | `max_revisions` option, default 2 | A loop with no cap is a spend risk (principle 2); consistent with `max_passes` |
+| Gates and writers in a loop | Lift the loop rule (`not_allowed_in_loop`) for a gate and for writers: a gate's decision, its `gate_waiting` and its expiry are keyed by `(run, node, iteration)`, and a writer in a loop commits onto its one branch each pass | User's choice, after the plan's loop turned out to be refused: a loop's body holds no gate or writer today (6.9; 7.6 made each review round its own run). Keeps one run, one cost line and one console story for the revisions |
 | Feedback path | Gate output carries the comments; the loop's next pass reads them through `results.approve_spec` as data | Same mechanism as 6.9's reviewer-to-lead feedback, no new input channel |
 
 ## Open questions
