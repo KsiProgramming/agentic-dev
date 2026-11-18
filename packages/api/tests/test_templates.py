@@ -34,6 +34,8 @@ async def test_lists_the_templates_with_their_options() -> None:
     assert set(sdd["parameters"]["properties"]) == {
         "max_passes",
         "max_revisions",
+        "max_clarifications",
+        "answer_ttl_s",
         "move_to",
         "spec_model",
         "planner_model",
