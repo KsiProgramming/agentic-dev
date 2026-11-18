@@ -94,10 +94,10 @@ What to know:
 
 **Issues built into pull requests (7.5).** The **Build from a Jira issue** template is spec-driven development in GitHub Spec Kit's stages. Start it from a trigger rule (for example: project API, status "Ready for dev", template "Build from a Jira issue", your repo), or by hand from the template gallery with an issue key. A run started by hand is told the issue too, on the site where you picked its project. A run:
 
-1. writes a specification (`spec.md`) from the issue, its acceptance criteria (mapped in Settings, 7.4) and the code, marking each open question `[NEEDS CLARIFICATION: …]`;
-2. waits for you to approve the specification. Rejecting it ends the run without building anything;
+1. writes a specification (`spec.md`) from the issue, its acceptance criteria (mapped in Settings, 7.4) and the code, marking each open question `[NEEDS CLARIFICATION: …]` and each acceptance criterion `AC-001…` in the form "When …, the system shall …", then a technical plan (`plan.md`) and, when the change has a user interface, a throwaway prototype in a `prototype/` folder on its own branch that is never pushed (7.8);
+2. waits for you to approve the specification, the plan and the prototype together. **Request changes** sends them back with a comment on any of them, and they are redone (at most `max_revisions` times, 2 by default); **Reject** ends the run without building anything;
 3. if the specification has open questions, shows you the comment that asks them and posts it on the issue once you approve;
-4. writes a plan (`plan.md`) and a task list (`tasks.md`), then has a lead engineer split the tasks between engineers on agent branches, while a reviewer checks each requirement and sends the work back (at most `max_passes` times);
+4. writes a task list (`tasks.md`), then has a lead engineer split the tasks between engineers on agent branches, while a reviewer checks each requirement and sends the work back (at most `max_passes` times);
 5. commits the specification, plan and tasks to `specs/<KEY>-<summary>/` on the same branch, so they are in the pull request (Spec Kit reads them from there);
 6. waits for you to approve the diff, then pushes the branch, opens one pull request, comments on the issue with links to the pull request and to each file under `specs/` in it, and, when you set **Move to**, moves the issue to that status (for example "In Review").
 

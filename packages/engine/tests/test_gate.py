@@ -390,3 +390,38 @@ def test_on_changes_needs_a_loop_with_a_pass_left() -> None:
                 "root": {"type": "gate", "id": "check", "title": "Right?", "on_changes": 1},
             }
         )
+
+
+async def test_a_gate_stores_the_comments_of_a_request_for_changes_as_an_artifact() -> None:
+    """Phase 7.8: `writes` on a gate with `on_changes` keeps each request's comments for the
+    agents that revise, and an approval writes nothing."""
+    doc = revising().model_dump(mode="json", exclude_none=True)
+    doc["root"]["body"]["steps"][1]["writes"] = "changes.md"
+    run = Run(parse_spec(doc), FakeRuntime({"writer": [Message(text="draft"), ECHO_USAGE] * 2}))
+    asked = GateDecision(decision="changes", comments=[GateComment(item="spec", text="More.")])
+
+    await run.start()
+    await run.resume(asked)
+    done = await run.resume(APPROVE)
+
+    written = [e for e in run.sink.events if e.type == "artifact_written"]
+    assert [(e.node_id, e.payload["name"], e.payload["version"]) for e in written] == [
+        ("check", "changes.md", 1)
+    ]
+    assert done.status == "completed"
+
+
+async def test_a_rejection_with_on_reject_end_in_a_loop_ends_the_run_completed() -> None:
+    """Phase 7.8: a gate in a root loop's body may end the run when it is rejected."""
+    doc = revising().model_dump(mode="json", exclude_none=True)
+    doc["root"]["body"]["steps"][1]["on_reject"] = "end"
+    doc["root"]["body"]["steps"].append(
+        {"type": "agent", "id": "after", "role": "A", "instructions": "Go."}
+    )
+    run = Run(parse_spec(doc), FakeRuntime({"writer": [Message(text="draft"), ECHO_USAGE]}))
+
+    await run.start()
+    done = await run.resume(REJECT)
+
+    assert done.status == "completed"
+    assert "after" not in done.order

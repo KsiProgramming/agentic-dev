@@ -213,15 +213,23 @@ class GateNode(_Base):
     )
     writes: ArtifactName | None = Field(
         default=None,
-        description="With `select`, store the chosen items as this run artifact.",
+        description="With `select`, store the chosen items as this run artifact. With "
+        "`on_changes` (7.8), store the comments of each request for changes as this artifact "
+        "(Markdown), a new version each time, for the agents that revise to read.",
     )
 
     @model_validator(mode="after")
     def _writes_selection(self) -> Self:
-        if self.writes is not None and self.select is None:
-            raise ValueError(f"gate {self.id!r}: `writes` needs `select`")
-        if self.writes is not None and not self.writes.endswith(".json"):
+        if self.writes is not None and self.select is None and self.on_changes is None:
+            raise ValueError(f"gate {self.id!r}: `writes` needs `select` or `on_changes`")
+        if (
+            self.writes is not None
+            and self.select is not None
+            and not self.writes.endswith(".json")
+        ):
             raise ValueError(f"gate {self.id!r}: `writes` must be a .json artifact")
+        if self.writes is not None and self.select is not None and self.on_changes is not None:
+            raise ValueError(f"gate {self.id!r}: `on_changes` cannot be used with `select`")
         return self
 
 
@@ -2271,13 +2279,31 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     return in_run_order(root, issues)
 
 
+def _ending_steps(root: Node) -> set[int]:
+    """The steps where a gate's `on_reject: end` can end the run: those of the root sequence, and
+    (7.8) those of a loop's body that is itself a step there, through nested sequences."""
+    found: set[int] = set()
+
+    def visit(node: Node) -> None:
+        steps = node.steps if isinstance(node, SequenceNode) else [node]
+        for step in steps:
+            found.add(id(step))
+            if isinstance(step, LoopNode):
+                # A loop's body may be one sequence of steps: a gate there ends the run too.
+                visit(step.body)
+
+    visit(root)
+    return found
+
+
 def gate_issues(root: Node) -> list[ValidationIssue]:
     """Why the gates under `root` cannot run (6.7): a `select.preselect` that is not a valid
     condition over `item` (`invalid_expression`), and `on_reject: end` on a gate that is not a
-    step of the root sequence (`invalid_gate`): only there does ending skip to the run's end. An
+    step of the root sequence or of a loop's body there (`invalid_gate`): only there does ending
+    skip to the run's end. An
     `on_changes` (7.8) needs a gate in a loop's body, with fewer of them than the loop has
     passes (`invalid_gate`)."""
-    top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else {id(root)}
+    top = _ending_steps(root)
     in_loop: dict[int, LoopNode] = {}
     for _, outer in iter_nodes(root):
         if isinstance(outer, LoopNode):

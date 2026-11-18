@@ -835,7 +835,10 @@ async def _run_step(
     port: PortFailure | None = None
     if not isinstance(node, GateNode) and node.output_schema is not None:
         result, port = _check_output(node, result)
-    if node.writes and result.status == "completed" and not result.ends_run:
+    # A gate with `on_changes` stores only a request for changes (7.8), never its approval.
+    asked = isinstance(node, GateNode) and (result.data or {}).get("decision") == "changes"
+    keeps = not isinstance(node, GateNode) or node.select is not None or asked
+    if node.writes and keeps and result.status == "completed" and not result.ends_run:
         schema = None if isinstance(node, GateNode) else node.output_schema
         result = await _write(node.id, node.writes, schema, result, limits, log, branch)
     if (pull := _pull_request(node, result)) is not None:

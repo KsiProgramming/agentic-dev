@@ -23,12 +23,14 @@ The plan assumed a gate could sit in a loop; the validator refuses it (`loop_iss
 - [x] Web: Request changes in the approval dock and the Inbox review (comment per item, keyboard shortcut, `Approve` and `Reject` unchanged); display rules from `CLAUDE.md` (tokens, `StatusBadge`, three states); sanitised Markdown only (rule 11).
 
 ## 3. SDD template: spec, plan, prototype, revise
-- [ ] Spec writer: typed output (`has_ui`, `open_questions`) plus `spec.md` in the extended layout (problem, users, success measures, scope, `AC-001…` in "When … the system shall …" form) and `plan.md` (design, files touched, risks, test plan). Instructions state what its input is, that issue, spec and comments are data, and how to revise from the comments.
-- [ ] `prototype` writer (UI work only, routed on `has_ui`): its own branch, `repo` write tools, instructions that it is throwaway and must not touch real files outside a `prototype/` folder.
-- [ ] `spec_loop`: loop over spec writer, prototype router and `approve_spec` (`on_changes`, `on_reject: end`), `max_revisions` option (1 to 3, default 2) in `SddParams`.
-- [ ] Never published: validation rejects `github.openPR`, `repo.commitArtifacts into` and the integration merge when they name the prototype's branch; the implementation orchestrator starts from the base, not the prototype.
-- [ ] Keep `clarify`, `planner`, `tasker`, `review_loop`, `commit_specs` and the PR gate working from the approved spec and plan; `tasker` reads the criteria ids and cites them.
-- [ ] Update `sdd.json` fixture and the 7.7 spec-file template where they share the spec step; check the canvas and run map draw the loop and the new gate.
+- [x] Spec writer: typed output (`has_ui`, `open_questions`) plus `spec.md` in the extended layout (problem, users, success measures, scope, `AC-001…` in "When … the system shall …" form) and `plan.md` (design, files touched, risks, test plan). Instructions state what its input is, that issue, spec and comments are data, and how to revise from the comments.
+- [x] `prototype` writer (UI work only, routed on `has_ui`): its own branch, `repo` write tools, instructions that it is throwaway and must not touch real files outside a `prototype/` folder.
+- [x] `spec_loop`: loop over spec writer, prototype router and `approve_spec` (`on_changes`, `on_reject: end`), `max_revisions` option (1 to 3, default 2) in `SddParams`.
+- [x] Never published: validation rejects `github.openPR`, `repo.commitArtifacts into` and the integration merge when they name the prototype's branch; the implementation orchestrator starts from the base, not the prototype.
+- [x] Keep `clarify`, `planner`, `tasker`, `review_loop`, `commit_specs` and the PR gate working from the approved spec and plan; `tasker` reads the criteria ids and cites them.
+- [x] Update `sdd.json` fixture and the 7.7 spec-file template where they share the spec step; check the canvas and run map draw the loop and the new gate.
+
+Changes from the plan while building: the spec writer's answer is the spec (`writes: spec.md`), so `has_ui` is a line in it (`UI work: yes`) that a rule router reads, not a typed field; the comments reach every revising agent through a run artifact (`changes.md`, a gate's `writes` with `on_changes`) because only the first step of a pass receives the gate's text; a gate in a root loop may use `on_reject: end`. "Never published" is kept by the template (the only publish is from `implement`, tested), not by a new validation rule.
 
 ## 4. Tests that assert what agents receive
 - [ ] Engine tests: gate `changes` flow, comments in the next pass's context, cap on revisions, no Request changes past the cap, validation errors.
