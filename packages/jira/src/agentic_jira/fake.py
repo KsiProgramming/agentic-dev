@@ -529,7 +529,7 @@ class FakeAtlassian:
     ) -> FakeDelivery:
         """A signed `comment_created` delivery for comment `comment_id` of issue `key`."""
         issue = self._find(cloud_id, key)
-        payload = {
+        payload: dict[str, Any] = {
             "timestamp": int(datetime.now(UTC).timestamp() * 1000),
             "webhookEvent": "comment_created",
             "comment": {"id": comment_id, "author": {"accountId": author_id}, "body": "x"},

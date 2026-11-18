@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from pydantic import JsonValue
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -36,7 +37,12 @@ pytestmark = pytest.mark.integration
 
 CLOUD = "00000000-0000-0000-0000-0000000c10d0"
 BRIEF = IssueBrief(key="KAN-5", url="https://acme.atlassian.net/browse/KAN-5", project="KAN")
-ISSUE = {"cloud_id": CLOUD, "site": "acme.atlassian.net", "key": "KAN-5", "url": BRIEF.url}
+ISSUE: dict[str, JsonValue] = {
+    "cloud_id": CLOUD,
+    "site": "acme.atlassian.net",
+    "key": "KAN-5",
+    "url": BRIEF.url,
+}
 
 
 def spec() -> WorkflowSpec:

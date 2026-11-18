@@ -1,9 +1,11 @@
 """The `wait_for` step (7.9): a run that asked a question holds until the platform continues it,
 builds nothing meanwhile, and survives a restart while it waits (lessons rule 9)."""
 
+from typing import Any
 from uuid import UUID, uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
+from pydantic import JsonValue
 
 from agentic_engine.agent import IssueBrief, RunContext
 from agentic_engine.events import InMemoryEventSink
@@ -61,7 +63,7 @@ class Run:
     """One run across its waits: the same checkpointer and sink, a new attempt each resume."""
 
     def __init__(self, workflow: WorkflowSpec, *, comment_id: str | None = "10001") -> None:
-        data = {"comment_id": comment_id} if comment_id is not None else {}
+        data: dict[str, JsonValue] = {"comment_id": comment_id} if comment_id is not None else {}
         self.tools = ScriptedToolExecutor({"jira.comment": ToolOutput(text="posted", data=data)})
         self.runtime = FakeRuntime({"build": [Message(text="built"), ECHO_USAGE]})
         self.spec = workflow
@@ -172,7 +174,7 @@ def test_a_wait_may_sit_in_a_loop_but_not_a_map_or_a_parallel() -> None:
     wait = {"type": "wait_for", "id": "w", "title": "T", "after_from": "ask"}
     ask = {"type": "tool", "id": "ask", "tool": "repo.list_files"}
 
-    def codes(node: dict[str, object]) -> set[str]:
+    def codes(node: dict[str, Any]) -> set[str]:
         document = {
             "spec_version": "0",
             "id": "x",

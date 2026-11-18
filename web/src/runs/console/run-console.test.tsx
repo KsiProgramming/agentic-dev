@@ -1313,7 +1313,7 @@ test("an issue address that is not https is not made a link", async () => {
 });
 
 test("Check now asks the API to look for an answer and says what it found", async () => {
-  const answers = vi.fn((_: Request) => json({ run_id: RUN_ID, found: false }));
+  const answers = vi.fn<(r: Request) => Response>(() => json({ run_id: RUN_ID, found: false }));
   api(detail({ status: "waiting" }), async (request) => {
     if (request.url.endsWith(`/runs/${RUN_ID}/answers/check`)) return answers(request);
     throw new Error(`unexpected ${request.method} ${request.url}`);

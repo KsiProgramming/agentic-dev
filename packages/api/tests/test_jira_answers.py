@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 from langgraph.checkpoint.memory import InMemorySaver
-from pydantic import SecretStr
+from pydantic import JsonValue, SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -31,7 +31,12 @@ pytestmark = pytest.mark.integration
 ACME = "fake-cloud-acme"
 KEY = "API-1"
 BRIEF = IssueBrief(key=KEY, url="https://acme.atlassian.net/browse/API-1", project="API")
-ISSUE = {"cloud_id": ACME, "site": "acme.atlassian.net", "key": KEY, "url": BRIEF.url}
+ISSUE: dict[str, JsonValue] = {
+    "cloud_id": ACME,
+    "site": "acme.atlassian.net",
+    "key": KEY,
+    "url": BRIEF.url,
+}
 RULE = {
     "cloud_id": ACME,
     "project_key": "API",
