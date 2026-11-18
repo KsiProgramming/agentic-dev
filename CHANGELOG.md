@@ -9,6 +9,8 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 7.8 Spec and prototype at one gate (in progress):
+  - **A gate, and a writer, in a loop's body.** A loop's body may now hold a gate and a writer (a publisher, a Jira write, a repo creator, a loop, a map or a parallel stay refused; a map and a parallel still refuse a gate and a writer). An approval belongs to a pass of its gate (`approvals.iteration`, migration 0038): each pass of a gate in a loop pauses, is decided and expires on its own. The workflow spec schema and node manifests describe it.
 - Phase 7.7 Spec from a Markdown file:
   - **Build from a spec file.** A new template runs spec-driven development from a Markdown spec instead of a Jira issue, with no Jira connection: the spec writer rewrites your file in Spec Kit's layout keeping every requirement, you answer its open questions at the spec gate, a team builds it with a reviewer, and one pull request opens with the spec, plan and tasks under `specs/<slug of the file's title>/`. It comes from the same builder as "Build from a Jira issue".
   - **A spec file as a run's input.** A workflow whose input is a spec file (`input.kind: "spec_file"`) is given one through `POST /runs` `spec_file`: an upload (`.md` or `.markdown`, at most 256 KB) or a path in the run's repo, read through the GitHub App at the run's branch when the run starts. Refusals: `spec_file_required`, `spec_file_invalid`, `path_invalid`, `path_not_found`, `not_a_file`, `spec_file_unexpected`. A rerun keeps the file and never reads the repo again.

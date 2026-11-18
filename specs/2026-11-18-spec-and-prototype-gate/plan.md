@@ -4,9 +4,9 @@ Build order: engine and API first (the gate decision), then the web, then the te
 
 ## 0. Lift the loop rule for gates and writers (found while starting the build)
 The plan assumed a gate could sit in a loop; the validator refuses it (`loop_issues`, `_not_in_loop`) because a gate's approval is unique per `(run, node)` and a decision is found by node id.
-- [ ] `approvals`: add `iteration` (default 1), unique on `(run_id, node_id, iteration)`; Alembic migration; `record_approval`, `pending_decision`, the expiry join (`expiry.py`) and `waiting_gate` carry the iteration.
-- [ ] Engine: a gate in a loop's body knows its pass (`state["iterations"][loop_id]`), puts `iteration` in `gate_waiting` and `gate_decided`; the resume reads the decision of that pass.
-- [ ] Validator: `_not_in_loop` allows a gate and a writer (not a publisher, Jira write, repo creator, loop, map or parallel); `not_allowed_in_map` and `not_allowed_in_parallel` keep refusing them. A writer in a loop commits onto its one branch each pass (as 6.9's integration branch does), and its saved bundle (12.2) is the latest.
+- [x] `approvals`: add `iteration` (default 1), unique on `(run_id, node_id, iteration)`; Alembic migration; `record_approval`, `pending_decision`, the expiry join (`expiry.py`) and `waiting_gate` carry the iteration.
+- [x] Engine: no change needed. The pass is the number of `gate_waiting` events the gate has in the run (`_pass`, in `agentic_store.approvals` and `expiry`), and the engine resumes the latest interrupt with the decision of that pass. A decision of an earlier pass is never read, because `pending_decision` counts the events first.
+- [x] Validator: `_not_in_loop` allows a gate and a writer (not a publisher, Jira write, repo creator, loop, map or parallel); `not_allowed_in_map` and `not_allowed_in_parallel` keep refusing them. A writer in a loop commits onto its one branch each pass (as 6.9's integration branch does), and its saved bundle (12.2) is the latest.
 - [ ] Console, Inbox and the audit log show "pass N" for a gate that has run more than once; rerun from a step (12.4) and 7.6's follow-up check the new key.
 - [ ] Tests: a gate in a loop pauses and resumes on each pass, an old pass's approval is not reused, expiry cancels only the waiting pass, the validator's other rules are unchanged. Record the rule change in tech-stack (loop section, decisions log) and `lessons.md` if the real run shows a problem.
 

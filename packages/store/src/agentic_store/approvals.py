@@ -106,7 +106,8 @@ async def record_approval(
             changes = _shown_changes(payload)
             if gate != node_id:
                 raise WrongGateError(f"run {run_id} is waiting at gate {gate!r}, not {node_id!r}")
-            if await _approval(session, run_id, node_id) is not None:
+            iteration = await _pass(session, run_id, node_id)
+            if await _approval(session, run_id, node_id, iteration) is not None:
                 raise AlreadyDecidedError(f"gate {node_id!r} of run {run_id} was already decided")
             try:
                 edits = check_edits(changes, decision.decision, decision.edits)
@@ -122,6 +123,7 @@ async def record_approval(
                 Approval(
                     run_id=run_id,
                     node_id=node_id,
+                    iteration=iteration,
                     decision=decision.decision,
                     comment=decision.comment,
                     decided_by=decision.decided_by,
@@ -237,7 +239,11 @@ async def pending_decision(
     only while the run is still paused there."""
     async with sessions() as session:
         gate = await _waiting_gate(session, run_id)
-        approval = None if gate is None else await _approval(session, run_id, gate)
+        approval = (
+            None
+            if gate is None
+            else await _approval(session, run_id, gate, await _pass(session, run_id, gate))
+        )
     if approval is None:
         return None
     return GateDecision.model_validate(
@@ -296,7 +302,26 @@ async def _waiting_gate(session: AsyncSession, run_id: UUID) -> str | None:
     )
 
 
-async def _approval(session: AsyncSession, run_id: UUID, node_id: str) -> Approval | None:
+async def _pass(session: AsyncSession, run_id: UUID, node_id: str) -> int:
+    """The pass of the gate `node_id` the run is at: how many times it has paused (7.8). A gate
+    that runs once is at pass 1."""
+    count = await session.scalar(
+        select(func.count()).where(
+            RunEventRow.run_id == run_id,
+            RunEventRow.type == GATE_WAITING,
+            RunEventRow.node_id == node_id,
+        )
+    )
+    return max(count or 0, 1)
+
+
+async def _approval(
+    session: AsyncSession, run_id: UUID, node_id: str, iteration: int
+) -> Approval | None:
     return await session.scalar(
-        select(Approval).where(Approval.run_id == run_id, Approval.node_id == node_id)
+        select(Approval).where(
+            Approval.run_id == run_id,
+            Approval.node_id == node_id,
+            Approval.iteration == iteration,
+        )
     )

@@ -1,0 +1,40 @@
+{
+  "spec_version": "0",
+  "id": "loop-with-publisher",
+  "name": "Publisher in a loop",
+  "root": {
+    "type": "loop",
+    "id": "revise",
+    "body": {
+      "type": "sequence",
+      "id": "round",
+      "steps": [
+        {
+          "type": "agent",
+          "id": "writer",
+          "role": "Writer",
+          "instructions": "Write NOTES.md and commit it.",
+          "tools": [
+            "repo.write_file",
+            "repo.commit"
+          ]
+        },
+        {
+          "type": "gate",
+          "id": "check",
+          "title": "Open the pull request?"
+        },
+        {
+          "type": "tool",
+          "id": "publish",
+          "tool": "github.openPR",
+          "args": {
+            "from_node": "writer"
+          }
+        }
+      ]
+    },
+    "until": "last.contains(\"APPROVED\")",
+    "max_iterations": 3
+  }
+}

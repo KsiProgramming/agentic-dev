@@ -236,9 +236,10 @@ class LoopNode(_Base):
     the loop's output is its last iteration's. `until` is a CEL condition over `last` (the body's
     output), `iteration` (iterations completed, from 1) and `results` (node id → `{status, text,
     data}`, the latest result of each node run so far). Reaching `max_iterations` ends the loop
-    normally. The body cannot contain gates, writers, publishers or loops: each is keyed by node
-    id, which repeats in every iteration. It may hold an orchestrator (6.9), whose plans are kept
-    per iteration and whose writers all land on its one integration branch."""
+    normally. The body cannot contain publishers, Jira writes or loops: each is keyed by node
+    id, which repeats in every iteration. A gate (7.8: one approval per pass) and a writer (one
+    branch, committed to on every pass) may be in it. It may hold an orchestrator (6.9), whose
+    plans are kept per iteration and whose writers all land on its one integration branch."""
 
     type: Literal["loop"]
     id: NodeId
@@ -1313,10 +1314,11 @@ def _uses_repo(node: Node) -> bool:
 
 def loop_issues(root: Node) -> list[ValidationIssue]:
     """Why the loops under `root` cannot run, in run order (depth first); empty if they can. A
-    loop's `until` must be a valid condition, and its body must not hold a gate, a writer, a
-    publisher, another loop, a map or a parallel: the issue is on that node, which is the one to
-    move. An orchestrator may be in it (6.9): its worker is checked by `orchestrator_issues`, and
-    its writers, which commit on task branches merged into its integration branch, are allowed."""
+    loop's `until` must be a valid condition, and its body must not hold a publisher, a Jira
+    write, a repo creator, another loop, a map or a parallel: the issue is on that node, which
+    is the one to move. A gate (7.8) and a writer may be in it. An orchestrator may be in it
+    (6.9): its worker is checked by `orchestrator_issues`, and its writers, which commit on task
+    branches merged into its integration branch, are allowed."""
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, LoopNode):
@@ -1365,10 +1367,13 @@ def _outside_workers(node: Node, path: str) -> Iterator[tuple[str, Node]]:
 
 
 def _not_in_loop(node: Node) -> str | None:
+    """Why `node` cannot be in a loop's body, or `None`. A gate (7.8: its approval is per pass,
+    `approvals.iteration`) and a writer (it commits onto its one branch each pass, as an
+    orchestrator's integration branch does, 6.9) may be."""
     tools = set(node_tools(node))
     match node:
         case GateNode():
-            return "gate"
+            return None
         case LoopNode():
             return "loop"
         case MapNode():
@@ -1384,9 +1389,20 @@ def _not_in_loop(node: Node) -> str | None:
         case _ if tools & CREATE_TOOLS:
             return "repo creator"
         case _ if tools & WRITE_TOOLS:
-            return "writer"
+            return None
         case _:
             return None
+
+
+def _not_in_map_or_parallel(node: Node) -> str | None:
+    """`_not_in_loop`, and also a gate and a writer, which only a loop's body may hold (7.8)."""
+    if isinstance(node, GateNode):
+        return "gate"
+    if reason := _not_in_loop(node):
+        return reason
+    if not isinstance(node, OrchestratorNode) and set(node_tools(node)) & WRITE_TOOLS:
+        return "writer"
+    return None
 
 
 def map_issues(root: Node) -> list[ValidationIssue]:
@@ -1487,7 +1503,7 @@ def _not_in_map(node: Node) -> str | None:
     match node:
         # A subflow's called nodes are checked as nodes of the map themselves.
         case AgentNode() | ToolNode() | SequenceNode() | RouterNode() | SubflowNode():
-            return _not_in_loop(node)
+            return _not_in_map_or_parallel(node)
         case _:
             return node.type
 
