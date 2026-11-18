@@ -59,6 +59,16 @@ export interface ReasoningTurn {
 
 export type Turn = MessageTurn | ToolTurn | ReasoningTurn;
 
+/** The `comments` of a `gate_decided` payload, leaving out malformed entries. */
+function parseComments(value: unknown): { item: string; text: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry: unknown) => {
+    const item = (entry as { item?: unknown } | null)?.item;
+    const text = (entry as { text?: unknown } | null)?.text;
+    return typeof item === "string" && typeof text === "string" ? [{ item, text }] : [];
+  });
+}
+
 export interface GateInfo {
   title: string;
   decision: string | null;
@@ -71,6 +81,8 @@ export interface GateInfo {
   select: GateSelection | null;
   /** The keys its approval chose, once decided. */
   selection: string[] | null;
+  /** The comments of a request for changes (7.8), once decided; empty otherwise. */
+  comments: { item: string; text: string }[];
   /** What rejecting does: cancel the run, or end it here as completed. */
   onReject: "cancel" | "end";
 }
@@ -755,6 +767,7 @@ class Builder {
           edits: [],
           select: parseSelection(payload.select),
           selection: null,
+          comments: [],
           onReject: payload.on_reject === "end" ? "end" : "cancel",
         };
         return;
@@ -771,6 +784,7 @@ class Builder {
           selection: Array.isArray(selection)
             ? selection.filter((k): k is string => typeof k === "string")
             : null,
+          comments: parseComments(payload.comments),
           onReject: step.gate?.onReject ?? "cancel",
         };
         return;

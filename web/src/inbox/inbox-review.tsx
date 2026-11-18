@@ -32,6 +32,7 @@ import {
   GateRunArtifacts,
   plural,
   RejectButton,
+  RequestChangesButton,
 } from "@/runs/console/decision-controls";
 import { StatusLabel } from "@/runs/console/gate-files";
 import { SelectionChecklist } from "@/runs/console/selection-checklist";
@@ -63,7 +64,10 @@ export function InboxReview({
   shortcuts: boolean;
   onDecided: (decision: Decision) => void;
 }) {
-  const gate = useRunGate(run.id, run.waiting_gate?.node_id, { baseUrl });
+  const gate = useRunGate(run.id, run.waiting_gate?.node_id, {
+    baseUrl,
+    since: run.waiting_gate?.expires_at,
+  });
   if (gate.isPending) return <LoadingState rows={6} label="Loading the gate…" />;
   if (!gate.data) {
     if (gate.error instanceof ApiError && gate.error.status === 409) {
@@ -182,14 +186,17 @@ function GateReview({
         <p role="status" className="font-medium">
           {decision.sent === "approve"
             ? "Approved. The run carries on shortly."
-            : gate.onReject === "end"
-              ? "Ended. The run completes here."
-              : "Rejected. The run carries on shortly."}
+            : decision.sent === "changes"
+              ? "Changes requested. The run carries on shortly."
+              : gate.onReject === "end"
+                ? "Ended. The run completes here."
+                : "Rejected. The run carries on shortly."}
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <ApproveButton decision={decision} shortcut={shortcuts} />
           <RejectButton decision={decision} shortcut={shortcuts} />
+          <RequestChangesButton decision={decision} />
           <Button asChild variant="ghost" className="sm:ml-auto">
             <Link href={`/runs/${run.id}`}>
               <ExternalLinkIcon aria-hidden="true" data-icon="inline-start" />

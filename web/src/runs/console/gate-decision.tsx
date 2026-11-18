@@ -47,14 +47,25 @@ export function GateDecision({ gate }: { gate: GateInfo }) {
       {gate.decision ? (
         <span className="text-muted-foreground" data-testid="gate-decision">
           ·{" "}
-          {gate.decision !== "approve"
-            ? `${gate.onReject === "end" ? "Ended the run here" : "Rejected"}${
-                gate.comment ? `: ${gate.comment}` : ""
-              }`
-            : `${selectedLine(gate) ?? "Approved"}${
-                edited ? ` with edits to ${plural(edited, "file")}` : ""
-              }${gate.comment ? `: ${gate.comment}` : ""}`}
+          {gate.decision === "changes"
+            ? `Asked for changes (${plural(gate.comments.length, "comment")})`
+            : gate.decision !== "approve"
+              ? `${gate.onReject === "end" ? "Ended the run here" : "Rejected"}${
+                  gate.comment ? `: ${gate.comment}` : ""
+                }`
+              : `${selectedLine(gate) ?? "Approved"}${
+                  edited ? ` with edits to ${plural(edited, "file")}` : ""
+                }${gate.comment ? `: ${gate.comment}` : ""}`}
         </span>
+      ) : null}
+      {gate.comments.length > 0 ? (
+        <ul className="basis-full text-foreground-secondary" data-testid="gate-comments">
+          {gate.comments.map((c, i) => (
+            <li key={i}>
+              <span className="font-mono">{c.item}</span>: {c.text}
+            </li>
+          ))}
+        </ul>
       ) : null}
       {edited > 0 ? (
         <>

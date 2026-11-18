@@ -18,9 +18,9 @@ The plan assumed a gate could sit in a loop; the validator refuses it (`loop_iss
 - [x] Policy: `on_changes` is the number of requests the gate takes (validated below the loop's `max_iterations`); the store refuses one past it and the gate view shows `changes_left`.
 
 ## 2. Gate shows more than one thing
-- [ ] Let a gate review show several items (spec artifact, plan artifact, a writer branch's diff), each as a tab, without changing gates that show one.
-- [ ] Gate comments in the run console: shown on the step they came from.
-- [ ] Web: Request changes in the approval dock and the Inbox review (comment per item, keyboard shortcut, `Approve` and `Reject` unchanged); display rules from `CLAUDE.md` (tokens, `StatusBadge`, three states); sanitised Markdown only (rule 11).
+- [x] A gate review shows its run artifacts (spec, plan) as cards that open beside a writer branch's diff (the prototype). Inline tabs are not built: the existing sheet already holds all three; revisit after the real run.
+- [x] Gate comments in the run console: shown on the step they came from.
+- [x] Web: Request changes in the approval dock and the Inbox review (comment per item, keyboard shortcut, `Approve` and `Reject` unchanged); display rules from `CLAUDE.md` (tokens, `StatusBadge`, three states); sanitised Markdown only (rule 11).
 
 ## 3. SDD template: spec, plan, prototype, revise
 - [ ] Spec writer: typed output (`has_ui`, `open_questions`) plus `spec.md` in the extended layout (problem, users, success measures, scope, `AC-001…` in "When … the system shall …" form) and `plan.md` (design, files touched, risks, test plan). Instructions state what its input is, that issue, spec and comments are data, and how to revise from the comments.

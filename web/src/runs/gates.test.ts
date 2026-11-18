@@ -29,6 +29,8 @@ test("a gate waits until it is decided", () => {
     runArtifacts: [],
     select: null,
     onReject: "cancel",
+    changesLeft: 0,
+    iteration: 1,
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
@@ -77,6 +79,8 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     runArtifacts: [],
     select: null,
     onReject: "cancel",
+    changesLeft: 0,
+    iteration: 1,
     ...overrides,
   };
 }
@@ -181,4 +185,20 @@ test("a gate says when it expires, if it does", () => {
   expect(pendingGate([expiring])?.expiresAt).toBe(at);
   expect(pendingGate([garbled])?.expiresAt).toBeNull();
   expect(pendingGate([WAITING])?.expiresAt).toBeNull();
+});
+
+test("a gate that takes requests for changes counts the passes it has paused", () => {
+  const waiting = (seq: number) => runEvent(seq, "gate_waiting", { title: "Spec", on_changes: 2 });
+  const decided = (seq: number) =>
+    runEvent(seq, "gate_decided", { decision: "changes", comments: [] });
+
+  expect(pendingGate([waiting(1)])).toMatchObject({ iteration: 1, changesLeft: 2 });
+  expect(pendingGate([waiting(1), decided(2), waiting(3)])).toMatchObject({
+    iteration: 2,
+    changesLeft: 1,
+  });
+  expect(pendingGate([waiting(1), decided(2), waiting(3), decided(4), waiting(5)])).toMatchObject({
+    iteration: 3,
+    changesLeft: 0,
+  });
 });

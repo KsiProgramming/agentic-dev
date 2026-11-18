@@ -10,7 +10,13 @@ import type { GateSelection, PendingGate } from "../gates";
 import { useGateEdits, type GateEdits } from "./use-gate-edits";
 import { useGateShortcuts } from "./use-gate-shortcuts";
 
-export type Decision = "approve" | "reject";
+export type Decision = "approve" | "reject" | "changes";
+
+/** One comment of a request for changes (7.8): on `item`, a thing the gate showed. */
+export interface ChangeComment {
+  item: string;
+  text: string;
+}
 
 /** The items chosen at a selection gate (6.7): the preselected ones until the approver changes
  * them. `keys` keeps the gate's item order. */
@@ -74,7 +80,10 @@ export interface GateDecision {
   /** The Reject dialog is open. */
   rejecting: boolean;
   setRejecting: (open: boolean) => void;
-  decide: (decision: Decision, comment?: string) => Promise<void>;
+  /** The Request changes dialog is open (7.8). */
+  requesting: boolean;
+  setRequesting: (open: boolean) => void;
+  decide: (decision: Decision, comment?: string, comments?: ChangeComment[]) => Promise<void>;
 }
 
 /**
@@ -102,11 +111,12 @@ export function useGateDecision({
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const busy = pending !== null || sent !== null;
   const edits = useGateEdits(gate.changes);
   const choice = useGateChoice(gate.select);
 
-  async function decide(decision: Decision, comment?: string) {
+  async function decide(decision: Decision, comment?: string, comments?: ChangeComment[]) {
     if (busy) return;
     if (decision === "approve" && choice?.blocked) {
       setError(choice.blocked);
@@ -125,6 +135,7 @@ export function useGateDecision({
           node_id: gate.nodeId,
           decision,
           ...(comment ? { comment } : {}),
+          ...(decision === "changes" && comments ? { comments } : {}),
           ...(decision === "approve" && edits.count > 0
             ? {
                 edits: edits.edits.map((e) => ({
@@ -140,10 +151,17 @@ export function useGateDecision({
       if (!data) throw new ApiError(response.status, body, "The decision was not accepted");
       setSent(decision);
       setRejecting(false);
+      setRequesting(false);
       setDetails(false);
       // The gate goes away once the run moves on; the toast keeps the outcome visible.
       const done =
-        decision === "approve" ? "Approved" : gate.onReject === "end" ? "Ended" : "Rejected";
+        decision === "approve"
+          ? "Approved"
+          : decision === "changes"
+            ? "Changes requested"
+            : gate.onReject === "end"
+              ? "Ended"
+              : "Rejected";
       toast.success(`${done}: ${gate.title}`);
       onDecided?.(decision);
     } catch (err) {
@@ -173,6 +191,8 @@ export function useGateDecision({
     setDetails,
     rejecting,
     setRejecting,
+    requesting,
+    setRequesting,
     decide,
   };
 }

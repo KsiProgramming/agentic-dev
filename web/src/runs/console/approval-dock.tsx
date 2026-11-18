@@ -8,7 +8,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
 import { gateSummary, type PendingGate } from "../gates";
-import { ApproveButton, GateDecisionDialogs, RejectButton } from "./decision-controls";
+import {
+  ApproveButton,
+  GateDecisionDialogs,
+  RejectButton,
+  RequestChangesButton,
+} from "./decision-controls";
 import { useGateDecision } from "./use-gate-decision";
 
 /** The dock's element id: the timeline's "Waiting for approval" marker moves focus to it. */
@@ -107,7 +112,12 @@ export function ApprovalDock({
           </div>
           {sent ? (
             <p role="status" className="text-meta font-medium">
-              {sent === "approve" ? "Approved" : "Rejected"}. The run carries on shortly.
+              {sent === "approve"
+                ? "Approved"
+                : sent === "changes"
+                  ? "Changes requested"
+                  : "Rejected"}
+              . The run carries on shortly.
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-2 md:flex md:shrink-0 md:items-center">
@@ -116,6 +126,7 @@ export function ApprovalDock({
                 Review details
               </Button>
               <RejectButton decision={decision} shortcut />
+              <RequestChangesButton decision={decision} />
               <ApproveButton decision={decision} shortcut review />
             </div>
           )}
