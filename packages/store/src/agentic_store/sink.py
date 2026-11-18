@@ -96,6 +96,9 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
             "title": title if isinstance(title, str) else None,
             "expires_at": None if expires_at is None else expires_at.isoformat(),
         }
+        if isinstance(wait := payload.get("wait_for"), dict):
+            # A step that waits for an answer (7.9): what is checked, and what the console shows.
+            values["waiting_gate"] = {**values["waiting_gate"], "wait_for": wait}
         values["gate_expires_at"] = expires_at
     elif event.type == PR_OPENED and isinstance(url := payload.get("url"), str):
         values["pr_url"] = url

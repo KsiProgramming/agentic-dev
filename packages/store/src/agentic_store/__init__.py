@@ -1,5 +1,6 @@
 """Postgres persistence (models, runs, the run event sink) and the Redis run queue."""
 
+from agentic_store.answers import ANSWER_DECIDER, WaitingRun, answer_arrived, waiting_runs
 from agentic_store.approvals import (
     AlreadyDecidedError,
     ApprovalError,
@@ -7,6 +8,7 @@ from agentic_store.approvals import (
     GateExpiredError,
     InvalidEditsError,
     InvalidSelectionError,
+    NotAGateError,
     PendingGate,
     RunNotFoundError,
     RunNotWaitingError,
@@ -63,7 +65,7 @@ from agentic_store.connections import (
     put_connection,
     put_github_connection,
 )
-from agentic_store.expiry import APPROVAL_EXPIRED_REASON, expire_gates
+from agentic_store.expiry import ANSWERS_EXPIRED_REASON, APPROVAL_EXPIRED_REASON, expire_gates
 from agentic_store.jira import (
     JIRA,
     JiraConnectionInfo,
@@ -242,6 +244,8 @@ from agentic_store.workflows import (
 )
 
 __all__ = [
+    "ANSWERS_EXPIRED_REASON",
+    "ANSWER_DECIDER",
     "APPROVAL_EXPIRED_REASON",
     "AUDIT_ACTIONS",
     "CONNECTION_COLUMNS_CHECK",
@@ -297,6 +301,7 @@ __all__ = [
     "JiraTriggerNotFoundError",
     "JiraWebhook",
     "JiraWebhookInfo",
+    "NotAGateError",
     "PendingGate",
     "PolicyViolationError",
     "PostgresArtifactStore",
@@ -334,6 +339,7 @@ __all__ = [
     "TriggerRunActiveError",
     "UnloadableRun",
     "VersionConflictError",
+    "WaitingRun",
     "Workflow",
     "WorkflowCaller",
     "WorkflowExistsError",
@@ -346,6 +352,7 @@ __all__ = [
     "WorkspacePolicy",
     "WrongGateError",
     "active_seconds",
+    "answer_arrived",
     "audit_review_ignored",
     "cancel_reason",
     "cancel_requested",
@@ -461,5 +468,6 @@ __all__ = [
     "update_jira_trigger",
     "update_workflow",
     "waiting_run_ids",
+    "waiting_runs",
     "workspace_price_table",
 ]
