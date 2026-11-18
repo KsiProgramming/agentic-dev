@@ -203,6 +203,14 @@ class GateNode(_Base):
         description="What a rejection does: cancel the run (unset), or end it here as completed, "
         "skipping the steps after the gate (a step of the root sequence only).",
     )
+    on_changes: int | None = Field(
+        default=None,
+        ge=1,
+        le=PLATFORM_POLICY.loop_iterations,
+        description="Let the approver send the work back with comments (7.8) at most this many "
+        "times: the gate completes with `data.decision` `changes` and the comments, and the "
+        "loop it is in goes round again. Only a gate in a loop's body.",
+    )
     writes: ArtifactName | None = Field(
         default=None,
         description="With `select`, store the chosen items as this run artifact.",
@@ -2266,8 +2274,16 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
 def gate_issues(root: Node) -> list[ValidationIssue]:
     """Why the gates under `root` cannot run (6.7): a `select.preselect` that is not a valid
     condition over `item` (`invalid_expression`), and `on_reject: end` on a gate that is not a
-    step of the root sequence (`invalid_gate`): only there does ending skip to the run's end."""
+    step of the root sequence (`invalid_gate`): only there does ending skip to the run's end. An
+    `on_changes` (7.8) needs a gate in a loop's body, with fewer of them than the loop has
+    passes (`invalid_gate`)."""
     top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else {id(root)}
+    in_loop: dict[int, LoopNode] = {}
+    for _, outer in iter_nodes(root):
+        if isinstance(outer, LoopNode):
+            for _, inner in iter_nodes(outer.body):
+                if isinstance(inner, GateNode):
+                    in_loop[id(inner)] = outer
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
         if not isinstance(node, GateNode):
@@ -2281,6 +2297,27 @@ def gate_issues(root: Node) -> list[ValidationIssue]:
                     ValidationIssue(
                         code="invalid_expression",
                         path=f"{path}.select.preselect",
+                        node_id=node.id,
+                        message=message,
+                    )
+                )
+        if node.on_changes is not None:
+            loop = in_loop.get(id(node))
+            if loop is None:
+                why = "needs the gate to be in a loop's body, which it sends the work back to"
+            elif node.on_changes >= loop.max_iterations:
+                why = (
+                    f"is at least the {loop.max_iterations} passes of loop {loop.id!r}: it needs "
+                    "a pass left to act on the comments"
+                )
+            else:
+                why = ""
+            if why:
+                message = f"gate {node.id!r} at {path}: on_changes {why}"
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_gate",
+                        path=f"{path}.on_changes",
                         node_id=node.id,
                         message=message,
                     )

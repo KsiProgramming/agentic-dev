@@ -7,7 +7,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agentic_engine.events import InMemoryEventSink, RunEvent
-from agentic_engine.gate import GateDecision
+from agentic_engine.gate import GateComment, GateDecision
 from agentic_engine.graph import (
     CompileError,
     WorkflowRunResult,
@@ -304,3 +304,89 @@ async def test_a_gate_in_a_loop_pauses_on_every_pass() -> None:
     assert [e.type for e in run.sink.events].count("gate_waiting") == 2
     assert [e.type for e in run.sink.events].count("gate_decided") == 2
     assert [r.node_id for r in run.runtime.requests] == ["writer", "writer"]
+
+
+def revising(on_changes: int | None = 2, max_iterations: int = 3) -> WorkflowSpec:
+    """A writer and a gate in a loop that goes round while the gate sends the work back."""
+    gate: dict[str, object] = {"type": "gate", "id": "check", "title": "Right?"}
+    if on_changes is not None:
+        gate["on_changes"] = on_changes
+    return parse_spec(
+        {
+            "spec_version": "0",
+            "id": "revising",
+            "name": "Revising",
+            "root": {
+                "type": "loop",
+                "id": "revise",
+                "until": 'results.check.data.decision != "changes"',
+                "max_iterations": max_iterations,
+                "body": {
+                    "type": "sequence",
+                    "id": "round",
+                    "steps": [
+                        {"type": "agent", "id": "writer", "role": "W", "instructions": "Go."},
+                        gate,
+                    ],
+                },
+            },
+        }
+    )
+
+
+async def test_a_request_for_changes_sends_the_comments_to_the_next_pass() -> None:
+    """Phase 7.8: the gate completes with the comments, and the loop's next pass gets them."""
+    run = Run(revising(), FakeRuntime({"writer": [Message(text="draft"), ECHO_USAGE] * 2}))
+    comments = [
+        GateComment(item="spec", text="Name the users."),
+        GateComment(item="plan", text="List the risks."),
+        GateComment(item="spec", text="Cut the scope."),
+    ]
+
+    assert (await run.start()).status == "waiting"
+    second = await run.resume(GateDecision(decision="changes", comments=comments))
+    done = await run.resume(APPROVE)
+
+    assert (second.status, done.status) == ("waiting", "completed")
+    assert run.runtime.requests[1].input == (
+        "## spec\n\n- Name the users.\n- Cut the scope.\n\n## plan\n\n- List the risks."
+    )
+    decided = [e for e in run.sink.events if e.type == "gate_decided"]
+    assert [e.payload["decision"] for e in decided] == ["changes", "approve"]
+    assert decided[0].payload["comments"] == [c.model_dump() for c in comments]
+
+
+async def test_a_gate_without_on_changes_does_not_take_a_request_for_changes() -> None:
+    run = Run(
+        revising(on_changes=None), FakeRuntime({"writer": [Message(text="draft"), ECHO_USAGE]})
+    )
+    asked = GateDecision(decision="changes", comments=[GateComment(item="spec", text="More.")])
+
+    await run.start()
+    result = await run.resume(asked)
+
+    assert (result.status, result.stopped_at) == ("failed", "check")
+    failed = [e for e in run.sink.events if e.type == "node_failed" and e.node_id == "check"]
+    assert "does not take requests for changes" in str(failed[0].payload["error"])
+
+
+def test_a_request_for_changes_needs_comments_and_only_it_has_them() -> None:
+    with pytest.raises(ValueError, match="at least one comment"):
+        GateDecision(decision="changes")
+    with pytest.raises(ValueError, match="only a request for changes"):
+        GateDecision(decision="approve", comments=[GateComment(item="spec", text="x")])
+
+
+def test_on_changes_needs_a_loop_with_a_pass_left() -> None:
+    assert revising(on_changes=2, max_iterations=3).id == "revising"
+    with pytest.raises(ValueError, match="needs a pass left"):
+        revising(on_changes=3, max_iterations=3)
+    with pytest.raises(ValueError, match="in a loop's body"):
+        parse_spec(
+            {
+                "spec_version": "0",
+                "id": "outside",
+                "name": "Outside",
+                "root": {"type": "gate", "id": "check", "title": "Right?", "on_changes": 1},
+            }
+        )

@@ -17,10 +17,10 @@ those items. A gate with `on_reject: end` ends the run as completed when it is r
 import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol, Self, cast
 
 from langgraph.types import interrupt
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agentic_engine.agent import AgentNodeResult
 from agentic_engine.artifacts import ArtifactRef, ArtifactStore
@@ -81,14 +81,33 @@ class FileEdit(BaseModel):
     content: str
 
 
-class GateDecision(BaseModel):
-    """What a human decided at a gate; the value a paused run continues with. Only an approval
-    has `edits`, and only a selection gate's approval a `selection`."""
+class GateComment(BaseModel):
+    """One comment of a request for changes (7.8): on `item`, one of the things the gate showed
+    (for the spec gate `spec`, `plan` or `prototype`), and what to change. Data for the agent
+    that revises, never instructions to the platform."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    decision: Literal["approve", "reject"]
+    item: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+MAX_CHANGE_COMMENTS = 20
+"""The most comments one request for changes carries."""
+
+
+class GateDecision(BaseModel):
+    """What a human decided at a gate; the value a paused run continues with. Only an approval
+    has `edits`, only a selection gate's approval a `selection`, and only a request for changes
+    (7.8) has `comments`, at least one."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    decision: Literal["approve", "reject", "changes"]
     comment: str | None = None
+    comments: list[GateComment] = Field(
+        default_factory=list[GateComment], max_length=MAX_CHANGE_COMMENTS
+    )
     decided_by: str | None = None
     edits: list[FileEdit] = Field(default_factory=list[FileEdit])
     selection: list[str] | None = Field(
@@ -96,6 +115,14 @@ class GateDecision(BaseModel):
         max_length=MAX_SELECT_ITEMS,
         description="A selection gate's approval: the keys of the items chosen (6.7).",
     )
+
+    @model_validator(mode="after")
+    def _comments_with_changes(self) -> Self:
+        if self.decision == "changes" and not self.comments:
+            raise ValueError("a request for changes needs at least one comment")
+        if self.decision != "changes" and self.comments:
+            raise ValueError("only a request for changes carries comments")
+        return self
 
 
 class GateReview(Protocol):
@@ -136,14 +163,15 @@ class EditError(ValueError):
 
 def check_edits(
     changes: Sequence[FileChange],
-    decision: Literal["approve", "reject"],
+    decision: Literal["approve", "reject", "changes"],
     edits: Sequence[FileEdit],
 ) -> list[FileEdit]:
     """The edits of a decision at a gate that showed `changes`, without those that leave a file
     as it was. Raises `EditError` for edits with a reject, an edit of a file that was not shown
     as editable, the same file twice, or edits over the size caps."""
-    if edits and decision == "reject":
-        raise EditError("edits_with_reject", "a rejection cannot carry edits")
+    if edits and decision != "approve":
+        why = "a rejection" if decision == "reject" else "a request for changes"
+        raise EditError("edits_with_reject", f"{why} cannot carry edits")
     editable = {(c.node_id, c.path): c for c in changes if c.editable}
     seen: set[tuple[str, str]] = set()
     kept: list[FileEdit] = []
@@ -258,16 +286,16 @@ def selection_shown(select: GateSelect, ref: ArtifactRef, document: JsonValue) -
 
 def check_selection(
     shown: SelectionShown | None,
-    decision: Literal["approve", "reject"],
+    decision: Literal["approve", "reject", "changes"],
     selection: Sequence[str] | None,
 ) -> list[str]:
     """The selection of a decision at a gate that showed `shown` (`None` for a gate that does not
     select). Raises `SelectionError` for a selection on a gate that does not select or with a
     reject, no selection on a selection gate's approval, a key it did not show, a key twice, or
     fewer keys than its `min`."""
-    if shown is None or decision == "reject":
+    if shown is None or decision != "approve":
         if selection is not None:
-            why = "a rejection" if shown is not None else "a gate that does not select"
+            why = "a gate that does not select" if shown is None else f"a {decision} decision"
             raise SelectionError("selection_not_allowed", f"{why} cannot carry a selection")
         return []
     if selection is None:
@@ -345,13 +373,31 @@ def gate_request(
         request["select"] = shown.model_dump(mode="json")
     if node.on_reject == "end":
         request["on_reject"] = "end"
+    if node.on_changes is not None:
+        request["on_changes"] = node.on_changes
     return request
+
+
+def changes_text(comments: Sequence[GateComment]) -> str:
+    """A request for changes as the text the loop's next pass receives: one `## <item>` section
+    per item commented on, each comment a bullet. It is the approver's words, data for the agent
+    that revises (principle 5)."""
+    items: dict[str, list[str]] = {}
+    for comment in comments:
+        items.setdefault(comment.item, []).append(comment.text)
+    return "\n\n".join(
+        f"## {item}\n\n" + "\n".join(f"- {text}" for text in texts) for item, texts in items.items()
+    )
 
 
 def decided_payload(decision: GateDecision, commits: dict[str, str]) -> dict[str, JsonValue]:
     """The `gate_decided` payload: the decision, plus its selection if it has one, and its edits
     and the commits they made if it has edits."""
-    payload: dict[str, JsonValue] = decision.model_dump(mode="json", exclude={"edits", "selection"})
+    payload: dict[str, JsonValue] = decision.model_dump(
+        mode="json", exclude={"edits", "selection", "comments"}
+    )
+    if decision.comments:
+        payload["comments"] = [c.model_dump(mode="json") for c in decision.comments]
     if decision.selection is not None:
         payload["selection"] = list[JsonValue](decision.selection)
     if decision.edits:
@@ -372,7 +418,9 @@ async def run_gate_node(
     """Pause until the run is continued with a `GateDecision`, then log it. Approve completes the
     node and passes `input` on unchanged, once its edits are committed through `review`; edits
     that cannot be committed fail the node. Reject cancels it, which stops the run; with
-    `on_reject: end` it completes with `ends_run`, which ends the run as completed. The gate
+    `on_reject: end` it completes with `ends_run`, which ends the run as completed. A request
+    for changes (7.8, a gate with `on_changes`) completes it with the comments as its text and
+    `data` `{decision: "changes", comments}`, for the loop around it to go round again. The gate
     waits `ttl_s` (the run's `approval_ttl_s`) unless it sets its own; the worker cancels the run
     once that has passed (`agentic_store.expiry`).
 
@@ -404,10 +452,25 @@ async def run_gate_node(
         except GateReviewError as e:
             error = f"the gate's edits could not be applied: {e}"
             return AgentNodeResult(status="failed", text=input, usage=None, error=error)
+    if decision.decision == "changes" and node.on_changes is None:
+        error = f"gate {node.id!r} does not take requests for changes"
+        return AgentNodeResult(status="failed", text=input, usage=None, error=error)
     await log.emit(GATE_DECIDED, node_id=node.id, payload=decided_payload(decision, commits))
+    if decision.decision == "changes":
+        data: dict[str, JsonValue] = {
+            "decision": "changes",
+            "comments": [c.model_dump(mode="json") for c in decision.comments],
+        }
+        return AgentNodeResult(
+            status="completed", text=changes_text(decision.comments), usage=None, data=data
+        )
     if decision.decision == "approve":
         if node.select is None:
-            return AgentNodeResult(status="completed", text=input, usage=None)
+            # A gate that can send the work back says which way it went (`until` reads it).
+            went: dict[str, JsonValue] | None = (
+                {"decision": "approve"} if node.on_changes is not None else None
+            )
+            return AgentNodeResult(status="completed", text=input, usage=None, data=went)
         data = selected_document(node.select, document, chosen)
         text = json.dumps(data, indent=2, ensure_ascii=False)
         return AgentNodeResult(status="completed", text=text, usage=None, data=data)

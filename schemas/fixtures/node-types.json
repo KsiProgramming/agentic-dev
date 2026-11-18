@@ -428,6 +428,13 @@
           "description": "What a rejection does: cancel the run (unset), or end it here as completed, skipping the steps after the gate (a step of the root sequence only).",
           "title": "On reject"
         },
+        "on_changes": {
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer",
+          "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.",
+          "title": "On changes"
+        },
         "writes": {
           "description": "With `select`, store the chosen items as this run artifact.",
           "examples": [

@@ -165,6 +165,21 @@
           "title": "Id",
           "type": "string"
         },
+        "on_changes": {
+          "anyOf": [
+            {
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.",
+          "title": "On Changes"
+        },
         "on_reject": {
           "anyOf": [
             {
