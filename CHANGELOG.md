@@ -9,6 +9,10 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 8.1 Verify Copilot SDK terms for hosted multi-tenant use ([#248](https://github.com/KsiProgramming/agentic-dev/pull/248)):
+  - **Verdict.** Self-hosted use of the Copilot SDK is a conditional go; a hosted multi-tenant service is a no-go until GitHub confirms in writing. Evidence, quotes and sources are in `specs/2026-11-18-copilot-sdk-terms/findings.md`.
+  - **Copilot is per person.** The company's GitHub App stays for repos and PRs; a user who wants Copilot adds a personal GitHub connection, and runs with no starter stay on Claude. Specs: tech-stack (agent runtime table, three decisions), mission (open question closed, provider line), roadmap (8.2 and 8.3 re-scoped).
+  - An untested probe script for 8.2's first task (`specs/2026-11-18-copilot-sdk-terms/spike/copilot_probe.py`); the spike was not run for lack of a subscription.
 - Phase 7.8 Spec and prototype at one gate ([#246](https://github.com/KsiProgramming/agentic-dev/pull/246)):
   - **The spec gate shows the spec, the plan and a prototype.** In "Build from a Jira issue" and "Build from a spec file", the spec step writes `spec.md` (with acceptance criteria `AC-001…` in the form "When …, the system shall …") and now also `plan.md` (moved before the gate), and for a change with a user interface a throwaway prototype in `prototype/` on its own branch that is never pushed. The approver can **Request changes** with a comment on any of them (at most the new option `max_revisions`, 1 to 3, default 2) and they are redone from the comments; the gate then shows the revised files. Reject still ends the run without building.
   - **A gate, and a writer, in a loop's body.** A loop's body may now hold a gate and a writer (a publisher, a Jira write, a repo creator, a loop, a map or a parallel stay refused; a map and a parallel still refuse a gate and a writer). An approval belongs to a pass of its gate (`approvals.iteration`, migration 0038): each pass of a gate in a loop pauses, is decided and expires on its own. The workflow spec schema and node manifests describe it.
