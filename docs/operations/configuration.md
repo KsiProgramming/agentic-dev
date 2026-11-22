@@ -41,6 +41,9 @@ Files referenced below (master key, GitHub App key) should be mounted read-only 
 | `SANDBOX_BACKEND` | `fake` | ⚠️ `docker` for isolated containers. **`fake` uses temp directories on the worker host with no isolation**; never use it with real repositories. Compose sets `docker`. |
 | `SANDBOX_IMAGE` | `agentic-dev/sandbox:dev` | Image built from [`packages/sandbox/Dockerfile`](../../packages/sandbox/Dockerfile). Push it to your registry and pin a digest in production. |
 | `SANDBOX_LOCAL_ROOT` | unset | The only directory local repo paths may be cloned from. Unset: https URLs only (recommended in production). |
+| `SANDBOX_NUGET_NETWORK`, `SANDBOX_NUGET_PROXY` | unset | The internal Docker network the NuGet egress proxy is on, and its URL there (`http://egress-proxy:3128` in compose). Both set: `scan.lint` restores C# projects through it. Either unset: .NET modules are skipped ("NuGet restore is not configured"). |
+| `SANDBOX_NPM_NETWORK`, `SANDBOX_NPM_PROXY` | unset | The same for npm (`agentic-npm`, `http://egress-proxy-npm:3128` in compose): `build.restore` restores Node modules through it. Either unset: Node modules are skipped ("npm restore is not configured"). |
+| `SANDBOX_PYPI_NETWORK`, `SANDBOX_PYPI_PROXY` | unset | The same for PyPI (`agentic-pypi`, `http://egress-proxy-pypi:3128` in compose): `build.restore` restores Python modules through it. Either unset: Python modules are skipped ("PyPI restore is not configured"). |
 | `DOCKER_HOST` | Docker default | Standard Docker variable (read by docker-py): point the worker at a remote or rootless daemon. |
 | `DOCKER_GID` | `0` | Compose only: group of the Docker socket on Linux (`stat -c %g /var/run/docker.sock`). |
 | `WORKER_ID` | hostname + pid | Names the worker in run leases. Must be unique per process. |
