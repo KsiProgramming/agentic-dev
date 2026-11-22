@@ -40,6 +40,6 @@
 - [ ] Add an entry to `specs/lessons.md` for anything tests did not catch, with the rule and what enforces it.
 
 ## 6. Specs and docs
-- [ ] `specs/tech-stack.md`: the Copilot adapter contract, "GitHub personal connection (API contract)", the audit actions, the decisions-log rows from the spike.
-- [ ] `specs/roadmap.md`: 8.2's row links this plan; update "Next up" only if the priority changed.
+- [x] `specs/tech-stack.md`: the Copilot adapter contract, "GitHub personal connection (API contract)", the audit actions, the decisions-log rows from the spike.
+- [x] `specs/roadmap.md`: 8.2's row links this plan; update "Next up" only if the priority changed.
 - [ ] `docs/integrations/connecting-platforms.md`, `docs/security/security-model.md`, `.env.example`, `CHANGELOG.md` under `## [Unreleased]`.
