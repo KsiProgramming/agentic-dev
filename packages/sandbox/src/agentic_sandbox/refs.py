@@ -156,6 +156,35 @@ class RefPathError(SandboxError):
         self.path = path
 
 
+# `$3` is the destination directory (created, empty). Extracts the branch's committed tree into
+# it. `git archive` writes tar from git's own objects: nothing in the tree is executed, no hook or
+# filter runs (`--worktree-attributes` is never given), and a symlink stays a symlink.
+_ARCHIVE_SCRIPT = (
+    _PRELUDE
+    + """
+dest=$1
+mkdir -p -- "$dest" || exit 1
+g archive --format=tar "$ref" | tar -C "$dest" -xf - || exit 1
+"""
+)
+
+
+async def archive(sandbox: Sandbox, branch: str, dest: str) -> None:
+    """Extract `branch`'s tree as last committed into the new directory `dest`, which must be
+    under the staging directory (a job's work copy lives there, never in the checkout or a
+    worktree). Like the reads above it works after a restore. Raises `BranchNotFoundError` if the
+    branch does not exist, `ValueError` for a `dest` outside the staging directory, and
+    `SandboxError` if the tree cannot be extracted."""
+    _check_branch(branch)
+    staging = sandbox.staging_dir.rstrip("/")
+    if not dest.startswith(f"{staging}/") or ".." in dest.split("/"):
+        raise ValueError(f"not a directory under the staging directory: {dest!r}")
+    result = await _run(sandbox, _ARCHIVE_SCRIPT, branch, dest)
+    _raise_if_missing(result.exit_code, branch)
+    if result.exit_code != 0:
+        raise SandboxError(f"could not extract branch {branch}")
+
+
 async def branch_has_commits(sandbox: Sandbox, branch: str) -> bool:
     """Whether `branch` holds a commit on top of the clone's `HEAD`. A missing branch has none."""
     _check_branch(branch)

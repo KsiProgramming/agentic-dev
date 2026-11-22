@@ -29,6 +29,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
+from agentic_runtime import ReadableWriters
 from agentic_sandbox import Sandbox, SandboxError
 from agentic_tools.repo.paths import CONFINE, NOT_FOUND, OUTSIDE, repo_relative
 from agentic_tools.scan.dotnet import DotnetLimits, lint_dotnet
@@ -50,6 +51,7 @@ from agentic_tools.scan.report import (
 )
 from agentic_tools.scan.stack import PROBE_SCRIPT, Linter, LintTarget, plan_lint, read_probe
 from agentic_tools.strict import strict_tool
+from agentic_tools.tree import archived_tree
 
 SERVER_NAME = "scan"
 TOOLS = frozenset({"lint", "secrets", "dependencies"})
@@ -108,14 +110,27 @@ ScanPath = Annotated[
 ]
 
 
+NodeArg = Annotated[
+    str | None,
+    Field(
+        max_length=100,
+        description="A writer that ran before this step: lint its committed work instead of "
+        "the checkout.",
+    ),
+]
+
+
 class _Failed(Exception):
     """An engine did not produce a report; the message says why, with no repo content."""
 
 
 class _ScanTools:
-    def __init__(self, sandbox: Sandbox, limits: ScanLimits) -> None:
+    def __init__(
+        self, sandbox: Sandbox, limits: ScanLimits, readable: ReadableWriters | None = None
+    ) -> None:
         self._sandbox = sandbox
         self._limits = limits
+        self._readable = readable
         self._versions: dict[str, str] | None = None
 
     async def _versions_of(self) -> dict[str, str]:
@@ -223,12 +238,16 @@ class _ScanTools:
             ),
         ] = "auto",
         path: ScanPath = ".",
+        node: NodeArg = None,
     ) -> FindingsReport:
         """Lint the repository with the linters its own stack uses: ruff for Python, Biome for
         JS/TS, ShellCheck for shell scripts, the .NET analyzers (a build) for C# projects. Each
         module uses its own config; a module with none gets a conservative platform rule set
         (findings marked `platform-default`). The report lists what was checked where, and why
-        anything was skipped."""
+        anything was skipped. With `node`, lints what that writer committed."""
+        if node is not None:
+            async with archived_tree(self._sandbox, self._readable, node) as tree:
+                return await _ScanTools(tree, self._limits).lint(linters, path)
         target = await self._checked_path(path)
         probe = await self._sandbox.exec(["sh", "-c", PROBE_SCRIPT, "probe"])
         if probe.exit_code != 0 or "::sources::" not in probe.stdout:
@@ -350,9 +369,12 @@ def _all_failed(checks: Sequence[Check]) -> None:
         raise ToolError(f"every scanner failed: {reasons}")
 
 
-def build_scan_server(sandbox: Sandbox, *, limits: ScanLimits | None = None) -> MCPServer:
-    """The `scan` server over the run's checkout in `sandbox`."""
-    tools = _ScanTools(sandbox, limits or ScanLimits())
+def build_scan_server(
+    sandbox: Sandbox, *, limits: ScanLimits | None = None, readable: ReadableWriters | None = None
+) -> MCPServer:
+    """The `scan` server over the run's checkout in `sandbox`; with `readable`, `lint` takes a
+    writer's `node` (13.3)."""
+    tools = _ScanTools(sandbox, limits or ScanLimits(), readable)
     example: dict[str, Any] = {"path": ".", "description": "Check the code for likely bugs"}
     return MCPServer(
         SERVER_NAME,

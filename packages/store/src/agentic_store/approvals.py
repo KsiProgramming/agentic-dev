@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.artifacts import GateArtifact
 from agentic_engine.events import GATE_WAITING
+from agentic_engine.evidence import EvidencePack
 from agentic_engine.gate import (
     EditError,
     EditErrorCode,
@@ -220,6 +221,8 @@ class PendingGate:
     # Requests for changes the gate may still take (7.8), and which pass of it this is.
     changes_left: int = 0
     iteration: int = 1
+    # What the platform's checks found about the writer's work (13.3), if the gate has any.
+    evidence: EvidencePack | None = None
 
 
 async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> PendingGate:
@@ -253,7 +256,16 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         on_reject=_text(payload.get("on_reject")) or "cancel",
         changes_left=max(allowed - passes + 1, 0) if isinstance(allowed, int) else 0,
         iteration=passes,
+        evidence=_shown_evidence(payload),
     )
+
+
+def _shown_evidence(payload: dict[str, JsonValue]) -> EvidencePack | None:
+    shown = payload.get("evidence")
+    try:
+        return EvidencePack.model_validate(shown) if shown is not None else None
+    except ValidationError:
+        return None
 
 
 def _shown_selection(payload: dict[str, JsonValue]) -> SelectionShown | None:

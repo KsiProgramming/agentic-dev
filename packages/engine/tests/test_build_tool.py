@@ -55,7 +55,7 @@ def issues(raw: dict[str, Any]) -> list[tuple[str, str]]:
 
 
 def test_build_restore_is_a_platform_tool_that_needs_a_repo_and_no_agent_may_have() -> None:
-    assert {"build.restore"} == BUILD_TOOLS
+    assert {"build.restore", "build.test"} == BUILD_TOOLS
     assert BUILD_TOOLS <= PLATFORM_TOOLS
     assert "build." in REPO_TOOL_PREFIXES
     assert not BUILD_TOOLS & set(AGENT_TOOLS)

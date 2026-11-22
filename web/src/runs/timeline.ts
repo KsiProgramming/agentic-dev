@@ -1,4 +1,5 @@
 import { parseArtifact, parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
+import { parseEvidence, type Evidence } from "./evidence";
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
 import {
   parseChanges,
@@ -85,6 +86,10 @@ export interface GateInfo {
   comments: { item: string; text: string }[];
   /** What rejecting does: cancel the run, or end it here as completed. */
   onReject: "cancel" | "end";
+  /** Who sent the work back: `checks` when the platform's checks did, with no person (13.3). */
+  source: "checks" | null;
+  /** What the checks found about the writer's work before this pass of the gate (13.3). */
+  evidence: Evidence | null;
 }
 
 /** A branch saved outside the sandbox (12.2), as its step's last `branch_saved` or
@@ -500,6 +505,9 @@ class Builder {
    * last. */
   private open: Step[] = [];
   private seen = new Set<number>();
+  /** The latest evidence pack of each gate (13.3): its `evidence_collected` comes before the
+   * gate's own events, and a pass sent back by the checks never pauses. */
+  private evidence = new Map<string, Evidence | null>();
   /** The `item` and `branch` tags each step's events carry: a router in a map runs once per
    * item, under the same id. */
   private tags = new WeakMap<Step, { item: number | null; branch: number | null }>();
@@ -544,6 +552,9 @@ class Builder {
 
     // Events a loop, map or parallel writes about itself.
     switch (event.type) {
+      case "evidence_collected":
+        this.evidence.set(nodeId, parseEvidence(payload));
+        return;
       case "loop_iteration_started": {
         const loop = this.container(nodeId, at, item, branch);
         loop.iterations ??= [];
@@ -812,6 +823,8 @@ class Builder {
           selection: null,
           comments: [],
           onReject: payload.on_reject === "end" ? "end" : "cancel",
+          source: null,
+          evidence: parseEvidence(payload.evidence) ?? this.evidence.get(nodeId) ?? null,
         };
         return;
       case "gate_decided": {
@@ -829,6 +842,8 @@ class Builder {
             : null,
           comments: parseComments(payload.comments),
           onReject: step.gate?.onReject ?? "cancel",
+          source: payload.source === "checks" ? "checks" : null,
+          evidence: step.gate?.evidence ?? this.evidence.get(nodeId) ?? null,
         };
         return;
       }

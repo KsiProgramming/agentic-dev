@@ -13,6 +13,7 @@ from agentic_engine.nodes import NODE_MANIFESTS
 from agentic_engine.spec import GraphOps, WorkflowSpec
 from agentic_runtime.findings import FindingsReport
 from agentic_tools.build.report import BuildReport
+from agentic_tools.build.tests import TestReport
 
 SCHEMAS = Path(__file__).resolve().parents[1] / "schemas"
 SCHEMA_BASE = "https://github.com/KsiProgramming/agentic-dev/schemas"
@@ -21,6 +22,7 @@ OUTPUTS: dict[str, tuple[type[BaseModel], str]] = {
     "findings.v1.json": (FindingsReport, "Findings report v1"),
     "graph-ops.v1.json": (GraphOps, "Graph operations v1"),
     "build.v1.json": (BuildReport, "Build report v1"),
+    "tests.v1.json": (TestReport, "Test report v1"),
 }
 
 

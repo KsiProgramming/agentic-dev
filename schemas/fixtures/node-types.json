@@ -205,6 +205,7 @@
             "artifacts.list",
             "artifacts.read",
             "build.restore",
+            "build.test",
             "github.createRepo",
             "github.openPR",
             "jira.comment",
@@ -347,6 +348,85 @@
     "icon": "shield-check",
     "parameters": {
       "$defs": {
+        "AnalyzerMode": {
+          "enum": [
+            "no_new",
+            "shown",
+            "off"
+          ],
+          "type": "string"
+        },
+        "EvidenceChecks": {
+          "additionalProperties": false,
+          "description": "Which checks a gate's evidence pack holds, and what each does (13.3). `required` sends the\nwork back to the writer when it fails; `shown` only shows it at the gate; `off` does not run.\n`analyzers: no_new` fails on a finding the base commit's report does not have.",
+          "properties": {
+            "build": {
+              "$ref": "#/$defs/EvidenceMode",
+              "default": "required",
+              "description": "Whether the writer's work builds.",
+              "title": "Build"
+            },
+            "tests": {
+              "$ref": "#/$defs/EvidenceMode",
+              "default": "required",
+              "description": "Whether its tests pass.",
+              "title": "Tests"
+            },
+            "analyzers": {
+              "$ref": "#/$defs/AnalyzerMode",
+              "default": "no_new",
+              "description": "Whether the analyzers find nothing new.",
+              "title": "Analyzers"
+            }
+          },
+          "title": "EvidenceChecks",
+          "type": "object"
+        },
+        "EvidenceMode": {
+          "enum": [
+            "required",
+            "shown",
+            "off"
+          ],
+          "type": "string"
+        },
+        "GateEvidence": {
+          "additionalProperties": false,
+          "description": "The checks the platform runs before a gate shows a writer's work (13.3): the writer's\nbranch is built, its tests run and its analyzers compared with the base's, by the engine and\nnever by an agent. A required check that fails sends the work back to the writer without a\nperson (at most `max_rounds` times); then, or when it passes, the gate shows the pack.",
+          "properties": {
+            "node": {
+              "description": "The writer (or an orchestrator whose body writes) whose branch is checked: a node that runs before the gate in the loop's body.",
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "title": "Node",
+              "type": "string"
+            },
+            "path": {
+              "default": ".",
+              "description": "A directory of the repository to check, relative to its root.",
+              "maxLength": 1024,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "checks": {
+              "$ref": "#/$defs/EvidenceChecks",
+              "title": "Checks"
+            },
+            "max_rounds": {
+              "default": 3,
+              "description": "How many times the checks may send the work back. Never on the loop's last pass, whatever this says. After that the gate pauses and shows the failing pack.",
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Max rounds",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "node"
+          ],
+          "title": "GateEvidence",
+          "type": "object"
+        },
         "GateSelect": {
           "additionalProperties": false,
           "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key.",
@@ -439,6 +519,11 @@
           "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.",
           "title": "On changes"
         },
+        "evidence": {
+          "$ref": "#/$defs/GateEvidence",
+          "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects.",
+          "title": "Evidence"
+        },
         "writes": {
           "description": "With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.",
           "examples": [
@@ -476,6 +561,11 @@
           "advanced": true
         }
       },
+      "evidence": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
       "on_reject": {
         "ui:options": {
           "advanced": true
@@ -497,6 +587,85 @@
     "icon": "hourglass",
     "parameters": {
       "$defs": {
+        "AnalyzerMode": {
+          "enum": [
+            "no_new",
+            "shown",
+            "off"
+          ],
+          "type": "string"
+        },
+        "EvidenceChecks": {
+          "additionalProperties": false,
+          "description": "Which checks a gate's evidence pack holds, and what each does (13.3). `required` sends the\nwork back to the writer when it fails; `shown` only shows it at the gate; `off` does not run.\n`analyzers: no_new` fails on a finding the base commit's report does not have.",
+          "properties": {
+            "build": {
+              "$ref": "#/$defs/EvidenceMode",
+              "default": "required",
+              "description": "Whether the writer's work builds.",
+              "title": "Build"
+            },
+            "tests": {
+              "$ref": "#/$defs/EvidenceMode",
+              "default": "required",
+              "description": "Whether its tests pass.",
+              "title": "Tests"
+            },
+            "analyzers": {
+              "$ref": "#/$defs/AnalyzerMode",
+              "default": "no_new",
+              "description": "Whether the analyzers find nothing new.",
+              "title": "Analyzers"
+            }
+          },
+          "title": "EvidenceChecks",
+          "type": "object"
+        },
+        "EvidenceMode": {
+          "enum": [
+            "required",
+            "shown",
+            "off"
+          ],
+          "type": "string"
+        },
+        "GateEvidence": {
+          "additionalProperties": false,
+          "description": "The checks the platform runs before a gate shows a writer's work (13.3): the writer's\nbranch is built, its tests run and its analyzers compared with the base's, by the engine and\nnever by an agent. A required check that fails sends the work back to the writer without a\nperson (at most `max_rounds` times); then, or when it passes, the gate shows the pack.",
+          "properties": {
+            "node": {
+              "description": "The writer (or an orchestrator whose body writes) whose branch is checked: a node that runs before the gate in the loop's body.",
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "title": "Node",
+              "type": "string"
+            },
+            "path": {
+              "default": ".",
+              "description": "A directory of the repository to check, relative to its root.",
+              "maxLength": 1024,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "checks": {
+              "$ref": "#/$defs/EvidenceChecks",
+              "title": "Checks"
+            },
+            "max_rounds": {
+              "default": 3,
+              "description": "How many times the checks may send the work back. Never on the loop's last pass, whatever this says. After that the gate pauses and shows the failing pack.",
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Max rounds",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "node"
+          ],
+          "title": "GateEvidence",
+          "type": "object"
+        },
         "GateSelect": {
           "additionalProperties": false,
           "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key.",
@@ -589,6 +758,11 @@
           "type": "integer",
           "description": "Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.",
           "title": "On changes"
+        },
+        "evidence": {
+          "$ref": "#/$defs/GateEvidence",
+          "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects.",
+          "title": "Evidence"
         },
         "writes": {
           "description": "With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.",

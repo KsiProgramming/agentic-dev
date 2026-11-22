@@ -136,6 +136,7 @@ test("filters from the URL narrow the query, and Load more fetches the next page
     "gate.approved",
     "gate.rejected",
     "gate.changes_requested",
+    "gate.sent_back_by_checks",
     "gate.expired",
   ]);
   expect(first.get("run_id")).toBe(RUN);

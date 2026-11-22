@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { fileKey, type FileChange } from "../gates";
 import type { GateInfo } from "../timeline";
 import type { GateFile } from "./gate-files";
+import { EvidenceStrip } from "./evidence-strip";
 import { selectedLine } from "./step-entries";
 import { GateReviewSheet } from "./gate-review-sheet";
 
@@ -48,7 +49,7 @@ export function GateDecision({ gate }: { gate: GateInfo }) {
         <span className="text-muted-foreground" data-testid="gate-decision">
           ·{" "}
           {gate.decision === "changes"
-            ? `Asked for changes (${plural(gate.comments.length, "comment")})`
+            ? `${gate.source === "checks" ? "Sent back by checks" : "Asked for changes"} (${plural(gate.comments.length, "comment")})`
             : gate.decision !== "approve"
               ? `${gate.onReject === "end" ? "Ended the run here" : "Rejected"}${
                   gate.comment ? `: ${gate.comment}` : ""
@@ -67,6 +68,7 @@ export function GateDecision({ gate }: { gate: GateInfo }) {
           ))}
         </ul>
       ) : null}
+      {gate.evidence ? <EvidenceStrip evidence={gate.evidence} className="basis-full" /> : null}
       {edited > 0 ? (
         <>
           <Button type="button" variant="link" size="sm" onClick={() => setOpen(true)}>

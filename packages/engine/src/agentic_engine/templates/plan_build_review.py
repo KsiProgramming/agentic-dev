@@ -11,7 +11,11 @@ review loop, a gate and a pull request, as one sequence:
    - `synthesizer`: reads the merged code and writes the pull request's description
      (`pr-description.md`).
    - `reviewer`: reads the merged code and answers a typed `verdict` and `feedback`.
-3. `approve_pr`: a gate on the integration branch's diff.
+3. `approve_pr`: a gate on the integration branch's diff. With `checks` (13.3) it is the last step
+   of the loop's body instead, with `evidence`: the engine builds the merged work and runs its
+   tests and analyzers before a person sees it, and a failing check sends the lead back with
+   the failures (at most `check_rounds` times, never on the last pass). The loop then ends when
+   the reviewer is satisfied and the gate approved.
 4. `publish`: `github.openPR` from `implement`, its body the synthesizer's description.
 
 Only `engineer` writes and only `publish` publishes, after the gate (tests). The request reaches
@@ -21,7 +25,7 @@ every pass although its input is the analyses, then the review.
 
 from typing import Annotated, Final
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from agentic_engine.spec import WorkflowSpec
 from agentic_runtime.pricing import DEFAULT_PRICES
@@ -108,6 +112,19 @@ class PlanBuildReviewParams(BaseModel):
         description="How many times the reviewer may send the work back to the lead, counting "
         "the first pass.",
     )
+    checks: bool = Field(
+        default=False,
+        description="Build and test the merged work, and compare the analyzers with the base's, "
+        "before you see it (13.3): a failing build or test sends the lead back with the failures, "
+        "with no one involved. Needs at least two passes.",
+    )
+    check_rounds: int = Field(
+        default=1,
+        ge=1,
+        le=MAX_PASSES - 1,
+        description="With `checks`: how many times the checks may send the work back. Fewer than "
+        "`max_passes`: the last pass is never sent back.",
+    )
     analyst_model: _Model = Field(
         default=None, description="The model of the two analysts. Unset uses the workspace default."
     )
@@ -120,6 +137,14 @@ class PlanBuildReviewParams(BaseModel):
         description="The model of the synthesizer and the reviewer. Unset uses the workspace "
         "default.",
     )
+
+    @model_validator(mode="after")
+    def _checks_have_a_pass_to_go_back_to(self) -> "PlanBuildReviewParams":
+        if self.checks and self.max_passes < 2:
+            raise ValueError("checks need max_passes of at least 2: the work goes back to a pass")
+        if self.checks and self.check_rounds >= self.max_passes:
+            raise ValueError("check_rounds must be below max_passes, so the last pass is left")
+        return self
 
     @field_validator("analyst_model", "engineer_model", "reviewer_model")
     @classmethod
@@ -160,6 +185,32 @@ def build_plan_build_review_spec(params: PlanBuildReviewParams) -> WorkflowSpec:
     reviewer = _agent("reviewer", "Senior reviewer", _REVIEWER, _READ_TOOLS, params.reviewer_model)
     reviewer["output_schema"] = VERDICT_SCHEMA
     passes = "pass" if params.max_passes == 1 else "passes"
+    gate: dict[str, JsonValue] = {
+        "type": "gate",
+        "id": "approve_pr",
+        "title": "Open the pull request?",
+        "prompt": "Every pass's work is merged on one branch. Check the diff and "
+        "the reviewer's last verdict: if it still asked for changes after the "
+        "last pass, its feedback says what is missing. Approving pushes the "
+        "branch to GitHub and opens a pull request.",
+    }
+    until = 'results.reviewer.data.verdict == "ok"'
+    if params.checks:
+        gate["prompt"] = (
+            "The platform built the merged work, ran its tests and compared the analyzers with "
+            "the base's: the checks are shown with the diff. The reviewer's verdict is the "
+            "gate's input. If the reviewer still asks for changes, the lead plans them in the "
+            "next pass; on the last pass, approving pushes the branch to GitHub and opens a "
+            "pull request."
+        )
+        gate["evidence"] = {
+            "node": "implement",
+            "max_rounds": params.check_rounds,
+            "checks": {"build": "required", "tests": "required", "analyzers": "no_new"},
+        }
+        until = (
+            'results.reviewer.data.verdict == "ok" && results.approve_pr.data.decision == "approve"'
+        )
     return WorkflowSpec.model_validate(
         {
             "spec_version": "0",
@@ -205,7 +256,7 @@ def build_plan_build_review_spec(params: PlanBuildReviewParams) -> WorkflowSpec:
                     {
                         "type": "loop",
                         "id": "review_loop",
-                        "until": 'results.reviewer.data.verdict == "ok"',
+                        "until": until,
                         "max_iterations": params.max_passes,
                         "body": {
                             "type": "sequence",
@@ -228,18 +279,11 @@ def build_plan_build_review_spec(params: PlanBuildReviewParams) -> WorkflowSpec:
                                 },
                                 synthesizer,
                                 reviewer,
+                                *([gate] if params.checks else []),
                             ],
                         },
                     },
-                    {
-                        "type": "gate",
-                        "id": "approve_pr",
-                        "title": "Open the pull request?",
-                        "prompt": "Every pass's work is merged on one branch. Check the diff and "
-                        "the reviewer's last verdict: if it still asked for changes after the "
-                        "last pass, its feedback says what is missing. Approving pushes the "
-                        "branch to GitHub and opens a pull request.",
-                    },
+                    *([] if params.checks else [gate]),
                     {
                         "type": "tool",
                         "id": "publish",

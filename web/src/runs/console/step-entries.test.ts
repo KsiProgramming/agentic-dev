@@ -308,3 +308,17 @@ describe("stepOutline of scans and reviews", () => {
     ).toBe("Answered in JSON");
   });
 });
+
+describe("the outline of a gate sent back by checks (13.3)", () => {
+  it("says the checks sent it back, and a person's request as before", () => {
+    const gate = (source: "checks" | null) =>
+      ({
+        status: "completed",
+        error: null,
+        gate: { decision: "changes", comments: [{ item: "Tests", text: "x" }], source },
+      }) as unknown as Parameters<typeof stepOutline>[0];
+
+    expect(stepOutline(gate("checks"))).toBe("Sent back by checks (1 comment)");
+    expect(stepOutline(gate(null))).toBe("Asked for changes (1 comment)");
+  });
+});

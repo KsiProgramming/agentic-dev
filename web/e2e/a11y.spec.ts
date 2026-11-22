@@ -6,6 +6,7 @@ import {
   apiURL,
   COMBINE,
   DOCS_DEMO_URL,
+  evidencePack,
   GATE,
   MAP,
   REPO_READER,
@@ -14,6 +15,7 @@ import {
   startRun,
   TYPED_READER,
   TYPED_WRITER,
+  withEvidence,
   WRITER,
 } from "./runs";
 import { workflowFromTemplate } from "./workflows";
@@ -315,6 +317,21 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoSeriousIssues(page);
       await request.post(`${apiURL}/runs/${runId}/cancel`);
     });
+
+    for (const failing of [false, true]) {
+      test(`the inbox, a gate with ${failing ? "a failing" : "a passing"} evidence pack, has no serious a11y issues`, async ({
+        page,
+        request,
+      }) => {
+        const runId = await startRun(request, [WRITER, GATE], "E2E evidence a11y");
+        await withEvidence(page, evidencePack(failing));
+        await open(page, `/inbox?run=${runId}`);
+        const review = page.getByTestId("inbox-review").filter({ visible: true });
+        await expect(review.getByTestId("evidence")).toBeVisible({ timeout: 30_000 });
+        await expectNoSeriousIssues(page);
+        await request.post(`${apiURL}/runs/${runId}/cancel`);
+      });
+    }
 
     test("the gate review sheet has no serious a11y issues", async ({ page, request }) => {
       test.setTimeout(120_000);

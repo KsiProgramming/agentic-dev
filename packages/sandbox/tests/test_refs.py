@@ -1,5 +1,6 @@
 """A writer's branch read from git refs (13.1), on both backends."""
 
+import sys
 from uuid import UUID
 
 import pytest
@@ -8,6 +9,7 @@ from agentic_sandbox import Sandbox, Worktree, add_worktree
 from agentic_sandbox.refs import (
     DiffFile,
     RefPathError,
+    archive,
     branch_diff,
     branch_has_commits,
     grep_tree,
@@ -173,3 +175,54 @@ async def test_grep_tree_skips_binary_files(sandbox: Sandbox) -> None:
     tree = await writer(sandbox)
 
     assert await grep_tree(sandbox, tree.branch, "b", path="out", max_lines=50) == []
+
+
+async def test_archive_extracts_the_committed_tree_and_leaves_the_checkout(
+    sandbox: Sandbox,
+) -> None:
+    tree = await writer(sandbox)
+    await sh(tree, "echo draft > draft.txt")  # uncommitted: not in the archive
+    dest = f"{sandbox.staging_dir}/archive-1"
+
+    await archive(sandbox, tree.branch, dest)
+
+    listing = await sh(sandbox, f"cd {dest} && find . -type f | sort")
+    assert "./out/new.md" in listing.splitlines()
+    assert "./src/main.py" in listing.splitlines()
+    assert "./docs/guide.md" not in listing.splitlines()  # the writer deleted it
+    assert "draft.txt" not in listing
+    assert "./.git" not in listing
+    assert await sh(sandbox, f"cat {dest}/README.md") == "# Hello\nmore"
+    # The run's checkout still has its own files and no branch's changes.
+    assert await sh(sandbox, "test -f docs/guide.md && test ! -e out/new.md && echo same") == "same"
+
+
+async def test_archive_of_a_missing_branch_is_refused(sandbox: Sandbox) -> None:
+    with pytest.raises(BranchNotFoundError):
+        await archive(sandbox, "agent/x/nobody", f"{sandbox.staging_dir}/archive-2")
+
+
+@pytest.mark.parametrize("dest", ["/tmp/out", "/workspace/repo/x", "../x"])
+async def test_archive_only_writes_under_the_staging_directory(sandbox: Sandbox, dest: str) -> None:
+    tree = await writer(sandbox)
+
+    with pytest.raises(ValueError, match="staging directory"):
+        await archive(sandbox, tree.branch, dest)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the host cannot create symlinks")
+async def test_archive_keeps_a_symlink_as_a_link(sandbox: Sandbox) -> None:
+    tree = await add_worktree(sandbox, RUN_ID, "writer")
+    # A mode-120000 entry, made through the index so it works on hosts that cannot `ln -s`.
+    await sh(
+        tree,
+        "blob=$(printf '/etc/passwd' | git hash-object -w --stdin)"
+        " && git update-index --add --cacheinfo 120000,$blob,link"
+        " && git -c user.name=t -c user.email=t@e.invalid -c commit.gpgsign=false"
+        " commit -q -m link",
+    )
+    dest = f"{sandbox.staging_dir}/archive-3"
+
+    await archive(sandbox, tree.branch, dest)
+
+    assert await sh(sandbox, f"readlink {dest}/link") == "/etc/passwd"

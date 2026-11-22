@@ -133,6 +133,8 @@ describe("buildTimeline on a recorded docs run", () => {
       selection: null,
       comments: [],
       onReject: "cancel",
+      source: null,
+      evidence: null,
     });
   });
 
@@ -557,5 +559,59 @@ describe("buildTimeline with routers (4.6)", () => {
     expect(router.status).toBe("failed");
     expect(router.router?.mode).toBe("classifier");
     expect(router.router?.steps[0]?.error).toBe("model refused");
+  });
+});
+
+describe("a gate whose checks sent the work back (13.3)", () => {
+  const pack = {
+    version: 1,
+    gate: "check",
+    node: "writer",
+    path: ".",
+    rounds_left: 1,
+    sent_back: true,
+    checks: [
+      {
+        kind: "tests",
+        status: "failed",
+        required: true,
+        summary: "tests failed (1 of 3)",
+        detail: { failures: [{ name: "sum > adds" }] },
+      },
+    ],
+  };
+  const sentBack = [
+    event(1, "run_started", null, { workflow_name: "Build" }),
+    event(2, "evidence_collected", "check", pack),
+    event(3, "node_started", "check"),
+    event(4, "gate_decided", "check", {
+      decision: "changes",
+      source: "checks",
+      comments: [{ item: "Tests", text: "tests failed (1 of 3)" }],
+    }),
+    event(5, "node_completed", "check"),
+  ];
+
+  it("records who sent it back and what the checks found, with no pause", () => {
+    const [gate] = buildTimeline(sentBack).steps;
+
+    expect(gate?.gate?.decision).toBe("changes");
+    expect(gate?.gate?.source).toBe("checks");
+    expect(gate?.gate?.evidence?.checks[0]?.status).toBe("failed");
+    expect(gate?.status).toBe("completed");
+  });
+
+  it("is not labelled as a person's request for changes", () => {
+    const person = [
+      ...sentBack.slice(0, 3),
+      event(4, "gate_decided", "check", {
+        decision: "changes",
+        comments: [{ item: "spec", text: "More." }],
+      }),
+    ];
+
+    const [gate] = buildTimeline(person).steps;
+
+    expect(gate?.gate?.source).toBeNull();
   });
 });

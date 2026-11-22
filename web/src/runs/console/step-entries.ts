@@ -403,6 +403,9 @@ export function stepOutline(step: Step): string | null {
       const edits = step.gate.edits.length;
       return edits > 0 ? `Approved with edits to ${count(edits, "file")}` : "Approved";
     }
+    if (step.gate.decision === "changes" && step.gate.source === "checks") {
+      return `Sent back by checks (${count(step.gate.comments.length, "comment")})`;
+    }
     if (step.gate.decision === "changes") {
       return `Asked for changes (${count(step.gate.comments.length, "comment")})`;
     }

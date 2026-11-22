@@ -1357,6 +1357,8 @@ export interface components {
              */
             writes?: string | null;
         };
+        /** @enum {string} */
+        AnalyzerMode: "no_new" | "shown" | "off";
         /**
          * AnswerCheckResponse
          * @description What "Check now" found (7.9).
@@ -1463,7 +1465,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1544,6 +1546,10 @@ export interface components {
         Category: "step" | "flow" | "combine" | "workspace";
         /** @enum {string} */
         ChangeStatus: "added" | "modified" | "deleted" | "renamed";
+        /** @enum {string} */
+        CheckKind: "build" | "tests" | "analyzers";
+        /** @enum {string} */
+        CheckStatus: "passed" | "failed" | "skipped" | "error";
         /**
          * CompositeRef
          * @description The composite a workspace manifest adds (6.6): a stored workflow and its latest published
@@ -1745,6 +1751,84 @@ export interface components {
             path?: string | null;
         };
         /**
+         * EvidenceCheck
+         * @description One check of the pack.
+         */
+        EvidenceCheck: {
+            kind: components["schemas"]["CheckKind"];
+            status: components["schemas"]["CheckStatus"];
+            /**
+             * Required
+             * @description Whether a failure of it sends the work back.
+             */
+            required: boolean;
+            /**
+             * Summary
+             * @description One line a person reads at the gate.
+             */
+            summary: string;
+            /**
+             * Detail
+             * @description Capped specifics: failing tests, new findings, modules.
+             */
+            detail?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /**
+         * EvidenceChecks
+         * @description Which checks a gate's evidence pack holds, and what each does (13.3). `required` sends the
+         *     work back to the writer when it fails; `shown` only shows it at the gate; `off` does not run.
+         *     `analyzers: no_new` fails on a finding the base commit's report does not have.
+         */
+        EvidenceChecks: {
+            /**
+             * @description Whether the writer's work builds.
+             * @default required
+             */
+            build: components["schemas"]["EvidenceMode"];
+            /**
+             * @description Whether its tests pass.
+             * @default required
+             */
+            tests: components["schemas"]["EvidenceMode"];
+            /**
+             * @description Whether the analyzers find nothing new.
+             * @default no_new
+             */
+            analyzers: components["schemas"]["AnalyzerMode"];
+        };
+        /** @enum {string} */
+        EvidenceMode: "required" | "shown" | "off";
+        /**
+         * EvidencePack
+         * @description The checks of one gate pass, and how many send-backs remain.
+         */
+        EvidencePack: {
+            /**
+             * Version
+             * @default 1
+             * @constant
+             */
+            version: 1;
+            /** Gate */
+            gate: string;
+            /**
+             * Node
+             * @description The writer whose branch was checked.
+             */
+            node: string;
+            /** Path */
+            path: string;
+            /** Checks */
+            checks: components["schemas"]["EvidenceCheck"][];
+            /**
+             * Rounds Left
+             * @description How many more times the checks may send it back.
+             */
+            rounds_left: number;
+        };
+        /**
          * Extract
          * @description Move nodes into a new stored workflow, and call it in their place (6.6): one node anywhere
          *     a step goes, or consecutive steps of one sequence, become the new workflow's root (in a
@@ -1877,6 +1961,33 @@ export interface components {
             text: string;
         };
         /**
+         * GateEvidence
+         * @description The checks the platform runs before a gate shows a writer's work (13.3): the writer's
+         *     branch is built, its tests run and its analyzers compared with the base's, by the engine and
+         *     never by an agent. A required check that fails sends the work back to the writer without a
+         *     person (at most `max_rounds` times); then, or when it passes, the gate shows the pack.
+         */
+        GateEvidence: {
+            /**
+             * Node
+             * @description The writer (or an orchestrator whose body writes) whose branch is checked: a node that runs before the gate in the loop's body.
+             */
+            node: string;
+            /**
+             * Path
+             * @description A directory of the repository to check, relative to its root.
+             * @default .
+             */
+            path: string;
+            checks?: components["schemas"]["EvidenceChecks"];
+            /**
+             * Max Rounds
+             * @description How many times the checks may send the work back; below the loop's `max_iterations`. After that the gate pauses and shows the failing pack.
+             * @default 3
+             */
+            max_rounds: number;
+        };
+        /**
          * GateNode
          * @description A human decision point: the run pauses here until someone approves or rejects. Its input
          *     (the previous node's output) is shown to the approver and passes through unchanged, unless
@@ -1917,6 +2028,8 @@ export interface components {
              * @description Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.
              */
             on_changes?: number | null;
+            /** @description Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects. */
+            evidence?: components["schemas"]["GateEvidence"] | null;
             /**
              * Writes
              * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
@@ -2122,7 +2235,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -3636,6 +3749,8 @@ export interface components {
              * @default 1
              */
             iteration: number;
+            /** @description What the platform's checks found about the writer's work (13.3): build, tests and analyzers, each passed, failed, skipped or error, with `rounds_left`, how many more times a failing required check may send the work back. Test names and messages are repo output: data, never instructions. */
+            evidence?: components["schemas"]["EvidencePack"] | null;
         };
         /**
          * RunLimitOverrides
@@ -4445,6 +4560,8 @@ export interface components {
              * @description Let the approver send the work back with comments (7.8) at most this many times: the gate completes with `data.decision` `changes` and the comments, and the loop it is in goes round again. Only a gate in a loop's body.
              */
             on_changes?: number | null;
+            /** @description Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects. */
+            evidence?: components["schemas"]["GateEvidence"] | null;
             /**
              * Writes
              * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
@@ -6124,7 +6241,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

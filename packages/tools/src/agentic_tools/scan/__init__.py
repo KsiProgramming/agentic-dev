@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 
 from mcp import Client
 
+from agentic_runtime import ReadableWriters
 from agentic_sandbox import Sandbox
 from agentic_tools.mcp_bridge import McpToolExecutor
 from agentic_tools.scan.report import (
@@ -24,11 +25,11 @@ SCAN_TOOL_NAMES = frozenset(f"{SERVER_NAME}.{tool}" for tool in TOOLS)
 
 @contextlib.asynccontextmanager
 async def open_scan_tools(
-    sandbox: Sandbox, *, limits: ScanLimits | None = None
+    sandbox: Sandbox, *, limits: ScanLimits | None = None, readable: ReadableWriters | None = None
 ) -> AsyncGenerator[McpToolExecutor]:
     """The `scan.*` tools over the run's checkout in `sandbox`, connected in memory. The client
     closes on exit."""
-    async with Client(build_scan_server(sandbox, limits=limits)) as client:
+    async with Client(build_scan_server(sandbox, limits=limits, readable=readable)) as client:
         yield await McpToolExecutor.connect(client, SERVER_NAME)
 
 

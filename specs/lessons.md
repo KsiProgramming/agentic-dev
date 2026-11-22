@@ -51,6 +51,25 @@ Mistakes that reached a real run, and the rule each one left. Read this before y
 - A checklist of connections is the template's requirements minus what the chosen provider does not use; never the template's list as it is.
 - Look at the screen once against a real stack before calling a UI phase done: the rendered sheet showed what the component tests could not.
 
+### 12. A package that git ignores is not in the pull request
+*From 13.3 (2026-11-22).* 13.2 added `packages/tools/src/agentic_tools/build/`, the package that restores and builds a repo, and merged without it: the root `.gitignore` has `build/` (for build output), `git add` skipped the whole directory, and 13.2's CI was green only because the files existed on the author's machine. A fresh clone of `main` could not import `agentic_tools.build`. It was found when 13.3 changed those files and `git status` did not list them. Enforced by a negation in `.gitignore` (`!packages/tools/src/agentic_tools/build/`).
+
+- After adding a package or a directory with a common name (`build`, `dist`, `lib`, `out`), check that git sees it: `git status --short` lists it, or `git check-ignore -v <file>` says nothing.
+- A phase that adds source files is checked on a clean clone before it is called done, since a local tree can hide a file CI never gets.
+
+### 13. A send-back must leave a pass to act on
+*From 13.3.* A check that sends the work back to a writer ends a pass, and a loop that runs out of passes ends with the work unapproved, so whatever follows it (a publish) would run. The first design only required `max_rounds` below the loop's `max_iterations`, which holds on paper and fails as soon as another step also uses passes (a reviewer's `changes`, a person's request for changes). Enforced by `rounds_left = min(max_rounds - used, passes left in the loop)` (`_evidence` in the compiler), a test that reaches the last pass with a round unused (`test_the_checks_never_send_the_work_back_on_the_loops_last_pass`), and the refusal of `evidence` with `on_changes` on one gate.
+
+- Anything that decides a loop goes round again must know how many passes are left, and never use the last one.
+- When two mechanisms send work back, count them together, or keep them apart.
+
+### 14. A test runner is built on a run, not on its documentation
+*From 13.3 (2026-11-22).* `build.test` for .NET passed every unit test on a scripted sandbox, and its first run on a real repo found "no tests found": the project was not found (a `find` that prunes a start path named `.`), then the TRX files, which start with a byte-order mark, did not parse, then the test host could not start (tests built for net8.0, an image with one runtime, .NET 10), and zero tests read as "no tests found" instead of a failed run. Enforced by `DOTNET_ROLL_FORWARD=LatestMajor`, the byte-order-mark and zero-tests-with-a-failing-exit tests (`test_build_dotnet_test.py`), and the rule below.
+
+- A job that wraps a tool is run once for real, on a real repo, before it is called done; scripted sandboxes prove the parsing, not that the tool ran.
+- "Nothing found" and "could not run" are different answers: zero results with a failing exit code is the second.
+- A report that says "nothing to build" for a repo in a language it does not handle hides the gap: say which languages were looked at.
+
 ## Rules for writing workflows and templates
 
 - **Name the input.** Declare `input` (label, example) when the first step works on a request; mark it `required` when the workflow cannot do anything without it (rule 3).
