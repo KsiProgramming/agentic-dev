@@ -88,7 +88,8 @@ export function EvidenceStrip({
 
 function CheckBadge({ check }: { check: EvidenceCheck }) {
   const { status, label } = CHECK_BADGE[check.status];
-  return <StatusBadge status={status} label={label} />;
+  // The tile's value is a stat-sized figure; the badge keeps the badge size.
+  return <StatusBadge status={status} label={label} className="text-caption" />;
 }
 
 function CheckSummary({ check }: { check: EvidenceCheck }) {

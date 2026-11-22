@@ -13,6 +13,7 @@ person. Test names and messages are repo output: they are capped, and reach the 
 under fixed headings.
 """
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
@@ -115,6 +116,17 @@ class _Findings(BaseModel):
     checks: list[dict[str, JsonValue]] = Field(default_factory=lambda: list[dict[str, JsonValue]]())
 
 
+NOTHING_TO_CHECK = "no changes to check"
+_NO_WORK = ("has no commits", "has not run before this step")
+_TOOL_PREFIX = re.compile(r"^Error executing tool \w+: ")
+
+
+def _nothing(error: str | None) -> bool:
+    """Whether a tool refused because the writer has no committed work: nothing to check, which is
+    not a failure of the check."""
+    return error is not None and any(text in error for text in _NO_WORK)
+
+
 def _clip(text: str | None, limit: int = MAX_TEXT) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
@@ -134,6 +146,10 @@ def _tests_report(data: Mapping[str, Any] | None) -> _TestReport | None:
 def build_check(report: _TestReport | None, mode: str, error: str | None = None) -> EvidenceCheck:
     """The `build` check from the test report's modules."""
     required = mode == "required"
+    if report is None and _nothing(error):
+        return EvidenceCheck(
+            kind="build", status="skipped", required=required, summary=NOTHING_TO_CHECK
+        )
     if report is None:
         return EvidenceCheck(
             kind="build", status="error", required=required, summary=error or "could not build"
@@ -180,6 +196,10 @@ def build_check(report: _TestReport | None, mode: str, error: str | None = None)
 def tests_check(report: _TestReport | None, mode: str, error: str | None = None) -> EvidenceCheck:
     """The `tests` check from the test report's modules."""
     required = mode == "required"
+    if report is None and _nothing(error):
+        return EvidenceCheck(
+            kind="tests", status="skipped", required=required, summary=NOTHING_TO_CHECK
+        )
     if report is None:
         return EvidenceCheck(
             kind="tests", status="error", required=required, summary=error or "could not test"
@@ -250,6 +270,10 @@ def analyzers_check(
     """The `analyzers` check: what the branch's lint finds that the base's does not (`no_new`),
     or every finding (`shown`)."""
     required = mode == "no_new"
+    if branch is None and _nothing(error):
+        return EvidenceCheck(
+            kind="analyzers", status="skipped", required=required, summary=NOTHING_TO_CHECK
+        )
     if branch is None:
         return EvidenceCheck(
             kind="analyzers",
@@ -432,5 +456,7 @@ async def _call(
     except Exception:
         return None, f"{name} failed"
     if output.is_error or output.data is None:
-        return None, _clip(output.text, 200) if output.is_error else f"{name} gave no report"
+        if output.is_error:
+            return None, _clip(_TOOL_PREFIX.sub("", output.text), 200)
+        return None, f"{name} gave no report"
     return output.data, None

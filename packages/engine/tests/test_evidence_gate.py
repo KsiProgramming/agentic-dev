@@ -283,7 +283,7 @@ async def test_no_new_analyzers_pass_on_old_findings_and_fail_on_a_new_one() -> 
 
 
 async def test_a_check_that_could_not_run_reaches_a_person_instead_of_the_writer() -> None:
-    broken = ToolOutput(text="writer 'writer' has no commits", is_error=True)
+    broken = ToolOutput(text="could not read the writer's work", is_error=True)
     run = Run(spec(), Checks([broken]))
 
     result = await run.start()
@@ -292,6 +292,26 @@ async def test_a_check_that_could_not_run_reaches_a_person_instead_of_the_writer
     assert run.events("gate_decided") == []  # an error is not the writer's failure
     statuses = {k: c["status"] for k, c in by_kind(pack_of(run)).items()}
     assert (statuses["build"], statuses["tests"]) == ("error", "error")
+
+
+async def test_a_writer_with_no_work_has_nothing_to_check_and_is_not_an_error() -> None:
+    refusal = ToolOutput(
+        text="Error executing tool test: writer 'writer' has not run before this step",
+        is_error=True,
+    )
+    run = Run(spec(), Checks([refusal]))
+
+    result = await run.start()
+
+    assert result.status == "waiting"
+    assert run.events("gate_decided") == []
+    checks = by_kind(pack_of(run))
+    assert {k: c["status"] for k, c in checks.items()} == {
+        "build": "skipped",
+        "tests": "skipped",
+        "analyzers": "passed",  # the lint tool answered; only build and tests refused
+    }
+    assert checks["tests"]["summary"] == "no changes to check"
 
 
 async def test_checks_set_to_shown_never_send_the_work_back() -> None:
