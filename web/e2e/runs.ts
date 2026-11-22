@@ -167,3 +167,55 @@ export async function endedRunEvents(
     .filter((line) => line.startsWith("data:"))
     .map((line) => JSON.parse(line.slice("data:".length)));
 }
+
+/** An evidence pack as a gate shows it (13.3): `failing` has a failed test and a new finding. */
+export function evidencePack(failing: boolean) {
+  const check = (kind: string, status: string, summary: string, detail = {}) => ({
+    kind,
+    status,
+    required: true,
+    summary,
+    detail,
+  });
+  return {
+    version: 1,
+    gate: "approve",
+    node: "writer",
+    path: ".",
+    rounds_left: failing ? 0 : 2,
+    checks: failing
+      ? [
+          check("build", "passed", "1 module built"),
+          check("tests", "failed", "tests failed (1 of 3)", {
+            test_ms: 800,
+            failures: [
+              { name: "sum > adds", file: "src/sum.test.js", message: "expected 3 but got 4" },
+            ],
+          }),
+          check("analyzers", "failed", "1 new finding", {
+            findings: [
+              { tool: "ruff", rule: "F401", path: "src/a.py", line: 3, message: "unused import" },
+            ],
+          }),
+        ]
+      : [
+          check("build", "passed", "1 module built"),
+          check("tests", "passed", "12 tests passed", { test_ms: 2500 }),
+          check("analyzers", "passed", "no new findings"),
+        ],
+  };
+}
+
+/** Makes the gate of the page's run answer with `evidence` as well: the real gate, so the review
+ * is the real one, plus the pack the stack's fake tools cannot produce. */
+export async function withEvidence(
+  page: import("@playwright/test").Page,
+  evidence: ReturnType<typeof evidencePack>,
+) {
+  await page.route("**/runs/*/gate", async (route) => {
+    const response = await route.fetch();
+    if (!response.ok()) return route.fulfill({ response });
+    const body = (await response.json()) as Record<string, unknown>;
+    return route.fulfill({ response, json: { ...body, evidence } });
+  });
+}

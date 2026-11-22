@@ -122,6 +122,7 @@ from agentic_engine.events import (
     BRANCH_INTEGRATED,
     BRANCH_SAVE_FAILED,
     BRANCH_SAVED,
+    EVIDENCE_COLLECTED,
     LOOP_CONDITION_EVALUATED,
     LOOP_ITERATION_STARTED,
     MAP_ITEM_COMPLETED,
@@ -143,6 +144,7 @@ from agentic_engine.events import (
     NullEventSink,
     RunEventLog,
 )
+from agentic_engine.evidence import collect, pack_payload, send_back_comments
 from agentic_engine.expr import (
     ROUTE_VARIABLES,
     CompiledList,
@@ -151,7 +153,7 @@ from agentic_engine.expr import (
     compile_list,
     compile_value,
 )
-from agentic_engine.gate import GateReview, run_gate_node, run_wait_node
+from agentic_engine.gate import EvidenceInput, GateReview, run_gate_node, run_wait_node
 from agentic_engine.graph.checkpoint import Checkpointer
 from agentic_engine.graph.deltas import DeltaBuffer
 from agentic_engine.graph.state import (
@@ -269,6 +271,13 @@ class _Limits:
     """The orchestrators whose tasks write (each has an integration branch once it merged)."""
     roles: dict[str, str] = field(default_factory=dict[str, str])
     """Each agent's and orchestrator's role, for what a later step is told about its work."""
+    evidence_loops: dict[str, tuple[str, int]] = field(default_factory=dict[str, tuple[str, int]])
+    """Each gate with evidence (13.3) → its loop's id and `max_iterations`: the checks never send
+    the work back on the loop's last pass, which would end the loop with the work unapproved."""
+    base_lint: dict[str, Mapping[str, object] | None] = field(
+        default_factory=dict[str, Mapping[str, object] | None]
+    )
+    """The base commit's lint report per gate with evidence (13.3), read once per attempt."""
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -319,6 +328,12 @@ def step_nodes(root: Node) -> list[StepNode]:
             case _:
                 raise CompileError(f"node type {node.type!r} at {path} is not supported yet")
     return steps
+
+
+def evidence_node_id(gate: GateNode) -> str:
+    """The LangGraph node that checks a writer's work before `gate` (13.3). `NodeId` has no
+    `.`, so no spec node can take this name; the gate's send-backs are counted under it too."""
+    return f"{gate.id}.evidence"
 
 
 def check_node_id(loop: LoopNode) -> str:
@@ -494,6 +509,7 @@ def compile_workflow(
         context.spec if context is not None else None,
     )
     limits.loops = _enclosing_loops(spec.root)
+    limits.evidence_loops = _evidence_loops(spec.root)
     limits.providers = providers
     limits.readable = readable
     limits.writer_ids = frozenset(writer_node_ids(spec.root))
@@ -647,6 +663,16 @@ def compile_workflow(
                 builder.add_node(ready, _repo_ready)
                 builder.add_edge(ready, then)
                 return node.id
+            case GateNode() if node.evidence is not None:
+                checks = evidence_node_id(node)
+                builder.add_node(checks, _evidence(node, tools, log, limits))
+                builder.add_node(
+                    node.id,
+                    _saving(_step(node, runtime, tools, log, limits), log, limits, top[node.id]),
+                )
+                builder.add_edge(checks, node.id)
+                go_on(node.id, node.id, then)
+                return checks
             case AgentNode() | ToolNode() | GateNode():
                 builder.add_node(
                     node.id,
@@ -739,13 +765,74 @@ def _step(
                 route_as=reads,
                 results=state["results"],
                 writers=writers_before(state, limits.writer_ids, limits.team_ids),
+                evidence=_evidence_input(node, state),
             )
 
         if isinstance(node, AgentNode):
             return await _spawn(node.id, state, limits, log, run)
-        return _update(node.id, await run())
+        result = await run()
+        update = _update(node.id, result)
+        sent_back = (result.data or {}).get("source") == "checks"
+        if isinstance(node, GateNode) and node.evidence is not None and sent_back:
+            key = evidence_node_id(node)
+            update["rounds"] = {key: state.get("rounds", {}).get(key, 0) + 1}
+        return update
 
     return step
+
+
+def _evidence(
+    gate: GateNode, tools: ToolExecutor | None, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Checks the writer's work before `gate` (13.3): `build.test` and `scan.lint` on its branch,
+    run by the engine through the run's tools, never by an agent. A step of its own, so a
+    restart between it and the gate runs nothing twice (a gate runs again from its start when it
+    continues). It stores the pack and, when a required check failed with a round left, the
+    comments that send the work back, in the state the gate reads."""
+    spec = gate.evidence
+    assert spec is not None
+    key = evidence_node_id(gate)
+
+    async def check(state: RunState) -> RunUpdate:
+        used = state.get("rounds", {}).get(key, 0)
+        loop_id, passes = limits.evidence_loops.get(gate.id, ("", 0))
+        passes_left = passes - state["iterations"].get(loop_id, passes)
+        limits.announce(writers_before(state, limits.writer_ids, limits.team_ids))
+        pack = await collect(
+            gate.id,
+            spec,
+            tools,
+            base_cache=limits.base_lint,
+            rounds_left=max(min(spec.max_rounds - used, passes_left), 0),
+            node_id=key,
+        )
+        comments = send_back_comments(pack) if pack.sends_back() else []
+        payload = pack_payload(pack)
+        await log.emit(
+            EVIDENCE_COLLECTED,
+            node_id=gate.id,
+            payload={**payload, "sent_back": bool(comments)},
+        )
+        asked: list[JsonValue] = [c.model_dump(mode="json") for c in comments]
+        update: RunUpdate = {"evidence": {key: {"pack": payload, "comments": asked}}}
+        name = f"{gate.id[:40]}.evidence.json"
+        stored = AgentNodeResult(
+            status="completed", text=json.dumps(payload), usage=None, data=payload
+        )
+        written = await _write(gate.id, name, None, stored, limits, log)
+        if written.artifact is not None:
+            update["artifacts"] = {name: written.artifact}
+        return update
+
+    return check
+
+
+def _evidence_input(node: StepNode, state: RunState) -> EvidenceInput | None:
+    """What the checks before the gate `node` found (13.3), as the checkpoint holds it."""
+    if not isinstance(node, GateNode) or node.evidence is None:
+        return None
+    found = state.get("evidence", {}).get(evidence_node_id(node))
+    return EvidenceInput.model_validate(found) if found is not None else None
 
 
 def _integrated_reader(state: RunState) -> str | None:
@@ -849,6 +936,7 @@ async def _run_step(
     route_as: str | None = None,
     results: Mapping[str, AgentNodeResult] | None = None,
     writers: Sequence[ReadableWriter] = (),
+    evidence: EvidenceInput | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
     a map or an orchestrator's task, `branch` inside a parallel). `writers` ran before it: an
@@ -911,6 +999,7 @@ async def _run_step(
                     limits.policy.approval_ttl_s,
                     limits.artifacts,
                     refs,
+                    evidence,
                 )
             case AgentNode():
                 async with limits.alive:
@@ -1970,6 +2059,17 @@ def _to_route(router: RouterNode, starts: Mapping[str, str]) -> Callable[[RunSta
 
 _SKIPPED_END: Final[dict[str, JsonValue]] = {"route": None, "skipped": True}
 """The `node_completed` payload of a router that skipped (7.5)."""
+
+
+def _evidence_loops(root: Node) -> dict[str, tuple[str, int]]:
+    """Each gate with evidence → the innermost loop around it, as its id and `max_iterations`."""
+    found: dict[str, tuple[str, int]] = {}
+    for _, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            for _, inner in iter_nodes(node.body):
+                if isinstance(inner, GateNode) and inner.evidence is not None:
+                    found[inner.id] = (node.id, node.max_iterations)
+    return found
 
 
 def _enclosing_loops(root: Node) -> dict[str, str]:

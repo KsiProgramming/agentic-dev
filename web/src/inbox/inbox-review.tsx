@@ -34,6 +34,7 @@ import {
   RejectButton,
   RequestChangesButton,
 } from "@/runs/console/decision-controls";
+import { EvidenceStrip } from "@/runs/console/evidence-strip";
 import { StatusLabel } from "@/runs/console/gate-files";
 import { SelectionChecklist } from "@/runs/console/selection-checklist";
 import { useGateDecision, type Decision } from "@/runs/console/use-gate-decision";
@@ -163,6 +164,8 @@ function GateReview({
           value={<Money usage={usageOfRun(run.usage)} budget={run.usage.budget_usd ?? null} />}
         />
       </StatStrip>
+
+      <EvidenceStrip evidence={gate.evidence} />
 
       {decision.choice ? (
         <SelectionChecklist runId={run.id} choice={decision.choice} baseUrl={baseUrl} />

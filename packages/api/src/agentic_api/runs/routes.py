@@ -1026,6 +1026,7 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
         on_reject="end" if pending.on_reject == "end" else "cancel",
         changes_left=pending.changes_left,
         iteration=pending.iteration,
+        evidence=pending.evidence,
     )
 
 

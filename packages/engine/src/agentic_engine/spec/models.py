@@ -177,6 +177,50 @@ class GateSelect(_Base):
         return self
 
 
+type EvidenceMode = Literal["required", "shown", "off"]
+type AnalyzerMode = Literal["no_new", "shown", "off"]
+
+MAX_EVIDENCE_ROUNDS = 10
+"""The most times a gate's checks may send the work back (`GateEvidence.max_rounds`)."""
+
+
+class EvidenceChecks(_Base):
+    """Which checks a gate's evidence pack holds, and what each does (13.3). `required` sends the
+    work back to the writer when it fails; `shown` only shows it at the gate; `off` does not run.
+    `analyzers: no_new` fails on a finding the base commit's report does not have."""
+
+    build: EvidenceMode = Field(default="required", description="Whether the writer's work builds.")
+    tests: EvidenceMode = Field(default="required", description="Whether its tests pass.")
+    analyzers: AnalyzerMode = Field(
+        default="no_new", description="Whether the analyzers find nothing new."
+    )
+
+
+class GateEvidence(_Base):
+    """The checks the platform runs before a gate shows a writer's work (13.3): the writer's
+    branch is built, its tests run and its analyzers compared with the base's, by the engine and
+    never by an agent. A required check that fails sends the work back to the writer without a
+    person (at most `max_rounds` times); then, or when it passes, the gate shows the pack."""
+
+    node: NodeId = Field(
+        description="The writer (or an orchestrator whose body writes) whose branch is checked: "
+        "a node that runs before the gate in the loop's body."
+    )
+    path: NonEmptyStr = Field(
+        default=".",
+        max_length=1024,
+        description="A directory of the repository to check, relative to its root.",
+    )
+    checks: EvidenceChecks = Field(default_factory=EvidenceChecks)
+    max_rounds: int = Field(
+        default=3,
+        ge=1,
+        le=MAX_EVIDENCE_ROUNDS,
+        description="How many times the checks may send the work back; below the loop's "
+        "`max_iterations`. After that the gate pauses and shows the failing pack.",
+    )
+
+
 class GateNode(_Base):
     """A human decision point: the run pauses here until someone approves or rejects. Its input
     (the previous node's output) is shown to the approver and passes through unchanged, unless
@@ -212,6 +256,13 @@ class GateNode(_Base):
         "times: the gate completes with `data.decision` `changes` and the comments, and the "
         "loop it is in goes round again. Only a gate in a loop's body.",
     )
+    evidence: GateEvidence | None = Field(
+        default=None,
+        description="Check the writer's work before the gate shows it (13.3): build, tests and "
+        "analyzers. A failing required check sends the work back like a request for changes, "
+        "never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: "
+        "a person approves or rejects.",
+    )
     writes: ArtifactName | None = Field(
         default=None,
         description="With `select`, store the chosen items as this run artifact. With "
@@ -223,6 +274,13 @@ class GateNode(_Base):
     def _writes_selection(self) -> Self:
         if self.writes is not None and self.select is None and self.on_changes is None:
             raise ValueError(f"gate {self.id!r}: `writes` needs `select` or `on_changes`")
+        if self.evidence is not None and self.select is not None:
+            raise ValueError(f"gate {self.id!r}: `evidence` cannot be used with `select`")
+        if self.evidence is not None and self.on_changes is not None:
+            raise ValueError(
+                f"gate {self.id!r}: `evidence` cannot be used with `on_changes`: the checks send "
+                "the work back, and a person approves or rejects"
+            )
         if (
             self.writes is not None
             and self.select is not None
@@ -873,10 +931,11 @@ SCAN_TOOLS = frozenset({"scan.lint", "scan.secrets", "scan.dependencies"})
 """Deterministic scanners over the run's repo in the sandbox (4.4): read-only, so allowed
 everywhere. Each returns a findings report (`agentic_runtime.findings.FindingsReport`)."""
 
-BUILD_TOOLS = frozenset({"build.restore"})
+BUILD_TOOLS = frozenset({"build.restore", "build.test"})
 """Restores the run's repo's Node and Python packages through a registry's egress proxy, then
-builds with no network (13.2). It opens a route out of the sandbox, so only a tool node may call
-one (`tool_node_only`): a step the workflow's author draws, never an agent's choice at run time."""
+builds with no network (13.2), and runs its tests the same way (`build.test`, 13.3). It opens a
+route out of the sandbox, so only a tool node may call one (`tool_node_only`): a step the
+workflow's author draws, never an agent's choice at run time."""
 
 JIRA_READ_TOOLS = frozenset({"jira.getIssue", "jira.search", "jira.listTransitions"})
 """Tools that read the workspace's Jira (7.2), scoped to its picked projects: allowed everywhere.
@@ -955,6 +1014,9 @@ type IssueCode = Literal[
     "copilot_connection_required",
     "no_writer_before",
     "tool_node_only",
+    "evidence_not_in_loop",
+    "evidence_unknown_writer",
+    "invalid_evidence",
 ]
 
 
@@ -2423,6 +2485,77 @@ def _ending_steps(root: Node) -> set[int]:
     return found
 
 
+def _evidence_issues(
+    root: Node, path: str, node: GateNode, loop: LoopNode | None
+) -> list[ValidationIssue]:
+    """Why the evidence of the gate `node` (13.3) cannot run: the gate is not in a loop's body
+    (`evidence_not_in_loop`), `node` is no writer that runs before it in that body
+    (`evidence_unknown_writer`), or `max_rounds` or the checks are not usable
+    (`invalid_evidence`)."""
+    evidence = node.evidence
+    if evidence is None:
+        return []
+
+    def issue(code: IssueCode, field: str, message: str) -> ValidationIssue:
+        return ValidationIssue(
+            code=code, path=f"{path}.evidence{field}", node_id=node.id, message=message
+        )
+
+    if loop is None:
+        return [
+            issue(
+                "evidence_not_in_loop",
+                "",
+                f"gate {node.id!r} at {path}: evidence needs the gate to be in a loop's body, "
+                "which the checks send the work back to",
+            )
+        ]
+    found: list[ValidationIssue] = []
+    before: list[str] = []
+    for _, inner in iter_nodes(loop.body):
+        if inner.id == node.id:
+            break
+        before.append(inner.id)
+    writers = writer_node_ids(root) | task_writer_orchestrators(root)
+    if evidence.node not in writers or evidence.node not in before:
+        why = (
+            "is not a writer or an orchestrator whose body writes"
+            if evidence.node not in writers
+            else f"does not run before the gate in the body of loop {loop.id!r}"
+        )
+        found.append(
+            issue(
+                "evidence_unknown_writer",
+                ".node",
+                f"gate {node.id!r} at {path}: evidence.node {evidence.node!r} {why}",
+            )
+        )
+    if evidence.max_rounds >= loop.max_iterations:
+        found.append(
+            issue(
+                "invalid_evidence",
+                ".max_rounds",
+                f"gate {node.id!r} at {path}: evidence.max_rounds is at least the "
+                f"{loop.max_iterations} passes of loop {loop.id!r}: the writer needs a pass left "
+                "to act on the failures",
+            )
+        )
+    checks = evidence.checks
+    if checks.build == "off" and checks.tests == "off" and checks.analyzers == "off":
+        found.append(
+            issue("invalid_evidence", ".checks", f"gate {node.id!r} at {path}: every check is off")
+        )
+    if evidence.path.startswith("/") or ".." in evidence.path.split("/"):
+        found.append(
+            issue(
+                "invalid_evidence",
+                ".path",
+                f"gate {node.id!r} at {path}: evidence.path must stay inside the repository",
+            )
+        )
+    return found
+
+
 def gate_issues(root: Node) -> list[ValidationIssue]:
     """Why the gates under `root` cannot run (6.7): a `select.preselect` that is not a valid
     condition over `item` (`invalid_expression`), and `on_reject: end` on a gate that is not a
@@ -2475,6 +2608,7 @@ def gate_issues(root: Node) -> list[ValidationIssue]:
                         message=message,
                     )
                 )
+        issues.extend(_evidence_issues(root, path, node, in_loop.get(id(node))))
         if node.on_reject == "end" and id(node) not in top:
             message = (
                 f'gate {node.id!r} at {path}: on_reject "end" needs the gate to be a step of '

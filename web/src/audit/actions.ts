@@ -5,6 +5,7 @@ import {
   CircleXIcon,
   CoinsIcon,
   FlagIcon,
+  FlaskConicalIcon,
   FilePenIcon,
   FilePlusIcon,
   HistoryIcon,
@@ -65,6 +66,11 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "gate.changes_requested": {
     label: "Changes requested",
     icon: MessageSquareIcon,
+    category: "approvals",
+  },
+  "gate.sent_back_by_checks": {
+    label: "Sent back by checks",
+    icon: FlaskConicalIcon,
     category: "approvals",
   },
   "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
@@ -283,6 +289,15 @@ export function describe(event: AuditEvent): string {
     case "gate.changes_requested": {
       const comments = count(d, "comments");
       return `Asked for changes at ${event.node_id ?? "a gate"} (${plural(comments, "comment")})`;
+    }
+    case "gate.sent_back_by_checks": {
+      const failed = Array.isArray(d.checks)
+        ? d.checks.filter((c): c is string => typeof c === "string")
+        : [];
+      return join(
+        `The checks sent the writer back at ${event.node_id ?? "a gate"}`,
+        failed.length > 0 && `${failed.join(" and ")} failed`,
+      );
     }
     case "gate.approved":
     case "gate.rejected": {

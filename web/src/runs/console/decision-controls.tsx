@@ -36,6 +36,7 @@ import { ArtifactCards } from "../artifacts/artifact-cards";
 import type { PendingGate } from "../gates";
 import { AgentMessage } from "./agent-message";
 import type { GateFile } from "./gate-files";
+import { EvidenceStrip } from "./evidence-strip";
 import { GateReviewSheet } from "./gate-review-sheet";
 import { SelectionChecklist } from "./selection-checklist";
 import type { GateDecision } from "./use-gate-decision";
@@ -256,8 +257,11 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
-            ) : gate.runArtifacts.length > 0 ? (
-              <GateRunArtifacts runId={decision.runId} gate={gate} baseUrl={decision.baseUrl} />
+            ) : gate.evidence || gate.runArtifacts.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                <EvidenceStrip evidence={gate.evidence} />
+                <GateRunArtifacts runId={decision.runId} gate={gate} baseUrl={decision.baseUrl} />
+              </div>
             ) : null
           }
           footer={
@@ -288,6 +292,7 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
               </SheetDescription>
             </SheetHeader>
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+              <EvidenceStrip evidence={gate.evidence} />
               <div>
                 <GateArtifact gate={gate} />
               </div>

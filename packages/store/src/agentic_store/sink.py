@@ -237,6 +237,8 @@ class PostgresEventSink:
                 await _audit_end(session, event)
             elif event.type == REPO_CREATED:
                 await _audit_repo_created(session, event)
+            elif event.type == GATE_DECIDED and event.payload.get("source") == "checks":
+                await _audit_sent_back(session, event)
             # Delivered on commit, so a listener that wakes up can already read the row.
             await session.execute(
                 select(func.pg_notify(RUN_EVENTS_CHANNEL, f"{event.run_id}:{event.seq}"))
@@ -263,6 +265,31 @@ async def _audit_end(session: AsyncSession, event: RunEvent) -> None:
             "estimated_usd": usd(run.estimated_usd),
             "cost_complete": run.cost_complete,
         },
+    )
+
+
+async def _audit_sent_back(session: AsyncSession, event: RunEvent) -> None:
+    """The `gate.sent_back_by_checks` audit entry (13.3): the platform's checks, not a person,
+    sent the writer's work back, so the entry has the system as its actor and names the
+    checks that failed (their headings), never their output."""
+    run = await session.get(Run, event.run_id)
+    if run is None:
+        return
+    comments = event.payload.get("comments")
+    items = (
+        [c.get("item") for c in comments if isinstance(c, dict)]
+        if isinstance(comments, list)
+        else []
+    )
+    audit(
+        session,
+        run.workspace_id,
+        "gate.sent_back_by_checks",
+        actor_type="system",
+        run_id=run.id,
+        node_id=event.node_id,
+        at=event.created_at,
+        details={"checks": [i for i in items if isinstance(i, str)]},
     )
 
 

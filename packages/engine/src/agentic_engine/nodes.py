@@ -57,8 +57,8 @@ AGENT_TOOLS: tuple[str, ...] = tuple(
 )
 """The tools an agent may be granted: publishing, creating a repo and writing to Jira are
 irreversible, so only a tool node may call those (`publish_not_tool_node`,
-`create_not_tool_node`, `jira_write_not_tool_node`), and so is `build.restore`, which opens a route
-out (`tool_node_only`); committing run artifacts onto a branch
+`create_not_tool_node`, `jira_write_not_tool_node`), and so are `build.restore` and
+`build.test`, which open a route out (`tool_node_only`); committing run artifacts onto a branch
 (7.5) is the engine's own step, never an agent's."""
 
 UI_WIDGETS = frozenset({"textarea", "checkboxes"})
@@ -325,6 +325,7 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
             "prompt": _TEXTAREA,
             "ttl_s": _ADVANCED,
             "select": _ADVANCED,
+            "evidence": _ADVANCED,
             "on_reject": _ADVANCED,
             "writes": _ADVANCED,
         },

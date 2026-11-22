@@ -5,6 +5,7 @@ import {
   apiURL,
   COMBINE,
   DOCS_DEMO_URL,
+  evidencePack,
   FAILING,
   REPO_READER,
   startReviewRun,
@@ -14,6 +15,7 @@ import {
   SCANS,
   TYPED_READER,
   TYPED_WRITER,
+  withEvidence,
   WRITER,
 } from "./runs";
 import { workflowFromTemplate } from "./workflows";
@@ -105,6 +107,25 @@ test("inbox, with a gate under review", async ({ page, request }) => {
   await checkPage(page, "inbox");
   await request.post(`${apiURL}/runs/${runId}/cancel`);
 });
+
+for (const failing of [false, true]) {
+  test(`inbox, a gate with ${failing ? "a failing" : "a passing"} evidence pack`, async ({
+    page,
+    request,
+  }) => {
+    const runId = await startRun(request, [WRITER, GATE], "E2E evidence layout");
+    await withEvidence(page, evidencePack(failing));
+    await page.goto(`/inbox?run=${runId}`);
+    const review = page.getByTestId("inbox-review").filter({ visible: true });
+    await expect(review.getByTestId("evidence")).toBeVisible({ timeout: 30_000 });
+    await expect(review.getByText("Tests", { exact: true })).toBeVisible();
+    if (failing) {
+      await expect(review.getByRole("list", { name: "Failing tests" })).toContainText("sum > adds");
+    }
+    await checkPage(page, failing ? "inbox-evidence-failing" : "inbox-evidence-passing");
+    await request.post(`${apiURL}/runs/${runId}/cancel`);
+  });
+}
 
 test("templates", async ({ page }) => {
   await page.goto("/templates");

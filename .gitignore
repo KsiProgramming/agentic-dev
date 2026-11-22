@@ -8,6 +8,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# The tools package named build (13.2) is source, not build output.
+!packages/tools/src/agentic_tools/build/
 
 # Node / Next.js
 node_modules/

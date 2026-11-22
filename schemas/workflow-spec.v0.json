@@ -159,10 +159,97 @@
       "title": "AgentNode",
       "type": "object"
     },
+    "AnalyzerMode": {
+      "enum": [
+        "no_new",
+        "shown",
+        "off"
+      ],
+      "type": "string"
+    },
+    "EvidenceChecks": {
+      "additionalProperties": false,
+      "description": "Which checks a gate's evidence pack holds, and what each does (13.3). `required` sends the\nwork back to the writer when it fails; `shown` only shows it at the gate; `off` does not run.\n`analyzers: no_new` fails on a finding the base commit's report does not have.",
+      "properties": {
+        "analyzers": {
+          "$ref": "#/$defs/AnalyzerMode",
+          "default": "no_new",
+          "description": "Whether the analyzers find nothing new."
+        },
+        "build": {
+          "$ref": "#/$defs/EvidenceMode",
+          "default": "required",
+          "description": "Whether the writer's work builds."
+        },
+        "tests": {
+          "$ref": "#/$defs/EvidenceMode",
+          "default": "required",
+          "description": "Whether its tests pass."
+        }
+      },
+      "title": "EvidenceChecks",
+      "type": "object"
+    },
+    "EvidenceMode": {
+      "enum": [
+        "required",
+        "shown",
+        "off"
+      ],
+      "type": "string"
+    },
+    "GateEvidence": {
+      "additionalProperties": false,
+      "description": "The checks the platform runs before a gate shows a writer's work (13.3): the writer's\nbranch is built, its tests run and its analyzers compared with the base's, by the engine and\nnever by an agent. A required check that fails sends the work back to the writer without a\nperson (at most `max_rounds` times); then, or when it passes, the gate shows the pack.",
+      "properties": {
+        "checks": {
+          "$ref": "#/$defs/EvidenceChecks"
+        },
+        "max_rounds": {
+          "default": 3,
+          "description": "How many times the checks may send the work back; below the loop's `max_iterations`. After that the gate pauses and shows the failing pack.",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Rounds",
+          "type": "integer"
+        },
+        "node": {
+          "description": "The writer (or an orchestrator whose body writes) whose branch is checked: a node that runs before the gate in the loop's body.",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "title": "Node",
+          "type": "string"
+        },
+        "path": {
+          "default": ".",
+          "description": "A directory of the repository to check, relative to its root.",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "title": "GateEvidence",
+      "type": "object"
+    },
     "GateNode": {
       "additionalProperties": false,
       "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged, unless\nit selects (6.7): then its output is the artifact's items the approver chose.",
       "properties": {
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects."
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "title": "Id",
@@ -1559,6 +1646,18 @@
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",
           "title": "After From",
           "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects."
         },
         "id": {
           "pattern": "^[a-z][a-z0-9_-]{0,62}$",

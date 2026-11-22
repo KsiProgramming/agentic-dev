@@ -139,6 +139,7 @@ from agentic_engine.policy import PolicyLimitExceeded
 from agentic_engine.spec import (
     BUILD_TOOLS,
     SPEC_INPUT_ARTIFACT,
+    GateNode,
     WorkflowSpec,
     creates_repo,
     iter_nodes,
@@ -1109,10 +1110,12 @@ async def _attempt(
                     readable=readable,
                 )
             )
-            scanning = await stack.enter_async_context(open_scan_tools(sandbox))
+            scanning = await stack.enter_async_context(open_scan_tools(sandbox, readable=readable))
             tools = RunTools([tools, scanning])
             if uses_build(run.spec):
-                building = await stack.enter_async_context(open_build_tools(sandbox))
+                building = await stack.enter_async_context(
+                    open_build_tools(sandbox, readable=readable)
+                )
                 tools = RunTools([tools, building])
             if target is not None and uses_github(run.spec):
                 assert worker.github is not None  # `_github_target` checked it
@@ -1208,9 +1211,14 @@ async def _log_restored(
 
 
 def uses_build(spec: WorkflowSpec) -> bool:
-    """Whether a node of the spec calls `build.restore` (13.2), which opens a route out of the
-    sandbox: the `build` tools are connected only for runs that name it."""
-    return any(BUILD_TOOLS.intersection(node_tools(node)) for _, node in iter_nodes(spec.root))
+    """Whether a node of the spec calls `build.restore` or `build.test` (13.2), or is a gate that
+    checks a writer's work (13.3), which opens a route out of the sandbox: the `build` tools are
+    connected only for runs that need them."""
+    return any(
+        BUILD_TOOLS.intersection(node_tools(node))
+        or (isinstance(node, GateNode) and node.evidence is not None)
+        for _, node in iter_nodes(spec.root)
+    )
 
 
 def uses_github(spec: WorkflowSpec) -> bool:

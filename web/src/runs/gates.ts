@@ -1,4 +1,5 @@
 import { parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
+import { parseEvidence, type Evidence } from "./evidence";
 import type { RunEvent } from "./types";
 
 export type FileChangeStatus = "added" | "modified" | "deleted" | "renamed";
@@ -91,6 +92,9 @@ export interface PendingGate {
   /** Set when the run waits for an answer on a Jira issue (7.9), not for a decision: nobody
    * approves it; the platform goes on when the answer is found. */
   waitFor: WaitFor | null;
+  /** What the platform's checks found about the writer's work before this gate (13.3); null
+   * for a gate that does not check. */
+  evidence: Evidence | null;
 }
 
 /** What a `wait_for` waits for: a comment on the issue after the one the platform posted. */
@@ -191,6 +195,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         on_reject,
         on_changes,
         wait_for,
+        evidence,
       } = event.payload ?? {};
       const iteration = events
         .slice(0, i + 1)
@@ -212,6 +217,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         changesLeft: typeof on_changes === "number" ? Math.max(on_changes - iteration + 1, 0) : 0,
         iteration,
         waitFor: parseWaitFor(wait_for),
+        evidence: parseEvidence(evidence),
       };
     }
   }

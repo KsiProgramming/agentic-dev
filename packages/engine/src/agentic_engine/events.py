@@ -27,6 +27,10 @@ NODE_FAILED: Final = "node_failed"
 NODE_CANCELLED: Final = "node_cancelled"
 GATE_WAITING: Final = "gate_waiting"
 GATE_DECIDED: Final = "gate_decided"
+EVIDENCE_COLLECTED: Final = "evidence_collected"
+"""A gate's checks ran on a writer's work (13.3), before the gate: the evidence pack
+(`gate`, `node`, `path`, `checks`, `rounds_left`) and `sent_back`, whether a failed
+required check sent the work back to the writer without a pause."""
 LOOP_ITERATION_STARTED: Final = "loop_iteration_started"
 """A loop starts an iteration: `iteration` (from 1)."""
 LOOP_CONDITION_EVALUATED: Final = "loop_condition_evaluated"

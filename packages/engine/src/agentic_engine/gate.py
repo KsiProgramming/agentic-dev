@@ -125,6 +125,17 @@ class GateDecision(BaseModel):
         return self
 
 
+class EvidenceInput(BaseModel):
+    """What a gate that checks a writer's work is given (13.3): the evidence `pack` (an
+    `EvidencePack` as JSON) and, when a required check failed with a round left, the failures as
+    the `comments` that send the work back without a person."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    pack: dict[str, JsonValue]
+    comments: list[GateComment] = Field(default_factory=list[GateComment])
+
+
 class GateReview(Protocol):
     """The run's writer branches as a gate shows and edits them. The worker implements it over
     the run's sandbox, so the engine never runs git."""
@@ -356,7 +367,11 @@ async def _selection(
 
 
 def gate_request(
-    node: GateNode, input: str, ttl_s: int, shown: SelectionShown | None = None
+    node: GateNode,
+    input: str,
+    ttl_s: int,
+    shown: SelectionShown | None = None,
+    evidence: EvidenceInput | None = None,
 ) -> dict[str, JsonValue]:
     """What the approver is shown: the `gate_waiting` payload, before the runner adds the
     `changes` and `expires_at`. `artifact` is the gate's input, the previous node's output (data,
@@ -371,6 +386,8 @@ def gate_request(
     }
     if shown is not None:
         request["select"] = shown.model_dump(mode="json")
+    if evidence is not None:
+        request["evidence"] = evidence.pack
     if node.on_reject == "end":
         request["on_reject"] = "end"
     if node.on_changes is not None:
@@ -414,6 +431,7 @@ async def run_gate_node(
     ttl_s: int = APPROVAL_TTL_S,
     artifacts: ArtifactStore | None = None,
     refs: Mapping[str, ArtifactRef] | None = None,
+    evidence: EvidenceInput | None = None,
 ) -> AgentNodeResult:
     """Pause until the run is continued with a `GateDecision`, then log it. Approve completes the
     node and passes `input` on unchanged, once its edits are committed through `review`; edits
@@ -427,7 +445,14 @@ async def run_gate_node(
     A selection gate (6.7) shows the items of its artifact (the version in `refs`, read from
     `artifacts`), and its approval's output is that artifact with only the chosen items (`data`,
     and pretty JSON as its text). One that cannot show its items, or gets a selection that does
-    not fit them, fails."""
+    not fit them, fails.
+
+    A gate with `evidence` (13.3) is given the checks' pack. When a required check failed and a
+    round is left (`evidence.comments`), it does not pause: it completes at once as a request for
+    changes with `source` `checks`, the failures as its comments, for the loop to hand the writer.
+    Otherwise it pauses and shows the pack."""
+    if evidence is not None and evidence.comments:
+        return await _sent_back(node, evidence, log)
     shown: SelectionShown | None = None
     document: JsonValue = None
     if node.select is not None:
@@ -437,7 +462,8 @@ async def run_gate_node(
             # It fails before it pauses, so the runner never announced its start.
             await log.emit(NODE_STARTED, node_id=node.id)
             return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
-    decision = GateDecision.model_validate(interrupt(gate_request(node, input, ttl_s, shown)))
+    request = gate_request(node, input, ttl_s, shown, evidence)
+    decision = GateDecision.model_validate(interrupt(request))
     try:
         chosen = check_selection(shown, decision.decision, decision.selection)
     except SelectionError as e:
@@ -468,7 +494,9 @@ async def run_gate_node(
         if node.select is None:
             # A gate that can send the work back says which way it went (`until` reads it).
             went: dict[str, JsonValue] | None = (
-                {"decision": "approve"} if node.on_changes is not None else None
+                {"decision": "approve"}
+                if node.on_changes is not None or node.evidence is not None
+                else None
             )
             return AgentNodeResult(status="completed", text=input, usage=None, data=went)
         data = selected_document(node.select, document, chosen)
@@ -478,6 +506,22 @@ async def run_gate_node(
         return AgentNodeResult(status="completed", text=input, usage=None, ends_run=True)
     reason = f"rejected at gate: {decision.comment}" if decision.comment else "rejected at gate"
     return AgentNodeResult(status="cancelled", text=input, usage=None, error=reason)
+
+
+async def _sent_back(node: GateNode, evidence: EvidenceInput, log: RunEventLog) -> AgentNodeResult:
+    """The gate's checks sent the work back (13.3): the same completion as a person's request for
+    changes (7.8), with no one named as having decided it and no pause."""
+    comments = evidence.comments
+    items: list[JsonValue] = [c.model_dump(mode="json") for c in comments]
+    # The gate never paused, so the runner did not announce its start.
+    await log.emit(NODE_STARTED, node_id=node.id)
+    await log.emit(
+        GATE_DECIDED,
+        node_id=node.id,
+        payload={"decision": "changes", "source": "checks", "comments": items},
+    )
+    data: dict[str, JsonValue] = {"decision": "changes", "source": "checks", "comments": items}
+    return AgentNodeResult(status="completed", text=changes_text(comments), usage=None, data=data)
 
 
 async def run_wait_node(

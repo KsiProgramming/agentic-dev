@@ -99,6 +99,18 @@ What drives the design:
 | Order of work | Spike, then the tool, then the gate and policy, then the web, then templates and a real run | Chosen in the interview. 13.2 showed that a spike on real repos settles what the docs do not (lessons, rule 10). |
 | Real run | Read step by step in the console, with **GitHub Copilot** as the provider instead of Claude | The user's choice. Since 8.3 the same workflow runs on both providers unchanged (AC-6). Lessons rule 1 and the roadmap note say "Claude", so the PR records this deviation (see Open questions). |
 
+## Built differently from the plan
+
+What changed while building it, and why (decisions-log rows in tech-stack, lessons rules 12 and 13):
+
+- **A gate with `evidence` takes no `on_changes`.** The plan let both exist. A person's request for changes is counted by pauses and the checks' send-backs are not, so together they could send the loop's last pass back and end it unapproved. The checks send back, and a person approves or rejects.
+- **The last pass is never sent back.** `rounds_left` is `min(max_rounds - used, passes left)`, on top of `max_rounds` below the loop's `max_iterations`. The plan's `max_rounds: 3` for a 3-pass template was itself invalid.
+- **The template adopts evidence by option.** "Plan, build and review" takes `checks` (default off) and `check_rounds`; with `checks` its gate moves into the loop's body. The build-from-Jira templates are unchanged: their `commit_specs` step must stay in the root sequence before the gate, so a gate in the loop needs its own design. Default flows, AC-2's conformance and `on_review` follow-ups are as they were.
+- **The hidden step is `<gate>.evidence`**, not `<gate>:evidence`, as every other internal node id uses a `.`.
+- **`scan.lint {node}` and `build.* {node}` run the existing scripts in the extracted tree** (`agentic_tools.tree.TreeSandbox`) instead of through job containers, so the scanners and the build are unchanged.
+- **Not done:** .NET tests, the Docker fixture tests, the e2e run, the spike on real repos and the real Copilot run. See `findings.md`.
+- **Found on the way:** 13.2's whole `build` package was never committed, as `.gitignore` has `build/` (lessons rule 12).
+
 ## Open questions
 
 - **Test result counts for Node.** Jest, Vitest and node:test each need a JUnit reporter to write results, and that reporter may not be in the lockfile. The spike decides between three options: a reporter flag the runner already has, counts read from its output, or exit code only.

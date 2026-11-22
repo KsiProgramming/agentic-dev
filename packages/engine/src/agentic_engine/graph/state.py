@@ -108,6 +108,11 @@ class RunState(TypedDict):
     integration branch (`branch`, `head`) and the task ids `merged` into it and `empty`. A
     conflicting task's result in `map_results` is replaced by a failure. Checkpoints saved before
     phase 6.3 have none.
+
+    `evidence` holds, by `<gate>.evidence` (13.3), the latest pack a gate's checks made and
+    the comments that send the work back (if they do), so the gate that follows reads them
+    and a restart between the two runs no check twice. Its send-backs are counted in
+    `rounds` under the same key. Checkpoints saved before phase 13.3 have none.
     """
 
     input: str
@@ -124,6 +129,7 @@ class RunState(TypedDict):
     plans: Annotated[dict[str, list[JsonValue]], merge_plans]
     rounds: Annotated[dict[str, int], merge_counts]
     integrated: Annotated[dict[str, dict[str, JsonValue]], merge_integrated]
+    evidence: NotRequired[Annotated[dict[str, dict[str, JsonValue]], merge_integrated]]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -141,6 +147,7 @@ class RunUpdate(TypedDict, total=False):
     routes: dict[str, str | None]
     plans: dict[str, list[JsonValue]]
     rounds: dict[str, int]
+    evidence: dict[str, dict[str, JsonValue]]
     integrated: dict[str, dict[str, JsonValue]]
 
 

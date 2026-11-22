@@ -61,7 +61,7 @@ def test_the_template_is_registered() -> None:
     assert template.requires == ("claude", "github")
     schema = template.parameters_schema()
     assert list(schema["properties"]) == [
-        "max_passes", "analyst_model", "engineer_model", "reviewer_model",
+        "max_passes", "checks", "check_rounds", "analyst_model", "engineer_model", "reviewer_model",
     ]  # fmt: skip
     assert "$defs" not in schema
     assert "pull request after you approve" in template.description
@@ -165,3 +165,51 @@ def test_the_ac2_fixture_is_the_templates_default_spec() -> None:
         FIXTURE.write_text(text + "\n", encoding="utf-8", newline="\n")
     assert FIXTURE.exists(), "run with UPDATE_FIXTURES=1 to write the fixture"
     assert json.loads(FIXTURE.read_text(encoding="utf-8")) == json.loads(text)
+
+
+def test_checks_put_the_gate_in_the_loop_with_evidence_on_the_merged_work() -> None:
+    spec = build_plan_build_review_spec(PlanBuildReviewParams(max_passes=3, checks=True))
+    nodes = _nodes(spec)
+
+    assert _issues(spec) == []
+    assert [s.id for s in spec.root.steps] == ["explore", "review_loop", "publish"]  # type: ignore[attr-defined]
+    loop = nodes["review_loop"]
+    assert isinstance(loop, LoopNode)
+    assert [s.id for s in loop.body.steps] == [  # type: ignore[attr-defined]
+        "implement",
+        "synthesizer",
+        "reviewer",
+        "approve_pr",
+    ]
+    gate = nodes["approve_pr"]
+    assert isinstance(gate, GateNode) and gate.evidence is not None
+    assert gate.on_changes is None  # the checks send the work back; a person approves or rejects
+    assert gate.evidence.node == "implement"
+    assert (gate.evidence.checks.build, gate.evidence.checks.tests) == ("required", "required")
+    assert gate.evidence.checks.analyzers == "no_new"
+    assert gate.evidence.max_rounds == 1 < loop.max_iterations
+    assert loop.until == (
+        'results.reviewer.data.verdict == "ok" && results.approve_pr.data.decision == "approve"'
+    )
+
+
+@pytest.mark.parametrize("passes", [2, 3])
+def test_checks_validate_for_every_pass_count_that_has_a_pass_to_go_back_to(passes: int) -> None:
+    spec = build_plan_build_review_spec(PlanBuildReviewParams(max_passes=passes, checks=True))
+
+    assert _issues(spec) == []
+
+
+def test_checks_need_a_pass_to_go_back_to() -> None:
+    with pytest.raises(ValidationError, match="at least 2"):
+        PlanBuildReviewParams(max_passes=1, checks=True)
+    with pytest.raises(ValidationError, match="below max_passes"):
+        PlanBuildReviewParams(max_passes=2, checks=True, check_rounds=2)
+
+
+def test_without_checks_the_template_is_unchanged() -> None:
+    spec = build_plan_build_review_spec(PlanBuildReviewParams())
+
+    gate = _nodes(spec)["approve_pr"]
+    assert isinstance(gate, GateNode) and gate.evidence is None
+    assert [s.id for s in spec.root.steps][1:3] == ["review_loop", "approve_pr"]  # type: ignore[attr-defined]
