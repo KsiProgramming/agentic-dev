@@ -18,6 +18,7 @@ async def test_offers_the_repo_tools_with_their_schemas(sandbox: Sandbox) -> Non
         definitions = {d.name: d for d in tools.definitions()}
 
     assert sorted(definitions) == [
+        "repo.diff",
         "repo.list_files",
         "repo.list_modules",
         "repo.read_file",

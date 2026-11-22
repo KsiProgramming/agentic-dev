@@ -154,6 +154,7 @@ class MapItem(TypedDict):
     item_input: str
     item_artifacts: NotRequired[dict[str, ArtifactRef]]
     item_reads: NotRequired[str | None]
+    item_writers: NotRequired[list[dict[str, str]]]
 
 
 class ParallelBranch(TypedDict):
@@ -166,6 +167,7 @@ class ParallelBranch(TypedDict):
     branch_input: str
     branch_artifacts: NotRequired[dict[str, ArtifactRef]]
     branch_reads: NotRequired[str | None]
+    branch_writers: NotRequired[list[dict[str, str]]]
 
 
 class OrchestratorTask(TypedDict):
@@ -181,6 +183,7 @@ class OrchestratorTask(TypedDict):
     task_artifacts: dict[str, ArtifactRef]
     plan_key: NotRequired[str]
     iteration: NotRequired[int]
+    task_writers: NotRequired[list[dict[str, str]]]
 
 
 def initial_state(input: str) -> RunState:

@@ -29,6 +29,7 @@ from agentic_engine.spec.models import (
     policy_issues,
     structure_issues,
     tool_issues,
+    writer_before_issues,
 )
 from agentic_engine.spec.providers import provider_gaps, resolve_root
 from agentic_engine.spec.subflows import Resolve, expand_root, no_subflows, on_subflows
@@ -78,6 +79,7 @@ def validate_workflow(
     issues += document_on_review_issues(document, root)
     issues += structure_issues(root, document_input_artifacts(document))
     issues += tool_issues(root, known_tools)
+    issues += writer_before_issues(root)
     issues += policy_issues(root, policy)
     declared = document.get("provider")
     workflow_provider: Provider | None = (

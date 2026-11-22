@@ -435,6 +435,21 @@ export function StepInput({
             <OutputView text={runInput} label="Run input" />
           </Field>
         ) : null}
+        {row.step.writers && row.step.writers.length > 0 ? (
+          <Field label="Work before this step">
+            {/* The writers this step was told about, which it may read with `node` (13.1). */}
+            <ul className="flex flex-col gap-1">
+              {row.step.writers.map((writer) => (
+                <li key={writer.nodeId} className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                  <Mono>{writer.nodeId}</Mono>
+                  <span className="text-meta text-foreground-secondary">
+                    {writer.kind === "integration" ? "team's merged work" : "writer"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Field>
+        ) : null}
         {node ? <NodeFields node={node} /> : null}
         {node ? <ArtifactFields node={node} /> : null}
         {node ? <PortSchemas node={node} /> : null}

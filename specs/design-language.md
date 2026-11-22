@@ -64,6 +64,15 @@ Severity colours (`--severity-X`, `-muted`, `-border`): a finding's severity is 
 | low | `#1d4ed8` | `#eff6ff` | `#bfdbfe` | 6.2:1 | `#93c5fd` / `#172554` / `#1e3a8a` |
 | info | `#52525b` | `#f4f4f5` | `#e4e4e7` | 7.0:1 | `#d4d4d8` / `#1c1c1f` / `#3f3f46` |
 
+Diff colours (`--diff-added`, `--diff-added-muted`, `--diff-removed`, `--diff-removed-muted`, 13.1): a line a writer added or removed in a unified diff. A diff line is not a status and not a severity, so it has hues of its own, never the status or severity ones (a removed line must not read as a failed run). The marker (`+`, `−`) stays in the gutter, so colour is never the only cue. Text is `foreground` on the muted fill; the marker takes the strong colour. File headers sit on `surface-subtle`.
+
+| Token | Light | Dark | Use | Contrast |
+|---|---|---|---|---|
+| `--diff-added` | `oklch(0.45 0.12 150)` | `oklch(0.82 0.14 150)` | The `+` marker and the added-lines count | ≥ 4.5:1 on its fill and on the background |
+| `--diff-added-muted` | `oklch(0.96 0.04 150)` | `oklch(0.25 0.06 150)` | Fill of an added line | `foreground` ≥ 4.5:1 on it |
+| `--diff-removed` | `oklch(0.45 0.16 25)` | `oklch(0.82 0.12 25)` | The `−` marker and the removed-lines count | ≥ 4.5:1 on its fill and on the background |
+| `--diff-removed-muted` | `oklch(0.96 0.03 25)` | `oklch(0.26 0.07 25)` | Fill of a removed line | `foreground` ≥ 4.5:1 on it |
+
 ### Dark
 
 | Token | Value |

@@ -6,6 +6,11 @@ structured so a `map` can fan out over it). A writer node's server is built on i
 worktree (`agentic_sandbox.Worktree`) with `writable=True` and also has `write_file` and
 `commit`, which change only that worktree and commit on its branch.
 
+With a run's `ReadableWriters` (13.1), the reads take a `node`: a writer that completed before the
+step (or an orchestrator whose integration branch merged), read as it last committed, from git refs
+in the run's checkout. `diff {node, path?}` returns what that writer changed against the run's base.
+Every refusal is one fixed text.
+
 Every tool runs a short shell script inside the sandbox, starting with `CONFINE` (or, for writes,
 its own confinement check), with the user's arguments passed as positional parameters (never
 interpolated). The scripts stick to POSIX and busybox tools, so they run the same in the sandbox
@@ -25,6 +30,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 from pydantic import Field
 
+from agentic_runtime import ReadableWriters, WorkRefused, no_commits_text
 from agentic_sandbox import (
     AGENT_IDENTITY,
     GIT_SAFETY,
@@ -32,8 +38,15 @@ from agentic_sandbox import (
     WRITE_FILE_SCRIPT,
     WRITE_NOT_A_FILE,
     WRITE_OUTSIDE,
+    BranchDiff,
+    RefPathError,
     Sandbox,
     SandboxError,
+    branch_diff,
+    branch_has_commits,
+    grep_tree,
+    list_tree,
+    show_file,
 )
 from agentic_tools.repo.paths import CONFINE, NOT_FOUND, OUTSIDE, repo_relative
 from agentic_tools.repo.stack import MODULES_SCRIPT, ModulesOut, find_modules
@@ -41,7 +54,7 @@ from agentic_tools.strict import strict_tool
 
 SERVER_NAME = "repo"
 MAX_SEARCH_RESULTS = 500
-READ_TOOLS = frozenset({"list_files", "read_file", "search", "list_modules"})
+READ_TOOLS = frozenset({"list_files", "read_file", "search", "list_modules", "diff"})
 """Tools every server has."""
 WRITE_TOOLS = frozenset({"write_file", "commit"})
 """Tools only a writable server has."""
@@ -151,10 +164,50 @@ def _confined_error(exit_code: int, path: str) -> None:
         raise ToolError(f"no such path in the repository: {path}")
 
 
+_NODE_HELP = (
+    "A writer that ran before you (see 'Work before you'): read its work as it last committed it "
+    "instead of your own checkout."
+)
+_Node = Annotated[str | None, Field(max_length=100, description=_NODE_HELP)]
+
+
 class _RepoTools:
-    def __init__(self, sandbox: Sandbox, limits: RepoLimits) -> None:
+    def __init__(
+        self,
+        sandbox: Sandbox,
+        limits: RepoLimits,
+        readable: ReadableWriters | None = None,
+        refs: Sandbox | None = None,
+    ) -> None:
         self._sandbox = sandbox
         self._limits = limits
+        self._readable = readable
+        # Git refs are read in the run's checkout, whose `HEAD` is the run's base; a writer's
+        # worktree has its own `HEAD`.
+        self._refs = refs or sandbox
+        self._own_branch: str | None = getattr(sandbox, "branch", None)
+
+    async def _branch_of(self, node: str | None, *, own_ok: bool = True) -> str | None:
+        """The branch a call with `node` reads: `None` without `node`, or when a writer names
+        itself (it reads its worktree, as without `node`); else the branch of a writer that
+        completed. Raises `ToolError` with a fixed text for any other node."""
+        if node is None:
+            return None
+        if self._readable is None:
+            raise ToolError(f"'{node}' is not a writer of this run")
+        if own_ok and self._readable.branch_name(node) == self._own_branch:
+            return None
+        try:
+            branch = self._readable.branch(node)
+        except WorkRefused as e:
+            raise ToolError(str(e)) from None
+        try:
+            has_commits = await branch_has_commits(self._refs, branch)
+        except SandboxError:
+            raise ToolError("could not read the writer's work") from None
+        if not has_commits:
+            raise ToolError(no_commits_text(node))
+        return branch
 
     async def list_files(
         self,
@@ -164,29 +217,41 @@ class _RepoTools:
         max_depth: Annotated[
             int, Field(ge=1, le=10, description="How many directory levels to descend.")
         ] = 3,
+        node: _Node = None,
     ) -> str:
         """List the files and directories in the repository, as paths relative to its root.
-        Directories end with '/'. The .git directory is skipped."""
+        Directories end with '/'. The .git directory is skipped. With `node`, lists what that
+        writer committed."""
         relative = _relative_or_refuse(path)
-        argv = ["sh", "-c", _LIST_SCRIPT, "list_files", f"./{relative}", str(max_depth)]
-        result = await self._sandbox.exec(argv)
-        if result.exit_code in (NOT_FOUND, OUTSIDE):
-            raise ToolError(f"not a directory in the repository: {path}")
-        if result.exit_code != 0 or ("::files::" not in result.stdout and not result.truncated):
-            raise ToolError("could not list the files")
-
-        dirs, _, files = result.stdout.partition("::files::")
-        prefix = "" if relative == "." else f"{relative}/"
-        entries = sorted(
-            [f"{prefix}{line[2:]}/" for line in dirs.splitlines() if line.startswith("./")]
-            + [f"{prefix}{line[2:]}" for line in files.splitlines() if line.startswith("./")]
-        )
+        branch = await self._branch_of(node)
+        listing_cut = False
+        if branch is not None:
+            try:
+                entries = await list_tree(self._refs, branch, relative, depth=max_depth)
+            except RefPathError:
+                raise ToolError(f"not a directory in the repository: {path}") from None
+            except SandboxError:
+                raise ToolError("could not list the files") from None
+        else:
+            argv = ["sh", "-c", _LIST_SCRIPT, "list_files", f"./{relative}", str(max_depth)]
+            result = await self._sandbox.exec(argv)
+            if result.exit_code in (NOT_FOUND, OUTSIDE):
+                raise ToolError(f"not a directory in the repository: {path}")
+            if result.exit_code != 0 or ("::files::" not in result.stdout and not result.truncated):
+                raise ToolError("could not list the files")
+            listing_cut = result.truncated
+            dirs, _, files = result.stdout.partition("::files::")
+            prefix = "" if relative == "." else f"{relative}/"
+            entries = sorted(
+                [f"{prefix}{line[2:]}/" for line in dirs.splitlines() if line.startswith("./")]
+                + [f"{prefix}{line[2:]}" for line in files.splitlines() if line.startswith("./")]
+            )
         if not entries:
             return "(empty directory)"
         shown = entries[: self._limits.max_entries]
         text = "\n".join(shown)
-        if len(entries) > len(shown) or result.truncated:
-            total = f"more than {len(entries)}" if result.truncated else str(len(entries))
+        if len(entries) > len(shown) or listing_cut:
+            total = f"more than {len(entries)}" if listing_cut else str(len(entries))
             text += f"\n(truncated: showing {len(shown)} of {total} entries)"
         return text
 
@@ -198,10 +263,13 @@ class _RepoTools:
             int | None,
             Field(ge=1, description="Last line to return; omit to read to the end of the file."),
         ] = None,
+        node: _Node = None,
     ) -> str:
         """Read a text file from the repository. Each line starts with its line number and a tab.
-        Long files are cut; the note at the end says how to read the rest."""
+        Long files are cut; the note at the end says how to read the rest. With `node`, reads the
+        file as that writer last committed it."""
         relative = _relative_or_refuse(path)
+        branch = await self._branch_of(node)
         if end_line is not None and end_line < start_line:
             raise ToolError("end_line must not be before start_line")
         limits = self._limits
@@ -209,20 +277,32 @@ class _RepoTools:
         if end_line is not None:
             last = min(last, end_line)
         # One more line and one more byte than allowed, to tell whether anything was cut.
-        argv = [
-            "sh", "-c", _READ_SCRIPT, "read_file", f"./{relative}",
-            str(start_line), str(last + 1), str(limits.max_bytes + 1),
-        ]  # fmt: skip
-        result = await self._sandbox.exec(argv)
-        _confined_error(result.exit_code, path)
-        if result.exit_code == _NOT_A_FILE:
-            raise ToolError(f"not a file: {path}")
-        if result.exit_code == _BINARY:
-            raise ToolError(f"binary file, not shown: {path}")
-        count, _, body = result.stdout.partition("\n")
-        if result.exit_code != 0 or not count.strip().isdigit():
-            raise ToolError("could not read the file")
-        total = int(count)
+        if branch is not None:
+            try:
+                piece = await show_file(
+                    self._refs, branch, relative, first=start_line, last=last + 1,
+                    max_bytes=limits.max_bytes + 1,
+                )  # fmt: skip
+            except RefPathError as e:
+                raise ToolError(_ref_path_error(e.kind, path)) from None
+            except SandboxError:
+                raise ToolError("could not read the file") from None
+            total, body = piece.total, piece.text
+        else:
+            argv = [
+                "sh", "-c", _READ_SCRIPT, "read_file", f"./{relative}",
+                str(start_line), str(last + 1), str(limits.max_bytes + 1),
+            ]  # fmt: skip
+            result = await self._sandbox.exec(argv)
+            _confined_error(result.exit_code, path)
+            if result.exit_code == _NOT_A_FILE:
+                raise ToolError(f"not a file: {path}")
+            if result.exit_code == _BINARY:
+                raise ToolError(f"binary file, not shown: {path}")
+            count, _, body = result.stdout.partition("\n")
+            if result.exit_code != 0 or not count.strip().isdigit():
+                raise ToolError("could not read the file")
+            total = int(count)
 
         cut = len(body.encode()) > limits.max_bytes
         lines = body.encode()[: limits.max_bytes].decode(errors="replace").splitlines()
@@ -257,37 +337,57 @@ class _RepoTools:
         max_results: Annotated[
             int, Field(ge=1, le=MAX_SEARCH_RESULTS, description="Most matching lines to return.")
         ] = 100,
+        node: _Node = None,
     ) -> str:
         """Search the repository's text files for a pattern. Returns one `path:line: text` entry
-        per matching line, by path then line. The .git directory and binary files are skipped."""
+        per matching line, by path then line. The .git directory and binary files are skipped.
+        With `node`, searches what that writer committed."""
         relative = _relative_or_refuse(path)
+        branch = await self._branch_of(node)
         limits = self._limits
         expression = pattern if regex else _ERE_SPECIAL.sub(r"\\\1", pattern)
-        argv = [
-            "sh", "-c", _SEARCH_SCRIPT, "search", f"./{relative}",
-            expression, str(limits.max_scan_lines), "" if case_sensitive else "-i",
-        ]  # fmt: skip
-        result = await self._sandbox.exec(argv)
-        _confined_error(result.exit_code, path)
-        if result.exit_code != 0:
-            raise ToolError("could not search the files")
-
-        target, _, found = result.stdout.partition("\n")
-        if target == ".":
-            prefix = "" if relative == "." else f"{relative}/"
+        scanned = 0
+        cut = False
+        if branch is not None:
+            try:
+                found_in_ref = await grep_tree(
+                    self._refs, branch, expression, path=relative,
+                    ignore_case=not case_sensitive, max_lines=limits.max_scan_lines,
+                )  # fmt: skip
+            except SandboxError:
+                raise ToolError("could not search the files") from None
+            hits = [(file, str(number), text) for file, number, text in found_in_ref]
+            scanned = len(hits)
         else:
-            parent = posixpath.dirname(relative)
-            prefix = f"{parent}/" if parent else ""
-        raw = found.splitlines()
-        hits = [
-            (f"{prefix}{m[1]}", m[2], m[3]) for line in raw if (m := _HIT.match(line)) is not None
-        ]
-        binary = await self._binary_files(sorted({file for file, _, _ in hits}))
-        # By path and line, not in the order `find` walked the disk, which differs between
-        # machines: the same search returns the same first matches everywhere.
-        hits = sorted(
-            (hit for hit in hits if hit[0] not in binary), key=lambda h: (h[0], int(h[1]))
-        )
+            argv = [
+                "sh", "-c", _SEARCH_SCRIPT, "search", f"./{relative}",
+                expression, str(limits.max_scan_lines), "" if case_sensitive else "-i",
+            ]  # fmt: skip
+            result = await self._sandbox.exec(argv)
+            _confined_error(result.exit_code, path)
+            if result.exit_code != 0:
+                raise ToolError("could not search the files")
+
+            target, _, found = result.stdout.partition("\n")
+            if target == ".":
+                prefix = "" if relative == "." else f"{relative}/"
+            else:
+                parent = posixpath.dirname(relative)
+                prefix = f"{parent}/" if parent else ""
+            raw = found.splitlines()
+            scanned = len(raw)
+            cut = result.truncated
+            hits = [
+                (f"{prefix}{m[1]}", m[2], m[3])
+                for line in raw
+                if (m := _HIT.match(line)) is not None
+            ]
+            binary = await self._binary_files(sorted({file for file, _, _ in hits}))
+            # By path and line, not in the order `find` walked the disk, which differs between
+            # machines: the same search returns the same first matches everywhere.
+            hits = sorted(
+                (hit for hit in hits if hit[0] not in binary), key=lambda h: (h[0], int(h[1]))
+            )
         if not hits:
             return f"no matches for {pattern!r}"
 
@@ -295,9 +395,41 @@ class _RepoTools:
         lines = [
             f"{file}:{number}: {_clip(text, limits.max_line_chars)}" for file, number, text in shown
         ]
-        if len(hits) > len(shown) or len(raw) >= limits.max_scan_lines or result.truncated:
+        if len(hits) > len(shown) or scanned >= limits.max_scan_lines or cut:
             lines.append(f"(truncated: showing the first {len(shown)} matches)")
         return "\n".join(lines)
+
+    async def diff(
+        self,
+        node: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=100,
+                description="The writer whose changes to read, one that ran before you (see "
+                "'Work before you').",
+            ),
+        ],
+        path: Annotated[
+            str,
+            Field(description="Only this file or directory, relative to the repository root."),
+        ] = ".",
+    ) -> str:
+        """Read what a writer changed: the files it added, modified, deleted or renamed, with
+        their lines added and removed, then the unified diff, all against the run's base. Only
+        committed work is shown. A long diff is cut: call again with `path` to read one file."""
+        relative = _relative_or_refuse(path)
+        branch = await self._branch_of(node, own_ok=False)
+        assert branch is not None
+        limits = self._limits
+        try:
+            result = await branch_diff(
+                self._refs, branch, path=None if relative == "." else relative,
+                max_bytes=limits.max_bytes,
+            )  # fmt: skip
+        except SandboxError:
+            raise ToolError("could not read the writer's changes") from None
+        return _diff_text(node, result, limits.max_bytes)
 
     async def list_modules(
         self,
@@ -396,6 +528,44 @@ class _RepoTools:
         return f"{sha} on {branch}: {', '.join(shown)}{more}"
 
 
+def _ref_path_error(kind: str, path: str) -> str:
+    if kind == "not_a_file":
+        return f"not a file: {path}"
+    if kind == "binary":
+        return f"binary file, not shown: {path}"
+    return f"no such path in the repository: {path}"
+
+
+_STATUS_WORD = {
+    "added": "added",
+    "modified": "modified",
+    "deleted": "deleted",
+    "renamed": "renamed",
+}
+
+
+def _diff_text(node: str, result: BranchDiff, max_bytes: int) -> str:
+    """The text `repo.diff` returns: a header, one line per changed file, a blank line, then the
+    unified diff. The console parses this shape (`diff-view`)."""
+    if not result.files:
+        return f"{node} changed nothing in the files asked for, against the run's base"
+    added = sum(f.added or 0 for f in result.files)
+    removed = sum(f.removed or 0 for f in result.files)
+    noun = "file" if len(result.files) == 1 else "files"
+    lines = [
+        f"{node} changed {len(result.files)} {noun} (+{added} -{removed}) "
+        f"against the run's base {result.base_sha[:7]}:"
+    ]
+    for f in sorted(result.files, key=lambda f: f.path):
+        name = f"{f.old_path} -> {f.path}" if f.old_path else f.path
+        counts = "binary, not shown" if f.binary else f"+{f.added} -{f.removed}"
+        lines.append(f"{_STATUS_WORD[f.status]} {name} ({counts})")
+    text = "\n".join(lines) + "\n\n" + result.diff
+    if result.truncated:
+        text += f"\n(truncated at {max_bytes // 1024} KB: call again with path to read one file)"
+    return text
+
+
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else f"{text[:limit]}…"
 
@@ -406,11 +576,18 @@ def _tool(fn: Callable[..., Any], example: dict[str, Any]) -> Tool:
 
 
 def build_repo_server(
-    sandbox: Sandbox, *, writable: bool = False, limits: RepoLimits | None = None
+    sandbox: Sandbox,
+    *,
+    writable: bool = False,
+    limits: RepoLimits | None = None,
+    readable: ReadableWriters | None = None,
+    refs: Sandbox | None = None,
 ) -> MCPServer:
     """The `repo` server over `sandbox`. With `writable`, `sandbox` must be a writer's worktree,
-    and the server also has `write_file` and `commit`."""
-    tools = _RepoTools(sandbox, limits or RepoLimits())
+    and the server also has `write_file` and `commit`. `readable` is the run's writers whose work
+    `node` may name; `refs` is the run's checkout, where their branches are read (default:
+    `sandbox`, right for a read-only server)."""
+    tools = _RepoTools(sandbox, limits or RepoLimits(), readable, refs)
     reads = [
         _tool(tools.list_files, {"path": ".", "description": "See how the repo is laid out"}),
         _tool(
@@ -420,6 +597,10 @@ def build_repo_server(
         _tool(
             tools.search,
             {"pattern": "[project]", "max_results": 20, "description": "Find the project table"},
+        ),
+        _tool(
+            tools.diff,
+            {"node": "test_writer", "description": "Read the changes of test_writer"},
         ),
         strict_tool(
             tools.list_modules,

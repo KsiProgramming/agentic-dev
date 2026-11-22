@@ -104,6 +104,13 @@ export interface SavedBranch {
   error: string | null;
 }
 
+/** A writer whose work a step was told about (13.1): a `writer` on its own branch, or an
+ * `integration` (an orchestrator's team, its merged work). */
+export interface WorkBefore {
+  nodeId: string;
+  kind: "writer" | "integration";
+}
+
 export interface Step {
   /** The node id. */
   id: string;
@@ -138,6 +145,10 @@ export interface Step {
   artifactsWritten: ArtifactVersion[];
   /** The versions of run artifacts the step read, from its `node_started`'s `reads`. */
   artifactsRead: ArtifactVersion[];
+  /** The writers that ran before the step and that it may read (13.1), from its `node_started`'s
+   * `writers`: an empty list for the first writer, `null` for a step that was told nothing (no
+   * repo tools, or a run from before 13.1). */
+  writers: WorkBefore[] | null;
   /** What a `dedupe` or `vote` reduce merged (4.5): its `node_completed`'s `merged`. */
   merged: MergeCounts | null;
   /** Set for a router node (4.6): its routes, the one it took and why, and that route's steps. */
@@ -343,6 +354,17 @@ function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function parseWriters(value: unknown): WorkBefore[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.flatMap((w): WorkBefore[] => {
+    if (typeof w !== "object" || w === null) return [];
+    const writer = w as Record<string, unknown>;
+    const nodeId = str(writer.node_id);
+    if (nodeId === null) return [];
+    return [{ nodeId, kind: writer.kind === "integration" ? "integration" : "writer" }];
+  });
+}
+
 function parsePort(value: unknown): PortFailure | null {
   if (typeof value !== "object" || value === null) return null;
   const port = value as Record<string, unknown>;
@@ -386,6 +408,7 @@ function newStep(id: string, at: string): Step {
     usage: null,
     provider: null,
     model: null,
+    writers: null,
     gate: null,
     prUrl: null,
     createdRepo: null,
@@ -714,6 +737,7 @@ class Builder {
         step.provider = payload.provider;
         step.model = str(payload.model);
       }
+      step.writers = parseWriters(payload.writers);
       if (payload.items !== undefined) {
         step.items ??= [];
         step.itemCount = num(payload.items);

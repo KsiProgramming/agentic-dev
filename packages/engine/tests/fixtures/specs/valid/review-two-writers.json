@@ -1,0 +1,60 @@
+{
+  "spec_version": "0",
+  "id": "review-two-writers",
+  "name": "Tests, refactor, review",
+  "description": "A test writer commits tests, a refactoring writer improves the code and keeps them passing, and a reviewer reads both writers' diffs and reviews them. No orchestrator: each writer commits on its own branch, and the steps after it read that work by naming the writer.",
+  "input": {
+    "label": "What should the team change?",
+    "required": true,
+    "description": "The code to cover with tests and refactor.",
+    "example": "Cover parse_price in src/shop/pricing.py with tests, then simplify it."
+  },
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "test_writer",
+        "role": "Test writer",
+        "instructions": "Your input is what the team was asked to change. Read the code it names with your tools, write tests that pin down its current behaviour, and commit them. Say which tests you added and what each one checks.",
+        "tools": [
+          "repo.list_files",
+          "repo.read_file",
+          "repo.search",
+          "repo.write_file",
+          "repo.commit"
+        ]
+      },
+      {
+        "type": "agent",
+        "id": "refactorer",
+        "role": "Refactoring engineer",
+        "instructions": "Your input is the test writer's report. Your tools read the checkout as the run found it, with none of the test writer's work in it: read the tests it added with `node` set to `test_writer`. Refactor the code the request names so those tests still pass, and commit. Say what you changed and why.",
+        "tools": [
+          "repo.list_files",
+          "repo.read_file",
+          "repo.search",
+          "repo.write_file",
+          "repo.commit"
+        ]
+      },
+      {
+        "type": "agent",
+        "id": "reviewer",
+        "role": "Senior reviewer",
+        "instructions": "Your input is the refactoring engineer's report. Your tools read the checkout as the run found it, with none of the writers' work in it: read what each writer changed with `repo.diff` and `node` set to `test_writer`, then to `refactorer`. Review both: do the tests pin down the behaviour, and does the refactoring keep it? Answer `ok` when both are ready to merge, otherwise `changes` with what to fix.",
+        "tools": ["repo.list_files", "repo.read_file", "repo.search", "repo.diff"],
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "verdict": { "type": "string", "enum": ["ok", "changes"] },
+            "feedback": { "type": "string" }
+          },
+          "required": ["verdict", "feedback"],
+          "additionalProperties": false
+        }
+      }
+    ]
+  }
+}

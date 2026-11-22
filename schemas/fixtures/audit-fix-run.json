@@ -797,6 +797,7 @@
       "type": "node_started",
       "node_id": "security",
       "payload": {
+        "writers": [],
         "branch": 1
       },
       "created_at": "2026-11-10T12:00:09Z"
@@ -1252,6 +1253,7 @@
       "type": "node_started",
       "node_id": "fixer",
       "payload": {
+        "writers": [],
         "item": 0
       },
       "created_at": "2026-11-10T12:00:42Z"
@@ -1262,6 +1264,7 @@
       "type": "node_started",
       "node_id": "fixer",
       "payload": {
+        "writers": [],
         "item": 1
       },
       "created_at": "2026-11-10T12:00:43Z"

@@ -553,7 +553,7 @@ class OrchestratorHub(_Base):
     tools: list[str] = Field(
         default_factory=list[str],
         description="The repo tools the hub may call while it plans: `repo.list_files`, "
-        "`repo.read_file`, `repo.search` and `repo.list_modules` only.",
+        "`repo.read_file`, `repo.search`, `repo.list_modules` and `repo.diff` only.",
     )
 
     @field_validator("tools")
@@ -850,7 +850,9 @@ def node_tools(node: Node) -> list[str]:
             return []
 
 
-READ_TOOLS = frozenset({"repo.list_files", "repo.read_file", "repo.search", "repo.list_modules"})
+READ_TOOLS = frozenset(
+    {"repo.list_files", "repo.read_file", "repo.search", "repo.list_modules", "repo.diff"}
+)
 """Tools that read the run's repo in the sandbox."""
 
 WRITE_TOOLS = frozenset({"repo.write_file", "repo.commit"})
@@ -945,6 +947,7 @@ type IssueCode = Literal[
     "jira_write_not_shown",
     "on_review_invalid",
     "copilot_connection_required",
+    "no_writer_before",
 ]
 
 
@@ -1728,6 +1731,48 @@ def tool_issues(root: Node, known_tools: Collection[str] = PLATFORM_TOOLS) -> li
             issues.append(
                 ValidationIssue(code="unknown_tool", path=path, node_id=node.id, message=message)
             )
+    return issues
+
+
+def writer_before_issues(root: Node) -> list[ValidationIssue]:
+    """Each node granted `repo.diff` that no writer runs before, in run order (13.1): the tool
+    reads a writer that ran earlier, so it could never return anything. A writer in the body of a
+    loop that holds the node counts, since the later iterations come after it; an orchestrator
+    whose tasks write counts once its whole subtree has run, and a node in an orchestrator's body
+    cannot read its own tasks' writers."""
+    tasked = task_node_ids(root)
+    loop_writers: list[tuple[set[str], bool]] = []
+    ends: set[str] = set()
+    for _, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            inside = list(iter_nodes(node.body))
+            loop_writers.append(
+                (
+                    {n.id for _, n in inside},
+                    any(_writes(n) and n.id not in tasked for _, n in inside),
+                )
+            )
+        if isinstance(node, OrchestratorNode) and _writes(node):
+            ends.add(list(iter_nodes(node))[-1][1].id)
+    issues: list[ValidationIssue] = []
+    seen = False
+    for path, node in iter_nodes(root):
+        if "repo.diff" in node_tools(node) and not seen:
+            looped = any(node.id in ids and writes for ids, writes in loop_writers)
+            if not looped:
+                message = (
+                    f"{node.type} {node.id!r} at {path}: `repo.diff` reads the work of a writer "
+                    "that ran before this node, and none does; put a writer node before it"
+                )
+                issues.append(
+                    ValidationIssue(
+                        code="no_writer_before", path=path, node_id=node.id, message=message
+                    )
+                )
+        if node.id not in tasked and not isinstance(node, OrchestratorNode) and _writes(node):
+            seen = True
+        if node.id in ends:
+            seen = True
     return issues
 
 

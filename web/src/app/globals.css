@@ -105,6 +105,11 @@
   --color-severity-info-muted: var(--severity-info-muted);
   --color-severity-info-border: var(--severity-info-border);
 
+  --color-diff-added: var(--diff-added);
+  --color-diff-added-muted: var(--diff-added-muted);
+  --color-diff-removed: var(--diff-removed);
+  --color-diff-removed-muted: var(--diff-removed-muted);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -195,6 +200,11 @@
   --severity-info: oklch(0.442 0.015 285.8);
   --severity-info-muted: oklch(0.967 0.001 286.4);
   --severity-info-border: oklch(0.92 0.004 286.3);
+
+  --diff-added: oklch(0.45 0.12 150);
+  --diff-added-muted: oklch(0.96 0.04 150);
+  --diff-removed: oklch(0.45 0.16 25);
+  --diff-removed-muted: oklch(0.96 0.03 25);
 }
 
 /* Compact mode (the top bar's density toggle): denser table rows. */
@@ -252,6 +262,11 @@
   --severity-info: oklch(0.871 0.005 286.3);
   --severity-info-muted: oklch(0.228 0.006 285.9);
   --severity-info-border: oklch(0.37 0.012 285.8);
+
+  --diff-added: oklch(0.82 0.14 150);
+  --diff-added-muted: oklch(0.25 0.06 150);
+  --diff-removed: oklch(0.82 0.12 25);
+  --diff-removed-muted: oklch(0.26 0.07 25);
 }
 
 @layer base {

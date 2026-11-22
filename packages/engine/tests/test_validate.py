@@ -278,3 +278,76 @@ def test_a_budget_needs_a_price_for_every_agent_model() -> None:
     )
     assert "model 'no-such-model' has no price" in issue.message
     assert validate(raw) == []
+
+
+WRITE = ["repo.write_file", "repo.commit"]
+
+
+def test_repo_diff_needs_a_writer_before_it() -> None:
+    """13.1: the tool reads a writer that ran earlier, so with none it can never return anything."""
+    root = {
+        "type": "sequence",
+        "id": "main",
+        "steps": [agent("reviewer", tools=["repo.diff"]), agent("writer", tools=WRITE)],
+    }
+
+    issues = validate(workflow(root))
+
+    assert where(issues) == [("no_writer_before", "root.steps[0]", "reviewer")]
+    assert "repo.diff" in issues[0].message
+
+
+def test_repo_diff_after_a_writer_is_valid() -> None:
+    root = {
+        "type": "sequence",
+        "id": "main",
+        "steps": [agent("writer", tools=WRITE), agent("reviewer", tools=["repo.diff"])],
+    }
+
+    assert validate(workflow(root)) == []
+
+
+def test_a_writer_later_in_the_same_loop_body_counts_for_the_whole_body() -> None:
+    body = {
+        "type": "sequence",
+        "id": "round",
+        "steps": [agent("reviewer", tools=["repo.diff"]), agent("writer", tools=WRITE)],
+    }
+    loop = {"type": "loop", "id": "revise", "body": body, "until": "false", "max_iterations": 2}
+
+    assert validate(workflow(loop)) == []
+
+
+def test_a_writer_in_a_later_loop_does_not_count_for_a_reader_outside_it() -> None:
+    loop = {
+        "type": "loop",
+        "id": "revise",
+        "body": agent("writer", tools=WRITE),
+        "until": "false",
+        "max_iterations": 2,
+    }
+    root = {
+        "type": "sequence",
+        "id": "main",
+        "steps": [agent("reviewer", tools=["repo.diff"]), loop],
+    }
+
+    assert where(validate(workflow(root))) == [("no_writer_before", "root.steps[0]", "reviewer")]
+
+
+def test_a_step_after_an_orchestrator_whose_tasks_write_may_diff() -> None:
+    orchestrator = {
+        "type": "orchestrator",
+        "id": "build",
+        "hub": {"role": "Lead", "instructions": "Plan.", "tools": ["repo.read_file"]},
+        "max_workers": 2,
+        "max_concurrency": 2,
+        "body": agent("engineer", tools=WRITE),
+    }
+    root = {
+        "type": "sequence",
+        "id": "main",
+        "steps": [orchestrator, agent("reviewer", tools=["repo.diff"])],
+    }
+
+    assert validate(workflow(root)) == []

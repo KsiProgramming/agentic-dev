@@ -104,6 +104,7 @@ from agentic_engine.spec.models import (
     tool_issues,
     top_steps,
     within,
+    writer_before_issues,
     writer_node_ids,
 )
 from agentic_engine.spec.ops import (
@@ -275,6 +276,7 @@ __all__ = [
     "top_steps",
     "validate_workflow",
     "within",
+    "writer_before_issues",
     "writer_node_ids",
 ]
 

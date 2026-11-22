@@ -179,7 +179,10 @@ def test_agents_choose_tools_they_may_be_granted() -> None:
     assert tools["uniqueItems"] is True
     assert "github.openPR" not in AGENT_TOOLS and "github.createRepo" not in AGENT_TOOLS
     agent = {"type": "agent", "id": "a", "role": "a", "instructions": "Do a.", "tools": AGENT_TOOLS}
-    spec = {"spec_version": "0", "id": "demo", "name": "Demo", "root": agent}
+    # `repo.diff` reads a writer that ran before the node, so one runs first (`no_writer_before`).
+    writer = {**agent, "id": "w", "tools": [t for t in AGENT_TOOLS if t != "repo.diff"]}
+    root = {"type": "sequence", "id": "main", "steps": [writer, agent]}
+    spec = {"spec_version": "0", "id": "demo", "name": "Demo", "root": root}
     issues = validate_workflow(
         spec, policy=PLATFORM_POLICY, priced=lambda _: True, default_model="m"
     )

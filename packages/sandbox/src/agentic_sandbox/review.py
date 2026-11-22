@@ -109,7 +109,7 @@ async def branch_changes(sandbox: Sandbox, branch: str) -> BranchChanges:
     if result.exit_code != 0 or result.truncated:
         raise SandboxError(f"could not list the changes of branch {branch}")
     base, *fields = result.stdout.split("\0")
-    files = _parse_name_status([f for f in fields if f != ""] if fields else [])
+    files = parse_name_status([f for f in fields if f != ""] if fields else [])
     sizes = await _sizes(sandbox, base, branch, files)
     return BranchChanges(base_sha=base, branch=branch, files=sizes)
 
@@ -154,7 +154,7 @@ async def commit_files(tree: Worktree, files: Sequence[tuple[str, bytes]], messa
     return tip
 
 
-def _parse_name_status(fields: list[str]) -> list[ChangedFile]:
+def parse_name_status(fields: list[str]) -> list[ChangedFile]:
     files: list[ChangedFile] = []
     i = 0
     while i < len(fields):

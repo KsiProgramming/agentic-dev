@@ -173,7 +173,7 @@ from agentic_jira import (
     check_and_answer,
     renew_jira_webhooks,
 )
-from agentic_runtime import AgentRuntime, ClaudeRuntime, ToolExecutor
+from agentic_runtime import AgentRuntime, ClaudeRuntime, ReadableWriters, ToolExecutor
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
 from agentic_sandbox import (
@@ -1023,6 +1023,7 @@ async def _attempt(
         review: SandboxGateReview | None = None
         integrator: SandboxIntegrator | None = None
         saver: SandboxBranchSaver | None = None
+        readable: ReadableWriters | None = None
         artifacts: ArtifactStore = PostgresArtifactStore(worker.sessions, run.id)
         mirror_dir: str | None = None
         if to_create and target is not None:
@@ -1076,8 +1077,17 @@ async def _attempt(
             if keeper is not None:
                 keeper.saver = saver
                 stack.callback(setattr, keeper, "saver", None)
+            # One per attempt: the engine tells it which writers the next step may read, and
+            # the repo tools resolve a call's `node` through it (13.1).
+            readable = ReadableWriters(lambda node: branch_name(run.id, node))
             tools = await stack.enter_async_context(
-                open_repo_tools(sandbox, run_id=run.id, writers=writers, task_writers=tasked)
+                open_repo_tools(
+                    sandbox,
+                    run_id=run.id,
+                    writers=writers,
+                    task_writers=tasked,
+                    readable=readable,
+                )
             )
             scanning = await stack.enter_async_context(open_scan_tools(sandbox))
             tools = RunTools([tools, scanning])
@@ -1123,6 +1133,7 @@ async def _attempt(
             integrator,
             saver,
             first=first,
+            readable=readable,
         )
         if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
@@ -1436,6 +1447,7 @@ async def _workflow(
     saver: BranchSaver | None = None,
     *,
     first: bool | None = None,
+    readable: ReadableWriters | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph: start it when it has no event before this attempt
     (`first`, else `last_seq == 0`), from a step of another run if it is a rerun from a step
@@ -1476,6 +1488,7 @@ async def _workflow(
                 saver=saver,
                 on_seeded=copy_artifacts,
                 providers=run_providers(run),
+                readable=readable,
             )
         except (StepNotFoundError, StepNotReachedError) as e:
             log.warning("run %s cannot start from its step: %s", run.id, e)
@@ -1502,6 +1515,7 @@ async def _workflow(
             saver=saver,
             inputs=run_inputs(run),
             providers=run_providers(run),
+            readable=readable,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -1524,6 +1538,7 @@ async def _workflow(
         saver=saver,
         inputs=run_inputs(run),
         providers=run_providers(run),
+        readable=readable,
     )
 
 
