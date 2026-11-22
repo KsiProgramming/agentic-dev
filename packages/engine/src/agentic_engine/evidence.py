@@ -14,8 +14,8 @@ under fixed headings.
 """
 
 import re
-from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
@@ -23,7 +23,8 @@ from agentic_engine.gate import MAX_CHANGE_COMMENTS, GateComment
 from agentic_engine.spec import GateEvidence
 from agentic_runtime import ToolExecutor
 
-type CheckKind = Literal["build", "tests", "analyzers"]
+type CheckKind = Literal["build", "tests", "analyzers", "coverage", "criteria"]
+type CriterionState = Literal["proven", "untested", "failing", "not_proven", "unchecked"]
 type CheckStatus = Literal["passed", "failed", "skipped", "error"]
 
 MAX_LISTED = 20
@@ -31,7 +32,13 @@ MAX_LISTED = 20
 MAX_TEXT = 500
 """The longest message kept of a failure or finding."""
 
-TITLES: dict[CheckKind, str] = {"build": "Build", "tests": "Tests", "analyzers": "Analyzers"}
+TITLES: dict[CheckKind, str] = {
+    "build": "Build",
+    "tests": "Tests",
+    "analyzers": "Analyzers",
+    "coverage": "Coverage",
+    "criteria": "Criteria",
+}
 """The heading each check has in the comments sent back to the writer."""
 
 
@@ -79,6 +86,30 @@ class _Failure(BaseModel):
     message: str | None = None
 
 
+class _Case(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str = ""
+    file: str | None = None
+    status: CheckStatus = "error"
+    ids: list[str] = Field(default_factory=lambda: list[str]())
+
+
+class _CoveredFile(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    path: str = ""
+    changed: int = 0
+    covered: int = 0
+    uncovered: list[tuple[int, int]] = Field(default_factory=lambda: list[tuple[int, int]]())
+
+
+class _Coverage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    changed: int = 0
+    covered: int = 0
+    files: list[_CoveredFile] = Field(default_factory=lambda: list[_CoveredFile]())
+    truncated: bool = False
+
+
 class _Module(BaseModel):
     model_config = ConfigDict(extra="ignore")
     path: str = "."
@@ -92,6 +123,10 @@ class _Module(BaseModel):
     skipped: int | None = None
     failures: list[_Failure] = Field(default_factory=lambda: list[_Failure]())
     test_ms: int | None = None
+    cases: list[_Case] = Field(default_factory=lambda: list[_Case]())
+    coverage: _Coverage | None = None
+    coverage_reason: str | None = None
+    cases_reason: str | None = None
 
 
 class _TestReport(BaseModel):
@@ -257,6 +292,201 @@ def tests_check(report: _TestReport | None, mode: str, error: str | None = None)
     )
 
 
+_SECTION = re.compile(r"^##[ \t]+acceptance criteria[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_NEXT_SECTION = re.compile(r"^##[ \t]", re.MULTILINE)
+_CRITERION = re.compile(r"(?<![A-Za-z0-9])AC-(\d{3,})(?!\d)")
+MAX_CRITERIA = 50
+"""The most criteria one spec's check looks at."""
+
+NO_CRITERIA = "no acceptance criteria listed"
+NO_CHANGED_LINES = "no changed lines to cover"
+_STATE_TEXT: dict[CriterionState, str] = {
+    "proven": "a test fails on the base and passes on the change",
+    "untested": "no test names it",
+    "failing": "a test of it fails on the change",
+    "not_proven": "every test of it also passes on the base",
+    "unchecked": "its tests could not be checked",
+}
+
+
+def criteria_ids(markdown: str) -> list[str]:
+    """The criterion ids (`AC-001`) the `## Acceptance criteria` section of `markdown` lists, in
+    order and once each, at most `MAX_CRITERIA`. Everything outside that section is ignored."""
+    start = _SECTION.search(markdown)
+    if start is None:
+        return []
+    body = markdown[start.end() :]
+    end = _NEXT_SECTION.search(body)
+    section = body[: end.start()] if end else body
+    return list(dict.fromkeys(f"AC-{d}" for d in _CRITERION.findall(section)))[:MAX_CRITERIA]
+
+
+def _ranges_text(ranges: Sequence[tuple[int, int]]) -> str:
+    return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in ranges)
+
+
+def coverage_check(
+    report: _TestReport | None, mode: str, minimum: int, error: str | None = None
+) -> EvidenceCheck:
+    """The `coverage` check: the share of the change's executable lines the tests ran, against
+    `minimum` percent. With no changed executable lines it passes; a module that cannot measure it
+    (Node, or a run that failed) leaves it an `error`, which reaches a person."""
+    required = mode == "required"
+    if report is None and _nothing(error):
+        return EvidenceCheck(
+            kind="coverage", status="skipped", required=required, summary=NOTHING_TO_CHECK
+        )
+    if report is None:
+        return EvidenceCheck(
+            kind="coverage",
+            status="error",
+            required=required,
+            summary=error or "coverage could not be measured",
+        )
+    measured = [m.coverage for m in report.checks if m.coverage is not None]
+    reasons = [m.coverage_reason for m in report.checks if m.coverage_reason]
+    if not measured:
+        if reasons:
+            return EvidenceCheck(
+                kind="coverage", status="error", required=required, summary=reasons[0]
+            )
+        return EvidenceCheck(
+            kind="coverage", status="skipped", required=required, summary="nothing to measure"
+        )
+    changed = sum(c.changed for c in measured)
+    covered = sum(c.covered for c in measured)
+    files = [f for c in measured for f in c.files]
+    shown: list[JsonValue] = [
+        {
+            "path": f.path,
+            "changed": f.changed,
+            "covered": f.covered,
+            "uncovered": [[a, b] for a, b in f.uncovered],
+        }
+        for f in files[:MAX_LISTED]
+    ]
+    percent = round(covered * 100 / changed, 1) if changed else 100.0
+    detail: dict[str, JsonValue] = {
+        "changed": changed,
+        "covered": covered,
+        "percent": percent,
+        "threshold": minimum,
+        "files": shown,
+        "truncated": any(c.truncated for c in measured) or len(files) > MAX_LISTED,
+        "unmeasured": list[JsonValue](reasons[:3]),
+    }
+    if not changed:
+        return EvidenceCheck(
+            kind="coverage",
+            status="passed",
+            required=required,
+            summary=NO_CHANGED_LINES,
+            detail=detail,
+        )
+    summary = f"{percent:g}% of changed lines covered ({covered} of {changed}, needs {minimum}%)"
+    return EvidenceCheck(
+        kind="coverage",
+        status="passed" if percent >= minimum else "failed",
+        required=required,
+        summary=summary,
+        detail=detail,
+    )
+
+
+def _cases(report: _TestReport | None) -> list[_Case]:
+    return [c for m in report.checks for c in m.cases] if report is not None else []
+
+
+def criteria_check(
+    ids: Sequence[str] | None,
+    change: _TestReport | None,
+    base: _TestReport | None,
+    mode: str,
+    *,
+    error: str | None = None,
+    base_error: str | None = None,
+) -> EvidenceCheck:
+    """The `criteria` check: for each criterion id, a test (its name holds the id) that fails on
+    the base and passes on the change is `proven`. `untested` has no test, `failing` has one that
+    fails on the change, `not_proven` has tests that also pass on the base, and `unchecked` could
+    not be told (a module that reports no per-test results, or a run that errored). A test the
+    base run does not report as passed counts as failing there, which includes one that could not
+    be built or collected on the base."""
+    required = mode == "required"
+
+    def check(
+        status: CheckStatus, summary: str, detail: dict[str, JsonValue] | None = None
+    ) -> EvidenceCheck:
+        return EvidenceCheck(
+            kind="criteria",
+            status=status,
+            required=required,
+            summary=summary,
+            detail=detail or {},
+        )
+
+    if ids is None:
+        return check("error", error or "could not read the criteria")
+    if not ids:
+        return check("skipped", NO_CRITERIA)
+    if change is None and _nothing(error):
+        return check("skipped", NOTHING_TO_CHECK)
+    if change is None:
+        return check("error", error or "could not run the tests")
+    blind = any(m.cases_reason or m.status == "error" for m in change.checks if m.runner)
+    cases = _cases(change)
+    base_cases = {c.name: c for c in _cases(base)}
+    base_errored = base is not None and any(m.status == "error" for m in base.checks)
+    base_ran = base is not None and not base_errored
+    states: list[dict[str, JsonValue]] = []
+    counts: dict[CriterionState, int] = dict.fromkeys(_STATE_TEXT, 0)
+    for id in ids:
+        linked = [c for c in cases if id in c.ids]
+        passing = [c for c in linked if c.status == "passed"]
+        state: CriterionState
+        if any(c.status == "failed" for c in linked):
+            state = "failing"
+        elif not passing:
+            state = "unchecked" if blind else "untested"
+        elif not base_ran:
+            state = "unchecked"
+        elif any(
+            base_cases.get(c.name) is None or base_cases[c.name].status != "passed" for c in passing
+        ):
+            state = "proven"
+        else:
+            state = "not_proven"
+        counts[state] += 1
+        tests: list[JsonValue] = [{"name": _clip(c.name, 200), "file": c.file} for c in linked[:5]]
+        before: str | None = None
+        if state in ("proven", "not_proven"):
+            before = "fails" if state == "proven" else "passes"
+        states.append(
+            {
+                "id": id,
+                "state": state,
+                "tests": tests,
+                "before": before,
+                "after": "fails" if state == "failing" else "passes" if passing else None,
+            }
+        )
+    gaps = counts["untested"] + counts["failing"] + counts["not_proven"]
+    proven = counts["proven"]
+    detail: dict[str, JsonValue] = {
+        "total": len(ids),
+        "proven": proven,
+        "criteria": list[JsonValue](states),
+        "base_reason": _clip(base_error, 200) if base_error else None,
+        "counts": {k: v for k, v in counts.items()},
+    }
+    summary = f"{proven} of {len(ids)} proven"
+    if gaps:
+        return check("failed", summary, detail)
+    if counts["unchecked"]:
+        return check("error", f"{summary}, {counts['unchecked']} could not be checked", detail)
+    return check("passed", summary, detail)
+
+
 def _parse_findings(data: Mapping[str, Any] | None) -> _Findings | None:
     try:
         return _Findings.model_validate(data) if data is not None else None
@@ -327,6 +557,10 @@ def make_pack(
     base: Mapping[str, Any] | None,
     lint_error: str | None,
     rounds_left: int,
+    base_tests: Mapping[str, Any] | None = None,
+    base_tests_error: str | None = None,
+    criteria: Sequence[str] | None = None,
+    criteria_error: str | None = None,
 ) -> EvidencePack:
     """The pack from the tools' structured reports (`None` where a call failed, with its error)."""
     checks: list[EvidenceCheck] = []
@@ -342,6 +576,21 @@ def make_pack(
                 _parse_findings(base),
                 evidence.checks.analyzers,
                 lint_error,
+            )
+        )
+    if evidence.checks.coverage != "off":
+        checks.append(
+            coverage_check(report, evidence.checks.coverage, evidence.coverage_min, tests_error)
+        )
+    if evidence.checks.criteria != "off":
+        checks.append(
+            criteria_check(
+                criteria,
+                report,
+                _tests_report(base_tests),
+                evidence.checks.criteria,
+                error=criteria_error or tests_error,
+                base_error=base_tests_error,
             )
         )
     return EvidencePack(
@@ -365,6 +614,25 @@ def send_back_comments(pack: EvidencePack) -> list[GateComment]:
                 where = f" ({f['file']})" if f.get("file") else ""
                 message = f": {f['message']}" if f.get("message") else ""
                 lines.append(f"{f.get('name', 'a test')}{where}{message}")
+        elif check.kind == "coverage":
+            for f in _items(check.detail.get("files")):
+                missed = [
+                    (r[0], r[1])
+                    for r in _lists(f.get("uncovered"))
+                    if len(r) == 2 and isinstance(r[0], int) and isinstance(r[1], int)
+                ]
+                if missed:
+                    lines.append(f"{f.get('path', '')}: no test runs lines {_ranges_text(missed)}")
+        elif check.kind == "criteria":
+            for c in _items(check.detail.get("criteria")):
+                state = str(c.get("state"))
+                if state not in ("untested", "failing", "not_proven"):
+                    continue
+                names = ", ".join(
+                    str(t.get("name", "")) for t in _items(c.get("tests"))[:3] if t.get("name")
+                )
+                why = _STATE_TEXT[cast("CriterionState", state)]
+                lines.append(f"{c.get('id', '')}: {why}" + (f" ({names})" if names else ""))
         elif check.kind == "analyzers":
             for f in _items(check.detail.get("findings")):
                 line = f":{f['line']}" if f.get("line") else ""
@@ -386,6 +654,10 @@ def _bullets(lines: Sequence[str]) -> str:
     return text if len(text) <= 4000 else text[:3999] + "…"
 
 
+def _lists(value: JsonValue | None) -> list[list[JsonValue]]:
+    return [v for v in value if isinstance(v, list)] if isinstance(value, list) else []
+
+
 def _items(value: JsonValue | None) -> list[dict[str, JsonValue]]:
     return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
 
@@ -403,6 +675,7 @@ async def collect(
     base_cache: dict[str, Mapping[str, Any] | None],
     rounds_left: int,
     node_id: str,
+    read_artifact: Callable[[str], Awaitable[str | None]] | None = None,
 ) -> EvidencePack:
     """Run the checks of `evidence` on the writer's branch through `tools` and fold them into a
     pack. The base's lint report is read once per run (`base_cache`, by the gate id), and only
@@ -410,13 +683,42 @@ async def collect(
     checks = evidence.checks
     tests: Mapping[str, Any] | None = None
     tests_error: str | None = None
-    if checks.build != "off" or checks.tests != "off":
-        tests, tests_error = await _call(
-            tools,
-            "build.test",
-            {"path": evidence.path, "node": evidence.node},
-            node_id,
-        )
+    criteria: list[str] | None = None
+    criteria_error: str | None = None
+    if checks.criteria != "off":
+        text = await read_artifact(evidence.criteria_from) if read_artifact is not None else None
+        if text is None:
+            criteria_error = f"{evidence.criteria_from} was not written"
+        else:
+            criteria = criteria_ids(text)
+    arguments: dict[str, JsonValue] = {"path": evidence.path, "node": evidence.node}
+    if checks.coverage != "off":
+        arguments["coverage"] = True
+    if criteria:
+        arguments["select"] = list[JsonValue](criteria)
+    base_tests: Mapping[str, Any] | None = None
+    base_tests_error: str | None = None
+    if (
+        checks.build != "off"
+        or checks.tests != "off"
+        or checks.coverage != "off"
+        or checks.criteria != "off"
+    ):
+        tests, tests_error = await _call(tools, "build.test", arguments, node_id)
+    if criteria and tests is not None:
+        linked = sorted({i for c in _cases(_tests_report(tests)) for i in c.ids} & set(criteria))
+        if linked:
+            base_tests, base_tests_error = await _call(
+                tools,
+                "build.test",
+                {
+                    "path": evidence.path,
+                    "node": evidence.node,
+                    "on": "base",
+                    "select": list[JsonValue](linked),
+                },
+                node_id,
+            )
     branch: Mapping[str, Any] | None = None
     base: Mapping[str, Any] | None = None
     lint_error: str | None = None
@@ -442,6 +744,10 @@ async def collect(
         base=base,
         lint_error=lint_error,
         rounds_left=rounds_left,
+        base_tests=base_tests,
+        base_tests_error=base_tests_error,
+        criteria=criteria,
+        criteria_error=criteria_error,
     )
 
 

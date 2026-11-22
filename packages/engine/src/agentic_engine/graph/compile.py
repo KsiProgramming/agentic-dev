@@ -798,6 +798,14 @@ def _evidence(
         loop_id, passes = limits.evidence_loops.get(gate.id, ("", 0))
         passes_left = passes - state["iterations"].get(loop_id, passes)
         limits.announce(writers_before(state, limits.writer_ids, limits.team_ids))
+        refs = state.get("artifacts", {})
+
+        async def read(name: str) -> str | None:
+            """The latest version of a run artifact the criteria check reads (13.4)."""
+            ref = refs.get(name)
+            stored = await limits.artifacts.get(name, ref.version) if ref is not None else None
+            return stored.content if stored is not None else None
+
         pack = await collect(
             gate.id,
             spec,
@@ -805,6 +813,7 @@ def _evidence(
             base_cache=limits.base_lint,
             rounds_left=max(min(spec.max_rounds - used, passes_left), 0),
             node_id=key,
+            read_artifact=read,
         )
         comments = send_back_comments(pack) if pack.sends_back() else []
         payload = pack_payload(pack)

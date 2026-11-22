@@ -194,6 +194,16 @@ class EvidenceChecks(_Base):
     analyzers: AnalyzerMode = Field(
         default="no_new", description="Whether the analyzers find nothing new."
     )
+    coverage: EvidenceMode = Field(
+        default="off",
+        description="Whether the tests run enough of the lines the change touched (13.4): the "
+        "share of its changed executable lines they ran, against `coverage_min`.",
+    )
+    criteria: EvidenceMode = Field(
+        default="off",
+        description="Whether each acceptance criterion of the spec has a test that fails on the "
+        "base and passes on the change (13.4), found by the criterion's id in the test's name.",
+    )
 
 
 class GateEvidence(_Base):
@@ -212,6 +222,17 @@ class GateEvidence(_Base):
         description="A directory of the repository to check, relative to its root.",
     )
     checks: EvidenceChecks = Field(default_factory=EvidenceChecks)
+    coverage_min: int = Field(
+        default=80,
+        description="The share of the changed executable lines the tests must run for `coverage` "
+        "to pass, from 0 to 100.",
+        json_schema_extra={"minimum": 0, "maximum": 100},
+    )
+    criteria_from: ArtifactName = Field(
+        default="spec.md",
+        description="The Markdown run artifact whose `## Acceptance criteria` section lists the "
+        "criteria (`AC-001`, …) that `criteria` checks: written before the gate.",
+    )
     max_rounds: int = Field(
         default=3,
         ge=1,
@@ -2171,6 +2192,19 @@ def _walk_artifacts(root: Node, inputs: Collection[str] = ()) -> _ArtifactFlow:
                 visit(node.body, f"{path}.body", seen)
                 return {**seen, node.writes: _UNTYPED} if node.writes else seen
             case GateNode():
+                evidence = node.evidence
+                if (
+                    evidence is not None
+                    and evidence.checks.criteria != "off"
+                    and evidence.criteria_from.endswith(".md")
+                    and evidence.criteria_from not in seen
+                ):
+                    unknown(
+                        node,
+                        f"{path}.evidence.criteria_from",
+                        evidence.criteria_from,
+                        "reads its criteria from",
+                    )
                 if node.select is None:
                     return seen
                 name = node.select.artifact
@@ -2531,9 +2565,36 @@ def _evidence_issues(
             )
         )
     checks = evidence.checks
-    if checks.build == "off" and checks.tests == "off" and checks.analyzers == "off":
+    if all(
+        mode == "off"
+        for mode in (
+            checks.build,
+            checks.tests,
+            checks.analyzers,
+            checks.coverage,
+            checks.criteria,
+        )
+    ):
         found.append(
             issue("invalid_evidence", ".checks", f"gate {node.id!r} at {path}: every check is off")
+        )
+    if not 0 <= evidence.coverage_min <= 100:
+        found.append(
+            issue(
+                "invalid_evidence",
+                ".coverage_min",
+                f"gate {node.id!r} at {path}: evidence.coverage_min is "
+                f"{evidence.coverage_min}: use a percentage from 0 to 100",
+            )
+        )
+    if checks.criteria != "off" and not evidence.criteria_from.endswith(".md"):
+        found.append(
+            issue(
+                "invalid_evidence",
+                ".criteria_from",
+                f"gate {node.id!r} at {path}: evidence.criteria_from {evidence.criteria_from!r} "
+                "must be a Markdown (.md) artifact with an `## Acceptance criteria` section",
+            )
         )
     if evidence.path.startswith("/") or ".." in evidence.path.split("/"):
         found.append(

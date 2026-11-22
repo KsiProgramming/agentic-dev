@@ -181,6 +181,16 @@
           "default": "required",
           "description": "Whether the writer's work builds."
         },
+        "coverage": {
+          "$ref": "#/$defs/EvidenceMode",
+          "default": "off",
+          "description": "Whether the tests run enough of the lines the change touched (13.4): the share of its changed executable lines they ran, against `coverage_min`."
+        },
+        "criteria": {
+          "$ref": "#/$defs/EvidenceMode",
+          "default": "off",
+          "description": "Whether each acceptance criterion of the spec has a test that fails on the base and passes on the change (13.4), found by the criterion's id in the test's name."
+        },
         "tests": {
           "$ref": "#/$defs/EvidenceMode",
           "default": "required",
@@ -204,6 +214,24 @@
       "properties": {
         "checks": {
           "$ref": "#/$defs/EvidenceChecks"
+        },
+        "coverage_min": {
+          "default": 80,
+          "description": "The share of the changed executable lines the tests must run for `coverage` to pass, from 0 to 100.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Coverage Min",
+          "type": "integer"
+        },
+        "criteria_from": {
+          "default": "spec.md",
+          "description": "The Markdown run artifact whose `## Acceptance criteria` section lists the criteria (`AC-001`, …) that `criteria` checks: written before the gate.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "title": "Criteria From",
+          "type": "string"
         },
         "max_rounds": {
           "default": 3,
