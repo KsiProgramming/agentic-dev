@@ -5000,7 +5000,9 @@
         "enum": [
           "build",
           "tests",
-          "analyzers"
+          "analyzers",
+          "coverage",
+          "criteria"
         ]
       },
       "CheckStatus": {
@@ -5518,6 +5520,16 @@
             "$ref": "#/components/schemas/AnalyzerMode",
             "description": "Whether the analyzers find nothing new.",
             "default": "no_new"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/EvidenceMode",
+            "description": "Whether the tests run enough of the lines the change touched (13.4): the share of its changed executable lines they ran, against `coverage_min`.",
+            "default": "off"
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/EvidenceMode",
+            "description": "Whether each acceptance criterion of the spec has a test that fails on the base and passes on the change (13.4), found by the criterion's id in the test's name.",
+            "default": "off"
           }
         },
         "additionalProperties": false,
@@ -5874,12 +5886,30 @@
           "checks": {
             "$ref": "#/components/schemas/EvidenceChecks"
           },
+          "coverage_min": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Coverage Min",
+            "description": "The share of the changed executable lines the tests must run for `coverage` to pass, from 0 to 100.",
+            "default": 80
+          },
+          "criteria_from": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "title": "Criteria From",
+            "description": "The Markdown run artifact whose `## Acceptance criteria` section lists the criteria (`AC-001`, \u2026) that `criteria` checks: written before the gate.",
+            "default": "spec.md",
+            "examples": [
+              "findings.json"
+            ]
+          },
           "max_rounds": {
             "type": "integer",
             "maximum": 10.0,
             "minimum": 1.0,
             "title": "Max Rounds",
-            "description": "How many times the checks may send the work back; below the loop's `max_iterations`. After that the gate pauses and shows the failing pack.",
+            "description": "How many times the checks may send the work back. Never on the loop's last pass, whatever this says. After that the gate pauses and shows the failing pack.",
             "default": 3
           }
         },

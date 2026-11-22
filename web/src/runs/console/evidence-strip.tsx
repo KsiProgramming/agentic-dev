@@ -1,7 +1,7 @@
 import { FlaskConicalIcon } from "lucide-react";
 import { useId } from "react";
 
-import { Duration, StatStrip, StatTile, TruncatedPath } from "@/components/display";
+import { Duration, Percent, StatStrip, StatTile, TruncatedPath } from "@/components/display";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { StatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import {
   CHECK_BADGE,
   CHECK_LABEL,
+  CRITERION_BADGE,
+  beforeAfter,
   failingRequired,
   type Evidence,
   type EvidenceCheck,
@@ -52,7 +54,11 @@ export function EvidenceStrip({
     );
   }
   const failing = failingRequired(evidence);
-  const columns = Math.min(Math.max(evidence.checks.length, 2), 3) as 2 | 3;
+  // Build, tests and analyzers are one strip; coverage and criteria (13.4) another, so five
+  // checks never leave an empty cell in a row.
+  const basic = evidence.checks.filter((c) => c.kind !== "coverage" && c.kind !== "criteria");
+  const judged = evidence.checks.filter((c) => c.kind === "coverage" || c.kind === "criteria");
+  const groups = [basic, judged].filter((g) => g.length > 0);
   return (
     <section
       aria-labelledby={headingId}
@@ -62,16 +68,18 @@ export function EvidenceStrip({
       <h3 id={headingId} className="text-caption font-medium text-muted-foreground">
         Checks on {evidence.node || "the change"}
       </h3>
-      <StatStrip columns={columns}>
-        {evidence.checks.map((check) => (
-          <StatTile
-            key={check.kind}
-            label={CHECK_LABEL[check.kind]}
-            value={<CheckBadge check={check} />}
-            secondary={<CheckSummary check={check} />}
-          />
-        ))}
-      </StatStrip>
+      {groups.map((group) => (
+        <StatStrip key={group[0].kind} columns={Math.min(Math.max(group.length, 2), 3) as 2 | 3}>
+          {group.map((check) => (
+            <StatTile
+              key={check.kind}
+              label={CHECK_LABEL[check.kind]}
+              value={<CheckValue check={check} />}
+              secondary={<CheckSummary check={check} />}
+            />
+          ))}
+        </StatStrip>
+      ))}
       {failing.length > 0 ? (
         <p className="text-meta text-foreground-secondary" role="status">
           {evidence.roundsLeft > 0
@@ -92,10 +100,37 @@ function CheckBadge({ check }: { check: EvidenceCheck }) {
   return <StatusBadge status={status} label={label} className="text-caption" />;
 }
 
+/** A tile's value: the outcome as a badge, and for coverage and criteria the figure beside it
+ * (the share of changed lines the tests ran, how many criteria are proven). */
+function CheckValue({ check }: { check: EvidenceCheck }) {
+  if (check.kind === "coverage" && check.coverage && check.coverage.changed > 0) {
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        <Percent value={check.coverage.percent / 100} />
+        <CheckBadge check={check} />
+      </span>
+    );
+  }
+  if (check.kind === "criteria" && check.criteria.length > 0) {
+    const proven = check.criteria.filter((c) => c.state === "proven").length;
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        <span>
+          {proven} of {check.criteria.length}
+        </span>
+        <CheckBadge check={check} />
+      </span>
+    );
+  }
+  return <CheckBadge check={check} />;
+}
+
 function CheckSummary({ check }: { check: EvidenceCheck }) {
   return (
     <>
-      {check.summary}
+      {check.kind === "coverage" && check.coverage && check.coverage.changed > 0
+        ? `${check.coverage.covered} of ${check.coverage.changed} changed lines · needs ${check.coverage.threshold}%`
+        : check.summary}
       {check.kind === "tests" && check.testMs !== null && check.testMs > 0 ? (
         <>
           {" · "}
@@ -108,6 +143,55 @@ function CheckSummary({ check }: { check: EvidenceCheck }) {
 
 /** The failing tests, or the findings the base does not have: a short list under the strip. */
 function CheckDetails({ check }: { check: EvidenceCheck }) {
+  if (check.kind === "criteria" && check.criteria.length > 0) {
+    const shown = check.criteria.slice(0, LISTED);
+    return (
+      <ul aria-label="Acceptance criteria" className="flex flex-col gap-2 text-meta">
+        {shown.map((c) => {
+          const { status, label } = CRITERION_BADGE[c.state];
+          const words = beforeAfter(c);
+          return (
+            <li key={c.id} className="flex min-w-0 flex-col gap-0.5">
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="font-mono text-caption">{c.id}</span>
+                <StatusBadge status={status} label={label} className="text-caption" />
+                {words ? <span className="text-foreground-secondary">{words}</span> : null}
+              </span>
+              {c.tests.slice(0, 3).map((t) => (
+                <span key={t.name} className="font-mono text-caption break-words">
+                  {t.name}
+                </span>
+              ))}
+            </li>
+          );
+        })}
+        {check.criteria.length > LISTED ? (
+          <li className="text-muted-foreground">and {check.criteria.length - LISTED} more</li>
+        ) : null}
+      </ul>
+    );
+  }
+  if (check.kind === "coverage" && check.coverage) {
+    const missed = check.coverage.files.filter((f) => f.uncovered.length > 0);
+    if (missed.length === 0) return null;
+    const shown = missed.slice(0, LISTED);
+    return (
+      <ul aria-label="Uncovered lines" className="flex flex-col gap-2 text-meta">
+        {shown.map((f) => (
+          <li key={f.path} className="flex min-w-0 flex-col gap-0.5">
+            <TruncatedPath path={f.path} focusable={false} />
+            <span className="text-foreground-secondary">
+              no test runs lines{" "}
+              {f.uncovered.map(([a, b]) => (a === b ? a : `${a}-${b}`)).join(", ")}
+            </span>
+          </li>
+        ))}
+        {missed.length > LISTED ? (
+          <li className="text-muted-foreground">and {missed.length - LISTED} more</li>
+        ) : null}
+      </ul>
+    );
+  }
   if (check.kind === "tests" && check.failingTests.length > 0) {
     const shown = check.failingTests.slice(0, LISTED);
     return (

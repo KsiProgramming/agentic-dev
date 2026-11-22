@@ -1547,7 +1547,7 @@ export interface components {
         /** @enum {string} */
         ChangeStatus: "added" | "modified" | "deleted" | "renamed";
         /** @enum {string} */
-        CheckKind: "build" | "tests" | "analyzers";
+        CheckKind: "build" | "tests" | "analyzers" | "coverage" | "criteria";
         /** @enum {string} */
         CheckStatus: "passed" | "failed" | "skipped" | "error";
         /**
@@ -1797,6 +1797,16 @@ export interface components {
              * @default no_new
              */
             analyzers: components["schemas"]["AnalyzerMode"];
+            /**
+             * @description Whether the tests run enough of the lines the change touched (13.4): the share of its changed executable lines they ran, against `coverage_min`.
+             * @default off
+             */
+            coverage: components["schemas"]["EvidenceMode"];
+            /**
+             * @description Whether each acceptance criterion of the spec has a test that fails on the base and passes on the change (13.4), found by the criterion's id in the test's name.
+             * @default off
+             */
+            criteria: components["schemas"]["EvidenceMode"];
         };
         /** @enum {string} */
         EvidenceMode: "required" | "shown" | "off";
@@ -1981,8 +1991,21 @@ export interface components {
             path: string;
             checks?: components["schemas"]["EvidenceChecks"];
             /**
+             * Coverage Min
+             * @description The share of the changed executable lines the tests must run for `coverage` to pass, from 0 to 100.
+             * @default 80
+             */
+            coverage_min: number;
+            /**
+             * Criteria From
+             * @description The Markdown run artifact whose `## Acceptance criteria` section lists the criteria (`AC-001`, …) that `criteria` checks: written before the gate.
+             * @default spec.md
+             * @example findings.json
+             */
+            criteria_from: string;
+            /**
              * Max Rounds
-             * @description How many times the checks may send the work back; below the loop's `max_iterations`. After that the gate pauses and shows the failing pack.
+             * @description How many times the checks may send the work back. Never on the loop's last pass, whatever this says. After that the gate pauses and shows the failing pack.
              * @default 3
              */
             max_rounds: number;
