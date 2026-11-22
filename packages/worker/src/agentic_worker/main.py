@@ -44,8 +44,9 @@ Every run gets the `artifacts.*` tools, which read its artifacts (4.3). They are
 Postgres (`PostgresArtifactStore`), and a run with a sandbox also gets a read-only copy of each
 in its `artifacts_dir`, copied again into a fresh sandbox when an attempt starts.
 `SANDBOX_BACKEND` picks Docker containers or, where Docker is unavailable, temp directories on
-this host (no isolation). With Docker, `SANDBOX_NUGET_NETWORK` and `SANDBOX_NUGET_PROXY` name the
-NuGet egress proxy a .NET restore job reaches (4.8); unset, `scan.lint` skips .NET modules.
+this host (no isolation). With Docker, `SANDBOX_<REGISTRY>_NETWORK` and `SANDBOX_<REGISTRY>_PROXY`
+(`NUGET`, `NPM`, `PYPI`) name the egress proxy a restore job for that registry reaches (4.8,
+13.2); a registry with either unset has no job network, and its modules are skipped.
 
 With `AGENTIC_GITHUB=fake` (local dev and end-to-end tests, never `AGENTIC_ENV=production`), the
 GitHub App is a stand-in: the fake repos (`agentic_github.FAKE_REPOS`, and those it creates)
@@ -179,6 +180,7 @@ from agentic_runtime.fake import FakeRuntime, slow_echo_script
 from agentic_sandbox import (
     BranchBundle,
     FakeSandboxManager,
+    JobNetwork,
     RepoSource,
     Sandbox,
     SandboxError,
@@ -186,7 +188,7 @@ from agentic_sandbox import (
     branch_heads,
     branch_name,
 )
-from agentic_sandbox.docker_backend import DEFAULT_IMAGE
+from agentic_sandbox.docker_backend import DEFAULT_IMAGE, RegistryEgress
 from agentic_secrets import (
     KeyProvider,
     LocalKeyProvider,
@@ -298,10 +300,15 @@ class WorkerSettings(BaseSettings):
     sandbox_image: str = DEFAULT_IMAGE
     # The only directory runs may clone local repo paths from; unset allows https URLs only.
     sandbox_local_root: Path | None = None
-    # The NuGet egress proxy a .NET restore job reaches (4.8): the internal Docker network it is on
-    # and its URL there. Unset, `scan.lint` skips .NET modules ("NuGet restore is not configured").
+    # The egress proxy a restore job reaches, one per package registry (4.8, 13.2): the internal
+    # Docker network it is on and its URL there. Unset, modules of that registry are skipped
+    # ("NuGet restore is not configured").
     sandbox_nuget_network: str | None = None
     sandbox_nuget_proxy: str | None = None
+    sandbox_npm_network: str | None = None
+    sandbox_npm_proxy: str | None = None
+    sandbox_pypi_network: str | None = None
+    sandbox_pypi_proxy: str | None = None
     # A job container's limits (a .NET restore or build); the sandbox's own are smaller.
     sandbox_job_memory: str = "2g"
     sandbox_job_cpus: float = Field(default=2.0, gt=0)
@@ -599,6 +606,21 @@ def fake_clone_source(fixtures: Path) -> Callable[[RepoSource], RepoSource]:
     return source
 
 
+def registry_egress(settings: WorkerSettings) -> dict[JobNetwork, RegistryEgress]:
+    """The package registries a job can reach (4.8, 13.2): each needs both its network and its
+    proxy; a registry with either unset is left out, and its modules are skipped."""
+    pairs: dict[JobNetwork, tuple[str | None, str | None]] = {
+        "nuget": (settings.sandbox_nuget_network, settings.sandbox_nuget_proxy),
+        "npm": (settings.sandbox_npm_network, settings.sandbox_npm_proxy),
+        "pypi": (settings.sandbox_pypi_network, settings.sandbox_pypi_proxy),
+    }
+    return {
+        registry: RegistryEgress(network, proxy)
+        for registry, (network, proxy) in pairs.items()
+        if network and proxy
+    }
+
+
 def build_sandboxes(
     settings: WorkerSettings, keep: Collection[str] = frozenset()
 ) -> SandboxManager:
@@ -612,7 +634,6 @@ def build_sandboxes(
     from agentic_sandbox.docker_backend import (
         DockerSandboxManager,
         JobLimits,
-        NugetEgress,
         sweep_orphans,
     )
 
@@ -622,14 +643,11 @@ def build_sandboxes(
             log.info("removed %d leftover sandbox(es)", removed)
     except DockerException as e:
         raise ConfigError(f"SANDBOX_BACKEND=docker but Docker is not reachable: {e}") from e
-    nuget = None
-    if settings.sandbox_nuget_network and settings.sandbox_nuget_proxy:
-        nuget = NugetEgress(settings.sandbox_nuget_network, settings.sandbox_nuget_proxy)
     return DockerSandboxManager(
         client,
         image=settings.sandbox_image,
         job_limits=JobLimits(memory=settings.sandbox_job_memory, cpus=settings.sandbox_job_cpus),
-        nuget=nuget,
+        egress=registry_egress(settings),
         local_root=settings.sandbox_local_root,
     )
 

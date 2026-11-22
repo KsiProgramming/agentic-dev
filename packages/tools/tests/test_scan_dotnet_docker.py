@@ -20,7 +20,7 @@ from agentic_sandbox.testing import (
     EgressForTests,
     ensure_sandbox_image,
     make_repo,
-    nuget_egress,
+    registry_egress,
 )
 from agentic_tools.scan import build_scan_server
 
@@ -105,7 +105,7 @@ def client() -> Iterator[docker.DockerClient]:
 
 @pytest.fixture(scope="module")
 def egress(client: docker.DockerClient) -> Iterator[EgressForTests]:
-    with nuget_egress(client) as egress:
+    with registry_egress(client, "nuget") as egress:
         yield egress
 
 
@@ -115,7 +115,7 @@ async def sandbox(
 ) -> AsyncIterator[Sandbox]:
     repos = tmp_path_factory.mktemp("repos")
     make_repo(repos / "dotnet", DOTNET_REPO)
-    manager = DockerSandboxManager(client, nuget=egress.nuget, local_root=repos)
+    manager = DockerSandboxManager(client, egress=egress.networks, local_root=repos)
     async with manager.open(uuid4(), RepoSource(url=str(repos / "dotnet"))) as box:
         yield box
 

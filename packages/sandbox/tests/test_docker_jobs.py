@@ -11,14 +11,14 @@ import docker
 import pytest
 from docker.errors import DockerException
 
-from agentic_sandbox import RepoSource, Sandbox, SandboxError
+from agentic_sandbox import JobNetwork, RepoSource, Sandbox, SandboxError
 from agentic_sandbox.docker_backend import (
     JOB_LABEL,
     RUN_LABEL,
     DockerSandboxManager,
     JobLimits,
 )
-from agentic_sandbox.testing import EgressForTests, ensure_sandbox_image, nuget_egress
+from agentic_sandbox.testing import EgressForTests, ensure_sandbox_image, registry_egress
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +37,7 @@ def client() -> Iterator[docker.DockerClient]:
 
 @pytest.fixture(scope="module")
 def egress(client: docker.DockerClient) -> Iterator[EgressForTests]:
-    with nuget_egress(client) as egress:
+    with registry_egress(client, "nuget") as egress:
         yield egress
 
 
@@ -51,7 +51,7 @@ async def sandbox(
     client: docker.DockerClient, egress: EgressForTests, repos: Path, run_id: UUID
 ) -> AsyncIterator[Sandbox]:
     manager = DockerSandboxManager(
-        client, job_limits=JobLimits(memory="256m"), nuget=egress.nuget, local_root=repos
+        client, job_limits=JobLimits(memory="256m"), egress=egress.networks, local_root=repos
     )
     async with manager.open(run_id, RepoSource(url=str(repos / "hello"))) as box:
         yield box
@@ -195,3 +195,37 @@ async def test_discarding_a_run_removes_a_job_it_left_behind(
     finally:
         with contextlib.suppress(DockerException):
             left.remove(force=True)
+
+
+@pytest.mark.parametrize(
+    ("registry", "own", "other"),
+    [
+        ("npm", "https://registry.npmjs.org/", "https://pypi.org/"),
+        ("pypi", "https://pypi.org/", "https://registry.npmjs.org/"),
+    ],
+)
+async def test_a_job_reaches_its_own_registry_only(
+    client: docker.DockerClient, repos: Path, registry: JobNetwork, own: str, other: str
+) -> None:
+    """One network and proxy per registry (13.2): a job on `npm` cannot use PyPI, or the reverse,
+    and the proxy logs the host it refused."""
+    with registry_egress(client, registry) as egress:
+        manager = DockerSandboxManager(client, egress=egress.networks, local_root=repos)
+        async with manager.open(uuid4(), RepoSource(url=str(repos / "hello"))) as box:
+            assert box.job_networks == {"none", registry}
+            cwd = await workdir(box)
+
+            async def reach(url: str) -> str:
+                result = await box.run_job(
+                    ["git", "ls-remote", url], network=registry, cwd=cwd, timeout_s=30
+                )
+                assert result.exit_code != 0
+                return result.stderr
+
+            assert "CONNECT tunnel failed" not in await reach(own)
+            assert "CONNECT tunnel failed, response 403" in await reach(other)
+            with pytest.raises(SandboxError, match="nuget"):
+                await box.run_job(["true"], network="nuget", cwd=cwd, timeout_s=5)
+        refused = egress.refused_hosts()
+        assert other.split("/")[2] in refused
+        assert own.split("/")[2] not in refused

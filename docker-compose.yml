@@ -136,10 +136,12 @@ services:
     command: ["true"]
     network_mode: none
 
-  # The NuGet egress proxy (4.8): the only route out for a sandbox's .NET restore job. Jobs reach
-  # it on `agentic-nuget`, an internal network with no other way out; it alone also sits on the
-  # default network, which has internet access. It forwards HTTPS to api.nuget.org and logs every
-  # host it refuses.
+  # The package egress proxies (4.8, 13.2): the only route out for a sandbox's restore job, one per
+  # registry from one image with one config each. Jobs reach theirs on `agentic-<registry>`, an
+  # internal network with no other way out, so a job for npm cannot reach PyPI or NuGet. Each proxy
+  # alone also sits on the default network, which has internet access. It forwards HTTPS to its
+  # registry's hosts (nuget: api.nuget.org; npm: registry.npmjs.org; pypi: pypi.org and
+  # files.pythonhosted.org) and logs every host it refuses.
   egress-proxy:
     build:
       context: packages/egress-proxy
@@ -148,6 +150,24 @@ services:
       default:
       nuget:
         aliases: [egress-proxy]
+
+  egress-proxy-npm:
+    image: agentic-dev/egress-proxy:dev
+    command: ["tinyproxy", "-d", "-c", "/etc/tinyproxy/npm.conf"]
+    depends_on: [egress-proxy]
+    networks:
+      default:
+      npm:
+        aliases: [egress-proxy-npm]
+
+  egress-proxy-pypi:
+    image: agentic-dev/egress-proxy:dev
+    command: ["tinyproxy", "-d", "-c", "/etc/tinyproxy/pypi.conf"]
+    depends_on: [egress-proxy]
+    networks:
+      default:
+      pypi:
+        aliases: [egress-proxy-pypi]
 
   worker:
     build:
@@ -187,9 +207,14 @@ services:
       SANDBOX_BACKEND: ${SANDBOX_BACKEND:-docker}
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-agentic-dev/sandbox:dev}
       SANDBOX_LOCAL_ROOT: /samples
-      # A .NET restore job runs on this network and reaches NuGet through the proxy (4.8).
+      # A restore job runs on its registry's network and reaches only that registry, through its
+      # proxy (4.8, 13.2).
       SANDBOX_NUGET_NETWORK: agentic-nuget
       SANDBOX_NUGET_PROXY: http://egress-proxy:3128
+      SANDBOX_NPM_NETWORK: agentic-npm
+      SANDBOX_NPM_PROXY: http://egress-proxy-npm:3128
+      SANDBOX_PYPI_NETWORK: agentic-pypi
+      SANDBOX_PYPI_PROXY: http://egress-proxy-pypi:3128
       # The same GitHub App as the API: runs on GitHub repos clone with an installation token,
       # and `github.openPR` pushes a writer's branch and opens a pull request (after a gate).
       # Left blank, GitHub repos are cloned anonymously and runs that use github.* tools fail.
@@ -249,8 +274,14 @@ volumes:
   fixtures:
 
 networks:
-  # Sandbox restore jobs and the egress proxy only; `internal` gives it no route out (4.8). Named
-  # outright, as the worker attaches job containers to it by name.
+  # Sandbox restore jobs and one registry's egress proxy only; `internal` gives each no route out
+  # (4.8, 13.2). Named outright, as the worker attaches job containers to them by name.
   nuget:
     name: agentic-nuget
+    internal: true
+  npm:
+    name: agentic-npm
+    internal: true
+  pypi:
+    name: agentic-pypi
     internal: true

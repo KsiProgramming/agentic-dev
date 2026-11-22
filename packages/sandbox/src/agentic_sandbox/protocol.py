@@ -49,8 +49,9 @@ def check_artifact_name(name: str) -> None:
         raise ValueError(f"not an artifact name: {name!r}")
 
 
-type JobNetwork = Literal["none", "nuget"]
-"""Where a job container may connect: nowhere, or NuGet only through the egress proxy (4.8)."""
+type JobNetwork = Literal["none", "nuget", "npm", "pypi"]
+"""Where a job container may connect: nowhere, or one package registry only, through that
+registry's own egress proxy on its own internal network (4.8, 13.2)."""
 
 
 @dataclass(frozen=True)
@@ -121,8 +122,8 @@ class Sandbox(Protocol):
 
     @property
     def job_networks(self) -> frozenset[JobNetwork]:
-        """The networks `run_job` can give a job: `none`, and `nuget` when the deployment has a
-        NuGet egress proxy. Empty when the sandbox runs no jobs."""
+        """The networks `run_job` can give a job: `none`, and each registry (`nuget`, `npm`,
+        `pypi`) the deployment has an egress proxy for. Empty when the sandbox runs no jobs."""
         ...
 
     async def run_job(
