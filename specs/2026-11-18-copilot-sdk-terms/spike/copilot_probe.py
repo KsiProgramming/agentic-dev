@@ -1,5 +1,9 @@
-"""8.2 spike probe, run against the real SDK 1.0.34 on 2026-11-22. Token from COPILOT_PROBE_TOKEN only; never printed.
-Usage: python copilot_probe.py ok   (own token, custom tool)  |  python copilot_probe.py bad   (invalid token)"""
+"""8.2 spike probe, run against the real SDK 1.0.34 on 2026-11-22.
+
+The token comes from COPILOT_PROBE_TOKEN only and is never printed.
+Usage: python copilot_probe.py ok (own token, custom tool) or python copilot_probe.py bad.
+"""
+
 import asyncio
 import dataclasses
 import os
@@ -42,7 +46,11 @@ def on_event(ev):
         }
         print("EVENT", name, short(fields, 900))
     elif "tool" in name or "permission" in name:
-        print("EVENT", name, short({k: v for k, v in dataclasses.asdict(d).items() if v is not None}, 300))
+        print(
+            "EVENT",
+            name,
+            short({k: v for k, v in dataclasses.asdict(d).items() if v is not None}, 300),
+        )
     else:
         print("EVENT", name)
 
@@ -60,19 +68,23 @@ def on_perm(request, invocation):
 
 async def run(token, label, prompt, **kw):
     print(f"\n=== {label} ===")
-    client = CopilotClient(github_token=token, use_logged_in_user=False, working_directory=os.getcwd())
+    client = CopilotClient(
+        github_token=token, use_logged_in_user=False, working_directory=os.getcwd()
+    )
     try:
-        async with client:
-            async with await client.create_session(
+        async with (
+            client,
+            await client.create_session(
                 on_permission_request=on_perm,
                 tools=[echo],
                 on_event=on_event,
                 streaming=True,
                 **kw,
-            ) as session:
-                ans = await session.send_and_wait(prompt, timeout=90)
-                print("ANSWER:", short(getattr(getattr(ans, "data", None), "content", ans), 300))
-    except Exception as e:  # noqa: BLE001
+            ) as session,
+        ):
+            ans = await session.send_and_wait(prompt, timeout=90)
+            print("ANSWER:", short(getattr(getattr(ans, "data", None), "content", ans), 300))
+    except Exception as e:
         print("ERROR:", type(e).__name__, short(str(e).replace(token, "<token>"), 400))
 
 
