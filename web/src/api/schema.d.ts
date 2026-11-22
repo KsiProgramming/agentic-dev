@@ -671,6 +671,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/connections/github-user/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Authorize
+         * @description GitHub's consent URL for the person connecting. Consenting stores their grant in the
+         *     workspace, then sends the browser to `return_to` (the Integrations settings page by default).
+         */
+        post: operations["startGithubUserAuthorize"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/github-user/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Complete Authorize
+         * @description GitHub's redirect after the consent (the OAuth app's callback URL). Sends the browser back
+         *     to the page that started it (the Integrations settings page by default) with
+         *     `github_user=connected`, or `github_user=error` and a `reason`: `state` (unknown, used or
+         *     expired), `denied` (the person refused), `exchange` (GitHub refused the code), `github`
+         *     (GitHub could not be reached) or `not_configured`.
+         */
+        get: operations["completeGithubUserAuthorize"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/github-user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Connections
+         * @description The workspace's personal GitHub connections, one per person. Reads only what is stored;
+         *     it never calls GitHub.
+         */
+        get: operations["listGithubUserConnections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{workspace_id}/github-user/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Connection
+         * @description Remove the connection and its token. Runs started with it keep the login they recorded.
+         *     The app's access stays listed in the person's GitHub settings, where they can revoke it.
+         */
+        delete: operations["deleteGithubUserConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/connections/jira/authorize": {
         parameters: {
             query?: never;
@@ -1528,6 +1615,11 @@ export interface components {
              * @default
              */
             input: string;
+            /**
+             * Copilot Connection Id
+             * @description Run on this person's Copilot (8.2): the id of one of the workspace's personal GitHub connections (`GET /workspaces/{id}/github-user`). Every agent of the run then uses that person's subscription and nobody else's. Unset: the run is on Claude. Refused with `422` `copilot_connection_not_found` or `409` `copilot_needs_attention`.
+             */
+            copilot_connection_id?: string | null;
             /** @description The Markdown spec file the run is given (7.7), uploaded or read from the repo, when the workflow's `input` has `kind: "spec_file"`; the run's `input` is then the file's name or path. */
             spec_file?: components["schemas"]["SpecFileSource"] | null;
             /** @description The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`). */
@@ -1840,6 +1932,63 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+        };
+        /**
+         * GithubUserAuthorizeOut
+         * @description Where to send the browser to connect a personal GitHub account. Valid for 10 minutes.
+         */
+        GithubUserAuthorizeOut: {
+            /** Authorize Url */
+            authorize_url: string;
+        };
+        /**
+         * GithubUserConnectionOut
+         * @description One person's connection. The token is never returned.
+         */
+        GithubUserConnectionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Login
+             * @description The GitHub account that connected; its Copilot is used.
+             */
+            login: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "connected" | "needs_attention";
+            /**
+             * Reason
+             * @description Why it needs attention; connecting again clears it.
+             */
+            reason?: ("invalid_grant" | "unauthorized") | null;
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * GithubUserConnectionsOut
+         * @description The workspace's personal GitHub connections, one per person.
+         */
+        GithubUserConnectionsOut: {
+            /**
+             * Configured
+             * @description Whether the API has an OAuth app for personal connections. Without one nothing can connect.
+             */
+            configured: boolean;
+            /** Connections */
+            connections: components["schemas"]["GithubUserConnectionOut"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -3262,6 +3411,11 @@ export interface components {
             /** @description The Jira issue a trigger started the run on (7.3); a rerun keeps it. */
             jira_issue?: components["schemas"]["JiraIssueRef"] | null;
             /**
+             * Copilot Login
+             * @description The GitHub login whose Copilot subscription the run uses (8.2), as it was when the run started; `null`: the run is on Claude.
+             */
+            copilot_login?: string | null;
+            /**
              * Branch
              * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
              */
@@ -3636,6 +3790,11 @@ export interface components {
             /** @description The Jira issue a trigger started the run on (7.3); a rerun keeps it. */
             jira_issue?: components["schemas"]["JiraIssueRef"] | null;
             /**
+             * Copilot Login
+             * @description The GitHub login whose Copilot subscription the run uses (8.2), as it was when the run started; `null`: the run is on Claude.
+             */
+            copilot_login?: string | null;
+            /**
              * Branch
              * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
              */
@@ -3882,6 +4041,14 @@ export interface components {
         };
         /** StartAuthorize */
         StartAuthorize: {
+            /**
+             * Return To
+             * @description Where the web app lands after the consent. Defaults to the Integrations settings page.
+             */
+            return_to?: string | null;
+        };
+        /** StartGithubUserAuthorize */
+        StartGithubUserAuthorize: {
             /**
              * Return To
              * @description Where the web app lands after the consent. Defaults to the Integrations settings page.
@@ -6080,6 +6247,161 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    startGithubUserAuthorize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartGithubUserAuthorize"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GithubUserAuthorizeOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description No GitHub OAuth app, or no master key, is configured on the API */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    completeGithubUserAuthorize: {
+        parameters: {
+            query?: {
+                code?: string | null;
+                state?: string | null;
+                error?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listGithubUserConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GithubUserConnectionsOut"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteGithubUserConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such workspace, or it has no such connection */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
