@@ -16,6 +16,8 @@ from agentic_engine.policy import (
 )
 from agentic_github import installation_settings_url
 from agentic_runtime import ModelPrice
+from agentic_runtime import Provider as AgentProvider
+from agentic_runtime.pricing import DEFAULT_CREDIT_USD
 from agentic_store import AuditAction, AuditEventRow, ConnectionInfo, WorkspaceInfo
 
 Provider = Literal["claude", "github", "jira"]
@@ -177,6 +179,44 @@ class PutPricing(BaseModel):
         if dupes := sorted({m for m in models if models.count(m) > 1}):
             raise ValueError(f"one override per model: {', '.join(dupes)} given twice")
         return overrides
+
+
+class ProviderSettings(BaseModel):
+    """The workspace's provider settings (8.3): where a run's agents run when nothing narrower
+    says, and what Copilot usage costs."""
+
+    default_provider: AgentProvider = Field(
+        description="The provider of every agent that names none and whose run and workflow set "
+        "none: `claude` unless the workspace chose `copilot`."
+    )
+    copilot_model: str | None = Field(
+        description="The model a Copilot agent with no model of its own runs on; `null`: the "
+        "worker's `COPILOT_MODEL` (`auto` lets Copilot choose). Model names are per person, so "
+        "none is checked."
+    )
+    copilot_credit_usd: float = Field(
+        description="USD one Copilot AI credit is priced at, for the cost of Copilot usage: the "
+        "list-price value of the credits, not what a person's plan charged."
+    )
+    default_copilot_credit_usd: float = Field(
+        description=f"GitHub's price of an AI credit (${DEFAULT_CREDIT_USD}): what "
+        "`copilot_credit_usd` is unless the workspace changed it."
+    )
+
+
+class PutProviderSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_provider: AgentProvider = "claude"
+    copilot_model: ModelId | None = Field(
+        default=None, description="Unset: the worker's own model."
+    )
+    copilot_credit_usd: float | None = Field(
+        default=None,
+        gt=0,
+        le=100,
+        description="USD per AI credit, to at most 6 decimals. Unset: GitHub's price.",
+    )
 
 
 class RunLimits(BaseModel):

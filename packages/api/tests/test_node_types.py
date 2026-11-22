@@ -38,6 +38,6 @@ async def test_parameters_are_ready_for_the_side_panel() -> None:
         agent = (await client.get("/node-types")).json()[0]
 
     provider = agent["parameters"]["properties"]["provider"]
-    assert "anyOf" not in provider and provider["enum"] == ["claude"]
+    assert "anyOf" not in provider and provider["enum"] == ["claude", "copilot"]
     assert "github.openPR" not in agent["parameters"]["properties"]["tools"]["items"]["enum"]
     assert agent["ui"]["instructions"] == {"ui:widget": "textarea"}

@@ -498,6 +498,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{workspace_id}/provider-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Providers
+         * @description Where the workspace's runs put their agents when nothing narrower says (`default_provider`),
+         *     the model a Copilot agent runs on when it names none, and the price of an AI credit.
+         */
+        get: operations["getProviderSettings"];
+        /**
+         * Put Providers
+         * @description Replace the workspace's provider settings. They apply to runs created afterwards: a run
+         *     keeps the providers it was created with. Recorded in the audit log
+         *     (`workspace.settings_changed`).
+         */
+        put: operations["putProviderSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{workspace_id}/policy": {
         parameters: {
             query?: never;
@@ -1211,7 +1238,10 @@ export interface paths {
          *     `from_node`), a gate before every publisher, tool names, and the workspace's run limits and,
          *     with a budget, prices. An invalid workflow is answered `200` with `valid: false` and every
          *     issue. `workflow_id` must be the spec's `id` (`id_mismatch` otherwise). Nothing is stored,
-         *     and no connection is needed.
+         *     and no connection is needed, except that an agent that would run on Copilot (its own
+         *     `provider`, the workflow's, or the workspace's default, 8.3) is a
+         *     `copilot_connection_required` issue when the workspace has no usable personal GitHub
+         *     connection.
          */
         post: operations["validateWorkflow"];
         delete?: never;
@@ -1297,7 +1327,7 @@ export interface components {
              * Provider
              * @description Unset means the workspace default.
              */
-            provider?: "claude" | null;
+            provider?: ("claude" | "copilot") | null;
             /** Model */
             model?: string | null;
             /** Tools */
@@ -1433,7 +1463,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1489,8 +1519,11 @@ export interface components {
             id?: string | null;
             /** Description */
             description?: string | null;
-            /** @description The provider the starter agent runs on. Unset means the workspace default. */
-            provider?: components["schemas"]["Provider"] | null;
+            /**
+             * Provider
+             * @description The workflow's own `provider` (8.3): every agent that names none runs on it, the starter agent and those added later. Unset means the workspace default.
+             */
+            provider?: ("claude" | "copilot") | null;
         };
         /** CancelResponse */
         CancelResponse: {
@@ -1620,6 +1653,11 @@ export interface components {
              * @description Run on this person's Copilot (8.2): the id of one of the workspace's personal GitHub connections (`GET /workspaces/{id}/github-user`). Every agent of the run then uses that person's subscription and nobody else's. Unset: the run is on Claude. Refused with `422` `copilot_connection_not_found` or `409` `copilot_needs_attention`.
              */
             copilot_connection_id?: string | null;
+            /**
+             * Provider
+             * @description The provider the run's agents use unless a node names its own (8.3): the New run sheet's choice. It beats the workflow's `provider` and the workspace's default. Unset: those apply, then Claude. A run on Copilot needs `copilot_connection_id`: refused with `422` `copilot_connection_required`, naming the agents, without one. A run a trigger starts stays on Claude.
+             */
+            provider?: ("claude" | "copilot") | null;
             /** @description The Markdown spec file the run is given (7.7), uploaded or read from the repo, when the workflow's `input` has `kind: "spec_file"`; the run's `input` is then the file's name or path. */
             spec_file?: components["schemas"]["SpecFileSource"] | null;
             /** @description The repo the run works on, cloned into its sandbox. Needed by `repo.*` tools, and `github.*` tools need it to be on GitHub (`https://github.com/<owner>/<name>`). */
@@ -2084,7 +2122,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -2638,7 +2676,7 @@ export interface components {
              * Provider
              * @description Unset means the workspace default.
              */
-            provider?: "claude" | null;
+            provider?: ("claude" | "copilot") | null;
             /** Model */
             model?: string | null;
             /**
@@ -2816,8 +2854,34 @@ export interface components {
             model: string;
             price: components["schemas"]["Price"];
         };
-        /** @constant */
-        Provider: "claude";
+        /**
+         * ProviderSettings
+         * @description The workspace's provider settings (8.3): where a run's agents run when nothing narrower
+         *     says, and what Copilot usage costs.
+         */
+        ProviderSettings: {
+            /**
+             * Default Provider
+             * @description The provider of every agent that names none and whose run and workflow set none: `claude` unless the workspace chose `copilot`.
+             * @enum {string}
+             */
+            default_provider: "claude" | "copilot";
+            /**
+             * Copilot Model
+             * @description The model a Copilot agent with no model of its own runs on; `null`: the worker's `COPILOT_MODEL` (`auto` lets Copilot choose). Model names are per person, so none is checked.
+             */
+            copilot_model: string | null;
+            /**
+             * Copilot Credit Usd
+             * @description USD one Copilot AI credit is priced at, for the cost of Copilot usage: the list-price value of the credits, not what a person's plan charged.
+             */
+            copilot_credit_usd: number;
+            /**
+             * Default Copilot Credit Usd
+             * @description GitHub's price of an AI credit ($0.01): what `copilot_credit_usd` is unless the workspace changed it.
+             */
+            default_copilot_credit_usd: number;
+        };
         /** PublishWorkflowRequest */
         PublishWorkflowRequest: {
             /**
@@ -2861,6 +2925,25 @@ export interface components {
              */
             overrides: components["schemas"]["PriceOverride"][];
         };
+        /** PutProviderSettings */
+        PutProviderSettings: {
+            /**
+             * Default Provider
+             * @default claude
+             * @enum {string}
+             */
+            default_provider: "claude" | "copilot";
+            /**
+             * Copilot Model
+             * @description Unset: the worker's own model.
+             */
+            copilot_model?: string | null;
+            /**
+             * Copilot Credit Usd
+             * @description USD per AI credit, to at most 6 decimals. Unset: GitHub's price.
+             */
+            copilot_credit_usd?: number | null;
+        };
         /** Readiness */
         Readiness: {
             /**
@@ -2892,7 +2975,7 @@ export interface components {
              * Provider
              * @description Unset means the workspace default.
              */
-            provider?: "claude" | null;
+            provider?: ("claude" | "copilot") | null;
             /** Model */
             model?: string | null;
         };
@@ -3155,7 +3238,7 @@ export interface components {
              * Provider
              * @description Unset means the workspace default.
              */
-            provider?: "claude" | null;
+            provider?: ("claude" | "copilot") | null;
             /** Model */
             model?: string | null;
         };
@@ -3415,6 +3498,17 @@ export interface components {
              * @description The GitHub login whose Copilot subscription the run uses (8.2), as it was when the run started; `null`: the run is on Claude.
              */
             copilot_login?: string | null;
+            /**
+             * Provider
+             * @description The provider the run was started on (8.3): its agents' default, from the run's own choice, the workflow, the workspace or Claude. A node may name its own.
+             * @enum {string}
+             */
+            provider: "claude" | "copilot";
+            /**
+             * Providers
+             * @description The providers the run's agents use (8.3), fixed when the run was created: `['claude', 'copilot']` for a run that mixes them.
+             */
+            providers: ("claude" | "copilot")[];
             /**
              * Branch
              * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
@@ -3795,6 +3889,17 @@ export interface components {
              */
             copilot_login?: string | null;
             /**
+             * Provider
+             * @description The provider the run was started on (8.3): its agents' default, from the run's own choice, the workflow, the workspace or Claude. A node may name its own.
+             * @enum {string}
+             */
+            provider: "claude" | "copilot";
+            /**
+             * Providers
+             * @description The providers the run's agents use (8.3), fixed when the run was created: `['claude', 'copilot']` for a run that mixes them.
+             */
+            providers: ("claude" | "copilot")[];
+            /**
              * Branch
              * @description The branch the run works on: the repo's `ref`, else the default branch of a repo the run created; `null` when it is the repo's default branch, not known yet.
              */
@@ -3976,7 +4081,8 @@ export interface components {
         /**
          * SetParam
          * @description Set one parameter of a node, or of the document without `node_id` (`name`,
-         *     `description`, `budget_usd`, `input`, `input_schema`, `output_schema`, `on_review`). `null`
+         *     `description`, `budget_usd`, `provider`, `input`, `input_schema`, `output_schema`, `on_review`).
+         *     `null`
          *     unsets it. Ids, types and the slots that hold nodes change through the other ops.
          */
         SetParam: {
@@ -4535,6 +4641,11 @@ export interface components {
             output_schema?: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
+            /**
+             * Provider
+             * @description The provider of every agent that names none of its own; unset means the workspace default (8.3).
+             */
+            provider?: ("claude" | "copilot") | null;
             /** @description Lets a review comment on the pull request the workflow opened (`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing. */
             on_review?: components["schemas"]["OnReview"] | null;
             /** Root */
@@ -4873,6 +4984,8 @@ export interface operations {
                 template?: string | null;
                 /** @description Only runs on this repo URL. */
                 repo?: string | null;
+                /** @description Only runs that used this provider (8.3): any of their agents ran on it. */
+                provider?: ("claude" | "copilot") | null;
                 /** @description Only runs whose id starts with this (4 characters or more), whose last pull request has this number (`42` or `#42`), or whose workflow name contains it, ignoring case. */
                 q?: string | null;
                 /** @description `next_cursor` of the previous page. */
@@ -4976,6 +5089,8 @@ export interface operations {
                 template?: string | null;
                 /** @description Only runs on this repo URL. */
                 repo?: string | null;
+                /** @description Only runs that used this provider (8.3). */
+                provider?: ("claude" | "copilot") | null;
                 /** @description Default: the default workspace. */
                 workspace_id?: string | null;
             };
@@ -5849,6 +5964,84 @@ export interface operations {
             };
         };
     };
+    getProviderSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderSettings"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    putProviderSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutProviderSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderSettings"];
+                };
+            };
+            /** @description No workspace with this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A bad model name or credit price */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     getPolicy: {
         parameters: {
             query?: never;
@@ -5931,7 +6124,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

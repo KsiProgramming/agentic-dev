@@ -9,12 +9,20 @@ from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.policy import PLATFORM_POLICY, Policy
+from agentic_engine.providers import ResolvedProviders
 from agentic_engine.spec import WorkflowSpec
+from agentic_runtime import Provider
 from agentic_sandbox import RepoSource
 from agentic_store.audit import audit, usd
 from agentic_store.jira_triggers import JiraOrigin, add_trigger_run, lock_trigger_issue
 from agentic_store.models import DEFAULT_WORKSPACE_ID, Run
 from agentic_store.policy import run_policy
+from agentic_store.providers import (
+    TRIGGERED,
+    resolve_for_run,
+    run_resolution,
+    stored_resolution,
+)
 from agentic_store.subflows import run_spec
 
 
@@ -61,6 +69,12 @@ class StoredRun:
     # run is on Claude.
     copilot_connection_id: UUID | None = None
     copilot_login: str | None = None
+    # The provider the run was started on and the providers its agents use (8.3), and each
+    # agent's provider and model as they were resolved when the run was created; `resolved` is
+    # unset for a run from before 8.3, which resolves again from `provider`.
+    provider: Provider = "claude"
+    providers: tuple[Provider, ...] = ("claude",)
+    resolved: ResolvedProviders | None = None
 
 
 async def create_run(
@@ -79,6 +93,7 @@ async def create_run(
     jira_issue: dict[str, JsonValue] | None = None,
     spec_file: dict[str, JsonValue] | None = None,
     copilot_connection: tuple[UUID, str] | None = None,
+    provider: Provider | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) or the stored workflow version it was read
@@ -96,12 +111,26 @@ async def create_run(
     which its agents are then told as a triggered run's are. `spec_file` (7.7) is the
     Markdown spec file the run is given (`{source, name, path, ref, size, sha256, text}`).
     `copilot_connection` (8.2) is the person's GitHub connection, `(id, login)`, whose Copilot the
-    run uses; the caller has checked it belongs to the workspace."""
+    run uses; the caller has checked it belongs to the workspace.
+
+    The providers of the run's agents are resolved here, once, and stored (8.3): node, then
+    `provider` (the run's own choice; with only `copilot_connection` it is Copilot, as in 8.2),
+    the workflow's, the workspace's default, Claude. A run a trigger started (`trigger` `jira` or
+    `github`, or `jira_origin`) stays on Claude. Raises `ProviderGapError` when a node resolves
+    to Copilot and there is no `copilot_connection`."""
     run_id = uuid4()
     async with sessions.begin() as session:
         if jira_origin is not None:
             await lock_trigger_issue(session, jira_origin)
-        policy = await run_policy(session, workspace_id, spec, budget_usd)
+        resolved = await resolve_for_run(
+            session,
+            workspace_id,
+            spec,
+            override=provider or ("copilot" if copilot_connection else None),
+            triggered=trigger in TRIGGERED or jira_origin is not None,
+            has_copilot_connection=copilot_connection is not None,
+        )
+        policy = await run_policy(session, workspace_id, spec, budget_usd, resolved)
         run = Run(
             id=run_id,
             workspace_id=workspace_id,
@@ -122,6 +151,7 @@ async def create_run(
             spec_file=spec_file,
             copilot_connection_id=copilot_connection[0] if copilot_connection else None,
             copilot_login=copilot_connection[1] if copilot_connection else None,
+            **stored_resolution(resolved),
         )
         session.add(run)
         audit(
@@ -139,6 +169,7 @@ async def create_run(
                 "repo_url": repo.url if repo else None,
                 "budget_usd": usd(policy.budget_usd),
                 **({"copilot_login": copilot_connection[1]} if copilot_connection else {}),
+                "providers": [*resolved.providers],
             },
         )
         if jira_origin is not None:
@@ -174,7 +205,14 @@ def stored_run(run: Run) -> StoredRun:
         spec_file=run.spec_file,
         copilot_connection_id=run.copilot_connection_id,
         copilot_login=run.copilot_login,
+        provider=_provider(run.provider),
+        providers=tuple(_provider(p) for p in run.providers),
+        resolved=run_resolution(run),
     )
+
+
+def _provider(value: str) -> Provider:
+    return "copilot" if value == "copilot" else "claude"
 
 
 async def set_run_jira_brief(

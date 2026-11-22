@@ -40,6 +40,7 @@ const DOCUMENT_PARAMS = new Set([
   "name",
   "description",
   "budget_usd",
+  "provider",
   "input",
   "input_schema",
   "output_schema",

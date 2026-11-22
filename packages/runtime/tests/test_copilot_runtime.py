@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from decimal import Decimal
 
 import pytest
 
@@ -327,3 +328,35 @@ async def test_a_run_can_only_be_iterated_once() -> None:
     aiter(run)
     with pytest.raises(RuntimeError, match="only be iterated once"):
         aiter(run)
+
+
+async def test_a_call_is_priced_from_its_ai_credits() -> None:
+    """1,260,000,000 nano AIU is 1.26 credits, and a credit is $0.01 (8.3)."""
+    report = UsageReport(model="gpt-test", input_tokens=12, output_tokens=5, nano_aiu=1_260_000_000)
+    connector = FakeCopilotConnector([report, AssistantMessage("hi"), SessionIdle()])
+
+    events = await collect_and_check(runtime(connector), request())
+
+    [usage] = [e for e in events if isinstance(e, Usage)]
+    assert usage.ai_credits == pytest.approx(1.26)
+    assert usage.estimated_usd == pytest.approx(0.0126)
+
+
+async def test_a_changed_price_per_credit_changes_the_estimate() -> None:
+    report = UsageReport(model="gpt-test", input_tokens=1, output_tokens=1, nano_aiu=1_260_000_000)
+    connector = FakeCopilotConnector([report, AssistantMessage("hi"), SessionIdle()])
+
+    events = await collect_and_check(runtime(connector, credit_usd=Decimal("0.02")), request())
+
+    [usage] = [e for e in events if isinstance(e, Usage)]
+    assert usage.ai_credits == pytest.approx(1.26)
+    assert usage.estimated_usd == pytest.approx(0.0252)
+
+
+async def test_a_call_with_no_credits_stays_unpriced() -> None:
+    connector = FakeCopilotConnector([USAGE, AssistantMessage("hi"), SessionIdle()])
+
+    events = await collect_and_check(runtime(connector), request())
+
+    [usage] = [e for e in events if isinstance(e, Usage)]
+    assert (usage.ai_credits, usage.estimated_usd) == (None, None)

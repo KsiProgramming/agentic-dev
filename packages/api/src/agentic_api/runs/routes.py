@@ -79,6 +79,7 @@ from agentic_github import (
     repo_full_name,
 )
 from agentic_jira import check_and_answer
+from agentic_runtime import Provider
 from agentic_sandbox import ARTIFACT_NAME, RepoSource, branch_name
 from agentic_store import (
     ANSWERS_EXPIRED_REASON,
@@ -90,6 +91,7 @@ from agentic_store import (
     InvalidSelectionError,
     JiraOrigin,
     PolicyViolationError,
+    ProviderGapError,
     RerunFromStep,
     RunEndedError,
     RunNotEndedError,
@@ -227,6 +229,8 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "branch": row.branch,
         "jira_issue": JiraIssueRef.model_validate(row.jira_issue) if row.jira_issue else None,
         "copilot_login": row.copilot_login,
+        "provider": row.provider,
+        "providers": row.providers,
         "pr_review": PrReviewRef.model_validate(row.pr_review) if row.pr_review else None,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
         "active_ms": active_ms,
@@ -254,6 +258,12 @@ async def list_runs(
     ] = None,
     template: Annotated[str | None, Query(description="Only runs of this template id.")] = None,
     repo: Annotated[str | None, Query(description="Only runs on this repo URL.")] = None,
+    provider: Annotated[
+        Provider | None,
+        Query(
+            description="Only runs that used this provider (8.3): any of their agents ran on it."
+        ),
+    ] = None,
     q: Annotated[
         str | None,
         Query(
@@ -281,6 +291,7 @@ async def list_runs(
             template_id=template,
             repo_url=repo,
             search=q,
+            provider=provider,
             cursor=cursor,
             limit=limit,
         )
@@ -301,11 +312,20 @@ async def counts(
     workspace_id: Annotated[UUID, Depends(existing_workspace)],
     template: Annotated[str | None, Query(description="Only runs of this template id.")] = None,
     repo: Annotated[str | None, Query(description="Only runs on this repo URL.")] = None,
+    provider: Annotated[
+        Provider | None, Query(description="Only runs that used this provider (8.3).")
+    ] = None,
 ) -> RunCounts:
     """How many runs each saved view of the runs list holds (All, Running, Needs approval,
     Failed), with the same `template` and `repo` filters as `GET /runs`. A run waiting at a gate
     past its expiry is not counted as waiting, even before a worker cancels it."""
-    row = await count_runs(_sessions(request), workspace_id, template_id=template, repo_url=repo)
+    row = await count_runs(
+        _sessions(request),
+        workspace_id,
+        template_id=template,
+        repo_url=repo,
+        provider=provider,
+    )
     return RunCounts(all=row.all, running=row.running, waiting=row.waiting, failed=row.failed)
 
 
@@ -543,9 +563,12 @@ async def start_run(
             jira_issue=manual_issue,
             spec_file=spec_file,
             copilot_connection=copilot,
+            provider=body.provider,
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e
+    except ProviderGapError as e:
+        raise _no_copilot(e) from e
     redis: Redis = request.app.state.redis
     await enqueue_run(redis, run_id)
     return CreateRunResponse(
@@ -719,6 +742,16 @@ _NO_JIRA = (
     "jira_not_connected: the workflow uses jira.* tools, but the workspace's Jira connection "
     "is missing or needs attention; connect it in Settings > Integrations"
 )
+
+
+def _no_copilot(error: ProviderGapError) -> HTTPException:
+    """`copilot_connection_required`, naming the agents that run on Copilot (8.3)."""
+    nodes = ", ".join(repr(i.node_id) for i in error.issues if i.node_id)
+    return _unprocessable(
+        "copilot_connection_required",
+        f"{nodes} would run on Copilot, which needs a personal GitHub connection with a Copilot "
+        "subscription; connect one in Settings > Integrations, or run on Claude",
+    )
 
 
 def _unprocessable(code: str, message: str) -> HTTPException:
@@ -938,6 +971,8 @@ async def rerun(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     except PolicyViolationError as e:
         raise _over_policy(e) from e
+    except ProviderGapError as e:
+        raise _no_copilot(e) from e
     await enqueue_run(request.app.state.redis, new_id)
     return CreateRunResponse(
         run_id=new_id, events_url=str(request.url_for("stream_run_events", run_id=new_id))

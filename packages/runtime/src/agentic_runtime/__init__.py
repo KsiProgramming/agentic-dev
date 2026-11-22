@@ -28,7 +28,7 @@ from agentic_runtime.pricing import (
     PriceTable,
 )
 from agentic_runtime.protocol import AgentRun, AgentRuntime
-from agentic_runtime.request import AgentRequest
+from agentic_runtime.request import AgentRequest, Provider
 from agentic_runtime.tools import ToolDefinition, ToolExecutor, ToolOutput
 
 __all__ = [
@@ -50,6 +50,7 @@ __all__ = [
     "ModelPrice",
     "ModelPricing",
     "PriceTable",
+    "Provider",
     "ReasoningDelta",
     "TerminalEvent",
     "TextDelta",

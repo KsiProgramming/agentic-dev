@@ -50,6 +50,9 @@ class RunSummaryRow:
     rerun_of: UUID | None
     # The GitHub login whose Copilot the run uses (8.2); `None`: the run is on Claude.
     copilot_login: str | None
+    # The provider the run was started on and the providers its agents use (8.3).
+    provider: str
+    providers: list[str]
     # `{node_id, use_wip, edited}` of a rerun from a step (12.4).
     rerun_from: dict[str, Any] | None
     # What started the run: `manual`, `api`, `rerun` or `jira` (7.3).
@@ -154,6 +157,8 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.waiting_gate,
         Run.rerun_of,
         Run.copilot_login,
+        Run.provider,
+        Run.providers,
         Run.rerun_from,
         Run.jira_issue,
         Run.pr_review,
@@ -205,6 +210,8 @@ def _summary(
         waiting_gate=row.waiting_gate,
         rerun_of=row.rerun_of,
         copilot_login=row.copilot_login,
+        provider=row.provider,
+        providers=list(row.providers),
         rerun_from=row.rerun_from,
         trigger=row.trigger,
         branch=row.branch,
@@ -248,8 +255,12 @@ def _filtered(
     template_id: str | None,
     repo_url: str | None,
     search: str | None = None,
+    provider: str | None = None,
 ) -> Select[*tuple[Any, ...]]:
     query = query.where(Run.workspace_id == workspace_id)
+    if provider is not None:
+        # A run matches when any of its agents used the provider (8.3).
+        query = query.where(Run.providers.contains([provider]))
     if template_id is not None:
         query = query.where(Run.template_id == template_id)
     if repo_url is not None:
@@ -294,6 +305,7 @@ async def count_runs(
     *,
     template_id: str | None = None,
     repo_url: str | None = None,
+    provider: str | None = None,
 ) -> RunCountsRow:
     """The workspace's runs counted per saved view, with the same filters as
     `list_run_summaries`. A run waiting at a gate past its expiry no longer needs approval, so it
@@ -315,6 +327,7 @@ async def count_runs(
         workspace_id,
         template_id,
         repo_url,
+        provider=provider,
     )
     async with sessions() as session:
         row = (await session.execute(query)).one()
@@ -329,14 +342,16 @@ async def list_run_summaries(
     template_id: str | None = None,
     repo_url: str | None = None,
     search: str | None = None,
+    provider: str | None = None,
     cursor: str | None = None,
     limit: int = 25,
 ) -> tuple[list[RunSummaryRow], str | None]:
     """One page of the workspace's runs, newest first, and the cursor of the next page (`None`
     on the last one). Filters combine with AND; several `statuses` match any of them; `search`
-    finds a run by id prefix, PR number or workflow name. Raises `InvalidCursorError` for a
+    finds a run by id prefix, PR number or workflow name; `provider` keeps the runs that
+    used it (8.3). Raises `InvalidCursorError` for a
     cursor this function did not return."""
-    query = _filtered(_select(), workspace_id, template_id, repo_url, search)
+    query = _filtered(_select(), workspace_id, template_id, repo_url, search, provider)
     if statuses:
         query = query.where(Run.status.in_(statuses))
     if cursor is not None:

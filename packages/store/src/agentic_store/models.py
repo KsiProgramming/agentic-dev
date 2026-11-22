@@ -24,7 +24,7 @@ from sqlalchemy import (
     text,
     true,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -60,6 +60,12 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(String(128))
     wrapped_dek: Mapped[bytes | None] = mapped_column(LargeBinary)
     key_id: Mapped[str | None] = mapped_column(String(128))
+    # The provider a run uses when nothing narrower names one (8.3); null is Claude.
+    default_provider: Mapped[str | None] = mapped_column(String(16))
+    # The model a Copilot agent with none of its own runs on; null is the worker's `auto`.
+    copilot_model: Mapped[str | None] = mapped_column(String(128))
+    # USD one Copilot AI credit is priced at, for the cost of Copilot usage; null is $0.01.
+    copilot_credit_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -475,6 +481,15 @@ class Run(Base):
         ForeignKey("github_user_connections.id", ondelete="SET NULL")
     )
     copilot_login: Mapped[str | None] = mapped_column(String(255))
+    # The provider the run was started on, and the providers its agents use (8.3). `provider_map`
+    # is the resolution frozen when the run was created (`ResolvedProviders.to_json`): each
+    # agent's provider and model, so a resume never moves a half-done run. Null for a run from
+    # before 8.3, which resolves again from `provider`.
+    provider: Mapped[str] = mapped_column(String(16), server_default="claude")
+    providers: Mapped[list[str]] = mapped_column(
+        ARRAY(String(16)), server_default=text("ARRAY['claude']::varchar[]")
+    )
+    provider_map: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     # The branch the run works on: its repo's `ref`, else the default branch of a repo it created.
     branch: Mapped[str | None] = mapped_column(Text)
     # Time spent executing and paused at gates, in closed stretches (`sink.summary_values`):

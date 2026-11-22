@@ -9,8 +9,11 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { FieldMessage } from "@/forms/schema-form/schema-fields";
 
-/** Who a run is on: Claude, or the Copilot of one personal GitHub connection (8.2). */
-export type RunProvider = "claude" | "copilot";
+import type { RunAgent, RunProvider } from "./providers";
+
+export type { RunProvider };
+
+const PROVIDER_NAME: Record<RunProvider, string> = { claude: "Claude", copilot: "Copilot" };
 
 /** What the run can be given, from the personal GitHub connections: the ones that work, and when
  * none do, one sentence on why. */
@@ -41,6 +44,8 @@ export function ProviderChoice({
   failed,
   error,
   disabled,
+  needsCopilot = false,
+  pinned = [],
 }: {
   provider: RunProvider;
   connectionId: string;
@@ -49,6 +54,10 @@ export function ProviderChoice({
   failed: boolean;
   error?: string;
   disabled: boolean;
+  /** Some agent runs on Copilot (its own provider, or the choice), so an account is needed. */
+  needsCopilot?: boolean;
+  /** Agents whose own provider keeps them off the choice (8.3). */
+  pinned?: RunAgent[];
 }) {
   const name = useId();
   const selectId = useId();
@@ -68,7 +77,7 @@ export function ProviderChoice({
           value="claude"
           checked={provider === "claude"}
           disabled={disabled}
-          onChange={() => onChange("claude", "")}
+          onChange={() => onChange("claude", chosen?.id ?? "")}
           className="size-4"
         />
         <BotIcon aria-hidden="true" className="size-4" />
@@ -96,7 +105,7 @@ export function ProviderChoice({
           {copilotOff && reason ? <span className="text-caption">{reason}</span> : null}
         </span>
       </label>
-      {provider === "copilot" && !copilotOff ? (
+      {(provider === "copilot" || needsCopilot) && !copilotOff ? (
         usable.length > 1 ? (
           <Field>
             <FieldLabel htmlFor={selectId}>Run as</FieldLabel>
@@ -116,12 +125,22 @@ export function ProviderChoice({
           </Field>
         ) : null
       ) : null}
+      {pinned.length > 0 ? (
+        <ul className="flex flex-col gap-0.5 text-caption text-foreground-secondary">
+          {pinned.map((a) => (
+            <li key={a.id}>
+              <span className="font-mono">{a.id}</span> stays on {PROVIDER_NAME[a.provider]}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {error ? (
         <FieldMessage id={`${name}-error`}>{error}</FieldMessage>
-      ) : provider === "copilot" && chosen ? (
+      ) : (provider === "copilot" || needsCopilot) && chosen ? (
         <FieldDescription id={`${name}-help`}>
-          Runs on <span className="font-mono">{chosen.login}</span>&apos;s Copilot. Usage is counted
-          in tokens only.
+          {provider === "copilot" ? "Runs" : "Its Copilot steps run"} on{" "}
+          <span className="font-mono">{chosen.login}</span>&apos;s Copilot. Cost is the list price
+          of its AI credits.
         </FieldDescription>
       ) : copilotOff ? (
         <FieldDescription id={`${name}-help`}>

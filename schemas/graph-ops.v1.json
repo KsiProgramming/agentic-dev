@@ -194,7 +194,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -851,7 +854,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -1174,7 +1180,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -1450,7 +1459,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -1676,7 +1688,7 @@
     },
     "SetParam": {
       "additionalProperties": false,
-      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `input`, `input_schema`, `output_schema`, `on_review`). `null`\nunsets it. Ids, types and the slots that hold nodes change through the other ops.",
+      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `provider`, `input`, `input_schema`, `output_schema`, `on_review`).\n`null`\nunsets it. Ids, types and the slots that hold nodes change through the other ops.",
       "properties": {
         "node_id": {
           "anyOf": [

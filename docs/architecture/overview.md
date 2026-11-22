@@ -56,7 +56,7 @@ flowchart LR
 | GitHub | List repos, clone private repos, push agent branches, open PRs, create org repos | GitHub App private key → short-lived installation tokens | The operator who registers the App |
 | Anthropic | Run `agent` nodes | Workspace API key, stored encrypted | Each workspace ("bring your own key") |
 | Jira Cloud | Today: connect an account and pick the projects runs may use. Planned (Milestone 7): read issues, comment and transition behind gates, start runs from issues | Atlassian OAuth 2.0 (3LO) app's client secret (operator); the workspace's grant, stored encrypted and renewed | The operator registers the app; each workspace consents |
-| GitHub Copilot *(planned, Milestone 8)* | Second agent provider | GitHub OAuth / App | Each workspace |
+| GitHub Copilot | Second agent provider | A person's own GitHub OAuth token | Each person |
 
 No personal access token is ever stored.
 
@@ -233,6 +233,6 @@ Read these before deploying. They are tracked in the roadmap and in [`TODO.md`](
 - **No user authentication or authorisation in the API yet.** Anyone who can reach the API can act on every workspace. Deploy it only behind an authenticating proxy on a private network. See [Security model → Known gaps](../security/security-model.md#7-known-gaps-and-hardening-roadmap).
 - **Single default workspace in the UI.** The data model is multi-tenant; membership and roles are not built.
 - **Worker uses the host Docker socket** in the reference compose setup. Production isolation (gVisor or Firecracker) is phase 10.2.
-- **One model provider** (Claude). Copilot is Milestone 8.
+- **Two model providers**: Claude, and GitHub Copilot on a person's own account. The provider is chosen per step, per workflow, per workspace or per run, and decided once when the run starts.
 - **GitHub only.** GitLab, Bitbucket and Azure DevOps would be new `GithubPlatform`-style adapters.
 - **No OpenTelemetry tracing yet** (phase 10.3); logs are structured and redacted.

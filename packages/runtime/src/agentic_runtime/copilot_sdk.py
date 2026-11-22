@@ -44,7 +44,7 @@ def translate(event: Any) -> CopilotEvent | None:
     """One SDK session event as a `CopilotEvent`, or `None` for the ones a run does not need.
 
     The SDK's `input_tokens` already includes cache reads and writes; ours is uncached input, so
-    they are taken out.
+    they are taken out. `copilot_usage.total_nano_aiu` is the call's AI credits (8.3).
     """
     data: Any = event.data
     match str(event.type.value):
@@ -64,6 +64,7 @@ def translate(event: Any) -> CopilotEvent | None:
                 output_tokens=data.output_tokens or 0,
                 cache_read_tokens=read,
                 cache_write_tokens=write,
+                nano_aiu=_nano_aiu(data),
             )
         case "session.idle":
             return SessionIdle(aborted=bool(data.aborted))
@@ -71,6 +72,12 @@ def translate(event: Any) -> CopilotEvent | None:
             return SessionError(message=str(data.message), status_code=data.status_code)
         case _:
             return None
+
+
+def _nano_aiu(data: Any) -> int | None:
+    """The call's AI credits in nano units, from `copilot_usage.total_nano_aiu`, when reported."""
+    nano = getattr(getattr(data, "copilot_usage", None), "total_nano_aiu", None)
+    return int(nano) if isinstance(nano, int | float) else None
 
 
 def permission_handler(allow: Callable[[PermissionAsk], bool]) -> Callable[[Any, Any], Any]:

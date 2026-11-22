@@ -29,6 +29,7 @@ from agentic_store.cancel import ENDED_STATUSES
 from agentic_store.models import Run
 from agentic_store.policy import run_policy
 from agentic_store.pr_review import FollowUp, check_follow_up
+from agentic_store.providers import resolve_for_rerun, stored_resolution
 from agentic_store.subflows import run_spec
 
 
@@ -102,12 +103,15 @@ async def create_rerun(
             }
         if follow_up is not None:
             await check_follow_up(session, follow_up)
-        policy = await run_policy(
+        new_spec = run_spec(spec, original.subflows)
+        resolved = await resolve_for_rerun(
             session,
-            original.workspace_id,
-            run_spec(spec, original.subflows),
-            budget_usd,
+            original,
+            new_spec,
+            from_step=from_step is not None,
+            follow_up=follow_up is not None,
         )
+        policy = await run_policy(session, original.workspace_id, new_spec, budget_usd, resolved)
         session.add(
             Run(
                 id=new_id,
@@ -141,6 +145,7 @@ async def create_rerun(
                     original.copilot_connection_id if follow_up is None else None
                 ),
                 copilot_login=original.copilot_login if follow_up is None else None,
+                **stored_resolution(resolved),
             )
         )
         if follow_up is not None:

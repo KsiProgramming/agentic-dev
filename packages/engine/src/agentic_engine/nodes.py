@@ -31,6 +31,7 @@ from agentic_engine.spec import (
     WaitForNode,
     WorkflowSpec,
 )
+from agentic_runtime.request import Provider
 
 type Category = Literal["step", "flow", "combine", "workspace"]
 """Where the palette lists a kind: `step` does one thing, `flow` holds other nodes and decides
@@ -514,9 +515,6 @@ def node_kinds() -> list[str]:
     return [get_args(m.model_fields["type"].annotation)[0] for m in get_args(union)]
 
 
-type Provider = Literal["claude"]
-"""A provider an agent may run on: the values of an agent's `provider` (Copilot comes in 8.2)."""
-
 STARTER_STEP_ID = "agent_1"
 """The id of the one agent a blank workflow starts with, as the palette would name it."""
 
@@ -539,20 +537,19 @@ def blank_spec(
     provider: Provider | None = None,
 ) -> WorkflowSpec:
     """A new workflow with nothing in it yet (5.8): a root sequence with the one agent the
-    palette would add, on `provider` when given. A sequence cannot be empty, so this is the
-    least a workflow can be."""
+    palette would add. `provider`, when given, is the workflow's own (8.3), so the starter agent
+    and every agent added later follow it. A sequence cannot be empty, so this is the least a
+    workflow can be."""
     agent = manifest_for("agent")
     assert agent is not None, "every primitive has a manifest"
-    update: dict[str, Any] = {"id": STARTER_STEP_ID}
-    if provider is not None:
-        update["provider"] = provider
-    step = agent.default.model_copy(update=update)
+    step = agent.default.model_copy(update={"id": STARTER_STEP_ID})
     return WorkflowSpec.model_validate(
         {
             "spec_version": "0",
             "id": id or workflow_slug(name),
             "name": name,
             "description": description,
+            "provider": provider,
             "root": {"type": "sequence", "id": "sequence_1", "steps": [step]},
         }
     )

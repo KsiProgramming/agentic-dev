@@ -164,7 +164,7 @@ def test_optional_fields_keep_their_type_and_drop_the_null_default() -> None:
     properties = MANIFESTS["agent"].parameters["properties"]
     assert properties["provider"] == {
         "type": "string",
-        "enum": ["claude"],
+        "enum": ["claude", "copilot"],
         "title": "Provider",
         "description": "Unset means the workspace default.",
     }

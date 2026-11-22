@@ -114,6 +114,10 @@ export interface Step {
   turns: Turn[];
   /** The node's own usage; `stepUsage` adds its map items, branches and iterations. */
   usage: TokenUsage | null;
+  /** The provider an agent-like node ran on and the model, from its `node_started` (8.3); the
+   * model is the one its usage reports once it has any. `null` for a node with no agent. */
+  provider: "claude" | "copilot" | null;
+  model: string | null;
   gate: GateInfo | null;
   prUrl: string | null;
   /** The repo the node created for the run (`github.createRepo`). */
@@ -286,6 +290,9 @@ export interface Timeline {
   /** Why the run was cancelled (`run_cancelled`'s `reason`), and whether its gate expired. */
   cancelReason: string | null;
   expired: boolean;
+  /** The agents a trigger kept on Claude although they asked for Copilot (`provider_fallback`,
+   * 8.3); `null` when nothing was kept. */
+  providerFallback: string[] | null;
 }
 
 /**
@@ -377,6 +384,8 @@ function newStep(id: string, at: string): Step {
     error: null,
     turns: [],
     usage: null,
+    provider: null,
+    model: null,
     gate: null,
     prUrl: null,
     createdRepo: null,
@@ -460,6 +469,7 @@ class Builder {
     clock: { activeMs: null, waitingMs: 0, activeSince: null, waitingSince: null },
     cancelReason: null,
     expired: false,
+    providerFallback: null,
   };
   /** When the event before the current one was written. */
   private lastAt: string | null = null;
@@ -486,6 +496,11 @@ class Builder {
       case "run_started":
         this.timeline.workflowName = str(payload.workflow_name);
         this.timeline.startedAt ??= at;
+        return;
+      case "provider_fallback":
+        this.timeline.providerFallback = Array.isArray(payload.nodes)
+          ? payload.nodes.filter((n): n is string => typeof n === "string")
+          : [];
         return;
       case "run_completed":
       case "run_failed":
@@ -695,6 +710,10 @@ class Builder {
         scope.steps.push(step);
         this.tags.set(step, { item, branch });
       }
+      if (payload.provider === "claude" || payload.provider === "copilot") {
+        step.provider = payload.provider;
+        step.model = str(payload.model);
+      }
       if (payload.items !== undefined) {
         step.items ??= [];
         step.itemCount = num(payload.items);
@@ -856,6 +875,7 @@ class Builder {
       }
       case "usage":
         step.usage = addUsage(step.usage, usageOfEvent(payload));
+        step.model = str(payload.model) ?? step.model;
         return;
       case "failed":
         step.error = str(payload.error) ?? step.error;

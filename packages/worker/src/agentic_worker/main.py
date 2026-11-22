@@ -201,6 +201,7 @@ from agentic_store import (
     APPROVAL_EXPIRED_REASON,
     PostgresArtifactStore,
     PostgresEventSink,
+    ProviderSettings,
     RerunBranchesError,
     StoredRun,
     UnloadableRun,
@@ -214,6 +215,7 @@ from agentic_store import (
     enqueue_run,
     expire_gates,
     get_github_installation,
+    get_provider_settings,
     kept_sandbox_run_ids,
     last_started_step,
     latest_branches,
@@ -257,6 +259,7 @@ from agentic_worker.branches import SandboxBranchSaver
 from agentic_worker.copilot import copilot_runtimes, token_loader
 from agentic_worker.errors import RunSetupError
 from agentic_worker.integrate import SandboxIntegrator
+from agentic_worker.providers import ProviderRouter, RoutedRuntimes, run_providers
 from agentic_worker.review import SandboxGateReview
 
 log = logging.getLogger("agentic_worker")
@@ -418,9 +421,10 @@ def run_runtimes(
     keys: KeyProvider | None,
     make_client: ClaudeClientFactory = anthropic_client,
     github_user: GithubUserAuth | None = None,
-) -> RunRuntimes:
-    """The runtimes this worker's runs use: Claude (or the stack's fake agents), and, for a run
-    started with a person's GitHub connection (8.2), that person's Copilot."""
+) -> RoutedRuntimes:
+    """The runtimes this worker's runs use: one `ProviderRouter` per run over Claude (or the
+    stack's fake agents) and, for the agents that run on a person's Copilot (8.2, 8.3), that
+    person's Copilot. Each is opened when the run first asks for it."""
     base = _provider_runtimes(settings, sessions, keys, make_client)
 
     async def no_token(run: StoredRun) -> SecretStr:
@@ -436,20 +440,33 @@ def run_runtimes(
             sessions, run.workspace_id, run.copilot_connection_id, "unauthorized"
         )
 
+    async def workspace_settings(run: StoredRun) -> ProviderSettings:
+        return await get_provider_settings(sessions, run.workspace_id)
+
     copilot = copilot_runtimes(
         settings,
         token_loader(sessions, keys, github_user) if keys is not None else no_token,
         base,
         refused,
+        workspace_settings,
     )
 
     @asynccontextmanager
     async def open_runtime(
         run: StoredRun, tools: ToolExecutor | None
-    ) -> AsyncGenerator[AgentRuntime]:
-        opener = base if run.copilot_connection_id is None else copilot
-        async with opener(run, tools) as runtime:
-            yield runtime
+    ) -> AsyncGenerator[ProviderRouter]:
+        async with contextlib.AsyncExitStack() as stack:
+            router = ProviderRouter(
+                {"claude": lambda: base(run, tools), "copilot": lambda: copilot(run, tools)},
+                stack,
+            )
+            # A run's first attempt will use every provider it resolved to, so a provider that
+            # cannot open fails the run before its first step, as one that needs a key always
+            # has. A resume opens one only when an agent that is left asks for it.
+            if run.attempt <= 1:
+                for provider in run_providers(run).providers:
+                    await router.runtime(provider)
+            yield router
 
     return open_runtime
 
@@ -1458,6 +1475,7 @@ async def _workflow(
                 inputs=run_inputs(run),
                 saver=saver,
                 on_seeded=copy_artifacts,
+                providers=run_providers(run),
             )
         except (StepNotFoundError, StepNotReachedError) as e:
             log.warning("run %s cannot start from its step: %s", run.id, e)
@@ -1483,6 +1501,7 @@ async def _workflow(
             context=run_context(run),
             saver=saver,
             inputs=run_inputs(run),
+            providers=run_providers(run),
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -1504,6 +1523,7 @@ async def _workflow(
         context=run_context(run),
         saver=saver,
         inputs=run_inputs(run),
+        providers=run_providers(run),
     )
 
 

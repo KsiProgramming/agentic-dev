@@ -28,6 +28,7 @@ from agentic_engine.events import (
     GATE_WAITING,
     NODE_STARTED,
     POLICY_LIMIT_EXCEEDED,
+    PROVIDER_FALLBACK,
     RUN_CANCELLED,
     RUN_COMPLETED,
     RUN_FAILED,
@@ -54,6 +55,7 @@ from agentic_engine.graph.state import (
 )
 from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
+from agentic_engine.providers import ResolvedProviders
 from agentic_engine.spec import INPUT_WRITER, WorkflowSpec
 from agentic_runtime import AgentRuntime, ToolExecutor
 
@@ -77,6 +79,7 @@ async def run_workflow(
     context: RunContext | None = None,
     saver: BranchSaver | None = None,
     inputs: Mapping[str, str] | None = None,
+    providers: ResolvedProviders | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -101,7 +104,9 @@ async def run_workflow(
     continues it, in an attempt that has the repo cloned.
 
     `inputs` are the run artifacts the run is given from its input (name → content, 7.7: its
-    spec file as `spec-input.md`): written before the first step (`seed_inputs`).
+    spec file as `spec-input.md`): written before the first step (`seed_inputs`). `providers` is
+    the provider and model each agent runs on, as the run stored them (8.3); without it, each
+    node's own, on Claude when it names none. `resume_workflow` and `rerun_workflow` take it too.
 
     Every step is written to `sink` in order: `run_started`, then per node `node_started`, its
     agent events and `node_<status>`, then `run_<status>`. An exception from the graph is logged
@@ -120,6 +125,7 @@ async def run_workflow(
     if inputs and artifacts is None:
         artifacts = InMemoryArtifactStore()
     await _start(log, spec, input)
+    await _emit_fallback(log, providers)
     start = await _initial(log, input, artifacts, inputs)
     return await _finish(
         log,
@@ -136,6 +142,7 @@ async def run_workflow(
             integrator=integrator,
             context=context,
             saver=saver,
+            providers=providers,
         ),
         start,
         _config(spec, log.run_id),
@@ -164,6 +171,7 @@ async def resume_workflow(
     context: RunContext | None = None,
     saver: BranchSaver | None = None,
     inputs: Mapping[str, str] | None = None,
+    providers: ResolvedProviders | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -197,6 +205,7 @@ async def resume_workflow(
         integrator=integrator,
         context=context,
         saver=saver,
+        providers=providers,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
@@ -244,6 +253,7 @@ async def rerun_workflow(
     saver: BranchSaver | None = None,
     on_seeded: Callable[[dict[str, int]], Awaitable[None]] | None = None,
     inputs: Mapping[str, str] | None = None,
+    providers: ResolvedProviders | None = None,
 ) -> WorkflowRunResult:
     """Start `run_id`, a rerun of `source_run` from its top-level step `from_node` (12.4), as
     `run_workflow` would, but from `source_run`'s checkpoint taken before that step
@@ -275,6 +285,7 @@ async def rerun_workflow(
         integrator=integrator,
         context=context,
         saver=saver,
+        providers=providers,
     )
     config = _config(spec, run_id)
     carried = await seed_rerun(
@@ -293,6 +304,7 @@ async def rerun_workflow(
             "carried": list(dict.fromkeys(seeded.get("order", []))),
         },
     )
+    await _emit_fallback(log, providers)
     start = None if seeded else await _initial(log, input, artifacts, inputs)
     return await _finish(log, lambda: graph, start, config, budget, review)
 
@@ -533,6 +545,18 @@ async def record_unloadable_run(
     log = RunEventLog(run_id, sink)
     await _emit_start(log, workflow_id, workflow_name, input)
     await log.emit(RUN_END["failed"], payload={"error": reason})
+
+
+async def _emit_fallback(log: RunEventLog, providers: ResolvedProviders | None) -> None:
+    """`provider_fallback` for a run whose agents were kept on Claude because a trigger started
+    it (8.3): once, as the run begins (an attempt that resumes it does not say it again)."""
+    if providers is None or not providers.fallback:
+        return
+    nodes: list[JsonValue] = [*providers.fallback]
+    await log.emit(
+        PROVIDER_FALLBACK,
+        payload={"nodes": nodes, "reason": "triggered", "provider": providers.default},
+    )
 
 
 async def _start(log: RunEventLog, spec: WorkflowSpec, input: str) -> None:

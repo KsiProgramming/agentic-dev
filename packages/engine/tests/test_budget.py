@@ -22,7 +22,9 @@ from agentic_engine.policy import (
     with_budget,
 )
 from agentic_engine.spec import WorkflowSpec, budget_errors, parse_spec
-from agentic_runtime import Message, Usage
+from agentic_runtime import CopilotRuntime, Message, Usage
+from agentic_runtime.copilot import AssistantMessage, SessionIdle, UsageReport
+from agentic_runtime.copilot_fake import FakeCopilotConnector
 from agentic_runtime.fake import Delay, FakeRuntime, Step
 
 
@@ -312,3 +314,19 @@ async def test_an_unbudgeted_run_is_not_capped_and_reports_its_cost() -> None:
     assert result.status == "completed"
     assert result.usage is not None and result.usage.estimated_usd == 120
     assert not [e for e in sink.events if e.type == "policy_limit_exceeded"]
+
+
+async def test_a_budgeted_copilot_run_stops_at_the_budget_like_a_claude_one() -> None:
+    """Copilot's credits are priced (1 credit = $0.01), so a budget holds on Copilot (8.3)."""
+    sink = InMemoryEventSink()
+    call = UsageReport(model="gpt-5", input_tokens=1, output_tokens=1, nano_aiu=60_000_000_000)
+    copilot = CopilotRuntime(
+        FakeCopilotConnector([call, AssistantMessage("done"), SessionIdle()]), model="gpt-5"
+    )
+    workflow = spec({"type": "sequence", "id": "s", "steps": [agent("a"), agent("b"), agent("c")]})
+
+    result = await run_workflow(workflow, copilot, sink=sink, policy=budgeted("1"))
+
+    assert result.status == "failed"
+    assert result.stopped_at == "b"
+    assert stop_of(sink.events).payload == {"limit": "budget_usd", "value": "1", "observed": "1.2"}

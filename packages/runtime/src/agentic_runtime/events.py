@@ -73,6 +73,7 @@ class Usage(_Event):
     cache_read_tokens: Count = 0
     cache_write_tokens: Count = 0
     premium_requests: Count | None = None
+    ai_credits: Annotated[float, Field(ge=0)] | None = None
     estimated_usd: Annotated[float, Field(ge=0)] | None = None
 
 

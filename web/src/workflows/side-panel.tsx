@@ -249,6 +249,27 @@ export function NodePanel({
   );
 }
 
+/** The workflow's own fields; `providers` are the agent manifest's `provider` choices (8.3), so
+ * the panel keeps no list of its own. */
+function documentSchema(providers: string[]): Schema {
+  if (providers.length === 0) return DOCUMENT_SCHEMA;
+  const properties = DOCUMENT_SCHEMA.properties as Record<string, unknown>;
+  return {
+    ...DOCUMENT_SCHEMA,
+    properties: {
+      ...properties,
+      provider: {
+        type: "string",
+        enum: providers,
+        title: "Provider",
+        description:
+          "Where every step that names no provider runs. Unset: the workspace's default provider. " +
+          "A run can choose its own when it starts; a step that names a provider keeps it.",
+      },
+    },
+  };
+}
+
 const DOCUMENT_SCHEMA: Schema = {
   type: "object",
   required: ["name"],
@@ -308,6 +329,7 @@ const DOCUMENT_SCHEMA: Schema = {
 const DOCUMENT_UI: UiSchema = {
   description: { "ui:widget": "textarea", "ui:options": { rows: 3 } },
   budget_usd: { "ui:widget": "usd", "ui:placeholder": "No budget" },
+  provider: { "ui:placeholder": "Workspace default" },
   input: {
     "ui:order": ["label", "required", "description", "example"],
     description: { "ui:widget": "textarea", "ui:options": { rows: 2 } },
@@ -323,16 +345,20 @@ export function WorkflowPanel({
   spec,
   changes = null,
   readOnly = false,
+  providers = [],
   onEdit,
   onClose,
 }: {
   spec: WorkflowSpec;
   changes?: PanelChanges | null;
   readOnly?: boolean;
+  /** The providers an agent may run on, from the agent manifest (8.3). */
+  providers?: string[];
   onEdit: (edit: Edit) => void;
   onClose?: () => void;
 }) {
   const values = documentParams(spec);
+  const schema = documentSchema(providers);
   return (
     <div className="flex min-h-0 flex-col" data-testid="workflow-panel">
       <PanelHeader
@@ -349,12 +375,12 @@ export function WorkflowPanel({
         {changes && changes.changes.length > 0 ? <ChangedSince {...changes} /> : null}
         <ParamForm
           idPrefix="workflow"
-          schema={DOCUMENT_SCHEMA}
+          schema={schema}
           ui={DOCUMENT_UI}
           values={values}
           readOnly={readOnly}
           onChange={(next) => {
-            const edit = paramEdit(null, values, next, DOCUMENT_SCHEMA);
+            const edit = paramEdit(null, values, next, schema);
             if (edit) onEdit(edit);
           }}
         />

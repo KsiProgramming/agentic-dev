@@ -67,7 +67,8 @@ A Copilot subscription belongs to one person, so Copilot never runs on the compa
 2. Set `GITHUB_USER_CLIENT_ID` and save the client secret to a file named by `GITHUB_USER_CLIENT_SECRET_FILE` (see `.env.example`). The API and the worker both read them. `GITHUB_USER_SCOPES` (space separated) is optional; **it is not verified which scopes a Copilot token needs**: the 8.2 spike ran with a token that had `repo`, `read:org` and `gist`. If runs fail with `copilot_no_subscription` for an account that has a seat, try the scopes the spike used.
 3. Run the workers with the real runtime (`AGENTIC_RUNTIME=claude`, which also serves Copilot); `COPILOT_MODEL` picks the model (default `auto`). With the fake runtime, a Copilot run reads its token and then runs the fake agents.
 4. Each person opens **Settings → Integrations → GitHub (personal, for Copilot)** and connects. They need their own active Copilot seat (a Business seat was tested). The platform stores the token encrypted, labelled by their GitHub login, and never shows it again.
-5. When starting a run, **Provider** offers GitHub Copilot with the login it will use. A run uses only the token of the connection it was started with. A run started by a Jira trigger, a GitHub webhook or a schedule has no person and stays on Claude.
+5. When starting a run, **Provider** offers GitHub Copilot with the login it will use. A run uses only the token of the connection it was started with. A run started by a Jira trigger, a GitHub webhook or a schedule has no person and stays on Claude: the console says so ("Ran on Claude") when an agent had asked for Copilot.
+6. To make Copilot the default for a workspace, open **Settings → Models and pricing**, choose Copilot as the default provider and, if you want, a Copilot model. A workflow can also set its own provider, or one step can; a run's own choice in the New run sheet beats the workflow's and the workspace's but never a step that names its own. The same workflow runs on either provider with no change. Starting a run whose agents would run on Copilot with no connection is refused with `copilot_connection_required`, naming them.
 
 A Copilot run that cannot use its token fails with a fixed code, and a refused token also marks that person's connection "Needs attention" until they connect again:
 
@@ -80,7 +81,7 @@ A Copilot run that cannot use its token fails with a fixed code, and a refused t
 | `copilot_rate_limited` | Copilot's rate limit for this account; try again later |
 | `copilot_unavailable` | GitHub could not be reached to renew the token |
 
-Usage is shown as tokens. Copilot meters AI credits, and the platform has no price for them, so a Copilot run shows no cost.
+Usage is shown as tokens and AI credits. A Copilot step's cost is its credits at the workspace's price per credit (**Settings → Models and pricing**, $0.01 by default, GitHub's price): the list-price value of the usage, like a Claude step's cost. A person whose plan still has included credits pays nothing extra for it, and the platform cannot see that allowance. A budget on a Copilot run stops it as on a Claude run.
 
 ### 3. Prices and limits
 

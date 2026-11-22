@@ -39,6 +39,7 @@ from agentic_store import (
     create_workflow,
     get_workflow_version,
     list_callers,
+    list_github_user_connections,
     list_workflow_versions,
     list_workflows,
     publish_workflow,
@@ -343,11 +344,19 @@ async def validate(
     `from_node`), a gate before every publisher, tool names, and the workspace's run limits and,
     with a budget, prices. An invalid workflow is answered `200` with `valid: false` and every
     issue. `workflow_id` must be the spec's `id` (`id_mismatch` otherwise). Nothing is stored,
-    and no connection is needed."""
+    and no connection is needed, except that an agent that would run on Copilot (its own
+    `provider`, the workflow's, or the workspace's default, 8.3) is a
+    `copilot_connection_required` issue when the workspace has no usable personal GitHub
+    connection."""
     workspace_id = body.workspace_id or DEFAULT_WORKSPACE_ID
     try:
+        people = await list_github_user_connections(_sessions(request), workspace_id)
         policy, issues = await check_workflow(
-            _sessions(request), workspace_id, body.workflow, to_usd(body.budget_usd)
+            _sessions(request),
+            workspace_id,
+            body.workflow,
+            to_usd(body.budget_usd),
+            has_copilot_connection=any(p.needs_attention is None for p in people),
         )
     except WorkspaceNotFoundError:
         raise HTTPException(

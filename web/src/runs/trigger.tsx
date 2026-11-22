@@ -12,13 +12,35 @@ interface Triggered {
   pr_review?: { number: number; comment_url: string } | null;
 }
 
-/** Whose Copilot a run used (8.2): "Copilot · <login>". Nothing for a run on Claude. */
-export function CopilotFact({ login }: { login?: string | null }) {
+/** Whose Copilot a run used (8.2, 8.3): "Copilot of <login>", or "Claude + Copilot of <login>"
+ * for a run that mixes them (`mixed`). Nothing for a run on Claude. */
+export function CopilotFact({ login, mixed = false }: { login?: string | null; mixed?: boolean }) {
   if (!login) return null;
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5" data-testid="copilot-login">
       <FolderGit2Icon aria-hidden="true" className="size-3.5 shrink-0" />
-      <span>Copilot of</span> <span className="truncate font-mono">{login}</span>
+      <span>{mixed ? "Claude + Copilot of" : "Copilot of"}</span>{" "}
+      <span className="truncate font-mono">{login}</span>
+    </span>
+  );
+}
+
+/** The providers a run used (8.3) as a quiet fact: nothing for a run that stayed on Claude,
+ * "Copilot of <login>" for one on a person's Copilot, "Claude + Copilot of <login>" for a mix.
+ * An API from before 8.3 sends no `providers`: only the login says. */
+export function ProvidersFact({
+  run,
+}: {
+  run: { copilot_login?: string | null; providers?: readonly string[] };
+}) {
+  const copilot = run.providers ? run.providers.includes("copilot") : !!run.copilot_login;
+  if (!copilot) return null;
+  const mixed = (run.providers ?? []).includes("claude");
+  if (run.copilot_login) return <CopilotFact login={run.copilot_login} mixed={mixed} />;
+  return (
+    <span data-testid="copilot-login" className="inline-flex items-center gap-1.5">
+      <FolderGit2Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      {mixed ? "Claude + Copilot" : "Copilot"}
     </span>
   );
 }

@@ -106,6 +106,18 @@ describe("an agent's parameters", () => {
     ]);
   });
 
+  test("Copilot is offered by the manifest, so a step can be pinned to it", () => {
+    const { onEdit } = panel(AGENT);
+    const options = Array.from(screen.getByLabelText(/^Provider/).querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    expect(options).toContain("copilot");
+    fireEvent.change(screen.getByLabelText(/^Provider/), { target: { value: "1" } });
+    expect(lastOps(onEdit)).toEqual([
+      { op: "setParam", node_id: "writer", path: "provider", value: "copilot" },
+    ]);
+  });
+
   test("tools are ticked from the tools an agent may be granted", () => {
     const { onEdit } = panel(AGENT);
     expect(screen.queryByLabelText("github.openPR")).toBeNull();
@@ -212,6 +224,40 @@ test("the workflow's budget is set and cleared", () => {
   rerender(<WorkflowPanel spec={{ ...spec, budget_usd: 2.5 } as WorkflowSpec} onEdit={onEdit} />);
   fireEvent.change(screen.getByLabelText(/^Budget/), { target: { value: "" } });
   expect(lastOps(onEdit)).toEqual([{ op: "setParam", path: "budget_usd", value: null }]);
+});
+
+test("the workflow's provider is chosen from the manifest's providers, and unset again", () => {
+  const spec = { spec_version: "0", id: "flow", name: "Flow", root: AGENT } as WorkflowSpec;
+  const onEdit = vi.fn<(edit: Edit) => void>();
+  const providers = ["claude", "copilot"];
+  const { rerender } = render(<WorkflowPanel spec={spec} providers={providers} onEdit={onEdit} />);
+  const provider = screen.getByLabelText(/^Provider/);
+  expect(Array.from(provider.querySelectorAll("option")).map((o) => o.textContent)).toEqual([
+    "Workspace default",
+    "claude",
+    "copilot",
+  ]);
+  fireEvent.change(provider, { target: { value: "1" } });
+  expect(lastOps(onEdit)).toEqual([{ op: "setParam", path: "provider", value: "copilot" }]);
+
+  rerender(
+    <WorkflowPanel
+      spec={{ ...spec, provider: "copilot" } as WorkflowSpec}
+      providers={providers}
+      onEdit={onEdit}
+    />,
+  );
+  expect(
+    (screen.getByLabelText(/^Provider/) as HTMLSelectElement).selectedOptions[0].textContent,
+  ).toBe("copilot");
+  fireEvent.change(screen.getByLabelText(/^Provider/), { target: { value: "" } });
+  expect(lastOps(onEdit)).toEqual([{ op: "setParam", path: "provider", value: null }]);
+});
+
+test("the workflow panel has no provider field until the manifest names providers", () => {
+  const spec = { spec_version: "0", id: "flow", name: "Flow", root: AGENT } as WorkflowSpec;
+  render(<WorkflowPanel spec={spec} onEdit={vi.fn()} />);
+  expect(screen.queryByLabelText(/^Provider/)).toBeNull();
 });
 
 test("the workflow panel sets the run input it asks for", () => {

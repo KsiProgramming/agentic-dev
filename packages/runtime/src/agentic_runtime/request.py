@@ -1,10 +1,13 @@
 """What the engine asks a runtime to run. Independent of the workflow spec models."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
+
+Provider = Literal["claude", "copilot"]
+"""A provider an agent may run on: the values of a spec's `provider` (8.3)."""
 
 
 class AgentRequest(BaseModel):
@@ -22,6 +25,9 @@ class AgentRequest(BaseModel):
     role: NonEmptyStr
     instructions: NonEmptyStr
     input: str = ""
+    provider: Provider = Field(
+        default="claude", description="The runtime that runs the turn (8.3)."
+    )
     model: NonEmptyStr | None = Field(default=None, description="Unset means the provider default.")
     tools: list[str] = Field(default_factory=list[str])
     context: str = Field(default="", description="The run's context from the platform, if any.")

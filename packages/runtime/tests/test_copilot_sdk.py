@@ -131,3 +131,37 @@ def test_the_connector_never_shows_its_token() -> None:
     assert token not in str(connector)
     with pytest.raises(ValueError, match="token is required"):
         SdkConnector("")
+
+
+def test_usage_carries_the_calls_ai_credits_in_nano_units() -> None:
+    usage = translate(
+        event(
+            "assistant.usage",
+            model="gpt-5",
+            input_tokens=10,
+            output_tokens=5,
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+            copilot_usage=SimpleNamespace(total_nano_aiu=1_260_000_000),
+        )
+    )
+
+    assert isinstance(usage, UsageReport)
+    assert usage.nano_aiu == 1_260_000_000
+
+
+def test_usage_without_copilot_usage_has_no_credits() -> None:
+    counts = {"model": "m", "input_tokens": 1, "output_tokens": 1}
+    counts |= {"cache_read_tokens": 0, "cache_write_tokens": 0}
+    bare = translate(event("assistant.usage", **counts))
+    empty = translate(
+        event(
+            "assistant.usage",
+            **counts,
+            copilot_usage=SimpleNamespace(total_nano_aiu=None),
+        )
+    )
+
+    assert isinstance(bare, UsageReport)
+    assert isinstance(empty, UsageReport)
+    assert (bare.nano_aiu, empty.nano_aiu) == (None, None)

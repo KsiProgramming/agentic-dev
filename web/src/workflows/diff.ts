@@ -29,7 +29,7 @@ export interface SpecDiff {
 /** The fields of a node that hold nodes: what changes there is a node added, removed or moved,
  * never a parameter. A route's `then` is in its router's `routes`. */
 const SLOTS = new Set(["steps", "branches", "body", "default"]);
-const DOCUMENT_FIELDS = ["name", "description", "budget_usd"] as const;
+const DOCUMENT_FIELDS = ["name", "description", "budget_usd", "provider"] as const;
 
 /** What changed from `before` to `after`, node by node. Nodes are matched by id, which graph
  * operations never change (5.1). */

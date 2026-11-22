@@ -16,6 +16,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 PRICES_AS_OF = date(2026, 10, 23)
 
+DEFAULT_CREDIT_USD = Decimal("0.01")
+"""What one GitHub Copilot AI credit is worth: GitHub bills 1 AI credit = $0.01 (8.3). A workspace
+may set its own (`workspaces.copilot_credit_usd`), so a price change by GitHub is an edit."""
+
+NANO_AIU = Decimal(1_000_000_000)
+"""The Copilot SDK reports AI credits in nano units (`total_nano_aiu`): 1 credit = 10⁹."""
+
 _MILLION = Decimal(1_000_000)
 # Estimates are kept to 1e-8 USD: a Haiku cache read of a few tokens is still non-zero.
 _QUANTUM = Decimal("0.00000001")
@@ -117,6 +124,16 @@ class PriceTable(Mapping[str, ModelPricing]):
             + tokens.cache_write_1h * price.cache_write_1h
         )
         return (total / _MILLION).quantize(_QUANTUM)
+
+
+def credits_of(nano_aiu: int) -> float:
+    """AI credits from the SDK's nano units: 1,260,000,000 is 1.26 credits."""
+    return float(Decimal(nano_aiu) / NANO_AIU)
+
+
+def credits_usd(nano_aiu: int, price_per_credit: Decimal = DEFAULT_CREDIT_USD) -> Decimal:
+    """The list-price USD value of `nano_aiu` AI credits at `price_per_credit`."""
+    return (Decimal(nano_aiu) / NANO_AIU * price_per_credit).quantize(_QUANTUM)
 
 
 _OPUS_4X = _price("5", "25", "6.25", "10", "0.50")

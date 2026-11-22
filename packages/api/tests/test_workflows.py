@@ -512,13 +512,27 @@ async def test_a_blank_workflow_keeps_its_id_description_and_provider(
     assert response.status_code == 201, response.text
     spec = response.json()["spec"]
     assert (spec["id"], spec["description"]) == ("my-notes", "Notes.")
-    assert spec["root"]["steps"][0]["provider"] == "claude"
+    assert spec["provider"] == "claude"
+    assert "provider" not in spec["root"]["steps"][0]  # the agent follows the workflow's
+
+
+async def test_a_blank_workflow_on_copilot_has_copilot_as_its_provider(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    blank = {"name": "Notes", "provider": "copilot"}
+
+    response = await client.post(
+        "/workflows", params={"workspace_id": str(workspace)}, json={"blank": blank}
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["spec"]["provider"] == "copilot"
 
 
 @pytest.mark.parametrize(
     ("body", "field"),
     [
-        ({"blank": {"name": "Notes", "provider": "copilot"}}, "provider"),
+        ({"blank": {"name": "Notes", "provider": "gemini"}}, "provider"),
         ({"blank": {"name": "Notes", "id": "Not An Id"}}, "id"),
         ({"blank": {"name": ""}}, "name"),
     ],

@@ -79,7 +79,12 @@ async def test_the_log_lists_runs_and_settings_changes_newest_first(
     created = page["items"][2]
     assert created["actor"] == {"type": "user", "id": None}
     assert created["run"] == {"template_id": None, "repo_url": None, "status": "queued"}
-    assert created["details"] == {"template_id": None, "repo_url": None, "budget_usd": None}
+    assert created["details"] == {
+        "template_id": None,
+        "repo_url": None,
+        "budget_usd": None,
+        "providers": ["claude"],
+    }
     assert page["items"][0]["details"]["after"]["agents_alive"] == 4
 
 

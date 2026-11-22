@@ -5,6 +5,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import {
   costCaveat,
+  creditsNote,
   formatCost,
   formatPrice,
   formatUsd,
@@ -44,12 +45,14 @@ export function Money(props: MoneyProps & SpanProps) {
   }
   const { usage, budget = null, focusable = true, className, ...rest } = props;
   const caveat = costCaveat(usage);
+  const credits = creditsNote(usage);
   return (
     <ValueTooltip
       content={
         <>
           <p>{usageDetails(usage)}</p>
           {caveat ? <p>{caveat}</p> : null}
+          {credits ? <p>{credits}</p> : null}
           {budget !== null ? (
             <p>The run stops once its cost reaches its {formatUsd(budget)} budget.</p>
           ) : null}

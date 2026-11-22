@@ -226,6 +226,14 @@ describe("describe", () => {
       "added a; changed b, c",
     ],
     [
+      "provider settings",
+      {
+        action: "workspace.settings_changed",
+        details: { changed: ["default_provider", "copilot_credit_usd"] },
+      },
+      "Changed default provider, AI credit price",
+    ],
+    [
       "workflow created",
       { action: "workflow.created", details: { workflow_id: "docs", version: 1 } },
       "Created docs v1",
@@ -335,5 +343,6 @@ test("each category has its actions", () => {
     "jira.webhook_failed",
     "policy.updated",
     "pricing.updated",
+    "workspace.settings_changed",
   ]);
 });

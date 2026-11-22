@@ -5,6 +5,8 @@ import { CoinsIcon } from "lucide-react";
 import { Money, StatStrip, StatTile, TokenCount } from "@/components/display";
 import { EmptyState } from "@/components/states";
 
+import { formatCredits } from "../cost";
+import { ProviderLabel } from "../provider-label";
 import { stepsUsage, stepUsage, type Step } from "../timeline";
 import type { StepRow } from "./step-entries";
 
@@ -34,7 +36,13 @@ export function StepUsage({
   ).filter((c) => c.usage !== null);
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <StatStrip columns={4}>
+      {step.provider ? (
+        <p className="flex items-center gap-1.5 text-meta text-foreground-secondary">
+          <span>Ran on</span>
+          <ProviderLabel provider={step.provider} model={step.model} />
+        </p>
+      ) : null}
+      <StatStrip columns={usage.aiCredits > 0 ? 5 : 4}>
         <StatTile label="Input" value={<TokenCount value={usage.inputTokens} usage={usage} />} />
         <StatTile label="Output" value={<TokenCount value={usage.outputTokens} usage={usage} />} />
         <StatTile
@@ -49,6 +57,13 @@ export function StepUsage({
             </>
           }
         />
+        {usage.aiCredits > 0 ? (
+          <StatTile
+            label="AI credits"
+            value={<span data-testid="step-credits">{formatCredits(usage.aiCredits)}</span>}
+            secondary="Copilot"
+          />
+        ) : null}
         <StatTile label="Cost" value={<Money data-testid="step-cost" usage={usage} />} />
       </StatStrip>
       {parts.length > 0 ? (

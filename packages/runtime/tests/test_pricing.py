@@ -3,7 +3,13 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from agentic_runtime.pricing import DEFAULT_PRICES, CallTokens, ModelPrice
+from agentic_runtime.pricing import (
+    DEFAULT_PRICES,
+    CallTokens,
+    ModelPrice,
+    credits_of,
+    credits_usd,
+)
 
 
 def price(**overrides: str) -> ModelPrice:
@@ -64,3 +70,10 @@ def test_many_small_calls_add_up_without_drift() -> None:
 def test_prices_cannot_be_negative() -> None:
     with pytest.raises(ValidationError):
         price(output="-1")
+
+
+def test_nano_credits_convert_to_credits_and_usd() -> None:
+    assert credits_of(1_260_000_000) == pytest.approx(1.26)
+    assert credits_usd(1_260_000_000) == Decimal("0.0126")
+    assert credits_usd(1_260_000_000, Decimal("0.02")) == Decimal("0.0252")
+    assert credits_usd(0) == Decimal(0)

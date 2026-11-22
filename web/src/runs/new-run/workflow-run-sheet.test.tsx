@@ -89,6 +89,7 @@ test("starting runs the stored version with its input, then opens the run", asyn
     workspace_id: DEFAULT_WORKSPACE_ID,
     trigger: "manual",
     budget_usd: null,
+    provider: "claude",
   });
 });
 

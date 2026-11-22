@@ -14,8 +14,12 @@ What differs from the Claude adapter, and why:
   never used.
 - The token belongs to the connector. It never reaches a request, an event or a log line: error
   text and tool output are scrubbed of every secret the runtime is given (`secrets`).
-- A stream that ends with no `usage` event gets one with zero tokens (the contract needs one);
-  Copilot has no price table here, so `estimated_usd` stays `None`.
+- A stream that ends with no `usage` event gets one with zero tokens (the contract needs one).
+- Cost: each usage event carries the call's AI credits (`ai_credits`) and `estimated_usd`, the
+  credits at the workspace's price per credit ($0.01 by default: GitHub bills 1 credit = $0.01).
+  It is a list-price value, as Claude's is: a plan with included credits pays nothing extra for
+  it. A call that reports no credits stays unpriced (`estimated_usd` is `None`), which the budget
+  meter already treats as a stop.
 """
 
 import asyncio
@@ -24,6 +28,7 @@ import logging
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Protocol
 
 from pydantic import JsonValue
@@ -42,6 +47,7 @@ from agentic_runtime.events import (
     Usage,
     is_terminal,
 )
+from agentic_runtime.pricing import DEFAULT_CREDIT_USD, credits_of, credits_usd
 from agentic_runtime.protocol import AgentRun
 from agentic_runtime.request import AgentRequest
 from agentic_runtime.tools import ToolDefinition, ToolExecutor
@@ -83,6 +89,8 @@ class UsageReport:
     output_tokens: int
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    nano_aiu: int | None = None
+    """AI credits in nano units (`copilot_usage.total_nano_aiu`); none when the SDK gave none."""
 
 
 @dataclass(frozen=True)
@@ -232,8 +240,10 @@ class CopilotRun:
         model: str,
         tools: ToolExecutor | None,
         secrets: Sequence[str],
+        credit_usd: Decimal = DEFAULT_CREDIT_USD,
     ) -> None:
         self._connector = connector
+        self._credit_usd = credit_usd
         self._request = request
         self._model = request.model or model
         self._tools = tools
@@ -347,6 +357,12 @@ class CopilotRun:
                         output_tokens=u.output_tokens,
                         cache_read_tokens=u.cache_read_tokens,
                         cache_write_tokens=u.cache_write_tokens,
+                        ai_credits=credits_of(u.nano_aiu) if u.nano_aiu is not None else None,
+                        estimated_usd=(
+                            float(credits_usd(u.nano_aiu, self._credit_usd))
+                            if u.nano_aiu is not None
+                            else None
+                        ),
                     )
                 ]
             case SessionError() as e:
@@ -443,7 +459,8 @@ class CopilotRuntime:
 
     `connector` opens sessions on one person's Copilot (it holds their token). `secrets` are the
     strings that must never appear in an event, normally just that token. `tools` runs the tools a
-    request names; without it, a request that names tools fails.
+    request names; without it, a request that names tools fails. A call's `estimated_usd` is its
+    AI credits at `credit_usd` each (8.3).
     """
 
     def __init__(
@@ -453,13 +470,20 @@ class CopilotRuntime:
         model: str = DEFAULT_MODEL,
         tools: ToolExecutor | None = None,
         secrets: Sequence[str] = (),
+        credit_usd: Decimal = DEFAULT_CREDIT_USD,
     ) -> None:
         self._connector = connector
+        self._credit_usd = credit_usd
         self._model = model
         self._tools = tools
         self._secrets = tuple(secrets)
 
     def start(self, request: AgentRequest) -> AgentRun:
         return CopilotRun(
-            self._connector, request, model=self._model, tools=self._tools, secrets=self._secrets
+            self._connector,
+            request,
+            model=self._model,
+            tools=self._tools,
+            secrets=self._secrets,
+            credit_usd=self._credit_usd,
         )

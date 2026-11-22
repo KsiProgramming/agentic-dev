@@ -86,7 +86,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -571,7 +574,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -894,7 +900,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -1148,7 +1157,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -1879,6 +1891,23 @@
       "default": null,
       "description": "The workflow's typed output (6.6): a subflow that calls it checks the called workflow's output against this, and the step after it reads it as typed.",
       "title": "Output Schema"
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "enum": [
+            "claude",
+            "copilot"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The provider of every agent that names none of its own; unset means the workspace default (8.3).",
+      "title": "Provider"
     },
     "root": {
       "discriminator": {

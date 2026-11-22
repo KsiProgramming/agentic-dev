@@ -51,6 +51,7 @@ import { ApprovalDock, DOCK_ID } from "./approval-dock";
 import { QueuedState } from "./queued-state";
 import { canRerun, RerunButton } from "../rerun";
 import { CancelRunButton } from "./cancel-run-button";
+import { ProviderFallbackNote } from "./provider-fallback-note";
 import { RunBanner, type BannerState } from "./run-banner";
 import { RunSandboxLine } from "./run-sandbox-line";
 import { RunHeader, type HeaderFacts } from "./run-header";
@@ -417,6 +418,10 @@ function Console({
             showStep(true);
           }}
         />
+      ) : null}
+
+      {timeline.providerFallback ? (
+        <ProviderFallbackNote nodes={timeline.providerFallback} />
       ) : null}
 
       {/* An API from before 12.3 sends no `sandbox`. */}

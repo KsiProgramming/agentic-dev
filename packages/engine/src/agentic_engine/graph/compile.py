@@ -169,6 +169,7 @@ from agentic_engine.integrate import (
 )
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
+from agentic_engine.providers import ResolvedNode, ResolvedProviders
 from agentic_engine.spec import (
     BODY_FROM_TOOLS,
     COMMIT_TOOLS,
@@ -246,10 +247,23 @@ class _Limits:
     spec: SpecFile | None = None
     loops: dict[str, str] = field(default_factory=dict[str, str])
     """Each router in a loop's body → the innermost loop around it (7.9: `iteration` in `when`)."""
+    providers: ResolvedProviders | None = None
+    """The provider and model of each agent-like node, as the run stored them (8.3); none means
+    each node's own, on Claude when it names none."""
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
         self.alive = asyncio.Semaphore(self.policy.agents_alive)
+
+    def provider_payload(self, node_id: str) -> dict[str, JsonValue]:
+        """The `provider` and `model` an agent-like node's `node_started` carries (8.3); nothing
+        when the run has no stored resolution."""
+        found = self.resolved(node_id)
+        return {} if found is None else {"provider": found.provider, "model": found.model}
+
+    def resolved(self, node_id: str) -> ResolvedNode | None:
+        """The provider and model stored for the agent-like node `node_id`, if the run has any."""
+        return self.providers.of(node_id) if self.providers is not None else None
 
 
 def step_nodes(root: Node) -> list[StepNode]:
@@ -412,17 +426,19 @@ def compile_workflow(
     integrator: BranchIntegrator | None = None,
     context: RunContext | None = None,
     saver: BranchSaver | None = None,
+    providers: ResolvedProviders | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
     commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
     one), orchestrators merge their tasks' branches through `integrator` (6.3; none are merged
     without one), every agent is told `context` about the run (the repository it works on), and
     all write to `log`, if given. Each step that may commit saves the run's branches through
-    `saver` before it is checkpointed (12.2; nothing is saved without one). With `checkpointer`,
-    the state is saved after each node, in the run's thread; a spec with a gate needs one, since
-    a paused run continues from it. The run's agents are held to `policy`'s `agents_alive` and
-    `agents_spawned`, and their usage to `budget`; the spec itself is checked against it before
-    the run (`policy_errors`)."""
+    `saver` before it is checkpointed (12.2; nothing is saved without one). Each agent runs on
+    the provider and model `providers` stored for its node (8.3; its own when none). With
+    `checkpointer`, the state is saved after each node, in the run's thread; a spec with a gate
+    needs one, since a paused run continues from it. The run's agents are held to `policy`'s
+    `agents_alive` and `agents_spawned`, and their usage to `budget`; the spec itself is checked
+    against it before the run (`policy_errors`)."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
     steps = step_nodes(spec.root)
@@ -445,6 +461,7 @@ def compile_workflow(
         context.spec if context is not None else None,
     )
     limits.loops = _enclosing_loops(spec.root)
+    limits.providers = providers
 
     loops: list[LoopNode] = []  # the loops `add` is inside
     top = top_step_of(spec)  # node id → the top-level step it runs in, for saved branches (12.4)
@@ -813,7 +830,13 @@ async def _run_step(
             case AgentNode():
                 async with limits.alive:
                     return await run_agent_node(
-                        node, runtime, input, on_event, route_as, limits.context
+                        node,
+                        runtime,
+                        input,
+                        on_event,
+                        route_as,
+                        limits.context,
+                        limits.resolved(node.id),
                     )
 
     reads = [] if isinstance(node, GateNode) else node.reads
@@ -825,6 +848,8 @@ async def _run_step(
                 {"name": name, "version": refs[name].version} for name in reads if name in refs
             ]
             started = {"reads": read}
+        if isinstance(node, AgentNode) and (provider := limits.provider_payload(node.id)):
+            started = {**(started or {}), **provider}
         await log.emit(NODE_STARTED, node_id=node.id, payload=started, item=item, branch=branch)
     if reads:
         try:
@@ -1916,7 +1941,10 @@ async def _choose(
     whose usage is the classifier's; or logs `node_failed` and returns the failure."""
     log, tag = scope.log, scope.tag()
     mode = "classifier" if router.classifier is not None else "rule"
-    await log.emit(NODE_STARTED, node_id=router.id, payload=_router_started(router), **tag)
+    started = _router_started(router)
+    if router.classifier is not None:
+        started = {**started, **scope.limits.provider_payload(router.id)}
+    await log.emit(NODE_STARTED, node_id=router.id, payload=started, **tag)
     usage: Usage | None = None
     port: PortFailure | None = None
     route: str | None = None
@@ -2198,7 +2226,12 @@ async def _classify(
         try:
             async with limits.alive:
                 result = await run_agent_node(
-                    agent, scope.runtime, input, buffer.emit, context=limits.context
+                    agent,
+                    scope.runtime,
+                    input,
+                    buffer.emit,
+                    context=limits.context,
+                    resolved=limits.resolved(router.id),
                 )
         finally:
             await buffer.close()
@@ -2287,7 +2320,12 @@ async def _plan(
         try:
             async with limits.alive:
                 result = await run_agent_node(
-                    agent, scope.runtime, input, buffer.emit, context=limits.context
+                    agent,
+                    scope.runtime,
+                    input,
+                    buffer.emit,
+                    context=limits.context,
+                    resolved=limits.resolved(orchestrator.id),
                 )
         finally:
             await buffer.close()
@@ -2470,7 +2508,10 @@ def _orchestrator_entry(
     count too, all at once (the tasks run in one LangGraph step, so they cannot count
     themselves): over `agents_spawned`, the orchestrator fails without running a task. A plan
     that does not match its schema, or names a task twice, fails it."""
-    started: dict[str, JsonValue] = {"max_workers": at.node.max_workers}
+    started: dict[str, JsonValue] = {
+        "max_workers": at.node.max_workers,
+        **limits.provider_payload(at.id),
+    }
     scope = _Scope(runtime, None, log, limits)
     node_id = at.id
 

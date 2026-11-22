@@ -120,6 +120,7 @@ import {
   ManifestIcon,
   paletteGroups,
   paletteKey,
+  agentProviders,
   useNodeTypes,
   type NodeManifest,
 } from "./node-types";
@@ -624,6 +625,7 @@ function Editor({
           spec={spec}
           changes={diff && compare !== null ? { changes: diff.document, compared: compare } : null}
           readOnly={readOnly}
+          providers={agentProviders(manifests)}
           onEdit={apply}
           onClose={onClose}
         />
@@ -880,6 +882,7 @@ function Editor({
           name: spec.name,
           requires: workflowRequires(version.spec as unknown as WorkflowSpec),
           input: (version.spec as unknown as WorkflowSpec).input ?? null,
+          spec: version.spec as unknown as WorkflowSpec,
         }}
         workspaceId={workspaceId}
       />

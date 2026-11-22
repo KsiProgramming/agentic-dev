@@ -7,6 +7,6 @@
     "id": "writer",
     "role": "Technical writer",
     "instructions": "Write docs.",
-    "provider": "copilot"
+    "provider": "gemini"
   }
 }

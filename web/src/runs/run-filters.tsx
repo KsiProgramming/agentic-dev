@@ -9,7 +9,13 @@ import { Button } from "@/components/ui/button";
 import { useTemplates } from "@/api/queries";
 
 import { isFiltered, TEMPLATE_OPTIONS, type RunsQuery } from "./filters";
+import { PROVIDER_NAMES, type ProviderName } from "./provider-label";
 import { repoLabel } from "./summaries";
+
+const PROVIDER_CHOICES = (Object.keys(PROVIDER_NAMES) as ProviderName[]).map((id) => ({
+  id,
+  label: PROVIDER_NAMES[id],
+}));
 
 /** The repo URLs runs can be filtered by: the repos the GitHub App reaches, or `null` when
  * GitHub is not connected (the filter is then hidden). */
@@ -26,7 +32,7 @@ function useRepoOptions(workspaceId: string, baseUrl: string) {
   });
 }
 
-/** Narrow the runs list by template and repo (the view tabs pick the status): a chip per filter
+/** Narrow the runs list by template, repo and provider (the view tabs pick the status): a chip per filter
  * that is on, then "+ Filter" (design-language.md → Components). The filters live in the URL. */
 export function RunFiltersBar({
   filters,
@@ -68,6 +74,21 @@ export function RunFiltersBar({
       ),
     },
   ];
+  options.push({
+    id: "provider",
+    label: "Provider",
+    control: (done) => (
+      <FilterChoices
+        label="Provider"
+        choices={PROVIDER_CHOICES}
+        value={filters.provider}
+        onPick={(provider) => {
+          onChange({ ...filters, provider: provider as ProviderName });
+          done();
+        }}
+      />
+    ),
+  });
   if (repoOptions) {
     options.push({
       id: "repo",
@@ -104,13 +125,20 @@ export function RunFiltersBar({
           onRemove={() => onChange({ ...filters, repo: null })}
         />
       ) : null}
+      {filters.provider ? (
+        <FilterChip
+          label="Provider"
+          value={PROVIDER_NAMES[filters.provider]}
+          onRemove={() => onChange({ ...filters, provider: null })}
+        />
+      ) : null}
       <AddFilter options={options} />
       {isFiltered(filters) ? (
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          onClick={() => onChange({ ...filters, template: null, repo: null })}
+          onClick={() => onChange({ ...filters, template: null, repo: null, provider: null })}
         >
           Clear filters
         </Button>
