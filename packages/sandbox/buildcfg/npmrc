@@ -1,0 +1,5 @@
+# The platform's npm config (13.2): the registry only. Repo .npmrc files are never read.
+registry=https://registry.npmjs.org/
+audit=false
+fund=false
+update-notifier=false

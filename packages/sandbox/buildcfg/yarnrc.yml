@@ -1,0 +1,5 @@
+# The platform's yarn berry config (13.2): the registry only; set again through YARN_*
+# variables, which win over a repo's .yarnrc.yml.
+npmRegistryServer: "https://registry.npmjs.org"
+enableTelemetry: false
+enableImmutableInstalls: true

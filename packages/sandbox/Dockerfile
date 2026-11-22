@@ -1,8 +1,9 @@
 # The sandbox image runs' repo tools execute in: alpine with git, so writer nodes can commit on
 # their own worktree, the scanners of the `scan` tools (4.4) and the .NET SDK `scan.lint` builds
-# C# projects with (4.8). Containers from it run as uid 1000 with no network, a read-only root and
-# no capabilities (`agentic_sandbox.docker_backend`); only a .NET restore job reaches NuGet,
-# through the egress proxy (`packages/egress-proxy`).
+# C# projects with (4.8), and the Node and Python toolchains `build.restore` restores and builds
+# with (13.2). Containers from it run as uid 1000 with no network, a read-only root and no
+# capabilities (`agentic_sandbox.docker_backend`); only a restore job reaches one package registry,
+# through that registry's egress proxy (`packages/egress-proxy`).
 # Build: docker build -t agentic-dev/sandbox:dev packages/sandbox
 
 # Scanners: pinned releases, each checked against its sha256 (from the release's asset digest).
@@ -64,17 +65,55 @@ RUN set -eu; \
 # when a restore job runs.
 FROM mcr.microsoft.com/dotnet/sdk:10.0.403-alpine3.24@sha256:cc02b814237a76c4735fb6eeee87181597b5e56f2ce458a435e527674d91f4d7 AS dotnet
 
+# Node 22 LTS with npm and yarn classic (13.2): Docker's official image for the same Alpine
+# release, pinned by digest. pnpm and yarn berry come from the next stage; corepack is not used.
+FROM node:22.16.0-alpine3.20@sha256:2289fb1fba0f4633b08ec47b94a89c7e20b829fc5679f9b7b298eaa2f1ed8b7e AS node
+
+# uv (13.2): Astral's image, pinned by its index digest (amd64 and arm64).
+FROM ghcr.io/astral-sh/uv:0.9.30@sha256:538e0b39736e7feae937a65983e49d2ab75e1559d35041f9878b7b7e51de91e4 AS uv
+
+# pnpm and yarn berry (13.2): the registry's tarballs, each checked against the sha512 the registry
+# publishes. Both are one bundled file with no dependencies.
+FROM node AS node-managers
+ARG PNPM_VERSION=10.34.9
+ARG PNPM_SHA512=9JtajqD97bRLs8DB1ldQkqU8KVDZW3rRXfEfF5dId6LeOgHAfpNOmyjOcW5RwJqUlixzBtCb4uHksYqMh2L9Mg==
+ARG YARN_BERRY_VERSION=4.19.0
+ARG YARN_BERRY_SHA512=jjv4NIPlz974CUxGIdQDuK7mRb1f26BFIdkCkuFcM/64LT9tTRVj7/UqEv9bcB8DKFvtUw680CVo71bEBsHjuA==
+RUN set -eu; \
+    apk add --no-cache curl openssl; \
+    get() { \
+      curl -fsSL --retry 3 -o "$1.tgz" "$2"; \
+      test "$(openssl dgst -sha512 -binary "$1.tgz" | openssl base64 -A)" = "$3"; \
+      mkdir "$1" && tar -xzf "$1.tgz" --strip-components=1 -C "$1"; \
+    }; \
+    get /opt/pnpm "https://registry.npmjs.org/pnpm/-/pnpm-${PNPM_VERSION}.tgz" "$PNPM_SHA512"; \
+    get /opt/yarn-berry "https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-${YARN_BERRY_VERSION}.tgz" "$YARN_BERRY_SHA512"
+
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
-# git for the repo tools; the rest is what the .NET SDK needs on alpine.
+# git for the repo tools; the rest is what the .NET SDK needs on alpine, and python3 (3.12 on this
+# release) for uv to build a venv on.
 RUN apk add --no-cache git ca-certificates icu-libs krb5-libs libgcc libintl libssl3 libstdc++ zlib \
+        python3 \
     && adduser -D -u 1000 -h /tmp sandbox
 
 COPY --from=dotnet /usr/share/dotnet/ /usr/share/dotnet/
 RUN ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=node /opt/yarn-v1.22.22 /opt/yarn-classic
+COPY --from=node-managers /opt/pnpm /opt/pnpm
+COPY --from=node-managers /opt/yarn-berry /opt/yarn-berry
+COPY --from=uv /uv /usr/local/bin/uv
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s /opt/yarn-classic/bin/yarn.js /usr/local/bin/yarn \
+    && ln -s /opt/yarn-berry/bin/yarn.js /usr/local/bin/yarn4 \
+    && ln -s /opt/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
 COPY --from=scanners /dl/bin/ /usr/local/bin/
 COPY --from=osv-db /osv/ /opt/osv/
 COPY scan/ /opt/scan/
+COPY buildcfg/ /opt/build/
 
 # No system or user git config is read: every git call sets what it needs on its command line.
 # Scanners keep no cache (the root is read-only; /tmp is small) and read the baked OSV database.
@@ -89,6 +128,12 @@ ENV GIT_CONFIG_NOSYSTEM=1 \
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
     DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=1 \
     DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
-    NUGET_CERT_REVOCATION_MODE=offline
+    NUGET_CERT_REVOCATION_MODE=offline \
+    COREPACK_ENABLE_NETWORK=0 \
+    COREPACK_ENABLE_AUTO_PIN=0 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON_PREFERENCE=only-system \
+    UV_NO_PROGRESS=1 \
+    UV_LINK_MODE=copy
 
 USER 1000:1000
