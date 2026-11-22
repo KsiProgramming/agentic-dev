@@ -9,8 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from agentic_api.runs.models import TemplateRun
 from agentic_api.workspaces.models import RunLimits, budget_field
-from agentic_engine.nodes import Provider, blank_spec
+from agentic_engine.nodes import blank_spec
 from agentic_engine.spec import MAX_OPS, GraphOp, NodeId, OpErrorCode, ValidationIssue
+from agentic_runtime import Provider
 
 
 class ValidateWorkflowRequest(BaseModel):
@@ -54,7 +55,8 @@ class BlankWorkflow(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     provider: Provider | None = Field(
         default=None,
-        description="The provider the starter agent runs on. Unset means the workspace default.",
+        description="The workflow's own `provider` (8.3): every agent that names none runs on "
+        "it, the starter agent and those added later. Unset means the workspace default.",
     )
 
 

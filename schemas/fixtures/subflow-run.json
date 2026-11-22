@@ -114,6 +114,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "premium_requests": null,
+        "ai_credits": null,
         "estimated_usd": 0.0001
       },
       "created_at": "2026-11-09T12:00:04Z"
@@ -182,6 +183,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "premium_requests": null,
+        "ai_credits": null,
         "estimated_usd": 0.0001
       },
       "created_at": "2026-11-09T12:00:10Z"
@@ -236,6 +238,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "premium_requests": null,
+        "ai_credits": null,
         "estimated_usd": 0.0001
       },
       "created_at": "2026-11-09T12:00:15Z"
@@ -298,6 +301,7 @@
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "premium_requests": null,
+        "ai_credits": null,
         "estimated_usd": 0.0001
       },
       "created_at": "2026-11-09T12:00:21Z"

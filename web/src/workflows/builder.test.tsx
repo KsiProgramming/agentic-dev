@@ -602,6 +602,35 @@ test("an edit that would connect ports that do not fit is not offered, and says 
   expect(cards()).toEqual(["a", "b", "c"]);
 });
 
+test("a Copilot step with no connection shows its issue on its card, like any other", async () => {
+  show({
+    [VALIDATE]: () =>
+      json(200, {
+        valid: false,
+        issues: [
+          {
+            code: "copilot_connection_required",
+            path: "root.steps[1]",
+            node_id: "c",
+            message: "node 'c' runs on Copilot, which needs a personal GitHub connection",
+          },
+        ],
+        policy: {},
+      }),
+  });
+  await screen.findByRole("heading", { name: "Flow" });
+
+  menu("c");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+
+  const card = await waitFor(() => {
+    const found = screen.getAllByTestId("builder-node").find((c) => c.dataset.node === "c")!;
+    expect(within(found).getByTestId("node-issue")).toBeDefined();
+    return found;
+  });
+  expect(within(card).getByTestId("node-issue").textContent).toContain("runs on Copilot");
+});
+
 test("live issues show on their node's card, in the count and in the list", async () => {
   const fetch = show({
     [VALIDATE]: () =>

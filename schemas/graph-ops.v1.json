@@ -194,7 +194,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -851,7 +854,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -1174,7 +1180,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {
@@ -1450,7 +1459,10 @@
         "provider": {
           "anyOf": [
             {
-              "const": "claude",
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string"
             },
             {

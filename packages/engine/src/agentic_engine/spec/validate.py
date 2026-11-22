@@ -5,7 +5,7 @@ Architect use it too, so they never disagree with what `POST /runs` accepts.
 """
 
 from collections.abc import Callable, Collection, Mapping, Sequence
-from typing import cast
+from typing import cast, get_args
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from pydantic_core import ErrorDetails
@@ -30,7 +30,9 @@ from agentic_engine.spec.models import (
     structure_issues,
     tool_issues,
 )
+from agentic_engine.spec.providers import provider_gaps, resolve_root
 from agentic_engine.spec.subflows import Resolve, expand_root, no_subflows, on_subflows
+from agentic_runtime.request import Provider
 
 _NODE: TypeAdapter[Node] = TypeAdapter(Node)
 
@@ -44,6 +46,8 @@ def validate_workflow(
     known_tools: Collection[str] = PLATFORM_TOOLS,
     resolve: Resolve = no_subflows,
     drafts: Collection[str] = (),
+    workspace_default: Provider | None = None,
+    has_copilot_connection: bool | None = None,
 ) -> list[ValidationIssue]:
     """Why the decoded JSON document `raw` cannot run under `policy`; empty if it can. Never
     raises for a bad document.
@@ -57,7 +61,11 @@ def validate_workflow(
     checks run on the expanded tree: a call that is unknown or cyclic is an issue on its
     subflow, and so is anything wrong inside the workflow it calls (`on_subflows`); a call to a
     version in `drafts` (a composite's unpublished version, 6.6) is `subflow_unpublished`. The
-    document's own `input_schema` and `output_schema` must be port schemas (`invalid_schema`)."""
+    document's own `input_schema` and `output_schema` must be port schemas (`invalid_schema`).
+
+    With `has_copilot_connection` (8.3), a node that resolves to Copilot, under the workflow's
+    `provider` and the workspace's `workspace_default`, is a `copilot_connection_required` issue
+    when it is false; left `None`, the connection is not checked."""
     root = _parse_root(raw)
     if isinstance(root, list):
         return root
@@ -71,7 +79,20 @@ def validate_workflow(
     issues += structure_issues(root, document_input_artifacts(document))
     issues += tool_issues(root, known_tools)
     issues += policy_issues(root, policy)
-    issues += budget_issues(root, policy, priced, default_model)
+    declared = document.get("provider")
+    workflow_provider: Provider | None = (
+        declared if declared in get_args(Provider) else None  # pyright: ignore[reportAssignmentType]
+    )
+    resolved = resolve_root(root, workflow_provider, workspace_default=workspace_default)
+    issues += budget_issues(
+        root,
+        policy,
+        priced,
+        default_model,
+        {node_id: (n.provider, n.model) for node_id, n in resolved.nodes.items()},
+    )
+    if has_copilot_connection is not None:
+        issues += provider_gaps(resolved, has_copilot_connection=has_copilot_connection)
     return on_subflows(root, in_run_order(root, issues))
 
 

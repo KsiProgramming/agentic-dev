@@ -52,6 +52,7 @@ export const EVENT_TYPES = [
   "branch_saved",
   "branch_save_failed",
   "branches_restored",
+  "provider_fallback",
   "text_delta",
   "reasoning_delta",
   "message",

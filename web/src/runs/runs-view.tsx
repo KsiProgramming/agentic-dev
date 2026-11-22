@@ -145,7 +145,7 @@ export function RunsView({
         ) : runs.length === 0 ? (
           <EmptyView
             query={query}
-            onClear={() => setQuery({ ...query, template: null, repo: null })}
+            onClear={() => setQuery({ ...query, template: null, repo: null, provider: null })}
           />
         ) : (
           <>

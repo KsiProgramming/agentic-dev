@@ -26,8 +26,12 @@ import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 import { ConnectionChip } from "@/runs/new-run/connection-chip";
 import { REQUIREMENT_LABEL, useReadiness, type Readiness } from "@/runs/new-run/readiness";
 
+import { useProviderSettings } from "@/settings/provider-settings-api";
+
 import { useCreateBlankWorkflow, type BlankWorkflow } from "./api";
-import { useNodeTypes, type NodeManifest } from "./node-types";
+import { agentProviders, useNodeTypes } from "./node-types";
+
+export { agentProviders };
 
 /** A workflow id: the engine's `NodeId`, as it names branches and URLs. */
 export const WORKFLOW_ID = /^[a-z][a-z0-9_-]{0,62}$/;
@@ -46,20 +50,13 @@ export function slugify(name: string): string {
   return prefixed.slice(0, 63).replace(/-+$/, "");
 }
 
-/** The providers an agent may run on: the agent manifest's `provider` choices (5.8). */
-export function agentProviders(manifests: NodeManifest[]): string[] {
-  const agent = manifests.find((m) => m.kind === "agent");
-  const properties = agent?.parameters.properties;
-  if (!properties || typeof properties !== "object") return [];
-  const provider = (properties as Record<string, { enum?: unknown }>).provider;
-  return Array.isArray(provider?.enum)
-    ? provider.enum.filter((v): v is string => typeof v === "string")
-    : [];
-}
-
-const PROVIDER_ICONS: Record<string, typeof SparklesIcon> = { claude: SparklesIcon };
+const PROVIDER_ICONS: Record<string, typeof SparklesIcon> = {
+  claude: SparklesIcon,
+  copilot: FolderGit2Icon,
+};
 
 function providerLabel(provider: string): string {
+  if (provider === "copilot") return "GitHub Copilot";
   return provider in REQUIREMENT_LABEL ? REQUIREMENT_LABEL[provider as Requirement] : provider;
 }
 
@@ -67,7 +64,7 @@ type FieldName = "name" | "id" | "description" | "provider";
 type Errors = Partial<Record<FieldName, ReactNode>>;
 
 /**
- * Starts a workflow from a blank canvas (5.8): its name, id, description and the provider its
+ * Starts a workflow from a blank canvas (5.8): its name, id, description and the provider
  * first agent runs on, then the builder. A side sheet from 768 px, a full-height bottom sheet
  * below, like the New run sheet.
  */
@@ -123,6 +120,7 @@ function SheetBody({
   const descriptionId = useId();
   const readiness = useReadiness({ workspaceId, baseUrl });
   const nodeTypes = useNodeTypes(baseUrl);
+  const settings = useProviderSettings({ workspaceId, baseUrl });
   const create = useCreateBlankWorkflow(workspaceId, baseUrl);
   const [name, setName] = useState("");
   // The id follows the name until it is edited.
@@ -134,7 +132,10 @@ function SheetBody({
 
   const id = ownId ?? (name.trim() ? slugify(name) : "");
   const providers = nodeTypes.data ? agentProviders(nodeTypes.data) : [];
-  const provider = chosen ?? providers[0] ?? null;
+  // The workspace's default provider is preselected (8.3), else the first the engine has.
+  const preferred = settings.data?.default_provider;
+  const provider =
+    chosen ?? (preferred && providers.includes(preferred) ? preferred : (providers[0] ?? null));
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -293,9 +294,9 @@ function SheetBody({
   );
 }
 
-/** The provider the starter agent runs on: one radio per provider the engine has, with whether
- * it is connected, and a disabled GitHub Copilot row: a run picks Copilot when it starts (8.2), per-node
- * choice comes with 8.3. */
+/** The workflow's provider (8.3): one radio per provider the engine has, from the agent
+ * manifest. Copilot runs on the personal connection of whoever starts a run, so it has no
+ * workspace connection chip. */
 function ProviderPicker({
   providers,
   loading,
@@ -361,16 +362,6 @@ function ProviderPicker({
           );
         })
       )}
-      <label className="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-placeholder">
-        <input type="radio" name={name} value="copilot" disabled className="size-4" />
-        <FolderGit2Icon aria-hidden="true" className="size-4" />
-        <span className="flex flex-1 flex-col">
-          <span className="font-medium">GitHub Copilot</span>
-          <span className="text-caption">
-            Chosen when a run starts, on a connected GitHub account.
-          </span>
-        </span>
-      </label>
       {error ? (
         <FieldMessage id={`${name}-error`}>{error}</FieldMessage>
       ) : state && state !== "ready" && state !== "loading" ? (
@@ -383,7 +374,7 @@ function ProviderPicker({
         </FieldDescription>
       ) : (
         <FieldDescription id={`${name}-help`}>
-          The first agent runs on it. Each step can change it in the builder.
+          Every step runs on it unless it names its own. A run can choose another when it starts.
         </FieldDescription>
       )}
     </fieldset>

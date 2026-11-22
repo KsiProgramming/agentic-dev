@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import type { TokenUsage } from "../cost";
-import { CopilotFact, RunTrigger } from "../trigger";
+import { ProvidersFact, RunTrigger } from "../trigger";
 import { repoLabel } from "../summaries";
 import type { ReceivedRunEvent } from "../types";
 import type { RunDetail } from "../use-run-detail";
@@ -170,9 +170,9 @@ export function RunHeader({
               <RunTrigger run={run} />
             </li>
           ) : null}
-          {run?.copilot_login ? (
+          {run?.copilot_login || run?.providers.includes("copilot") ? (
             <li className="flex min-w-0 items-center gap-1.5">
-              <CopilotFact login={run.copilot_login} />
+              <ProvidersFact run={run} />
             </li>
           ) : null}
           {facts.startedAt ? (

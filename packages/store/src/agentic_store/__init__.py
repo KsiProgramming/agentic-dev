@@ -197,6 +197,12 @@ from agentic_store.pricing import (
     replace_price_overrides,
     workspace_price_table,
 )
+from agentic_store.providers import (
+    ProviderGapError,
+    ProviderSettings,
+    get_provider_settings,
+    put_provider_settings,
+)
 from agentic_store.queue import RUN_QUEUE, dequeue_run, enqueue_run, requeue_stale_runs
 from agentic_store.rerun import (
     RerunFromStep,
@@ -325,6 +331,8 @@ __all__ = [
     "PostgresArtifactStore",
     "PostgresEventSink",
     "PrRun",
+    "ProviderGapError",
+    "ProviderSettings",
     "RerunBranchesError",
     "RerunFrom",
     "RerunFromStep",
@@ -397,6 +405,7 @@ __all__ = [
     "get_jira_trigger",
     "get_jira_webhook",
     "get_policy_overrides",
+    "get_provider_settings",
     "get_run",
     "get_run_artifact",
     "get_run_summary",
@@ -453,6 +462,7 @@ __all__ = [
     "put_github_connection",
     "put_github_user_connection",
     "put_jira_connection",
+    "put_provider_settings",
     "reclaim_expired_run",
     "record_approval",
     "record_base_sha",

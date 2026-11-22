@@ -96,6 +96,11 @@ ARTIFACT_WRITTEN: Final = "artifact_written"
 """A node wrote a run artifact (4.3), before its `node_completed`: `name`, `version`,
 `media_type`, `size` (bytes) and `sha256`. The content is in the run's artifact store."""
 
+PROVIDER_FALLBACK: Final = "provider_fallback"
+"""A run a trigger started (Jira, GitHub) stays on Claude (8.3), once, after `run_started`:
+`nodes` (the ids of the agents that asked for Copilot, from the node, the workflow or the
+workspace and run on Claude instead), `reason` (`triggered`) and `provider` (`claude`)."""
+
 RUN_END_STATUS: Final[dict[str, RunStatus]] = {
     RUN_COMPLETED: "completed",
     RUN_FAILED: "failed",

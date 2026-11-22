@@ -262,6 +262,8 @@ export function focusStep(steps: Step[], nodeId: string): Step | null {
         ...step,
         turns: [],
         usage: null,
+        provider: null,
+        model: null,
         gate: null,
         prUrl: null,
         createdRepo: null,

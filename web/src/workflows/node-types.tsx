@@ -116,3 +116,14 @@ export function paletteGroups(manifests: NodeManifest[]): PaletteGroup[] {
     .map(([label, items]) => ({ label, items }))
     .sort((a, b) => rank(a.items[0].category) - rank(b.items[0].category));
 }
+
+/** The providers an agent may run on: the agent manifest's `provider` choices (5.8). */
+export function agentProviders(manifests: NodeManifest[]): string[] {
+  const agent = manifests.find((m) => m.kind === "agent");
+  const properties = agent?.parameters.properties;
+  if (!properties || typeof properties !== "object") return [];
+  const provider = (properties as Record<string, { enum?: unknown }>).provider;
+  return Array.isArray(provider?.enum)
+    ? provider.enum.filter((v): v is string => typeof v === "string")
+    : [];
+}

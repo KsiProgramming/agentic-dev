@@ -138,7 +138,12 @@ async def test_a_run_is_audited_from_creation_to_its_end(
         None,
         run_id,
     )
-    assert created.details == {"template_id": "generate-docs", "repo_url": None, "budget_usd": None}
+    assert created.details == {
+        "template_id": "generate-docs",
+        "repo_url": None,
+        "budget_usd": None,
+        "providers": ["claude"],
+    }
     assert (ended.action, ended.actor_type, ended.run_id) == ("run.ended", "system", run_id)
     assert ended.details["status"] == "completed"
     assert ended.details["failure_reason"] is None

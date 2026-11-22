@@ -30,6 +30,7 @@ function usage(overrides: Partial<TokenUsage> = {}): TokenUsage {
     estimatedUsd: 0.042,
     costComplete: true,
     unpricedModels: [],
+    aiCredits: 0,
     ...overrides,
   };
 }

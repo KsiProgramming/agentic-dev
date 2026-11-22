@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { LoaderCircleIcon, PlayIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -58,7 +58,10 @@ import {
   toNewRepo,
   type NewRepoValues,
 } from "./new-repo-fields";
-import { ProviderChoice, type RunProvider } from "./provider-choice";
+import type { WorkflowSpec } from "@/runs/graph/spec-graph";
+import { ProviderChoice, copilotOptions, type RunProvider } from "./provider-choice";
+import { defaultChoice, pinnedAway, requiredFor, resolveRun } from "./providers";
+import { useDefaultProvider } from "./use-default-provider";
 import { isReady, useReadiness, type Readiness } from "./readiness";
 import { RepoCombobox } from "./repo-combobox";
 import {
@@ -111,6 +114,8 @@ export interface StoredWorkflowSource {
   name: string;
   requires: Requirement[];
   input?: RunInputSpec | null;
+  /** The version's spec, so the sheet can tell which agents name their own provider (8.3). */
+  spec?: WorkflowSpec | null;
 }
 
 /** What a run is started from: a template with its options, or a stored workflow's version. */
@@ -119,10 +124,16 @@ type RunSource = { template: Template } | { workflow: StoredWorkflowSource };
 const requiresOf = (source: RunSource) =>
   "template" in source ? source.template.requires : source.workflow.requires;
 
-/** A Copilot run uses the starter's own GitHub account, so it needs no Claude key. */
-export function requiredFor(requires: readonly Requirement[], provider: RunProvider) {
-  return provider === "copilot" ? requires.filter((r) => r !== "claude") : requires;
-}
+/** The refusals of `POST /runs` that are about the personal GitHub account (8.2, 8.3). */
+const COPILOT_REFUSALS = [
+  "copilot_connection_required",
+  "copilot_connection_not_found",
+  "copilot_needs_attention",
+  "copilot_not_for_triggers",
+];
+
+const specOf = (source: RunSource) =>
+  "workflow" in source ? (source.workflow.spec ?? null) : null;
 
 /** The problems of a `policy_limits` refusal, or null for any other body. */
 function policyErrors(error: unknown): string[] | null {
@@ -267,9 +278,32 @@ function NewRunForm({
   useEffect(() => {
     onProviderChange(chosenProvider);
   }, [chosenProvider, onProviderChange]);
+  // Where the agents run (8.3): their own providers, then the choice.
+  const spec = specOf(source);
+  const resolved = useMemo(() => resolveRun(spec, chosenProvider), [spec, chosenProvider]);
+  const pinned = pinnedAway(resolved, chosenProvider);
+  const needsCopilot = resolved.uses.copilot;
+  const accounts = copilotOptions(githubUser.data, githubUser.isError).usable;
+  const copilotAccount = copilotConnectionId || accounts[0]?.id || "";
+  const accountsKnown = githubUser.isError || githubUser.data !== undefined;
+  const noAccount = needsCopilot && accountsKnown && accounts.length === 0;
+  const defaultProvider = useDefaultProvider({ workspaceId, baseUrl });
+  // Start on the workflow's provider, else the workspace's, once; never over the person's pick.
+  const picked = useRef(false);
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || picked.current || !defaultProvider.settled || !githubUser.data) return;
+    started.current = true;
+    const first = defaultChoice(spec, defaultProvider.provider);
+    const account = accounts[0];
+    if (first === "copilot" && account) {
+      form.setValue("provider", "copilot");
+      form.setValue("copilotConnectionId", account.id);
+    }
+  }, [defaultProvider.settled, defaultProvider.provider, githubUser.data, accounts, spec, form]);
   const creating = needsRepo && repoMode === "new";
   const newRepoOptions = useNewRepoOptions({ workspaceId, baseUrl, enabled: creating });
-  const blocked = creating && newRepoOptions.data?.can_create !== true;
+  const blocked = (creating && newRepoOptions.data?.can_create !== true) || noAccount;
 
   useEffect(() => onPendingChange(isSubmitting), [isSubmitting, onPendingChange]);
   useEffect(() => onBlockedChange(blocked), [blocked, onBlockedChange]);
@@ -306,9 +340,8 @@ function NewRunForm({
           workspace_id: workspaceId,
           trigger: "manual",
           budget_usd: parseBudget(values.budget),
-          ...(values.provider === "copilot"
-            ? { copilot_connection_id: values.copilotConnectionId }
-            : {}),
+          provider: values.provider,
+          ...(needsCopilot && copilotAccount ? { copilot_connection_id: copilotAccount } : {}),
         },
       });
     } catch (err) {
@@ -330,13 +363,12 @@ function NewRunForm({
         return;
       }
       const code = codeOf(error);
-      if (
-        code === "copilot_connection_not_found" ||
-        code === "copilot_needs_attention" ||
-        code === "copilot_not_for_triggers"
-      ) {
+      // The API names these as `code` in an object, or as a string detail "code: message".
+      const copilotCode = COPILOT_REFUSALS.find((c) => c === code || message?.startsWith(`${c}:`));
+      if (copilotCode) {
         form.setError("copilotConnectionId", {
-          message: message ?? "This GitHub account cannot be used for the run.",
+          message:
+            message?.replace(`${copilotCode}: `, "") ?? "This GitHub account cannot be used.",
         });
         return;
       }
@@ -507,13 +539,21 @@ function NewRunForm({
             provider={field.value}
             connectionId={copilotConnectionId}
             onChange={(provider, id) => {
+              picked.current = true;
               form.setValue("provider", provider);
               form.setValue("copilotConnectionId", id);
               form.clearErrors("copilotConnectionId");
             }}
             accounts={githubUser.data}
             failed={githubUser.isError}
-            error={form.formState.errors.copilotConnectionId?.message}
+            error={
+              form.formState.errors.copilotConnectionId?.message ??
+              (noAccount
+                ? "Some steps run on Copilot, which needs a connected GitHub account. Connect one in Integrations."
+                : undefined)
+            }
+            needsCopilot={needsCopilot}
+            pinned={pinned}
             disabled={isSubmitting}
           />
         )}
@@ -609,7 +649,7 @@ function SheetBody({
   const template = list.find((t) => t.id === chosenId) ?? null;
   const parsed = useMemo(() => (template ? parseSchema(template.parameters) : null), [template]);
   const [provider, setProvider] = useState<RunProvider>("claude");
-  const required = template ? requiredFor(template.requires, provider) : [];
+  const required = template ? requiredFor(template.requires, resolveRun(null, provider)) : [];
   const ready = template ? isReady(readiness, required) : false;
 
   let body;
@@ -777,7 +817,10 @@ function WorkflowSheetBody({
   const [pending, setPending] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [provider, setProvider] = useState<RunProvider>("claude");
-  const required = requiredFor(workflow.requires, provider);
+  const required = useMemo(
+    () => requiredFor(workflow.requires, resolveRun(workflow.spec, provider)),
+    [workflow.requires, workflow.spec, provider],
+  );
   const ready = isReady(readiness, required);
   const returnTo = `/workflows/${encodeURIComponent(workflow.id)}?version=${workflow.version}`;
   return (

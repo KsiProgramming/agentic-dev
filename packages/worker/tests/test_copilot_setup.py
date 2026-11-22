@@ -17,6 +17,7 @@ from agentic_runtime.fake import FakeRuntime
 from agentic_runtime.testing import MockClaude
 from agentic_secrets import KEY_BYTES, LocalKeyProvider
 from agentic_store import (
+    ProviderSettings,
     StoredRun,
     Workspace,
     mark_github_user_needs_attention,
@@ -76,8 +77,9 @@ async def test_a_run_with_no_connection_stays_on_claude_whatever_copilot_is_set_
     )
 
     run = StoredRun(id=uuid4(), status="queued", spec=SPEC, input="")
-    async with runtimes(run, None) as runtime:
-        assert isinstance(runtime, ClaudeRuntime)
+    async with runtimes(run, None) as router:
+        assert isinstance(await router.runtime("claude"), ClaudeRuntime)
+        assert router.opened == ["claude"]
 
 
 async def test_on_the_fake_stack_a_copilot_run_reads_its_token_then_runs_fake_agents(
@@ -96,8 +98,8 @@ async def test_on_the_fake_stack_a_copilot_run_reads_its_token_then_runs_fake_ag
     runtimes = run_runtimes(WorkerSettings(), NO_DB, keys, github_user=FakeGithubUserAuth(""))
 
     run = a_copilot_run()
-    async with runtimes(run, None) as runtime:
-        assert isinstance(runtime, FakeRuntime)
+    async with runtimes(run, None) as router:
+        assert isinstance(await router.runtime("copilot"), FakeRuntime)
     assert seen == [run]
 
 
@@ -110,7 +112,11 @@ async def test_with_a_real_runtime_a_copilot_run_gets_the_copilot_runtime(
 
         return load
 
+    async def workspace(*_args: object) -> ProviderSettings:
+        return ProviderSettings()
+
     monkeypatch.setattr("agentic_worker.main.token_loader", loader)
+    monkeypatch.setattr("agentic_worker.main.get_provider_settings", workspace)
     runtimes = run_runtimes(
         WorkerSettings(agentic_runtime="claude", copilot_model="gpt-5"),  # pyright: ignore[reportCallIssue]
         NO_DB,
@@ -118,10 +124,12 @@ async def test_with_a_real_runtime_a_copilot_run_gets_the_copilot_runtime(
         github_user=FakeGithubUserAuth(""),
     )
 
-    async with runtimes(a_copilot_run(), None) as runtime:
+    async with runtimes(a_copilot_run(), None) as router:
+        runtime = await router.runtime("copilot")
         # Watched, so a token GitHub refuses mid-run marks its connection.
         assert isinstance(runtime, _Watching)
         assert isinstance(runtime._inner, CopilotRuntime)  # pyright: ignore[reportPrivateUsage]
+        assert router.opened == ["copilot"]  # a Copilot-only run never opens Claude
 
 
 async def test_a_copilot_run_with_no_master_key_fails_with_its_code() -> None:

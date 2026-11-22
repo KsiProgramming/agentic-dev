@@ -36,6 +36,7 @@ export async function fetchRunPage(
           ...(filters.status.length > 0 ? { status: filters.status } : {}),
           ...(filters.template ? { template: filters.template } : {}),
           ...(filters.repo ? { repo: filters.repo } : {}),
+          ...(filters.provider ? { provider: filters.provider } : {}),
           ...(cursor ? { cursor } : {}),
           limit,
         },

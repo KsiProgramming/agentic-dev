@@ -48,7 +48,7 @@ CI fails if `web/openapi.json` or `web/src/api/schema.d.ts` is out of date.
 
 ## Workflow spec
 A workflow is a JSON document validated by the Pydantic models in `agentic_engine.spec` (`parse_spec(data)` raises `pydantic.ValidationError` on a bad spec). v0 has eight node types:
-- `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`);
+- `agent`: one agent turn (`role`, `instructions`, optional `provider`, `model` and `tools`). `provider` is `claude` or `copilot`; left out, the agent follows the workflow's own `provider`, then the workspace's default (see [Providers](#providers));
 - `tool`: one call of a platform tool with fixed arguments and no model, e.g. `{"type": "tool", "id": "list", "tool": "repo.list_files", "args": {"path": "."}}`;
 - `gate`: a pause until a human approves or rejects (`title`, optional `prompt`); see [Gates](#gates);
 - `sequence`: its `steps`, in order;
@@ -101,6 +101,15 @@ The runtime and engine test suites block all non-loopback network access (`agent
 - API errors become `failed`. Rate limits, overloaded and 5xx responses, timeouts and connection errors are marked `retryable`. Hitting `max_tokens`, a refusal, or running out of turns fails without `retryable`.
 
 Tests use `agentic_runtime.testing.MockClaude`, a real `AsyncAnthropic` on an in-memory transport that replays scripted SSE replies (`text_reply`, `tool_use_reply`, `error_reply`) and records request bodies. `collect_and_check(runtime, request)` runs a request and checks the stream against the contract for any adapter.
+
+### Providers
+An agent runs on `claude` or `copilot` (`AgentRequest.provider`). The spec sets it in four places, and `agentic_engine.providers.resolve_providers` picks the first that is set: the node's own `provider` (an `agent`, a reduce's `agent`, a router's `classifier` or an orchestrator's `hub`), the run's override (`POST /runs` `provider`), the workflow's `provider`, the workspace's default (`GET` and `PUT /workspaces/{id}/provider-settings`), then Claude. `create_run` does it once and stores the result on the run (`runs.provider`, `providers`, `provider_map`), so a resume never moves a run: pass it to `run_workflow`, `resume_workflow` and `rerun_workflow` as `providers=`.
+
+- A node's `model` belongs to the provider it was written for (its own `provider`, else Claude); on another provider the node gets that provider's default, so one workflow runs on either without edits.
+- A run a trigger started stays on Claude; the engine logs one `provider_fallback` event naming the agents that asked for Copilot.
+- `provider_gaps(resolved, has_copilot_connection=...)` is the one place that says a Copilot agent has no connection (`copilot_connection_required`); `validate_workflow`, the canvas and `POST /runs` all use it.
+- The worker gives the engine one `ProviderRouter` (`agentic_worker.providers`) that opens the Claude and the Copilot runtime the first time an agent asks for each, and closes both with the attempt. Tests that give the worker one `runtime=` get it for every provider.
+- A Copilot call's `usage` carries `ai_credits` and an `estimated_usd` at the workspace's `copilot_credit_usd` (default $0.01); with `FakeCopilotConnector` a test scripts `UsageReport(nano_aiu=...)`.
 
 ## Engine
 `agentic_engine.graph` compiles a workflow spec to a LangGraph graph and runs it. `agent`, `tool` and `gate` nodes become graph nodes named by their spec node id, a `sequence` chains its steps, a `loop` adds an entry node, its body and a check node with an edge back (see [Loops](#loops)), and a `map` adds an entry node, a worker that LangGraph's `Send` starts once per item, and a join node (see [Map and reduce](#map-and-reduce)), and a `parallel` adds an entry node, a worker that `Send` starts once per branch, and a join node (see [Parallel](#parallel)). The first node gets the run input; each later node gets the previous node's output text as its `input` (data, never instructions). A node that ends `failed` or `cancelled` stops the run. `result.order` lists every node run, so a node in a loop appears once per iteration, and `result.usage` adds up every run.

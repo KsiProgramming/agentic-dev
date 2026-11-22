@@ -126,12 +126,49 @@ test("the header shows the workflow, repo and status from the summary before any
 });
 
 test("8.2: a Copilot run's header says whose Copilot it used; a Claude run has no such fact", async () => {
-  api(detail({ status: "running", queue_stalled_at: null, copilot_login: "ada" }));
+  api(
+    detail({
+      status: "running",
+      queue_stalled_at: null,
+      copilot_login: "ada",
+      provider: "copilot",
+      providers: ["copilot"],
+    }),
+  );
   show();
 
   const fact = await screen.findByTestId("copilot-login");
   expect(fact.textContent).toBe("Copilot of ada");
   expect(within(fact).getByText("ada").className).toContain("font-mono");
+});
+
+test("8.3: a run that used a connection's login but stayed on Claude shows no Copilot fact", async () => {
+  api(detail({ status: "running", queue_stalled_at: null, copilot_login: "ada" }));
+  show();
+
+  await screen.findByRole("heading", { name: "Generate docs" });
+  expect(screen.queryByTestId("copilot-login")).toBeNull();
+});
+
+test("8.3: the console says a trigger kept the run on Claude, from provider_fallback", async () => {
+  api(detail({ status: "running", queue_stalled_at: null }));
+  const source = show();
+
+  await screen.findByRole("heading", { name: "Generate docs" });
+  act(() => {
+    source.emit(runEvent(1, "run_started", { workflow_name: "Generate docs" }));
+    source.emit(
+      runEvent(2, "provider_fallback", {
+        nodes: ["reviewer"],
+        reason: "triggered",
+        provider: "claude",
+      }),
+    );
+  });
+
+  const note = await screen.findByTestId("provider-fallback");
+  expect(note.textContent).toContain("Ran on Claude");
+  expect(within(note).getByText("reviewer")).toBeTruthy();
 });
 
 test("8.2: a run on Claude shows no Copilot fact", async () => {

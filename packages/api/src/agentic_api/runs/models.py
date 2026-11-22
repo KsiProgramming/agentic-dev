@@ -37,6 +37,7 @@ from agentic_engine.spec import (
 )
 from agentic_engine.templates import NewRepo, get_template
 from agentic_github import repo_full_name
+from agentic_runtime import Provider
 from agentic_sandbox import RepoSource
 
 MAX_SPEC_FILE_BYTES = 256 * 1024
@@ -162,6 +163,14 @@ class CreateRunRequest(BaseModel):
         "GitHub connections (`GET /workspaces/{id}/github-user`). Every agent of the run then "
         "uses that person's subscription and nobody else's. Unset: the run is on Claude. "
         "Refused with `422` `copilot_connection_not_found` or `409` `copilot_needs_attention`.",
+    )
+    provider: Provider | None = Field(
+        default=None,
+        description="The provider the run's agents use unless a node names its own (8.3): the "
+        "New run sheet's choice. It beats the workflow's `provider` and the workspace's default. "
+        "Unset: those apply, then Claude. A run on Copilot needs `copilot_connection_id`: "
+        "refused with `422` `copilot_connection_required`, naming the agents, without one. A "
+        "run a trigger starts stays on Claude.",
     )
     spec_file: SpecFileSource | None = Field(
         default=None,
@@ -582,6 +591,14 @@ class RunSummary(BaseModel):
         default=None,
         description="The GitHub login whose Copilot subscription the run uses (8.2), as it was "
         "when the run started; `null`: the run is on Claude.",
+    )
+    provider: Provider = Field(
+        description="The provider the run was started on (8.3): its agents' default, from the "
+        "run's own choice, the workflow, the workspace or Claude. A node may name its own."
+    )
+    providers: list[Provider] = Field(
+        description="The providers the run's agents use (8.3), fixed when the run was created: "
+        "`['claude', 'copilot']` for a run that mixes them."
     )
     branch: str | None = Field(
         description="The branch the run works on: the repo's `ref`, else the default branch of a "

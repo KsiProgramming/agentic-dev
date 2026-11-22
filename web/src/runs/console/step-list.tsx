@@ -6,6 +6,7 @@ import { Duration, Money, WaitingTime } from "@/components/display";
 import { cn } from "@/lib/utils";
 
 import { KindIcon } from "../graph/node-kinds";
+import { ProviderLabel } from "../provider-label";
 import type { NodeKind } from "../graph/spec-graph";
 import { stepUsage, type Step } from "../timeline";
 import { StatusMarker } from "./rail";
@@ -80,6 +81,13 @@ function StepButton({
             <span className="shrink-0 text-caption text-muted-foreground">{row.itemKind}</span>
           ) : null}
         </span>
+        {step.provider ? (
+          <ProviderLabel
+            provider={step.provider}
+            model={step.model}
+            className="text-caption text-muted-foreground"
+          />
+        ) : null}
         {outline ? (
           <span
             data-testid="step-outline"

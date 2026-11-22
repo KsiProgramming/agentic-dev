@@ -25,6 +25,7 @@ from agentic_worker.main import (
     build_sandboxes,
     run_runtimes,
 )
+from agentic_worker.providers import ProviderRouter
 
 KEY = "sk-ant-test-0000-do-not-log"
 # Never bound: these tests read no stored keys.
@@ -44,8 +45,9 @@ def a_run() -> StoredRun:
 
 
 async def test_the_fake_runtime_is_the_default() -> None:
-    async with run_runtimes(WorkerSettings(), NO_DB, None)(a_run(), None) as runtime:
-        assert isinstance(runtime, FakeRuntime)
+    async with run_runtimes(WorkerSettings(), NO_DB, None)(a_run(), None) as router:
+        assert isinstance(router, ProviderRouter)
+        assert isinstance(await router.runtime("claude"), FakeRuntime)
 
 
 @pytest.fixture
@@ -77,8 +79,9 @@ async def test_agentic_runtime_claude_runs_on_the_stored_key(
     mock = MockClaude([])
     runtimes = run_runtimes(settings, NO_DB, keys, lambda k: mock.make_client(k.get_secret_value()))
 
-    async with runtimes(a_run(), None) as runtime:
-        assert isinstance(runtime, ClaudeRuntime)
+    async with runtimes(a_run(), None) as router:
+        assert isinstance(router, ProviderRouter)
+        assert isinstance(await router.runtime("claude"), ClaudeRuntime)
 
     assert settings.runtime == "claude"
     assert settings.claude_model == "claude-haiku-5-5"

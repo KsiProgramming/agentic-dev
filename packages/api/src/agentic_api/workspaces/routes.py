@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -16,8 +17,10 @@ from agentic_api.workspaces.models import (
     ModelPricingOut,
     NewWorkspace,
     Price,
+    ProviderSettings,
     PutClaudeConnection,
     PutPricing,
+    PutProviderSettings,
     RunLimitOverrides,
     RunLimits,
     WorkspaceOut,
@@ -26,6 +29,7 @@ from agentic_api.workspaces.models import (
 )
 from agentic_engine.policy import PLATFORM_POLICY, effective_policy
 from agentic_runtime import DEFAULT_PRICES, PRICES_AS_OF
+from agentic_runtime.pricing import DEFAULT_CREDIT_USD
 from agentic_secrets import KeyProvider
 from agentic_store import (
     AuditAction,
@@ -34,14 +38,19 @@ from agentic_store import (
     create_workspace,
     delete_connection,
     get_policy_overrides,
+    get_provider_settings,
     get_workspace,
     list_audit_events,
     list_connections,
     list_price_overrides,
     list_workspaces,
     put_connection,
+    put_provider_settings,
     replace_policy_overrides,
     replace_price_overrides,
+)
+from agentic_store import (
+    ProviderSettings as StoredProviderSettings,
 )
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -222,6 +231,58 @@ async def put_pricing(workspace_id: UUID, body: PutPricing, request: Request) ->
     except WorkspaceNotFoundError:
         raise _not_found(workspace_id) from None
     return await _pricing(sessions, workspace_id)
+
+
+def _provider_settings(stored: StoredProviderSettings) -> ProviderSettings:
+    return ProviderSettings(
+        default_provider=stored.default_provider or "claude",
+        copilot_model=stored.copilot_model,
+        copilot_credit_usd=float(stored.credit_usd),
+        default_copilot_credit_usd=float(DEFAULT_CREDIT_USD),
+    )
+
+
+@router.get(
+    "/{workspace_id}/provider-settings",
+    operation_id="getProviderSettings",
+    responses=_NOT_FOUND,
+)
+async def get_providers(workspace_id: UUID, request: Request) -> ProviderSettings:
+    """Where the workspace's runs put their agents when nothing narrower says (`default_provider`),
+    the model a Copilot agent runs on when it names none, and the price of an AI credit."""
+    try:
+        return _provider_settings(await get_provider_settings(_sessions(request), workspace_id))
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
+
+
+@router.put(
+    "/{workspace_id}/provider-settings",
+    operation_id="putProviderSettings",
+    responses={**_NOT_FOUND, 422: {"description": "A bad model name or credit price"}},
+)
+async def put_providers(
+    workspace_id: UUID, body: PutProviderSettings, request: Request
+) -> ProviderSettings:
+    """Replace the workspace's provider settings. They apply to runs created afterwards: a run
+    keeps the providers it was created with. Recorded in the audit log
+    (`workspace.settings_changed`)."""
+    credit = (
+        Decimal(str(body.copilot_credit_usd)).quantize(Decimal("0.000001"))
+        if body.copilot_credit_usd is not None
+        else None
+    )
+    settings = StoredProviderSettings(
+        default_provider=None if body.default_provider == "claude" else body.default_provider,
+        copilot_model=body.copilot_model,
+        copilot_credit_usd=credit if credit != DEFAULT_CREDIT_USD else None,
+    )
+    try:
+        return _provider_settings(
+            await put_provider_settings(_sessions(request), workspace_id, settings)
+        )
+    except WorkspaceNotFoundError:
+        raise _not_found(workspace_id) from None
 
 
 async def _policy(

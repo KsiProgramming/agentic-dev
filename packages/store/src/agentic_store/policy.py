@@ -17,6 +17,7 @@ from agentic_engine.policy import (
     effective_policy,
     with_budget,
 )
+from agentic_engine.providers import ResolvedProviders
 from agentic_engine.spec import (
     ValidationIssue,
     WorkflowSpec,
@@ -27,6 +28,7 @@ from agentic_engine.spec import (
     resolve_from,
     validate_workflow,
 )
+from agentic_runtime import Provider
 from agentic_runtime.claude import DEFAULT_MODEL
 from agentic_store.audit import audit
 from agentic_store.connections import WorkspaceNotFoundError
@@ -89,6 +91,7 @@ async def run_policy(
     workspace_id: UUID,
     spec: WorkflowSpec,
     budget_usd: Decimal | None = None,
+    resolved: ResolvedProviders | None = None,
 ) -> Policy:
     """The policy a new run of `spec` in the workspace gets, with the run's own `budget_usd` in
     place of the workspace's if it set one, else the spec's own `budget_usd`. Raises
@@ -100,7 +103,12 @@ async def run_policy(
     issues = policy_issues(spec.root, policy)
     if policy.budget_usd is not None:
         prices = await price_table(session, workspace_id)
-        issues += budget_issues(spec.root, policy, prices.__contains__, DEFAULT_MODEL)
+        on: dict[str, tuple[Provider, str | None]] | None = (
+            {node_id: (n.provider, n.model) for node_id, n in resolved.nodes.items()}
+            if resolved is not None
+            else None
+        )
+        issues += budget_issues(spec.root, policy, prices.__contains__, DEFAULT_MODEL, on)
     if issues:
         raise PolicyViolationError(on_subflows(spec.root, issues))
     return policy
@@ -111,15 +119,20 @@ async def check_workflow(
     workspace_id: UUID,
     raw: object,
     budget_usd: Decimal | None = None,
+    has_copilot_connection: bool | None = None,
 ) -> tuple[Policy, list[ValidationIssue]]:
     """Why the decoded workflow document `raw` could not run in the workspace now
     (`validate_workflow`), with the policy a run of it would get: the workspace's, with
     `budget_usd` in place of its budget if given, else the document's own `budget_usd`. The
-    workflows it calls (6.5) are read from the workspace. Writes nothing. Raises
-    `WorkspaceNotFoundError`."""
+    workflows it calls (6.5) are read from the workspace. Agents are checked on the provider they
+    would run on under the workspace's default (8.3); with `has_copilot_connection`, one that
+    would run on Copilot with no connection is a `copilot_connection_required` issue. Writes
+    nothing. Raises `WorkspaceNotFoundError`."""
     async with sessions() as session:
-        if await session.get(Workspace, workspace_id) is None:
+        workspace = await session.get(Workspace, workspace_id)
+        if workspace is None:
             raise WorkspaceNotFoundError(workspace_id)
+        default_provider = workspace.default_provider
         overrides = await _overrides(session, workspace_id)
         prices = await price_table(session, workspace_id)
         called = await load_subflows(session, workspace_id, raw)
@@ -132,6 +145,8 @@ async def check_workflow(
         default_model=DEFAULT_MODEL,
         resolve=resolve_from(called),
         drafts=drafts,
+        workspace_default="copilot" if default_provider == "copilot" else None,
+        has_copilot_connection=has_copilot_connection,
     )
     return policy, issues
 

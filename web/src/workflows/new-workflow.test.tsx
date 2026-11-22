@@ -42,14 +42,26 @@ describe("slugify", () => {
 });
 
 test("the providers are the agent manifest's", () => {
-  expect(agentProviders(NODE_TYPES)).toEqual(["claude"]);
+  expect(agentProviders(NODE_TYPES)).toEqual(["claude", "copilot"]);
   expect(agentProviders([])).toEqual([]);
 });
+
+const SETTINGS_PATH = `/workspaces/${DEFAULT_WORKSPACE_ID}/provider-settings`;
+
+function settings(defaultProvider: "claude" | "copilot") {
+  return {
+    default_provider: defaultProvider,
+    copilot_model: null,
+    copilot_credit_usd: 0.01,
+    default_copilot_credit_usd: 0.01,
+  };
+}
 
 function routes(extra: Routes = {}): Routes {
   return {
     "GET /node-types": () => json(200, NODE_TYPES),
     [`GET ${CONNECTIONS_PATH}`]: () => json(200, [CLAUDE]),
+    [`GET ${SETTINGS_PATH}`]: () => json(200, settings("claude")),
     ...extra,
   };
 }
@@ -91,7 +103,7 @@ test("a missing name and a bad id are shown on their fields, and nothing is sent
   expect(fetch.mock.calls.some(([r]) => r.method === "POST")).toBe(false);
 });
 
-test("Claude is chosen and connected; Copilot is listed, chosen when a run starts", async () => {
+test("Claude is chosen and connected; Copilot is a row to choose like it", async () => {
   stubApi(routes());
   const sheet = show();
 
@@ -99,8 +111,41 @@ test("Claude is chosen and connected; Copilot is listed, chosen when a run start
   expect(claude).toHaveProperty("checked", true);
   await waitFor(() => expect(claude.closest("label")?.textContent).toContain("Connected"));
   const copilot = sheet.getByRole("radio", { name: /GitHub Copilot/ });
-  expect(copilot).toHaveProperty("disabled", true);
-  expect(sheet.getByText("Chosen when a run starts, on a connected GitHub account.")).toBeDefined();
+  expect(copilot).toHaveProperty("disabled", false);
+  expect(copilot).toHaveProperty("checked", false);
+  expect(sheet.queryByText(/Chosen when a run starts/)).toBeNull();
+});
+
+test("the workspace's default provider is the row chosen, and Copilot is sent as the workflow's", async () => {
+  const fetch = stubApi(
+    routes({
+      [`GET ${SETTINGS_PATH}`]: () => json(200, settings("copilot")),
+      [CREATE]: () => json(201, { workflow_id: "notes", version: 1 }),
+    }),
+  );
+  const sheet = show();
+
+  const copilot = await sheet.findByRole("radio", { name: /GitHub Copilot/ });
+  await waitFor(() => expect(copilot).toHaveProperty("checked", true));
+  expect(sheet.getByRole("radio", { name: /Claude/ })).toHaveProperty("checked", false);
+  fireEvent.change(sheet.getByLabelText("Name"), { target: { value: "Notes" } });
+  fireEvent.click(sheet.getByRole("button", { name: "Create workflow" }));
+
+  await waitFor(() => expect(navigation.push).toHaveBeenCalled());
+  const post = fetch.mock.calls.find(([r]) => r.method === "POST")?.[0];
+  expect(await post?.json()).toEqual({
+    blank: { name: "Notes", id: "notes", provider: "copilot" },
+  });
+});
+
+test("a choice made by hand beats the workspace's default", async () => {
+  stubApi(routes({ [`GET ${SETTINGS_PATH}`]: () => json(200, settings("copilot")) }));
+  const sheet = show();
+
+  const claude = await sheet.findByRole("radio", { name: /Claude/ });
+  fireEvent.click(claude);
+
+  expect(claude).toHaveProperty("checked", true);
 });
 
 test("a provider that is not connected can be chosen, with how to connect it", async () => {

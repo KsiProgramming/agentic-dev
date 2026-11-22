@@ -30,6 +30,7 @@ from agentic_secrets import KeyProvider, SecretDecryptError, registered
 from agentic_store import (
     GithubUserNeedsAttentionError,
     GithubUserNotConnectedError,
+    ProviderSettings,
     StoredRun,
 )
 from agentic_worker.errors import RunSetupError
@@ -132,14 +133,26 @@ class _Watching:
         return _Watched(self._inner.start(request), self._run, self._on_refused)
 
 
+type WorkspaceSettings = Callable[[StoredRun], Awaitable[ProviderSettings]]
+"""The provider settings of the run's workspace (8.3)."""
+
+
+async def no_workspace_settings(run: StoredRun) -> ProviderSettings:
+    return ProviderSettings()
+
+
 def copilot_runtimes(
     settings: CopilotSettings,
     load_token: TokenLoader,
     fake: RunRuntimes,
     on_refused: Refused | None = None,
+    workspace: WorkspaceSettings = no_workspace_settings,
 ) -> RunRuntimes:
-    """Opens the runtime of a run that has a personal GitHub connection. On the fake stack
-    (`settings.runtime != "claude"`) that is `fake`, after the token was read."""
+    """Opens the Copilot runtime of a run that has a personal GitHub connection (8.2) for the
+    agents that run on it (8.3). On the fake stack (`settings.runtime != "claude"`) that is
+    `fake`, after the token was read. An agent with no model of its own runs on the workspace's
+    `copilot_model`, else the worker's; a call's cost is its AI credits at the workspace's price
+    per credit."""
 
     @asynccontextmanager
     async def open_copilot(
@@ -154,11 +167,13 @@ def copilot_runtimes(
             # Imported here: the SDK is only needed once a run really uses it.
             from agentic_runtime.copilot_sdk import SdkConnector
 
+            chosen = await workspace(run)
             runtime = CopilotRuntime(
                 SdkConnector(token.get_secret_value()),
-                model=settings.copilot_model,
+                model=chosen.copilot_model or settings.copilot_model,
                 tools=tools,
                 secrets=[token.get_secret_value()],
+                credit_usd=chosen.credit_usd,
             )
             yield _Watching(runtime, run, on_refused) if on_refused is not None else runtime
 

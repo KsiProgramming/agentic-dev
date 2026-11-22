@@ -20,6 +20,7 @@ export const DOCUMENT_FIELDS = [
   "name",
   "description",
   "budget_usd",
+  "provider",
   "input",
   "input_schema",
   "output_schema",
@@ -49,7 +50,7 @@ export function nodeParams(node: SpecNode, manifest: NodeManifest | undefined): 
   return values;
 }
 
-/** The workflow's name, description and budget. */
+/** The workflow's name, description, budget, provider and typed ports. */
 export function documentParams(spec: WorkflowSpec): Json {
   const doc = spec as unknown as Json;
   return Object.fromEntries(DOCUMENT_FIELDS.filter((f) => f in doc).map((f) => [f, doc[f]]));

@@ -45,6 +45,7 @@ AuditAction = Literal[
     "jira.webhook_failed",
     "policy.updated",
     "pricing.updated",
+    "workspace.settings_changed",
     "workflow.created",
     "workflow.updated",
     "workflow.restored",

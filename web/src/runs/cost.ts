@@ -16,6 +16,8 @@ export interface TokenUsage {
   costComplete: boolean;
   /** The models of the usage that had no price, for saying why the cost is missing. */
   unpricedModels: string[];
+  /** Copilot's AI credits (8.3); 0 for usage that reported none (Claude's). */
+  aiCredits: number;
 }
 
 function count(value: unknown): number {
@@ -35,6 +37,7 @@ export function usageOfEvent(payload: Record<string, unknown>): TokenUsage {
     estimatedUsd: priced ? usd : 0,
     costComplete: priced,
     unpricedModels: priced || model === null ? [] : [model],
+    aiCredits: count(payload.ai_credits),
   };
 }
 
@@ -48,6 +51,7 @@ export function usageOfRun(usage: RunUsage): TokenUsage {
     estimatedUsd: usage.estimated_usd,
     costComplete: usage.cost_complete,
     unpricedModels: [],
+    aiCredits: 0,
   };
 }
 
@@ -62,6 +66,7 @@ export function addUsage(a: TokenUsage | null, b: TokenUsage | null): TokenUsage
     estimatedUsd: a.estimatedUsd + b.estimatedUsd,
     costComplete: a.costComplete && b.costComplete,
     unpricedModels: [...new Set([...a.unpricedModels, ...b.unpricedModels])],
+    aiCredits: a.aiCredits + b.aiCredits,
   };
 }
 
@@ -116,6 +121,19 @@ export function costCaveat(usage: TokenUsage): string | null {
   return models.length > 0
     ? `No price for ${models.join(", ")}: add one in Settings → Model pricing.`
     : "Some usage was logged before costs were tracked.";
+}
+
+/** AI credits for people ("1.26"): up to 3 significant digits, so a small call is not "0". */
+export function formatCredits(credits: number): string {
+  return numberFormat({ maximumSignificantDigits: 3 }).format(credits);
+}
+
+/** What the price of Copilot usage is, or `null` for usage with no AI credits (Claude's): it is
+ * the list price of the credits (1 credit = $0.01 unless the workspace changed it), not what the
+ * person's plan charged. */
+export function creditsNote(usage: TokenUsage): string | null {
+  if (usage.aiCredits <= 0) return null;
+  return `${formatCredits(usage.aiCredits)} Copilot AI credits, priced at the workspace's price per credit. This is the list price of the credits, not what the person's plan charged.`;
 }
 
 /** A token count in a few characters ("12.3K"). */

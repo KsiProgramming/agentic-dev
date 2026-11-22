@@ -18,6 +18,7 @@ import {
   PlugIcon,
   PlugZapIcon,
   RotateCcwIcon,
+  ServerCogIcon,
   TimerOffIcon,
   ToggleLeftIcon,
   Trash2Icon,
@@ -121,6 +122,11 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   },
   "policy.updated": { label: "Run limits changed", icon: GaugeIcon, category: "settings" },
   "pricing.updated": { label: "Prices changed", icon: CoinsIcon, category: "settings" },
+  "workspace.settings_changed": {
+    label: "Provider settings changed",
+    icon: ServerCogIcon,
+    category: "settings",
+  },
 };
 
 export const AUDIT_CATEGORIES: readonly { id: AuditCategory; label: string }[] = [
@@ -421,6 +427,15 @@ export function describe(event: AuditEvent): string {
       return parts.length > 0
         ? parts.map(([verb, models]) => `${verb} ${models.join(", ")}`).join("; ")
         : "Prices saved";
+    }
+    case "workspace.settings_changed": {
+      const labels: Record<string, string> = {
+        default_provider: "default provider",
+        copilot_model: "Copilot model",
+        copilot_credit_usd: "AI credit price",
+      };
+      const changed = strings(d, "changed").map((key) => labels[key] ?? key);
+      return changed.length > 0 ? `Changed ${changed.join(", ")}` : "Provider settings saved";
     }
     default:
       return actionInfo(event.action).label;

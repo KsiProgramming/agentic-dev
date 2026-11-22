@@ -23,12 +23,13 @@
           "type": "string"
         },
         "provider": {
+          "enum": [
+            "claude",
+            "copilot"
+          ],
           "type": "string",
           "description": "Unset means the workspace default.",
-          "title": "Provider",
-          "enum": [
-            "claude"
-          ]
+          "title": "Provider"
         },
         "model": {
           "minLength": 1,
@@ -822,12 +823,13 @@
               "type": "string"
             },
             "provider": {
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string",
               "description": "Unset means the workspace default.",
-              "title": "Provider",
-              "enum": [
-                "claude"
-              ]
+              "title": "Provider"
             },
             "model": {
               "minLength": 1,
@@ -1086,12 +1088,13 @@
               "type": "string"
             },
             "provider": {
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string",
               "description": "Unset means the workspace default.",
-              "title": "Provider",
-              "enum": [
-                "claude"
-              ]
+              "title": "Provider"
             },
             "model": {
               "minLength": 1,
@@ -1308,12 +1311,13 @@
               "type": "string"
             },
             "provider": {
+              "enum": [
+                "claude",
+                "copilot"
+              ],
               "type": "string",
               "description": "Unset means the workspace default.",
-              "title": "Provider",
-              "enum": [
-                "claude"
-              ]
+              "title": "Provider"
             },
             "model": {
               "minLength": 1,

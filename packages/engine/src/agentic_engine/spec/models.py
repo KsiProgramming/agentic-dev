@@ -35,6 +35,7 @@ from agentic_engine.policy import (
 )
 from agentic_engine.ports import schema_problem
 from agentic_runtime.findings import FindingsReport
+from agentic_runtime.request import Provider
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
 """Slug used in branch names (`agent/<run>/<node>`), so it must be path- and ref-safe."""
@@ -84,7 +85,7 @@ class AgentNode(_Base):
     id: NodeId
     role: NonEmptyStr
     instructions: NonEmptyStr
-    provider: Literal["claude"] | None = Field(
+    provider: Provider | None = Field(
         default=None, description="Unset means the workspace default."
     )
     model: NonEmptyStr | None = None
@@ -334,7 +335,7 @@ class ReduceAgent(_Base):
 
     role: NonEmptyStr
     instructions: NonEmptyStr
-    provider: Literal["claude"] | None = Field(
+    provider: Provider | None = Field(
         default=None, description="Unset means the workspace default."
     )
     model: NonEmptyStr | None = None
@@ -459,7 +460,7 @@ class RouterClassifier(_Base):
     makes (`classifier_schema`)."""
 
     instructions: NonEmptyStr
-    provider: Literal["claude"] | None = Field(
+    provider: Provider | None = Field(
         default=None, description="Unset means the workspace default."
     )
     model: NonEmptyStr | None = None
@@ -545,7 +546,7 @@ class OrchestratorHub(_Base):
 
     role: NonEmptyStr
     instructions: NonEmptyStr
-    provider: Literal["claude"] | None = Field(
+    provider: Provider | None = Field(
         default=None, description="Unset means the workspace default."
     )
     model: NonEmptyStr | None = None
@@ -943,6 +944,7 @@ type IssueCode = Literal[
     "jira_write_without_gate",
     "jira_write_not_shown",
     "on_review_invalid",
+    "copilot_connection_required",
 ]
 
 
@@ -1857,12 +1859,20 @@ def policy_errors(root: Node, policy: Policy) -> list[str]:
 
 
 def budget_issues(
-    root: Node, policy: Policy, priced: Callable[[str], bool], default_model: str
+    root: Node,
+    policy: Policy,
+    priced: Callable[[str], bool],
+    default_model: str,
+    resolved: Mapping[str, tuple[Provider, str | None]] | None = None,
 ) -> list[ValidationIssue]:
     """Why the budget of `policy` cannot be held to the spec under `root`, in spec order; empty
     if it can, or if there is no budget. Every agent (a reduce's too) must run on a model that
     `priced` knows: its own `model`, else `default_model`. A usage with no price cannot be
-    counted against a budget."""
+    counted against a budget.
+
+    With `resolved` (node id → the provider and model it runs on, 8.3) an agent is checked on the
+    model it will run on, and one on Copilot is not checked at all: Copilot is priced by the AI
+    credits it reports, not by model."""
     if policy.budget_usd is None:
         return []
     issues: list[ValidationIssue] = []
@@ -1877,6 +1887,10 @@ def budget_issues(
             case OrchestratorNode():
                 model = node.hub.model
             case _:
+                continue
+        if resolved is not None and node.id in resolved:
+            provider, model = resolved[node.id]
+            if provider == "copilot":
                 continue
         model = model or default_model
         if not priced(model):
@@ -1897,10 +1911,14 @@ def budget_issues(
 
 
 def budget_errors(
-    root: Node, policy: Policy, priced: Callable[[str], bool], default_model: str
+    root: Node,
+    policy: Policy,
+    priced: Callable[[str], bool],
+    default_model: str,
+    resolved: Mapping[str, tuple[Provider, str | None]] | None = None,
 ) -> list[str]:
     """The messages of `budget_issues`."""
-    return messages(budget_issues(root, policy, priced, default_model))
+    return messages(budget_issues(root, policy, priced, default_model, resolved))
 
 
 type PortNode = AgentNode | ToolNode
@@ -2609,6 +2627,11 @@ class WorkflowSpec(_Base):
         default=None,
         description="The workflow's typed output (6.6): a subflow that calls it checks the called "
         "workflow's output against this, and the step after it reads it as typed.",
+    )
+    provider: Provider | None = Field(
+        default=None,
+        description="The provider of every agent that names none of its own; unset means the "
+        "workspace default (8.3).",
     )
     on_review: OnReview | None = Field(
         default=None,

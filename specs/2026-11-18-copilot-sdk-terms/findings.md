@@ -96,3 +96,11 @@ Run with `spike/copilot_probe.py` in a scratch virtualenv (SDK 1.0.34, runtime 1
 - **Through our own adapter.** `CopilotRuntime` with the real `SdkConnector` (stub tool executor, tool `repo.read_file`, no writes) on the same account: the agent called the tool with `{"path": "README.md"}`, got the result, answered `Zephyr`, and the event stream was `usage, tool_call, tool_result, text_delta ×2, usage, message, completed`. Per-call usage was `input 3, output 21, cache write 5504`, then `input 3, output 6, cache read 5504, cache write 44`, so the connector's "input minus cache" arithmetic is right. `premium_requests` and `estimated_usd` stayed empty: Copilot reports AI credits, and the platform has no price for them.
 - **Default model.** With no model set, the runtime's default ran as `gpt-6-luna`, not a Claude model. The account's model list is its own and per person, so 8.3's provider and capability checks cannot assume a model name.
 - **Not run:** an expired (not invalid) token and a user with no subscription (no second account was available); the `github_token_provider` refresh path; a call from a worker process of ours.
+
+## Cost of an AI credit (8.3), 2026-11-22
+
+The 8.2 spike showed `assistant.usage` carrying `copilot_usage.total_nano_aiu` (the call's AI credits in nano units) and no USD. 8.3 turns it into a cost:
+
+- **Conversion:** `ai_credits = total_nano_aiu / 10⁹`, and `estimated_usd = ai_credits × price per credit`, with the price a workspace setting that defaults to **$0.01**: the plan's requirements cite GitHub's docs ("GitHub Copilot billing" and the Copilot SDK's "Usage and billing" page) for 1 AI credit = $0.01 USD. The worked example used in the tests is the spike's own call: 1,260,000,000 nano AIU is 1.26 credits, $0.0126.
+- **What it is:** the list-price value of the usage, not what the person's plan charged: a plan with included credits pays nothing extra for it, and the platform cannot see that allowance (out of scope).
+- **Not re-checked online while building 8.3:** the pages above were cited from the plan, and the build made no new call to GitHub. The price is a setting precisely so a change by GitHub is an edit. Before the first real run, compare a step's credits with the figure on that person's GitHub usage page (credits × $0.01), as `validation.md` asks.

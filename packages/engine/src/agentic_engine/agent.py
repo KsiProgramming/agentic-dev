@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from agentic_engine.artifacts import ArtifactRef
+from agentic_engine.providers import ResolvedNode
 from agentic_engine.spec import AgentNode
 from agentic_runtime import (
     AgentEvent,
@@ -362,9 +363,15 @@ class RunContext(BaseModel):
 
 
 def to_request(
-    node: AgentNode, input: str, route_as: str | None = None, context: str = ""
+    node: AgentNode,
+    input: str,
+    route_as: str | None = None,
+    context: str = "",
+    resolved: ResolvedNode | None = None,
 ) -> AgentRequest:
     """The runtime request for `node` on `input`, with the run's `context` (`RunContext.text`).
+    `resolved` is the provider and model the run stored for the node (8.3); without it the node's
+    own, on Claude when it names no provider.
     `route_as` replaces the node id the request (and so its tool calls) is known by: a writer
     working on an orchestrator's task (6.1) writes on that task's branch (`task_writer_key`)."""
     instructions = node.instructions
@@ -375,12 +382,14 @@ def to_request(
     if node.output_schema is not None:
         schema = json.dumps(node.output_schema, ensure_ascii=False)
         instructions = f"{instructions}\n\n{OUTPUT_SCHEMA_INSTRUCTION}\n\n{schema}"
+    provider = resolved.provider if resolved is not None else node.provider or "claude"
     return AgentRequest(
         node_id=route_as or node.id,
         role=node.role,
         instructions=instructions,
         input=input,
-        model=node.model,
+        provider=provider,
+        model=resolved.model if resolved is not None else node.model,
         tools=list(node.tools),
         context=context,
         output_schema=node.output_schema,
@@ -394,6 +403,7 @@ async def run_agent_node(
     on_event: OnAgentEvent | None = None,
     route_as: str | None = None,
     context: str = "",
+    resolved: ResolvedNode | None = None,
 ) -> AgentNodeResult:
     """Run `node` to its terminal event and summarise the stream, with the run's `context`.
 
@@ -401,7 +411,7 @@ async def run_agent_node(
     `ContractViolation` if the runtime's stream breaks the contract. If the caller is cancelled
     while the run is in flight, the run is cancelled too.
     """
-    run = runtime.start(to_request(node, input, route_as, context))
+    run = runtime.start(to_request(node, input, route_as, context, resolved))
     events: list[AgentEvent] = []
     try:
         async for event in run:
@@ -447,14 +457,15 @@ def _total_usage(events: Sequence[AgentEvent]) -> Usage | None:
 def sum_usage(usages: Iterable[Usage | None]) -> Usage | None:
     """Add up usage records; `None` entries are skipped, and no records gives `None`.
 
-    `premium_requests` stays `None` unless at least one record sets it. `estimated_usd` is `None`
-    if any record has no price, so a partial sum is never shown as the cost. `model` is kept
-    only when every record has the same one.
+    `premium_requests` and `ai_credits` stay `None` unless at least one record sets them.
+    `estimated_usd` is `None` if any record has no price, so a partial sum is never shown as the
+    cost. `model` is kept only when every record has the same one.
     """
     present = [u for u in usages if u is not None]
     if not present:
         return None
     premium = [u.premium_requests for u in present if u.premium_requests is not None]
+    credits = [u.ai_credits for u in present if u.ai_credits is not None]
     usd = [u.estimated_usd for u in present]
     models = {u.model for u in present}
     return Usage(
@@ -464,5 +475,6 @@ def sum_usage(usages: Iterable[Usage | None]) -> Usage | None:
         cache_read_tokens=sum(u.cache_read_tokens for u in present),
         cache_write_tokens=sum(u.cache_write_tokens for u in present),
         premium_requests=sum(premium) if premium else None,
+        ai_credits=round(sum(credits), 9) if credits else None,
         estimated_usd=None if None in usd else round(sum(u for u in usd if u is not None), 8),
     )
