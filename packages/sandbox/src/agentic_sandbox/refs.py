@@ -10,6 +10,7 @@ Repo content is data: git runs with `GIT_SAFETY` and `safe.directory` for the ch
 read here is executed.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -156,33 +157,71 @@ class RefPathError(SandboxError):
         self.path = path
 
 
-# `$3` is the destination directory (created, empty). Extracts the branch's committed tree into
-# it. `git archive` writes tar from git's own objects: nothing in the tree is executed, no hook or
-# filter runs (`--worktree-attributes` is never given), and a symlink stays a symlink.
+# `$3` is the destination directory (created, empty), `$4` is `branch` or `base` (the clone's
+# `HEAD`), the rest are paths to extract (none: the whole tree). Extracts the tree as last
+# committed. `git archive` writes tar from git's own objects: nothing in the tree is executed, no
+# hook or filter runs (`--worktree-attributes` is never given), and a symlink stays a symlink.
 _ARCHIVE_SCRIPT = (
     _PRELUDE
     + """
 dest=$1
+which=$2
+shift 2
 mkdir -p -- "$dest" || exit 1
-g archive --format=tar "$ref" | tar -C "$dest" -xf - || exit 1
+tree=$ref
+[ "$which" = base ] && tree=HEAD
+if [ $# -gt 0 ]; then
+  g archive --format=tar "$tree" -- "$@" | tar -C "$dest" -xf - || exit 1
+else
+  g archive --format=tar "$tree" | tar -C "$dest" -xf - || exit 1
+fi
+"""
+)
+
+# `$3` is the byte cap. Prints the unified diff with no context from the clone's `HEAD` to the
+# branch: only the hunks' positions are read from it.
+_PATCH_SCRIPT = (
+    _PRELUDE
+    + """
+cap=$1
+base=$(g rev-parse --verify -q 'HEAD^{commit}') || exit 1
+g -c core.quotePath=false diff -U0 -M --no-ext-diff --no-color --no-textconv \
+  "$base" "$ref" | head -c "$cap"
 """
 )
 
 
-async def archive(sandbox: Sandbox, branch: str, dest: str) -> None:
-    """Extract `branch`'s tree as last committed into the new directory `dest`, which must be
-    under the staging directory (a job's work copy lives there, never in the checkout or a
-    worktree). Like the reads above it works after a restore. Raises `BranchNotFoundError` if the
-    branch does not exist, `ValueError` for a `dest` outside the staging directory, and
-    `SandboxError` if the tree cannot be extracted."""
+async def archive(
+    sandbox: Sandbox, branch: str, dest: str, *, base: bool = False, paths: Sequence[str] = ()
+) -> None:
+    """Extract `branch`'s tree as last committed into the directory `dest` (created if it is
+    missing), which must be under the staging directory (a job's work copy lives there, never in
+    the checkout or a worktree). With `base`, the clone's `HEAD`, the commit the run started from,
+    is extracted instead (`branch` must still exist); with `paths`, only those files. Like the
+    reads above it works after a restore. Raises `BranchNotFoundError` if the branch does not
+    exist, `ValueError` for a `dest` outside the staging directory, and `SandboxError` if the tree
+    cannot be extracted."""
     _check_branch(branch)
     staging = sandbox.staging_dir.rstrip("/")
     if not dest.startswith(f"{staging}/") or ".." in dest.split("/"):
         raise ValueError(f"not a directory under the staging directory: {dest!r}")
-    result = await _run(sandbox, _ARCHIVE_SCRIPT, branch, dest)
+    result = await _run(
+        sandbox, _ARCHIVE_SCRIPT, branch, dest, "base" if base else "branch", *paths
+    )
     _raise_if_missing(result.exit_code, branch)
     if result.exit_code != 0:
         raise SandboxError(f"could not extract branch {branch}")
+
+
+async def branch_patch(sandbox: Sandbox, branch: str, *, max_bytes: int = 4 * 1024 * 1024) -> str:
+    """What `branch` changed on top of the clone's `HEAD` as a unified diff with no context, cut at
+    `max_bytes`. Raises `BranchNotFoundError` if the branch does not exist."""
+    _check_branch(branch)
+    result = await _run(sandbox, _PATCH_SCRIPT, branch, str(max_bytes))
+    _raise_if_missing(result.exit_code, branch)
+    if result.exit_code != 0:
+        raise SandboxError(f"could not read the changes of branch {branch}")
+    return result.stdout
 
 
 async def branch_has_commits(sandbox: Sandbox, branch: str) -> bool:

@@ -1,5 +1,122 @@
 {
   "$defs": {
+    "ChangedCoverage": {
+      "description": "How much of the executable code a change touched the tests ran (13.4).",
+      "properties": {
+        "changed": {
+          "title": "Changed",
+          "type": "integer"
+        },
+        "covered": {
+          "title": "Covered",
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/CoveredFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "truncated": {
+          "default": false,
+          "description": "Whether files past the cap were left out.",
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "changed",
+        "covered"
+      ],
+      "title": "ChangedCoverage",
+      "type": "object"
+    },
+    "CoveredFile": {
+      "properties": {
+        "changed": {
+          "description": "Executable lines the change added or modified.",
+          "title": "Changed",
+          "type": "integer"
+        },
+        "covered": {
+          "description": "Of those, how many the tests ran.",
+          "title": "Covered",
+          "type": "integer"
+        },
+        "path": {
+          "description": "The file, relative to the repository root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "uncovered": {
+          "description": "The changed lines no test ran, as inclusive line ranges.",
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Uncovered",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "changed",
+        "covered"
+      ],
+      "title": "CoveredFile",
+      "type": "object"
+    },
+    "TestCase": {
+      "description": "One test that names a criterion (13.4): its name holds an id such as `AC-001`.",
+      "properties": {
+        "file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The test file, if the runner said.",
+          "title": "File"
+        },
+        "ids": {
+          "description": "The criterion ids in the name, as `AC-001`.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Ids",
+          "type": "array"
+        },
+        "name": {
+          "description": "The test's name, as the runner reports it.",
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TestStatus"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "ids"
+      ],
+      "title": "TestCase",
+      "type": "object"
+    },
     "TestCheck": {
       "description": "One module's build and tests for one ecosystem.",
       "properties": {
@@ -19,6 +136,52 @@
           "default": null,
           "description": "Whether the module's build ran (None: it has none).",
           "title": "Build"
+        },
+        "cases": {
+          "description": "With `select`: the tests whose names hold a selected id (at most 200).",
+          "items": {
+            "$ref": "#/$defs/TestCase"
+          },
+          "title": "Cases",
+          "type": "array"
+        },
+        "cases_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With `select`: why the tests' results were not read.",
+          "title": "Cases Reason"
+        },
+        "coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangedCoverage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With `coverage`: the coverage of the changed lines."
+        },
+        "coverage_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With `coverage`: why it was not measured.",
+          "title": "Coverage Reason"
         },
         "ecosystem": {
           "$ref": "#/$defs/TestEcosystem"

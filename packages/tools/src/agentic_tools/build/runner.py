@@ -25,6 +25,7 @@ from uuid import uuid4
 
 from agentic_sandbox import Sandbox, SandboxError
 from agentic_tools.build import commands
+from agentic_tools.build.changed import changed_coverage, parse_coverage_json
 from agentic_tools.build.dotnet_test import test_dotnet
 from agentic_tools.build.report import MAX_MODULES, BuildCheck, BuildReport, Ecosystem, build_report
 from agentic_tools.build.stack import (
@@ -38,10 +39,16 @@ from agentic_tools.build.stack import (
     plan,
 )
 from agentic_tools.build.tests import (
+    COVERAGE_FAILED,
     DOES_NOT_BUILD,
+    MAX_CASES,
+    NO_NODE_CASES,
+    NO_NODE_COVERAGE,
     NO_TESTS,
+    Outcome,
     TestCheck,
     TestEcosystem,
+    TestOptions,
     TestReport,
     job_script,
     make_report,
@@ -50,6 +57,7 @@ from agentic_tools.build.tests import (
     parse_junit,
     parse_node_output,
     python_has_pytest,
+    split_coverage,
     split_junit,
     tests_failed_reason,
 )
@@ -91,9 +99,12 @@ def _under(path: str, directory: str) -> bool:
 
 
 class _Restorer:
-    def __init__(self, sandbox: Sandbox, limits: BuildLimits) -> None:
+    def __init__(
+        self, sandbox: Sandbox, limits: BuildLimits, options: TestOptions | None = None
+    ) -> None:
         self._sandbox = sandbox
         self._limits = limits
+        self._options = options or TestOptions()
         self._testing = False
         self._pending: TestCheck | None = None
         self.tests: list[TestCheck] = []
@@ -249,7 +260,14 @@ class _Restorer:
         self, module: str, described: Described, item: Plan, work: str, built: Literal["ran"] | None
     ) -> TestCheck:
         """Run the module's tests in the work copy, in a job with no network."""
+        options = self._options
         base = TestCheck(path=module, ecosystem=item.ecosystem, status="skipped", build=built)
+        if item.ecosystem == "node":
+            asked = {
+                "coverage_reason": NO_NODE_COVERAGE if options.coverage else None,
+                "cases_reason": NO_NODE_CASES if options.select else None,
+            }
+            base = base.model_copy(update=asked)
         runner: str | None
         if item.ecosystem == "node":
             _, runner = node_runner(described.files.get("package.json", ""))
@@ -262,7 +280,13 @@ class _Restorer:
         base = base.model_copy(update={"runner": runner})
         started = time.monotonic()
         job = await self._sandbox.run_job(
-            ["sh", "-c", job_script(item), "test"],
+            [
+                "sh",
+                "-c",
+                job_script(item, options),
+                "test",
+                *(options.select if options.base else ()),
+            ],
             network="none",
             cwd=f"{work}/src",
             timeout_s=self._limits.test_timeout_s,
@@ -272,16 +296,20 @@ class _Restorer:
         base = base.model_copy(update={"test_ms": test_ms})
         if job.exit_code == commands.TIMED_OUT:
             return base.model_copy(update={"status": "error", "reason": TEST_TIMED_OUT})
+        extra: dict[str, Any] = {}
         if item.ecosystem == "python":
-            _, junit = split_junit(job.stdout)
+            head, junit = split_junit(job.stdout)
             outcome = parse_junit(junit)
-            crashed = job.exit_code in (2, 3, 4)
-            empty = job.exit_code == 5
+            crashed = job.exit_code in (2, 3, 4) and not options.base
+            empty = job.exit_code == 5 and not options.base
+            if options.base and outcome is None:
+                return base.model_copy(update={"status": "error", "reason": "test run failed"})
+            extra = self._python_extras(module, head, outcome)
         else:
             outcome = parse_node_output(runner, job.stdout + "\n" + job.stderr)
             crashed = False
             empty = job.exit_code == 0 and outcome is not None and outcome.total == 0
-        counts: dict[str, Any] = {}
+        counts: dict[str, Any] = dict(extra)
         if outcome is not None:
             counts = {
                 "passed": outcome.passed,
@@ -297,6 +325,23 @@ class _Restorer:
             return base.model_copy(update={"status": "passed", **counts})
         reason = tests_failed_reason(outcome)
         return base.model_copy(update={"status": "failed", "reason": reason, **counts})
+
+    def _python_extras(self, module: str, head: str, outcome: "Outcome | None") -> dict[str, Any]:
+        """The `cases` and `coverage` a pytest job was asked for."""
+        options = self._options
+        extra: dict[str, Any] = {}
+        if options.select and outcome is not None:
+            wanted = set(options.select)
+            extra["cases"] = [c for c in outcome.cases if wanted & set(c.ids)][:MAX_CASES]
+        if options.coverage and not options.base:
+            _, report_text = split_coverage(head)
+            report = parse_coverage_json(report_text)
+            if report is None:
+                extra["coverage_reason"] = COVERAGE_FAILED
+            else:
+                prefix = "" if module == "." else module
+                extra["coverage"] = changed_coverage(options.changes, report, prefix=prefix)
+        return extra
 
     async def _place_files(self, work: str, described: Described, item: Plan) -> None:
         """Put the files the work copy gets in place of the repo's: the pruned configs and the
@@ -373,12 +418,16 @@ async def test_modules(
     target: str = ".",
     ecosystems: Sequence[TestEcosystem] = ("node", "python", "dotnet"),
     limits: BuildLimits | None = None,
+    options: TestOptions | None = None,
 ) -> TestReport:
     """Restore, build and test the Node and Python modules, and the C# projects, at or under
-    `target`. Raises `RuntimeError` with a safe message when the repo cannot be read."""
+    `target`. `options` asks for per-test results of criteria, coverage of changed lines, or a run
+    of only the tests that name criteria (13.4). Raises `RuntimeError` with a safe message when the
+    repo cannot be read."""
     chosen = tuple(dict.fromkeys(ecosystems))
     limits = limits or BuildLimits()
-    restorer = _Restorer(sandbox, limits)
+    options = options or TestOptions()
+    restorer = _Restorer(sandbox, limits, options)
     try:
         report = await restorer.test_modules(
             target,
@@ -388,7 +437,7 @@ async def test_modules(
         raise RuntimeError(str(e)) from None
     if "dotnet" not in chosen or len(report.checks) >= MAX_MODULES:
         return report
-    found = await test_dotnet(sandbox, target, limits.dotnet, limits.test_timeout_s)
+    found = await test_dotnet(sandbox, target, limits.dotnet, limits.test_timeout_s, options)
     return make_report([*report.checks, *([found] if found else [])], truncated=report.truncated)
 
 

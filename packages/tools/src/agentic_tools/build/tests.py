@@ -10,6 +10,8 @@ could quote repo content; test names and messages are repo output, so they stay 
 import json
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -20,13 +22,39 @@ type TestStatus = Literal["passed", "failed", "skipped", "error"]
 type TestEcosystem = Literal["node", "python", "dotnet"]
 
 MAX_FAILURES = 20
+MAX_CASES = 200
+MAX_COVERED_FILES = 20
+MAX_RANGES = 20
+MAX_TRACKED = 5000
+"""The most tests with an id that one run's results keep."""
 MAX_MESSAGE = 500
 MAX_NAME = 200
 JUNIT_MARKER = "::junit::"
 
+NO_NODE_COVERAGE = "coverage is not measured for node yet"
+NO_NODE_CASES = "per-test results are not read for node yet"
+COVERAGE_FAILED = "coverage could not be measured"
+NO_CHANGED_LINES = "no changed lines to cover"
+BASE_DID_NOT_BUILD = "the base run did not build"
+
 NO_TESTS = "no tests found"
 DOES_NOT_BUILD = "does not build"
 TIMED_OUT = "test run timed out"
+
+
+_ID = re.compile(r"(?<![A-Za-z0-9])AC[-_ ]?(\d{3,})(?!\d)", re.IGNORECASE)
+_CRITERION = re.compile(r"AC-\d{3,}")
+
+
+def criterion_ids(name: str) -> list[str]:
+    """The criterion ids a test's name holds, as `AC-001`, in order and once each. An id is its own
+    token, with or without its hyphen and in any case (`test_ac_001_x`, `AC001_X`, `t[AC-001]`);
+    `TRACK001` is no id, and `AC-0011` is `AC-0011`, never `AC-001`."""
+    return list(dict.fromkeys(f"AC-{digits}" for digits in _ID.findall(name)))
+
+
+def is_criterion_id(text: str) -> bool:
+    return _CRITERION.fullmatch(text) is not None
 
 
 def no_runner(language: str) -> str:
@@ -39,6 +67,36 @@ class TestFailure(BaseModel):
     name: str = Field(description="The failing test's name.")
     file: str | None = Field(default=None, description="The test file, if the runner said.")
     message: str | None = Field(default=None, description="The failure message, cut.")
+
+
+class TestCase(BaseModel):
+    """One test that names a criterion (13.4): its name holds an id such as `AC-001`."""
+
+    __test__ = False
+
+    name: str = Field(description="The test's name, as the runner reports it.")
+    file: str | None = Field(default=None, description="The test file, if the runner said.")
+    status: TestStatus
+    ids: list[str] = Field(description="The criterion ids in the name, as `AC-001`.")
+
+
+class CoveredFile(BaseModel):
+    path: str = Field(description="The file, relative to the repository root.")
+    changed: int = Field(description="Executable lines the change added or modified.")
+    covered: int = Field(description="Of those, how many the tests ran.")
+    uncovered: list[tuple[int, int]] = Field(
+        default_factory=lambda: list[tuple[int, int]](),
+        description="The changed lines no test ran, as inclusive line ranges.",
+    )
+
+
+class ChangedCoverage(BaseModel):
+    """How much of the executable code a change touched the tests ran (13.4)."""
+
+    changed: int
+    covered: int
+    files: list[CoveredFile] = Field(default_factory=lambda: list[CoveredFile]())
+    truncated: bool = Field(default=False, description="Whether files past the cap were left out.")
 
 
 class TestCheck(BaseModel):
@@ -61,6 +119,19 @@ class TestCheck(BaseModel):
     skipped: int | None = None
     failures: list[TestFailure] = Field(default_factory=lambda: list[TestFailure]())
     test_ms: int | None = Field(default=None, description="Time spent running the tests, in ms.")
+    cases: list[TestCase] = Field(
+        default_factory=lambda: list[TestCase](),
+        description="With `select`: the tests whose names hold a selected id (at most 200).",
+    )
+    coverage: ChangedCoverage | None = Field(
+        default=None, description="With `coverage`: the coverage of the changed lines."
+    )
+    coverage_reason: str | None = Field(
+        default=None, description="With `coverage`: why it was not measured."
+    )
+    cases_reason: str | None = Field(
+        default=None, description="With `select`: why the tests' results were not read."
+    )
 
 
 class TestReport(BaseModel):
@@ -88,18 +159,74 @@ _NODE_TEST = {
     "yarn1": "yarn run test",
     "yarn4": "yarn4 run test",
 }
+COVERAGE_MARKER = "::coverage::"
+COVERAGE_WHEEL = "/opt/build/wheels/coverage-*.whl"
+
+
+@dataclass(frozen=True)
+class TestOptions:
+    """What a `build.test` call asks for beyond pass and fail (13.4)."""
+
+    __test__ = False
+
+    select: tuple[str, ...] = ()
+    """Criterion ids (`AC-001`): the tests that name them come back as `cases`."""
+    coverage: bool = False
+    changes: Mapping[str, set[int]] = field(default_factory=lambda: dict[str, set[int]]())
+    """With `coverage`: the lines the change touched, by repo path (`changed.source_changes`)."""
+    base: bool = False
+    """The run is on the base tree: only the tests that name a selected id run."""
+
+
 PYTEST_SCRIPT = (
     ".venv/bin/python -m pytest -q -p no:cacheprovider --junitxml=.agentic-junit.xml\n"
     f'code=$?\necho "{JUNIT_MARKER}"\ncat .agentic-junit.xml 2>/dev/null\nexit $code\n'
 )
 
 
-def job_script(plan: Plan) -> str:
+# pytest's `-k` for the ids in `$@` (as `ac_001 or ac001 or ac-001 …`): the test names are matched
+# again by `criterion_ids`, so this only narrows what runs. `$@` holds validated ids, never repo
+# text.
+_PYTEST_SELECT = """
+expr=""
+for id in "$@"; do
+  n=${id#AC-}
+  for v in "ac_$n" "ac$n" "ac-$n"; do expr="${expr:+$expr or }$v"; done
+done
+if [ -n "$expr" ]; then set -- -k "$expr" --continue-on-collection-errors; else set --; fi
+"""
+_PYTEST = ".venv/bin/python -m pytest -q -p no:cacheprovider --junitxml=.agentic-junit.xml"
+
+
+def python_script(options: TestOptions | None = None) -> str:
+    """The pytest job's script. With `coverage`, coverage.py (the image's pinned wheel) is put in
+    the module's venv offline and runs pytest, and its JSON is printed after `::coverage::`; with
+    `base`, only the tests that name the ids in `$@` run."""
+    options = options or TestOptions()
+    if not options.coverage and not options.base:
+        return PYTEST_SCRIPT
+    head = _PYTEST_SELECT if options.base else "set --\n"
+    if options.coverage:
+        run = (
+            f"uv pip install --config-file /opt/build/uv.toml --python .venv/bin/python --offline "
+            f"--no-deps -q {COVERAGE_WHEEL} >/dev/null 2>&1\n"
+            f"COVERAGE_FILE=.agentic-cov.dat .venv/bin/python -m coverage run --source=. -m pytest "
+            '-q -p no:cacheprovider --junitxml=.agentic-junit.xml "$@"\ncode=$?\n'
+            "COVERAGE_FILE=.agentic-cov.dat .venv/bin/python -m coverage json -q "
+            "-o .agentic-cov.json >/dev/null 2>&1\n"
+            f'echo "{COVERAGE_MARKER}"\ncat .agentic-cov.json 2>/dev/null\n'
+        )
+    else:
+        run = f'{_PYTEST} "$@"\ncode=$?\n'
+    return f'{head}{run}echo "{JUNIT_MARKER}"\ncat .agentic-junit.xml 2>/dev/null\nexit $code\n'
+
+
+def job_script(plan: Plan, options: TestOptions | None = None) -> str:
     """The test job's `sh -c` script for a Node or Python plan."""
     if plan.ecosystem == "node":
         assert plan.manager is not None
         return f"CI=true {_NODE_TEST[plan.manager]}\n"
-    return PYTEST_SCRIPT
+    return python_script(options)
 
 
 _PLACEHOLDER = re.compile(r"no test specified", re.IGNORECASE)
@@ -155,12 +282,26 @@ class Outcome(BaseModel):
     failed: int | None = None
     skipped: int | None = None
     failures: list[TestFailure] = Field(default_factory=lambda: list[TestFailure]())
+    cases: list[TestCase] = Field(default_factory=lambda: list[TestCase]())
 
     @property
     def total(self) -> int | None:
         if self.passed is None and self.failed is None:
             return None
         return (self.passed or 0) + (self.failed or 0) + (self.skipped or 0)
+
+
+def _keep_case(cases: list[TestCase], name: str, file: str | None, status: TestStatus) -> None:
+    ids = criterion_ids(name)
+    if ids and len(cases) < MAX_TRACKED:
+        cases.append(
+            TestCase(
+                name=_clip(name, MAX_NAME),
+                file=_clip(file, MAX_NAME) if file else None,
+                status=status,
+                ids=ids,
+            )
+        )
 
 
 def parse_junit(text: str) -> Outcome | None:
@@ -177,9 +318,17 @@ def parse_junit(text: str) -> Outcome | None:
         return None
     total = failed = skipped = 0
     failures: list[TestFailure] = []
+    cases: list[TestCase] = []
     for case in root.iter("testcase"):
         total += 1
         bad = next((c for c in case if c.tag in ("failure", "error")), None)
+        skip = bad is None and any(c.tag == "skipped" for c in case)
+        _keep_case(
+            cases,
+            f"{case.get('classname', '')}::{case.get('name', '')}".strip(":"),
+            case.get("file") or (case.get("classname", "").replace(".", "/") + ".py" or None),
+            "failed" if bad is not None else "skipped" if skip else "passed",
+        )
         if bad is not None:
             failed += 1
             if len(failures) < MAX_FAILURES:
@@ -200,7 +349,11 @@ def parse_junit(text: str) -> Outcome | None:
         elif any(c.tag == "skipped" for c in case):
             skipped += 1
     return Outcome(
-        passed=total - failed - skipped, failed=failed, skipped=skipped, failures=failures
+        passed=total - failed - skipped,
+        failed=failed,
+        skipped=skipped,
+        failures=failures,
+        cases=cases,
     )
 
 
@@ -228,6 +381,7 @@ def parse_trx(documents: list[str]) -> Outcome | None:
     file. A document with a DTD or entities is skipped: the file is written by repo code."""
     total = failed = skipped = 0
     failures: list[TestFailure] = []
+    cases: list[TestCase] = []
     found = False
     for text in documents:
         if "<!DOCTYPE" in text or "<!ENTITY" in text:
@@ -249,6 +403,15 @@ def parse_trx(documents: list[str]) -> Outcome | None:
             if _local(result.tag) != "UnitTestResult":
                 continue
             outcome = result.get("outcome", "")
+            owner = classes.get(result.get("testId", ""), "")
+            status: TestStatus = (
+                "skipped"
+                if outcome == "NotExecuted"
+                else "passed"
+                if outcome == "Passed"
+                else "failed"
+            )
+            _keep_case(cases, result.get("testName", ""), owner or None, status)
             if outcome == "NotExecuted":
                 skipped += 1
                 continue
@@ -259,7 +422,6 @@ def parse_trx(documents: list[str]) -> Outcome | None:
             if len(failures) >= MAX_FAILURES:
                 continue
             message = next((m.text or "" for m in result.iter() if _local(m.tag) == "Message"), "")
-            owner = classes.get(result.get("testId", ""), "")
             failures.append(
                 TestFailure(
                     name=_clip(result.get("testName", "a test"), MAX_NAME),
@@ -269,7 +431,16 @@ def parse_trx(documents: list[str]) -> Outcome | None:
             )
     if not found:
         return None
-    return Outcome(passed=total - failed, failed=failed, skipped=skipped, failures=failures)
+    return Outcome(
+        passed=total - failed, failed=failed, skipped=skipped, failures=failures, cases=cases
+    )
+
+
+def split_coverage(head: str) -> tuple[str, str]:
+    """What precedes a test job's JUnit file as (the runner's own output, the coverage report
+    printed after `::coverage::`)."""
+    output, found, report = head.partition(f"{COVERAGE_MARKER}\n")
+    return (output, report) if found else (head, "")
 
 
 def split_junit(stdout: str) -> tuple[str, str]:
@@ -390,13 +561,21 @@ def tests_failed_reason(outcome: Outcome | None) -> str:
 
 
 __all__ = [
+    "COVERAGE_FAILED",
     "DOES_NOT_BUILD",
+    "NO_CHANGED_LINES",
+    "NO_NODE_CASES",
+    "NO_NODE_COVERAGE",
     "NO_TESTS",
     "TIMED_OUT",
+    "ChangedCoverage",
     "Outcome",
+    "TestCase",
     "TestCheck",
     "TestFailure",
+    "TestOptions",
     "TestReport",
+    "criterion_ids",
     "job_script",
     "make_report",
     "no_runner",
@@ -405,6 +584,8 @@ __all__ = [
     "parse_node_output",
     "parse_trx",
     "python_has_pytest",
+    "python_script",
+    "split_coverage",
     "split_junit",
     "split_trx",
     "tests_failed_reason",
