@@ -312,15 +312,16 @@ class _Restorer:
         counts: dict[str, Any] = dict(extra)
         if outcome is not None:
             counts = {
+                **extra,
                 "passed": outcome.passed,
                 "failed": outcome.failed,
                 "skipped": outcome.skipped,
                 "failures": outcome.failures,
             }
         if empty:
-            return base.model_copy(update={"reason": NO_TESTS})
+            return base.model_copy(update={"reason": NO_TESTS, **extra})
         if crashed:
-            return base.model_copy(update={"status": "error", "reason": "test run failed"})
+            return base.model_copy(update={"status": "error", "reason": "test run failed", **extra})
         if job.exit_code == 0:
             return base.model_copy(update={"status": "passed", **counts})
         reason = tests_failed_reason(outcome)
