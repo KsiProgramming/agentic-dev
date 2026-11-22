@@ -1,10 +1,10 @@
 # Plan: Personal GitHub connection and Copilot adapter
 
 ## 1. The spike
-- [ ] Look up the SDK with `npx ctx7@latest library "GitHub Copilot SDK" "Python custom tools, usage events, permission handler, headless token auth"` then `docs`; note the current package name, version and release status.
-- [ ] In its own virtualenv outside the uv workspace, run `specs/2026-11-18-copilot-sdk-terms/spike/copilot_probe.py` with `COPILOT_PROBE_TOKEN` from the environment. Fix the script to the SDK's real API if names changed.
-- [ ] Extend the probe to check: a custom tool is called and its result returned; built-in tools can be turned off; what the permission handler is asked for; which event carries usage (tokens, premium requests) or that none does; headless use with no signed-in user; what happens with an expired token and with a user who has no subscription; whether the token appears in any event field.
-- [ ] Record the results in `specs/2026-11-18-copilot-sdk-terms/findings.md` (a "Spike results" section replacing "Not run") and as decisions-log rows in `specs/tech-stack.md`. If headless use does not work, stop here and record a no-go.
+- [x] Look up the SDK with `npx ctx7@latest library "GitHub Copilot SDK" "Python custom tools, usage events, permission handler, headless token auth"` then `docs`; note the current package name, version and release status.
+- [x] In its own virtualenv outside the uv workspace, run `specs/2026-11-18-copilot-sdk-terms/spike/copilot_probe.py` with `COPILOT_PROBE_TOKEN` from the environment. Fix the script to the SDK's real API if names changed.
+- [ ] Extend the probe to check: a custom tool is called and its result returned; built-in tools can be turned off; what the permission handler is asked for; which event carries usage (tokens, premium requests) or that none does; headless use with no signed-in user; what happens with an expired token and with a user who has no subscription; whether the token appears in any event field. (Done except an expired token and a user with no subscription: no second account yet.)
+- [x] Record the results in `specs/2026-11-18-copilot-sdk-terms/findings.md` (a "Spike results" section replacing "Not run") and as decisions-log rows in `specs/tech-stack.md`. If headless use does not work, stop here and record a no-go.
 
 ## 2. Copilot adapter on a fake SDK
 - [x] Add the pinned SDK to `packages/runtime`; add `packages/runtime/src/agentic_runtime/copilot.py` with `CopilotRuntime` implementing `AgentRuntime`.

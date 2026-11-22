@@ -5,12 +5,12 @@ This is a thin layer on purpose. Everything about a run lives in `copilot.py` an
 fake; here the SDK's types are mapped to the connector's, and `translate` is tested on stand-ins
 shaped like the SDK's events.
 
-**Written from the SDK's public API and documentation, not yet run against GitHub.** Phase 8.2's
-spike (`specs/2026-11-18-copilot-sdk-terms/findings.md`) must confirm with a real token: that a
-client runs headless on a stored token, that `available_tools` leaves the SDK's built-in tools
-off (an empty list included), that a custom tool's result reaches the model, which permission
-requests arrive, whether `append` or `replace` is the right system-message mode, and what the
-usage event's `cost` means. Until then this file is unproven.
+**Run against GitHub on 2026-11-22** (phase 8.2's spike, `specs/2026-11-18-copilot-sdk-terms/
+findings.md`, "online part"): a client runs headless on a user token, a custom tool's result
+reaches the model, the permission handler is asked once per custom tool, and the per-call usage
+below matches the SDK's totals. Still unproven: that `available_tools` leaves the SDK's built-in
+tools off when the model is asked to use one, whether `append` or `replace` is the right
+system-message mode, and an expired token.
 
 The token is held here and nowhere else: it goes to the SDK's client and is never part of a
 `SessionSpec`, an event or this object's `repr`.
