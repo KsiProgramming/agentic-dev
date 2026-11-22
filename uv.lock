@@ -143,16 +143,20 @@ version = "0.1.0"
 source = { editable = "packages/github" }
 dependencies = [
     { name = "agentic-secrets" },
+    { name = "agentic-store" },
     { name = "cryptography" },
     { name = "githubkit", extra = ["auth-app"] },
+    { name = "httpx2" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "agentic-secrets", editable = "packages/secrets" },
+    { name = "agentic-store", editable = "packages/store" },
     { name = "cryptography", specifier = ">=45" },
     { name = "githubkit", extras = ["auth-app"], specifier = ">=0.13" },
+    { name = "httpx2", specifier = ">=2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
 
@@ -183,6 +187,7 @@ version = "0.1.0"
 source = { editable = "packages/runtime" }
 dependencies = [
     { name = "anthropic" },
+    { name = "github-copilot-sdk" },
     { name = "httpx2" },
     { name = "jsonschema" },
     { name = "pydantic" },
@@ -191,6 +196,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=1.17" },
+    { name = "github-copilot-sdk", specifier = "==1.0.34" },
     { name = "httpx2", specifier = ">=2.0,<3" },
     { name = "jsonschema", specifier = ">=4.26" },
     { name = "pydantic", specifier = ">=2.11" },
@@ -831,6 +837,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6c/93/6e785df7ec0bdbfef9d7bf1044bc7bfabd6d22641d147e8326a1f2ba210b/fastapi-0.156.8.tar.gz", hash = "sha256:cee65bba7890cd85264b3b06c7fdf88e84ca3510d00d4018cdbc2ce629e1ff22", size = 504768, upload-time = "2026-10-21T08:45:18.817Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/21/93/b87423a73fad5b3b1de4f14a680a2d2344c442d5a1f297a0eb413b7572a3/fastapi-0.156.8-py3-none-any.whl", hash = "sha256:d5f2e052a5f985fb0bbe1114527938c25fedbe198a8197faae71c3d38851b7c3", size = 147358, upload-time = "2026-10-21T08:45:17.278Z" },
+]
+
+[[package]]
+name = "github-copilot-sdk"
+version = "1.0.34"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/3f/9b8405bf4943dfb6ecd5d0ac2179e1fab896a61bd31273c94267faeae5c9/github_copilot_sdk-1.0.34-py3-none-any.whl", hash = "sha256:0d9cffccdb59f5d90512e9b94a70d482859a5fc9e0d2d0926e1bb138a1e593c4", size = 1116400, upload-time = "2026-11-14T00:08:47.124Z" },
 ]
 
 [[package]]

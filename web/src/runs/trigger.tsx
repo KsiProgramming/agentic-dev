@@ -1,4 +1,4 @@
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, FolderGit2Icon } from "lucide-react";
 
 import { IdChip } from "@/components/display";
 
@@ -10,6 +10,17 @@ interface Triggered {
   rerun_from?: { node_id: string } | null;
   jira_issue?: { site: string; key: string; url: string } | null;
   pr_review?: { number: number; comment_url: string } | null;
+}
+
+/** Whose Copilot a run used (8.2): "Copilot · <login>". Nothing for a run on Claude. */
+export function CopilotFact({ login }: { login?: string | null }) {
+  if (!login) return null;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5" data-testid="copilot-login">
+      <FolderGit2Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      <span>Copilot of</span> <span className="truncate font-mono">{login}</span>
+    </span>
+  );
 }
 
 /** What started a run, as words: "Manual", "API", "Rerun", "Jira" (7.3), "GitHub" (7.6). */

@@ -57,6 +57,10 @@ class StoredRun:
     pr_review_brief: dict[str, JsonValue] | None = None
     # The spec file the run was given (7.7), with its text.
     spec_file: dict[str, JsonValue] | None = None
+    # The person's GitHub connection whose Copilot the run uses (8.2), and their login; unset: the
+    # run is on Claude.
+    copilot_connection_id: UUID | None = None
+    copilot_login: str | None = None
 
 
 async def create_run(
@@ -74,6 +78,7 @@ async def create_run(
     jira_origin: JiraOrigin | None = None,
     jira_issue: dict[str, JsonValue] | None = None,
     spec_file: dict[str, JsonValue] | None = None,
+    copilot_connection: tuple[UUID, str] | None = None,
 ) -> UUID:
     """Insert a `queued` run of `workspace_id` holding `spec`, `input` and `repo`, and the
     template `spec` was built from (with its options) or the stored workflow version it was read
@@ -89,7 +94,9 @@ async def create_run(
     `TriggerRunActiveError` when the rule already has a run going on the issue. Without one,
     `jira_issue` (`{cloud_id, site, key, url}`, 7.5) is the issue a run started by hand works on,
     which its agents are then told as a triggered run's are. `spec_file` (7.7) is the
-    Markdown spec file the run is given (`{source, name, path, ref, size, sha256, text}`)."""
+    Markdown spec file the run is given (`{source, name, path, ref, size, sha256, text}`).
+    `copilot_connection` (8.2) is the person's GitHub connection, `(id, login)`, whose Copilot the
+    run uses; the caller has checked it belongs to the workspace."""
     run_id = uuid4()
     async with sessions.begin() as session:
         if jira_origin is not None:
@@ -113,6 +120,8 @@ async def create_run(
             branch=repo.ref if repo else None,
             jira_issue=jira_issue,
             spec_file=spec_file,
+            copilot_connection_id=copilot_connection[0] if copilot_connection else None,
+            copilot_login=copilot_connection[1] if copilot_connection else None,
         )
         session.add(run)
         audit(
@@ -129,6 +138,7 @@ async def create_run(
                 ),
                 "repo_url": repo.url if repo else None,
                 "budget_usd": usd(policy.budget_usd),
+                **({"copilot_login": copilot_connection[1]} if copilot_connection else {}),
             },
         )
         if jira_origin is not None:
@@ -162,6 +172,8 @@ def stored_run(run: Run) -> StoredRun:
         pr_review=run.pr_review,
         pr_review_brief=run.pr_review_brief,
         spec_file=run.spec_file,
+        copilot_connection_id=run.copilot_connection_id,
+        copilot_login=run.copilot_login,
     )
 
 

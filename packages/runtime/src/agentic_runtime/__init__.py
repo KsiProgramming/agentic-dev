@@ -2,6 +2,7 @@
 
 from agentic_runtime.claude import ClaudeRuntime
 from agentic_runtime.contract import ContractViolation, check_events
+from agentic_runtime.copilot import CopilotRuntime
 from agentic_runtime.events import (
     TERMINAL_EVENT_TYPES,
     AgentEvent,
@@ -43,6 +44,7 @@ __all__ = [
     "ClaudeRuntime",
     "Completed",
     "ContractViolation",
+    "CopilotRuntime",
     "Failed",
     "Message",
     "ModelPrice",

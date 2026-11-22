@@ -2088,6 +2088,245 @@
         }
       }
     },
+    "/workspaces/{workspace_id}/connections/github-user/authorize": {
+      "post": {
+        "tags": [
+          "github-user"
+        ],
+        "summary": "Start Authorize",
+        "description": "GitHub's consent URL for the person connecting. Consenting stores their grant in the\nworkspace, then sends the browser to `return_to` (the Integrations settings page by default).",
+        "operationId": "startGithubUserAuthorize",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StartGithubUserAuthorize"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubUserAuthorizeOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "503": {
+            "description": "No GitHub OAuth app, or no master key, is configured on the API"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/github-user/callback": {
+      "get": {
+        "tags": [
+          "github-user"
+        ],
+        "summary": "Complete Authorize",
+        "description": "GitHub's redirect after the consent (the OAuth app's callback URL). Sends the browser back\nto the page that started it (the Integrations settings page by default) with\n`github_user=connected`, or `github_user=error` and a `reason`: `state` (unknown, used or\nexpired), `denied` (the person refused), `exchange` (GitHub refused the code), `github`\n(GitHub could not be reached) or `not_configured`.",
+        "operationId": "completeGithubUserAuthorize",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/github-user": {
+      "get": {
+        "tags": [
+          "github-user"
+        ],
+        "summary": "List Connections",
+        "description": "The workspace's personal GitHub connections, one per person. Reads only what is stored;\nit never calls GitHub.",
+        "operationId": "listGithubUserConnections",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubUserConnectionsOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No workspace with this id"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{workspace_id}/github-user/{connection_id}": {
+      "delete": {
+        "tags": [
+          "github-user"
+        ],
+        "summary": "Delete Connection",
+        "description": "Remove the connection and its token. Runs started with it keep the login they recorded.\nThe app's access stays listed in the person's GitHub settings, where they can revoke it.",
+        "operationId": "deleteGithubUserConnection",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such workspace, or it has no such connection"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workspaces/{workspace_id}/connections/jira/authorize": {
       "post": {
         "tags": [
@@ -4802,6 +5041,19 @@
             "title": "Input",
             "default": ""
           },
+          "copilot_connection_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copilot Connection Id",
+            "description": "Run on this person's Copilot (8.2): the id of one of the workspace's personal GitHub connections (`GET /workspaces/{id}/github-user`). Every agent of the run then uses that person's subscription and nobody else's. Unset: the run is on Claude. Refused with `422` `copilot_connection_not_found` or `409` `copilot_needs_attention`."
+          },
           "spec_file": {
             "anyOf": [
               {
@@ -5482,6 +5734,101 @@
         ],
         "title": "GithubErrorDetail",
         "description": "The `detail` of a 409 from a GitHub endpoint, or from a run on a new repo: `code` says\nwhat the user should do (`no_connection`, `installation_gone`, `personal_account`,\n`repo_exists`)."
+      },
+      "GithubUserAuthorizeOut": {
+        "properties": {
+          "authorize_url": {
+            "type": "string",
+            "title": "Authorize Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorize_url"
+        ],
+        "title": "GithubUserAuthorizeOut",
+        "description": "Where to send the browser to connect a personal GitHub account. Valid for 10 minutes."
+      },
+      "GithubUserConnectionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "login": {
+            "type": "string",
+            "title": "Login",
+            "description": "The GitHub account that connected; its Copilot is used."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_attention"
+            ],
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "invalid_grant",
+                  "unauthorized"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why it needs attention; connecting again clears it."
+          },
+          "connected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Connected At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "login",
+          "status",
+          "connected_at",
+          "updated_at"
+        ],
+        "title": "GithubUserConnectionOut",
+        "description": "One person's connection. The token is never returned."
+      },
+      "GithubUserConnectionsOut": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "description": "Whether the API has an OAuth app for personal connections. Without one nothing can connect."
+          },
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/GithubUserConnectionOut"
+            },
+            "type": "array",
+            "title": "Connections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "connections"
+        ],
+        "title": "GithubUserConnectionsOut",
+        "description": "The workspace's personal GitHub connections, one per person."
       },
       "HTTPValidationError": {
         "properties": {
@@ -8835,6 +9182,18 @@
             ],
             "description": "The Jira issue a trigger started the run on (7.3); a rerun keeps it."
           },
+          "copilot_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copilot Login",
+            "description": "The GitHub login whose Copilot subscription the run uses (8.2), as it was when the run started; `null`: the run is on Claude."
+          },
           "branch": {
             "anyOf": [
               {
@@ -9659,6 +10018,18 @@
             ],
             "description": "The Jira issue a trigger started the run on (7.3); a rerun keeps it."
           },
+          "copilot_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copilot Login",
+            "description": "The GitHub login whose Copilot subscription the run uses (8.2), as it was when the run started; `null`: the run is on Claude."
+          },
           "branch": {
             "anyOf": [
               {
@@ -10230,6 +10601,27 @@
         "additionalProperties": false,
         "type": "object",
         "title": "StartAuthorize"
+      },
+      "StartGithubUserAuthorize": {
+        "properties": {
+          "return_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "pattern": "^/([^/\\\\\\s]\\S*)?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return To",
+            "description": "Where the web app lands after the consent. Defaults to the Integrations settings page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StartGithubUserAuthorize"
       },
       "StartInstall": {
         "properties": {

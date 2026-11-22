@@ -184,7 +184,7 @@ A gate today shows a diff and asks a person to judge it. Whether the build and t
 | # | Phase | Done when | Status |
 |---|---|---|---|
 | 8.1 | Verify Copilot SDK terms for hosted multi-tenant use | Go/no-go recorded in tech-stack decisions log | ✅ Done ([#248](https://github.com/KsiProgramming/agentic-dev/pull/248)) |
-| 8.2 | Personal GitHub connection for Copilot (a user OAuth token per person, stored in the workspace and encrypted, picked by the person who starts a run; never the company's GitHub App), starting with the probe of [8.1's findings](2026-11-18-copilot-sdk-terms/findings.md) run with a real subscription; Copilot adapter + MCP tools registered as custom tools | A one-node run on Copilot works on the starter's own account, and its token appears in no event | — |
+| 8.2 | Personal GitHub connection for Copilot (a user OAuth token per person, stored in the workspace and encrypted, picked by the person who starts a run; never the company's GitHub App), starting with the probe of [8.1's findings](2026-11-18-copilot-sdk-terms/findings.md) run with a real subscription; Copilot adapter + MCP tools registered as custom tools. [Plan](2026-11-18-copilot-connection-adapter/requirements.md) | A one-node run on Copilot works on the starter's own account, and its token appears in no event | ✅ Done ([#251](https://github.com/KsiProgramming/agentic-dev/pull/251)) |
 | 8.3 | Provider selection per workspace / workflow / node; capability-gap validation; runs with no starter stay on Claude | AC-6: same workflow runs on Claude and Copilot unchanged | — |
 
 8.2 and 8.3 changed after 8.1's terms check: Copilot is per person, so the personal connection joins 8.2, and a run started by a webhook or schedule has no one's subscription to use.

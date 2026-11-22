@@ -57,7 +57,30 @@ Recommended on the GitHub side: protect default branches (required reviews, requ
 
 Each workspace pays its provider directly. Use a key from a dedicated Anthropic workspace with its own spend limit, so the provider's limit backs up the platform's budget.
 
-GitHub Copilot as a second provider is roadmap Milestone 8; the start screen already shows it as "not available yet".
+GitHub Copilot is the second provider (roadmap Milestone 8): it is connected per person, see section 2a.
+
+### 2a. GitHub Copilot: each person connects their own account (optional)
+
+A Copilot subscription belongs to one person, so Copilot never runs on the company's GitHub App or on a shared account. The company App (section 1) stays the platform's connection for repos and pull requests; a person who wants Copilot adds a second, personal GitHub connection that is used only for Copilot. Anyone who never connects one keeps using Claude. This is for a **self-hosted** deployment: whether a hosted multi-tenant service may offer Copilot is open until GitHub confirms it in writing ([findings](../../specs/2026-11-18-copilot-sdk-terms/findings.md)).
+
+1. Register an OAuth app for the deployment (**GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**, or use a GitHub App's user-token flow). Set the **Authorization callback URL** to `<API_BASE_URL>/github-user/callback` (for example `https://api.example.com/github-user/callback`).
+2. Set `GITHUB_USER_CLIENT_ID` and save the client secret to a file named by `GITHUB_USER_CLIENT_SECRET_FILE` (see `.env.example`). The API and the worker both read them. `GITHUB_USER_SCOPES` (space separated) is optional; **it is not verified which scopes a Copilot token needs**: the 8.2 spike ran with a token that had `repo`, `read:org` and `gist`. If runs fail with `copilot_no_subscription` for an account that has a seat, try the scopes the spike used.
+3. Run the workers with the real runtime (`AGENTIC_RUNTIME=claude`, which also serves Copilot); `COPILOT_MODEL` picks the model (default `auto`). With the fake runtime, a Copilot run reads its token and then runs the fake agents.
+4. Each person opens **Settings → Integrations → GitHub (personal, for Copilot)** and connects. They need their own active Copilot seat (a Business seat was tested). The platform stores the token encrypted, labelled by their GitHub login, and never shows it again.
+5. When starting a run, **Provider** offers GitHub Copilot with the login it will use. A run uses only the token of the connection it was started with. A run started by a Jira trigger, a GitHub webhook or a schedule has no person and stays on Claude.
+
+A Copilot run that cannot use its token fails with a fixed code, and a refused token also marks that person's connection "Needs attention" until they connect again:
+
+| Code | Meaning |
+|---|---|
+| `copilot_not_configured` | The worker has no OAuth app or master key |
+| `copilot_not_connected` | The connection was removed or cannot be decrypted |
+| `copilot_needs_attention` | GitHub refused the token (revoked, or expired inside a long run) |
+| `copilot_no_subscription` | GitHub refused Copilot access: the account has no Copilot seat |
+| `copilot_rate_limited` | Copilot's rate limit for this account; try again later |
+| `copilot_unavailable` | GitHub could not be reached to renew the token |
+
+Usage is shown as tokens. Copilot meters AI credits, and the platform has no price for them, so a Copilot run shows no cost.
 
 ### 3. Prices and limits
 

@@ -106,6 +106,7 @@ from agentic_store import (
     create_run,
     enqueue_run,
     get_github_installation,
+    get_github_user_connection,
     get_jira_connection,
     get_run,
     get_run_artifact,
@@ -225,6 +226,7 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "trigger": row.trigger,
         "branch": row.branch,
         "jira_issue": JiraIssueRef.model_validate(row.jira_issue) if row.jira_issue else None,
+        "copilot_login": row.copilot_login,
         "pr_review": PrReviewRef.model_validate(row.pr_review) if row.pr_review else None,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
         "active_ms": active_ms,
@@ -520,6 +522,7 @@ async def start_run(
         manual_issue = await _manual_jira_issue(
             _sessions(request), prepared.workspace_id, body.input
         )
+    copilot = await _copilot_connection(request, prepared, jira_origin)
     spec_file = await _spec_file(request, prepared)
     if spec_file is not None:
         body = body.model_copy(update={"input": spec_file["path"] or spec_file["name"]})
@@ -539,6 +542,7 @@ async def start_run(
             jira_origin=jira_origin,
             jira_issue=manual_issue,
             spec_file=spec_file,
+            copilot_connection=copilot,
         )
     except PolicyViolationError as e:
         raise _over_policy(e) from e
@@ -547,6 +551,37 @@ async def start_run(
     return CreateRunResponse(
         run_id=run_id, events_url=str(request.url_for("stream_run_events", run_id=run_id))
     )
+
+
+async def _copilot_connection(
+    request: Request, prepared: PreparedRun, jira_origin: JiraOrigin | None
+) -> tuple[UUID, str] | None:
+    """`(id, login)` of the personal GitHub connection whose Copilot the run uses (8.2), or `None`
+    for a run on Claude. The connection must be the workspace's own and usable; a run no person
+    started (a trigger's) is never given one."""
+    connection_id = prepared.body.copilot_connection_id
+    if connection_id is None:
+        return None
+    if jira_origin is not None:
+        raise _unprocessable(
+            "copilot_not_for_triggers",
+            "a run a trigger starts has no person whose Copilot it could use",
+        )
+    info = await get_github_user_connection(
+        _sessions(request), prepared.workspace_id, connection_id
+    )
+    if info is None:
+        raise _unprocessable(
+            "copilot_connection_not_found",
+            f"the workspace has no personal GitHub connection {connection_id}",
+        )
+    if info.needs_attention is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"copilot_needs_attention: {info.login}'s GitHub connection needs attention "
+            f"({info.needs_attention}); connect it again in Settings > Integrations",
+        )
+    return info.id, info.login
 
 
 async def prepare_run(request: Request, body: CreateRunRequest) -> PreparedRun:

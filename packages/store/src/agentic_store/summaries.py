@@ -48,6 +48,8 @@ class RunSummaryRow:
     # `{node_id, title, expires_at}` of the gate the run is paused at.
     waiting_gate: dict[str, Any] | None
     rerun_of: UUID | None
+    # The GitHub login whose Copilot the run uses (8.2); `None`: the run is on Claude.
+    copilot_login: str | None
     # `{node_id, use_wip, edited}` of a rerun from a step (12.4).
     rerun_from: dict[str, Any] | None
     # What started the run: `manual`, `api`, `rerun` or `jira` (7.3).
@@ -151,6 +153,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.lease_expires_at,
         Run.waiting_gate,
         Run.rerun_of,
+        Run.copilot_login,
         Run.rerun_from,
         Run.jira_issue,
         Run.pr_review,
@@ -201,6 +204,7 @@ def _summary(
         lease_expires_at=row.lease_expires_at,
         waiting_gate=row.waiting_gate,
         rerun_of=row.rerun_of,
+        copilot_login=row.copilot_login,
         rerun_from=row.rerun_from,
         trigger=row.trigger,
         branch=row.branch,

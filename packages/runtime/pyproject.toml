@@ -5,6 +5,7 @@ description = "Agent runtime interface and provider adapters for the Agentic Dev
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=1.17",
+    "github-copilot-sdk==1.0.34",
     "httpx2>=2.0,<3",
     "jsonschema>=4.26",
     "pydantic>=2.11",

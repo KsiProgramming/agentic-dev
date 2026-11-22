@@ -98,6 +98,13 @@ services:
       # client secret is read from ./.secrets/atlassian-client-secret.
       ATLASSIAN_CLIENT_ID: ${ATLASSIAN_CLIENT_ID:-}
       ATLASSIAN_CLIENT_SECRET_FILE: /github/atlassian-client-secret
+      # The deployment's OAuth app for personal GitHub connections, which let each person run
+      # Copilot on their own account (8.2). Its callback URL is <API_BASE_URL>/github-user/callback.
+      # Left blank, the card says personal connections are not configured. Its client secret is
+      # read from ./.secrets/github-user-client-secret.
+      GITHUB_USER_CLIENT_ID: ${GITHUB_USER_CLIENT_ID:-}
+      GITHUB_USER_CLIENT_SECRET_FILE: /github/github-user-client-secret
+      GITHUB_USER_SCOPES: ${GITHUB_USER_SCOPES:-}
       # Where Jira posts the webhook deliveries that start runs (7.3): <this>/jira/webhooks. Jira
       # must reach it from the internet; in development, a tunnel's URL. Blank: API_BASE_URL.
       JIRA_WEBHOOK_BASE_URL: ${JIRA_WEBHOOK_BASE_URL:-}
@@ -193,6 +200,11 @@ services:
       # grant with it. Left blank, runs that use jira.* tools fail.
       ATLASSIAN_CLIENT_ID: ${ATLASSIAN_CLIENT_ID:-}
       ATLASSIAN_CLIENT_SECRET_FILE: /github/atlassian-client-secret
+      # The same OAuth app as the API: a run on a person's Copilot (8.2) refreshes their token with
+      # it. Left blank, such a run fails with copilot_not_configured.
+      GITHUB_USER_CLIENT_ID: ${GITHUB_USER_CLIENT_ID:-}
+      GITHUB_USER_CLIENT_SECRET_FILE: /github/github-user-client-secret
+      COPILOT_MODEL: ${COPILOT_MODEL:-auto}
       # A Jira comment a run posts ends with a link to the run here.
       WEB_BASE_URL: http://localhost:${WEB_PORT:-3000}
     # The Docker socket gives the worker control of the host's Docker (dev only; phase 10.2

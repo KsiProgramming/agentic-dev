@@ -19,6 +19,8 @@ export type WorkspacePolicy = components["schemas"]["WorkspacePolicyOut"];
 export type RunLimits = components["schemas"]["RunLimits"];
 export type RunLimitOverrides = components["schemas"]["RunLimitOverrides"];
 export type JiraConnection = components["schemas"]["JiraConnectionOut"];
+export type GithubUserConnection = components["schemas"]["GithubUserConnectionOut"];
+export type GithubUserConnections = components["schemas"]["GithubUserConnectionsOut"];
 export type JiraSite = components["schemas"]["JiraSiteOut"];
 export type JiraProject = components["schemas"]["JiraProjectOut"];
 export type JiraProjectPage = components["schemas"]["JiraProjectPage"];
@@ -54,6 +56,10 @@ export function policyKey(workspaceId: string) {
 
 export function reposKey(workspaceId: string) {
   return ["workspace", workspaceId, "repos"] as const;
+}
+
+export function githubUserKey(workspaceId: string) {
+  return ["workspace", workspaceId, "github-user"] as const;
 }
 
 export function jiraKey(workspaceId: string) {
@@ -431,6 +437,84 @@ export function useDisconnectJira({
       void queries.invalidateQueries({ queryKey: connectionsKey(workspaceId) });
       void queries.invalidateQueries({ queryKey: jiraKey(workspaceId) });
     },
+  });
+}
+
+/** The workspace's personal GitHub connections (8.2), one per person, whose Copilot a run can
+ * use. Never a token. */
+export function useGithubUser({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  return useQuery({
+    queryKey: githubUserKey(workspaceId),
+    queryFn: async () => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).GET("/workspaces/{workspace_id}/github-user", {
+          params: { path: { workspace_id: workspaceId } },
+        }),
+      );
+      if (!data) {
+        throw new ApiError(response.status, error, "Could not load the GitHub accounts");
+      }
+      return data;
+    },
+  });
+}
+
+/** Asks for GitHub's consent URL and sends the browser there; GitHub sends it back to the
+ * settings page (or `returnTo`) with `?github_user=connected|error`. */
+export function useStartGithubUserAuthorize({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+  navigate = (url: string) => window.location.assign(url),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+  navigate?: (url: string) => void;
+}) {
+  return useMutation({
+    mutationFn: async (returnTo?: string) => {
+      const { data, error, response } = await call(() =>
+        createApiClient(baseUrl).POST(
+          "/workspaces/{workspace_id}/connections/github-user/authorize",
+          {
+            params: { path: { workspace_id: workspaceId } },
+            body: returnTo ? { return_to: returnTo } : undefined,
+          },
+        ),
+      );
+      if (!data) {
+        throw new ApiError(response.status, error, "Could not start connecting GitHub");
+      }
+      navigate(data.authorize_url);
+    },
+  });
+}
+
+export function useDeleteGithubUser({
+  workspaceId,
+  baseUrl = apiBaseUrl(),
+}: {
+  workspaceId: string;
+  baseUrl?: string;
+}) {
+  const queries = useQueryClient();
+  return useMutation({
+    mutationFn: async (connectionId: string) => {
+      const { error, response } = await call(() =>
+        createApiClient(baseUrl).DELETE("/workspaces/{workspace_id}/github-user/{connection_id}", {
+          params: { path: { workspace_id: workspaceId, connection_id: connectionId } },
+        }),
+      );
+      if (!response.ok && response.status !== 404) {
+        throw new ApiError(response.status, error, "Could not remove the account");
+      }
+    },
+    onSuccess: () => void queries.invalidateQueries({ queryKey: githubUserKey(workspaceId) }),
   });
 }
 

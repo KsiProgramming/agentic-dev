@@ -91,7 +91,7 @@ test("a missing name and a bad id are shown on their fields, and nothing is sent
   expect(fetch.mock.calls.some(([r]) => r.method === "POST")).toBe(false);
 });
 
-test("Claude is chosen and connected; Copilot is listed but not available yet", async () => {
+test("Claude is chosen and connected; Copilot is listed, chosen when a run starts", async () => {
   stubApi(routes());
   const sheet = show();
 
@@ -100,7 +100,7 @@ test("Claude is chosen and connected; Copilot is listed but not available yet", 
   await waitFor(() => expect(claude.closest("label")?.textContent).toContain("Connected"));
   const copilot = sheet.getByRole("radio", { name: /GitHub Copilot/ });
   expect(copilot).toHaveProperty("disabled", true);
-  expect(sheet.getByText("Comes with the Copilot adapter.")).toBeDefined();
+  expect(sheet.getByText("Chosen when a run starts, on a connected GitHub account.")).toBeDefined();
 });
 
 test("a provider that is not connected can be chosen, with how to connect it", async () => {
