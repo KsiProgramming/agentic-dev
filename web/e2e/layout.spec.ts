@@ -6,6 +6,7 @@ import {
   COMBINE,
   DOCS_DEMO_URL,
   evidencePack,
+  judgedEvidencePack,
   FAILING,
   REPO_READER,
   startReviewRun,
@@ -126,6 +127,19 @@ for (const failing of [false, true]) {
     await request.post(`${apiURL}/runs/${runId}/cancel`);
   });
 }
+
+test("inbox, a gate with coverage and criteria in its evidence pack", async ({ page, request }) => {
+  const runId = await startRun(request, [WRITER, GATE], "E2E criteria layout");
+  await withEvidence(page, judgedEvidencePack());
+  await page.goto(`/inbox?run=${runId}`);
+  const review = page.getByTestId("inbox-review").filter({ visible: true });
+  await expect(review.getByTestId("evidence")).toBeVisible({ timeout: 30_000 });
+  await expect(review.getByText("Coverage", { exact: true })).toBeVisible();
+  await expect(review.getByRole("list", { name: "Acceptance criteria" })).toContainText("AC-002");
+  await expect(review.getByRole("list", { name: "Uncovered lines" })).toContainText("7-9, 12");
+  await checkPage(page, "inbox-evidence-criteria");
+  await request.post(`${apiURL}/runs/${runId}/cancel`);
+});
 
 test("templates", async ({ page }) => {
   await page.goto("/templates");

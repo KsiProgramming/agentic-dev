@@ -206,6 +206,72 @@ export function evidencePack(failing: boolean) {
   };
 }
 
+/** An evidence pack with coverage and criteria (13.4): one criterion of each state, and changed
+ * lines no test runs, so the review shows both lists next to the build, tests and analyzers. */
+export function judgedEvidencePack() {
+  const check = (kind: string, status: string, summary: string, detail = {}) => ({
+    kind,
+    status,
+    required: true,
+    summary,
+    detail,
+  });
+  const pack = evidencePack(false);
+  return {
+    ...pack,
+    rounds_left: 0,
+    checks: [
+      ...pack.checks,
+      check("coverage", "failed", "50% of changed lines covered (5 of 10, needs 80%)", {
+        changed: 10,
+        covered: 5,
+        percent: 50,
+        threshold: 80,
+        files: [
+          {
+            path: "src/sum.py",
+            changed: 10,
+            covered: 5,
+            uncovered: [
+              [7, 9],
+              [12, 12],
+            ],
+          },
+        ],
+        truncated: false,
+      }),
+      check("criteria", "failed", "1 of 4 proven", {
+        total: 4,
+        proven: 1,
+        criteria: [
+          {
+            id: "AC-001",
+            state: "proven",
+            tests: [{ name: "tests.test_sum::test_ac_001_adds", file: "tests/test_sum.py" }],
+            before: "fails",
+            after: "passes",
+          },
+          { id: "AC-002", state: "untested", tests: [], before: null, after: null },
+          {
+            id: "AC-003",
+            state: "failing",
+            tests: [{ name: "tests.test_sum::test_ac_003_zero", file: null }],
+            before: null,
+            after: "fails",
+          },
+          {
+            id: "AC-004",
+            state: "not_proven",
+            tests: [{ name: "tests.test_sum::test_ac_004_keeps", file: null }],
+            before: "passes",
+            after: "passes",
+          },
+        ],
+      }),
+    ],
+  };
+}
+
 /** Makes the gate of the page's run answer with `evidence` as well: the real gate, so the review
  * is the real one, plus the pack the stack's fake tools cannot produce. */
 export async function withEvidence(
