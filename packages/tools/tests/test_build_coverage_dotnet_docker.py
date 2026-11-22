@@ -8,7 +8,7 @@ Run this file by itself: never `packages/sandbox/tests` as a whole (its sweep te
 stacks' sandboxes)."""
 
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import docker
@@ -54,15 +54,14 @@ BASE = {
 }
 
 # The change adds `Double` (line 6, run by AC002's test) and `Triple` (line 7, run by nobody).
-CALC_AFTER = CALC_BASE.replace(
-    "}\n",
-    "    public static int Double(int x) => x * 2;\n    public static int Triple(int x) => x * 3;\n}\n",
-    1,
-).replace("a + b;\n    public static int Double", "a + b;\n    public static int Double")
-TESTS_AFTER = TESTS_BASE.replace(
-    "}\n",
-    "    [Fact]\n    public void AC002_Doubles() => Assert.Equal(4, Calc.Calculator.Double(2));\n}\n",
+_ADDED = (
+    "    public static int Double(int x) => x * 2;\n    public static int Triple(int x) => x * 3;\n"
 )
+CALC_AFTER = CALC_BASE.replace("}\n", _ADDED + "}\n", 1)
+_TEST = (
+    "    [Fact]\n    public void AC002_Doubles() => Assert.Equal(4, Calc.Calculator.Double(2));\n"
+)
+TESTS_AFTER = TESTS_BASE.replace("}\n", _TEST + "}\n", 1)
 
 
 @pytest.fixture(scope="module")
@@ -124,8 +123,10 @@ async def call(sandbox: Sandbox, run_id: UUID, **arguments: Any) -> dict[str, An
             "test", {"node": "writer", "ecosystems": ["dotnet"], **arguments}
         )
     assert not result.is_error, result.content
-    (check,) = (result.structured_content or {})["checks"]
-    return check
+    payload = cast("dict[str, Any]", result.structured_content or {})
+    checks = cast("list[dict[str, Any]]", payload["checks"])
+    assert len(checks) == 1
+    return checks[0]
 
 
 @pytest.fixture(scope="module")
