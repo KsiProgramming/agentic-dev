@@ -137,6 +137,14 @@
           "description": "Whether the module's build ran (None: it has none).",
           "title": "Build"
         },
+        "build_errors": {
+          "description": "When the build failed: each error as `CODE path:line` (at most 10), never the compiler's words.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Build Errors",
+          "type": "array"
+        },
         "cases": {
           "description": "With `select`: the tests whose names hold a selected id (at most 200).",
           "items": {

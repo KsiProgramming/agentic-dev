@@ -150,6 +150,7 @@ async def test_done_when_a_review_comment_starts_a_follow_up_on_the_same_pr(
     workspace_id = await jira_workspace(sessions, atlassian, master_key)
     await put_github_connection(sessions, workspace_id, 42, "acme")
     limit = {"value": 100}
+    middle = ("checks",) if checks else ()
 
     def team(tools: ToolExecutor | None) -> AgentRuntime:
         return sdd_team(tools, limit["value"])
@@ -174,7 +175,7 @@ async def test_done_when_a_review_comment_starts_a_follow_up_on_the_same_pr(
             jira_issue=ISSUE,
         )
         await queue(redis_url, original)
-        await through_gates(sessions, redis_url, original, "approve_spec", "approve_pr")
+        await through_gates(sessions, redis_url, original, "approve_spec", *middle, "approve_pr")
         await wait_for_status(sessions, original, "completed")
         branch = f"agent/{original}/implement"
         opened_at = branch_sha(bare, branch)
@@ -190,6 +191,8 @@ async def test_done_when_a_review_comment_starts_a_follow_up_on_the_same_pr(
         limit["value"] = 50
         first = await follow_up(sessions, workspace_id, asked.id)
         await queue(redis_url, first)
+        if checks:  # the fake sandbox cannot build, so a person is asked at `checks` (13.4)
+            await through_gates(sessions, redis_url, first, "checks")
         await wait_for_gate(sessions, first, "approve_pr")
         assert branch_sha(bare, branch) == opened_at  # nothing pushed before the gate
         await through_gates(sessions, redis_url, first, "approve_pr")

@@ -85,32 +85,41 @@ BUILDERS = [pytest.param(_file, id="spec-file"), pytest.param(_jira, id="jira")]
 
 
 @pytest.mark.parametrize("build", BUILDERS)
-def test_with_checks_the_commit_and_the_gate_are_the_last_steps_of_the_review_loop(
-    build: Any,
-) -> None:
+def test_with_checks_the_builder_is_checked_before_the_reviewer_sees_it(build: Any) -> None:
     spec: WorkflowSpec = build(checks=True)
 
     assert issues(spec) == []
     top = [s.id for s in cast(SequenceNode, spec.root).steps]
     assert "approve_pr" not in top and "commit_specs" not in top
     assert top[top.index("review_loop") + 1] == "publish"
-    loop = nodes(spec)["review_loop"]
-    body = [s["id"] for s in loop["body"]["steps"]]
-    assert body == ["implement", "synthesizer", "reviewer", "commit_specs", "approve_pr"]
+    found = nodes(spec)
+    loop = found["review_loop"]
+    # The builder, the description, the checks, and only then the rest of the pass.
+    assert [s["id"] for s in loop["body"]["steps"]] == [
+        "implement",
+        "synthesizer",
+        "checks",
+        "review",
+    ]
+    route = found["review"]["routes"][0]
+    assert route["when"] == 'results.checks.data.decision == "approve"'
+    assert [s["id"] for s in route["then"]["steps"]] == ["commit_specs", "reviewer", "approve_pr"]
     assert loop["until"] == (
-        'results.reviewer.data.verdict == "ok" && results.approve_pr.data.decision == "approve"'
+        'results.checks.data.decision == "approve" && results.reviewer.data.verdict == "ok" '
+        '&& results.approve_pr.data.decision == "approve"'
     )
 
 
 @pytest.mark.parametrize("build", BUILDERS)
-def test_approve_pr_checks_the_implementation_against_the_spec(build: Any) -> None:
-    gate = nodes(build(checks=True, check_rounds=1, coverage_min=70))["approve_pr"]
+def test_the_checks_gate_checks_the_builder_and_passes_by_itself_when_clean(build: Any) -> None:
+    gate = nodes(build(checks=True, check_rounds=1, coverage_min=70))["checks"]
 
     assert gate["evidence"] == {
         "node": "implement",
         "max_rounds": 1,
         "coverage_min": 70,
         "criteria_from": "spec.md",
+        "pause": "on_failure",
         "checks": {
             "build": "required",
             "tests": "required",
@@ -121,6 +130,14 @@ def test_approve_pr_checks_the_implementation_against_the_spec(build: Any) -> No
         "path": ".",
     }
     assert "criterion" in gate["prompt"]
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+def test_the_final_gate_only_shows_the_checks_after_the_reviewer(build: Any) -> None:
+    gate = nodes(build(checks=True))["approve_pr"]
+
+    assert gate["evidence"]["pause"] == "always"
+    assert set(gate["evidence"]["checks"].values()) == {"shown"}
 
 
 @pytest.mark.parametrize("build", BUILDERS)
@@ -185,18 +202,10 @@ def test_plan_build_review_is_unchanged() -> None:
 # --- the validation rules the loop layout needs -----------------------------------------------------
 
 
-def test_a_commit_in_a_sequence_nested_in_the_loop_body_is_refused_with_a_clear_message() -> None:
+def test_a_commit_in_a_route_of_a_router_in_the_loop_body_is_accepted() -> None:
     spec = build_sdd_file_spec(SddFileParams(checks=True))
-    raw = spec.model_dump(mode="json", by_alias=True, exclude_none=True)
-    loop = next(s for s in raw["root"]["steps"] if s["id"] == "review_loop")
-    steps: list[dict[str, Any]] = loop["body"]["steps"]
-    commit = next(s for s in steps if s["id"] == "commit_specs")
-    steps[steps.index(commit)] = {"type": "sequence", "id": "wrapped", "steps": [commit]}
-    found = validate_workflow(
-        raw, policy=PLATFORM_POLICY, priced=lambda _: True, default_model="default"
-    )
 
-    assert any("or of the body of a loop that is one" in i.message for i in found)
+    assert [i for i in issues(spec) if "root sequence" in i] == []
 
 
 def test_a_commit_inside_a_router_is_still_refused() -> None:
@@ -344,9 +353,13 @@ async def test_a_proven_criterion_and_covered_lines_reach_the_gate_with_no_send_
     checks = {c["kind"]: c for c in run.pack()["checks"]}
     assert checks["criteria"]["status"] == "passed"
     assert checks["coverage"]["detail"]["percent"] == 100.0
-    assert [
-        e for e in run.sink.events if e.type == "gate_decided" and e.payload.get("source")
-    ] == []
+    # The checks gate passed by itself, with no pause and no send-back, before the reviewer ran.
+    decided = [
+        (e.node_id, e.payload.get("source")) for e in run.sink.events if e.type == "gate_decided"
+    ]
+    assert decided == [("approve_spec", None), ("checks", "checks_passed")]
+    order = [e.node_id for e in run.sink.events if e.type == "node_started"]
+    assert order.index("checks") < order.index("reviewer")
     assert (await run.decide()).status == "completed"  # approve_pr
     assert [n for n, _ in run.tools.calls] == ["github.openPR"]
 
@@ -358,8 +371,12 @@ async def test_an_untested_criterion_goes_back_to_the_lead_under_a_criteria_head
 
     await run.decide()  # approve_spec: the build runs, pass 1 is sent back, pass 2 reaches the gate
 
-    sent = [e for e in run.sink.events if e.type == "gate_decided" and e.payload.get("source")]
-    assert [e.node_id for e in sent] == ["approve_pr"]
+    sent = [
+        e
+        for e in run.sink.events
+        if e.type == "gate_decided" and e.payload.get("source") == "checks"
+    ]
+    assert [e.node_id for e in sent] == ["checks"]
     lead = run.runtime.requests["implement"]
     wrapper = json.loads(lead.input)  # a later pass: the checks are `input`, the work `previous`
     assert wrapper["input"].startswith("## Criteria\n\n- 0 of 1 proven")
@@ -383,3 +400,31 @@ async def test_what_the_writers_receive_with_checks_on() -> None:
     assert "AC001_" in got["implement.task1"].instructions
     assert "adds or changes" in got["spec_writer"].instructions
     assert "AC-001" in ANSWERS["spec_writer"] or True
+
+
+async def test_a_failing_check_stops_before_the_reviewer_and_the_reviewer_never_sees_it() -> None:
+    tools = Checked([[module()], [module(linked())]])
+    run = ChecksRun(tools)
+    await run.start()
+
+    await run.decide()
+
+    started = [e.node_id for e in run.sink.events if e.type == "node_started"]
+    # Pass 1 was sent back at `checks`: no synthesizer-after, no reviewer, no commit in that pass.
+    first_pass = started[: started.index("implement", started.index("implement") + 1)]
+    assert "checks" in first_pass
+    assert "reviewer" not in first_pass and "commit_specs" not in first_pass
+    assert started.count("reviewer") == 1  # only the pass whose checks passed
+
+
+async def test_when_the_checks_cannot_send_it_back_any_more_a_person_decides_at_checks() -> None:
+    tools = Checked([[module()]])  # never names a test: every pass fails
+    run = ChecksRun(tools)
+    await run.start()
+
+    result = await run.decide()  # pass 1 is sent back (the one round); pass 2 is the last
+
+    assert result.status == "waiting"
+    assert run.waits()[-1] == "checks"  # a person is asked, with the failing pack
+    assert (await run.decide()).status == "waiting"  # they let it through: the review goes on
+    assert run.waits()[-1] == "approve_pr"

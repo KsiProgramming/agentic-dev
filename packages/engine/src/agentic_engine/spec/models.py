@@ -222,6 +222,13 @@ class GateEvidence(_Base):
         description="A directory of the repository to check, relative to its root.",
     )
     checks: EvidenceChecks = Field(default_factory=EvidenceChecks)
+    pause: Literal["always", "on_failure"] = Field(
+        default="always",
+        description="`always`: the gate pauses for a person once the checks have run. "
+        "`on_failure`: it passes by itself when no required check failed or could not run, so a "
+        "gate between a builder and its reviewer only stops a person when the checks cannot "
+        "send the work back any more.",
+    )
     coverage_min: int = Field(
         default=80,
         description="The share of the changed executable lines the tests must run for `coverage` "
@@ -1316,10 +1323,10 @@ def _is_root_step(path: str) -> bool:
 
 
 def _is_root_loop_step(path: str) -> bool:
-    """Whether the node at `path` is a step of the body of a loop that is a step of the root
-    sequence (13.4): it runs whenever the run gets past that loop, as `on_reject: end` needs
-    (7.8)."""
-    return re.fullmatch(r"root\.steps\[\d+\]\.body\.steps\[\d+\]", path) is not None
+    """Whether the node at `path` is under the body of a loop that is a step of the root
+    sequence, at any depth (13.4): a step of it, or of a route of a router in it. Whatever it
+    does, it has done by the time the run is past that loop."""
+    return re.match(r"root\.steps\[\d+\]\.body\.", path) is not None
 
 
 def _previous_step(path: str, at_path: Mapping[str, Node]) -> Node | None:
@@ -1396,7 +1403,7 @@ def commit_artifacts_issues(root: Node) -> list[ValidationIssue]:
     place, 6.9), and give `dir`, a relative folder of the repo (`reference` otherwise). That a gate
     comes between it and a publish of `into` is `publish_gate_issues`'s check."""
     issues: list[ValidationIssue] = []
-    top = _ending_steps(root)
+    top = _loop_steps(root)
     earlier: list[Node] = []
     loops: set[str] = set()
     for path, node in iter_nodes(root):
@@ -2510,6 +2517,17 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     issues += port_issues(root) + artifact_issues(root, inputs) + subflow_issues(root)
     issues += gate_issues(root)
     return in_run_order(root, issues)
+
+
+def _loop_steps(root: Node) -> set[int]:
+    """The nodes a run is sure to have been past when it leaves the root sequence (13.4): its
+    steps, and everything in the body of a loop that is one of them, at any depth."""
+    steps = root.steps if isinstance(root, SequenceNode) else [root]
+    found = {id(step) for step in steps}
+    for step in steps:
+        if isinstance(step, LoopNode):
+            found |= {id(inner) for _, inner in iter_nodes(step.body)}
+    return found
 
 
 def _ending_steps(root: Node) -> set[int]:

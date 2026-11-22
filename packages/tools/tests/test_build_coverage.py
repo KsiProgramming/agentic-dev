@@ -282,13 +282,25 @@ error NU1101: Unable to find package Foo. No packages exist with this id in sour
 """
 
 
-def test_build_errors_keep_the_code_and_place_never_the_tools_words() -> None:
+def test_build_errors_keep_the_code_place_and_a_cut_message() -> None:
     from agentic_tools.build.tests import build_errors
 
     found = build_errors(ANALYZER_OUTPUT)
 
-    assert found == ["S4144 tests/Core.Tests/ItemKindTests.cs:35", "CS1002 src/Core/A.cs:3"]
-    assert "identical" not in " ".join(found)
+    assert found == [
+        "S4144 tests/Core.Tests/ItemKindTests.cs:35: Update this method so that its "
+        "implementation is not identical to 'X'.",
+        "CS1002 src/Core/A.cs:3: ; expected",
+    ]
+    assert not any("/workspace" in line or "dotnet-test" in line for line in found)
+
+
+def test_a_long_error_message_is_cut() -> None:
+    from agentic_tools.build.tests import MAX_BUILD_ERROR_TEXT, build_errors
+
+    (line,) = build_errors("a/B.cs(1,1): error CS0001: " + "x" * 5000 + " [p.csproj]")
+
+    assert len(line) <= MAX_BUILD_ERROR_TEXT + 200
 
 
 def test_an_analyzer_error_is_a_build_failure_and_a_restore_error_is_not() -> None:

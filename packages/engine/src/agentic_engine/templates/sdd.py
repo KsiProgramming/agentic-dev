@@ -724,11 +724,51 @@ def _build(
             "them in the next pass; on the last pass, approving pushes the branch to GitHub and "
             "opens a pull request" + (f", and comments on the Jira issue{moved}." if jira else ".")
         )
+        # The final gate shows the checks again, after the reviewer's changes; nothing here sends
+        # the work back, the `checks` gate between the builder and the reviewer does.
         approve_pr["evidence"] = {
+            "node": "implement",
+            "max_rounds": 1,
+            "coverage_min": params.coverage_min,
+            "criteria_from": SPEC,
+            "checks": {
+                "build": "shown",
+                "tests": "shown",
+                "analyzers": "shown",
+                "coverage": "shown",
+                "criteria": "shown",
+            },
+        }
+        review_until = (
+            'results.checks.data.decision == "approve" && results.reviewer.data.verdict == "ok" '
+            '&& results.approve_pr.data.decision == "approve"'
+        )
+    closing: list[JsonValue] = [commit_specs, approve_pr]
+    reviewer = _agent(
+        "reviewer",
+        "Senior reviewer",
+        _REVIEWER + (_CHECKS_REVIEWER if checks else ""),
+        _READ_TOOLS,
+        params.reviewer_model,
+        reads=[SPEC, DESCRIPTION],
+        output_schema=VERDICT_SCHEMA,
+    )
+    checks_gate: dict[str, JsonValue] = {
+        "type": "gate",
+        "id": "checks",
+        "title": "Let this change through to the review?",
+        "prompt": "The platform built the builders' work, ran its tests, compared the analyzers "
+        "with the base's, measured the coverage of the changed lines and checked each "
+        "acceptance criterion for a test that fails before the change and passes after. A "
+        "failing check sends the work back to the lead, with no one involved; you are asked "
+        "only when it cannot any more, or when a check could not run. Approve to let the "
+        "reviewer look at it as it is; reject to stop the run.",
+        "evidence": {
             "node": "implement",
             "max_rounds": params.check_rounds,
             "coverage_min": params.coverage_min,
             "criteria_from": SPEC,
+            "pause": "on_failure",
             "checks": {
                 "build": "required",
                 "tests": "required",
@@ -736,11 +776,8 @@ def _build(
                 "coverage": "required",
                 "criteria": "required",
             },
-        }
-        review_until = (
-            'results.reviewer.data.verdict == "ok" && results.approve_pr.data.decision == "approve"'
-        )
-    closing: list[JsonValue] = [commit_specs, approve_pr]
+        },
+    }
     rest: list[JsonValue] = [
         _agent(
             "tasker",
@@ -783,16 +820,32 @@ def _build(
                         params.reviewer_model,
                         writes=DESCRIPTION,
                     ),
-                    _agent(
-                        "reviewer",
-                        "Senior reviewer",
-                        _REVIEWER + (_CHECKS_REVIEWER if checks else ""),
-                        _READ_TOOLS,
-                        params.reviewer_model,
-                        reads=[SPEC, DESCRIPTION],
-                        output_schema=VERDICT_SCHEMA,
+                    *(
+                        [
+                            checks_gate,
+                            {
+                                "type": "router",
+                                "id": "review",
+                                "otherwise": "skip",
+                                "routes": [
+                                    {
+                                        "id": "checked",
+                                        "when": 'results.checks.data.decision == "approve"',
+                                        "description": "The checks passed, or a person let the "
+                                        "change through: commit the Spec Kit files, review it "
+                                        "and ask for approval.",
+                                        "then": {
+                                            "type": "sequence",
+                                            "id": "after_checks",
+                                            "steps": [commit_specs, reviewer, approve_pr],
+                                        },
+                                    }
+                                ],
+                            },
+                        ]
+                        if checks
+                        else [reviewer]
                     ),
-                    *(closing if checks else []),
                 ],
             },
         },

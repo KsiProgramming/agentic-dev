@@ -823,7 +823,10 @@ def _evidence(
             payload={**payload, "sent_back": bool(comments)},
         )
         asked: list[JsonValue] = [c.model_dump(mode="json") for c in comments]
-        update: RunUpdate = {"evidence": {key: {"pack": payload, "comments": asked}}}
+        proceed = spec.pause == "on_failure" and not comments and pack.clean()
+        update: RunUpdate = {
+            "evidence": {key: {"pack": payload, "comments": asked, "proceed": proceed}}
+        }
         name = f"{gate.id[:40]}.evidence.json"
         stored = AgentNodeResult(
             status="completed", text=json.dumps(payload), usage=None, data=payload

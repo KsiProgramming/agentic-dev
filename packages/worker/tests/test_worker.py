@@ -3035,7 +3035,7 @@ async def test_done_when_a_spec_file_run_opens_a_pr(
         redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
         try:
             await enqueue_run(redis, run_id)
-            for gate in ("approve_spec", "approve_pr"):
+            for gate in ("approve_spec", *(("checks",) if checks else ()), "approve_pr"):
                 await wait_for_gate(sessions, run_id, gate)
                 await record_approval(sessions, run_id, gate, GateDecision(decision="approve"))
                 await enqueue_run(redis, run_id)
@@ -3060,7 +3060,7 @@ async def test_done_when_a_spec_file_run_opens_a_pr(
     # sandbox the jobs cannot run, which is an `error` that reaches the person, never a send-back.
     pr_gate = next(e for e in events if e.type == "gate_waiting" and e.node_id == "approve_pr")
     assert ("evidence" in pr_gate.payload) is checks
-    assert not [e for e in events if e.type == "gate_decided" and e.payload.get("source")]
+    assert not [e for e in events if e.payload.get("source") == "checks"]
     first_node = next(i for i, e in enumerate(events) if e.type == "node_started")
     seeded = [i for i, e in enumerate(events) if (e.payload or {}).get("source") == "input"]
     assert len(seeded) == 1 and seeded[0] < first_node

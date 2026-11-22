@@ -74,6 +74,10 @@ class EvidencePack(BaseModel):
         """The required checks that failed."""
         return [c for c in self.checks if c.required and c.status == "failed"]
 
+    def clean(self) -> bool:
+        """Whether no required check failed or could not run: nothing needs a person."""
+        return not any(c.required and c.status in ("failed", "error") for c in self.checks)
+
     def sends_back(self) -> bool:
         """Whether the work goes back to the writer: a required check failed and a round is left."""
         return bool(self.failing) and self.rounds_left > 0

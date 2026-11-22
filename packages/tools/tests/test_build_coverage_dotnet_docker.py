@@ -183,4 +183,6 @@ async def test_an_analyzer_error_is_a_build_failure_with_its_code_and_place(
     bad = await call(sandbox, run_id, node="bad")
 
     assert (bad["status"], bad["reason"], bad["build"]) == ("failed", "does not build", "failed")
-    assert bad["build_errors"] == ["CA1822 src/Calc/Bad.cs:5"], bad
+    [error] = bad["build_errors"]
+    assert error.startswith("CA1822 src/Calc/Bad.cs:5: "), bad
+    assert "static" in error  # the rule's own words reach the writer, cut and as data

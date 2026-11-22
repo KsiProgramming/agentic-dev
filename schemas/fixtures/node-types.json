@@ -424,6 +424,16 @@
               "$ref": "#/$defs/EvidenceChecks",
               "title": "Checks"
             },
+            "pause": {
+              "default": "always",
+              "description": "`always`: the gate pauses for a person once the checks have run. `on_failure`: it passes by itself when no required check failed or could not run, so a gate between a builder and its reviewer only stops a person when the checks cannot send the work back any more.",
+              "enum": [
+                "always",
+                "on_failure"
+              ],
+              "title": "Pause",
+              "type": "string"
+            },
             "coverage_min": {
               "default": 80,
               "description": "The share of the changed executable lines the tests must run for `coverage` to pass, from 0 to 100.",
@@ -692,6 +702,16 @@
             "checks": {
               "$ref": "#/$defs/EvidenceChecks",
               "title": "Checks"
+            },
+            "pause": {
+              "default": "always",
+              "description": "`always`: the gate pauses for a person once the checks have run. `on_failure`: it passes by itself when no required check failed or could not run, so a gate between a builder and its reviewer only stops a person when the checks cannot send the work back any more.",
+              "enum": [
+                "always",
+                "on_failure"
+              ],
+              "title": "Pause",
+              "type": "string"
             },
             "coverage_min": {
               "default": 80,

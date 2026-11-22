@@ -59,22 +59,25 @@ def is_criterion_id(text: str) -> bool:
 
 MAX_BUILD_ERRORS = 10
 _BUILD_ERROR = re.compile(
-    r"^(?P<path>[^\r\n(]+?)\((?P<line>\d+),\d+\):\s*error\s+(?P<code>[A-Za-z]{1,6}\d{1,5})\b",
+    r"^(?P<path>[^\r\n(]+?)\((?P<line>\d+),\d+\):\s*error\s+(?P<code>[A-Za-z]{1,6}\d{1,5})\b:?"
+    r"(?P<text>[^\r\n]*?)(?:\s+\[[^\]\r\n]*\])?$",
     re.MULTILINE,
 )
-_WORK = re.compile(r"^/.*?/(?:dotnet-test|base|tree|build)-[0-9a-f]{32}/(?:repo/)?")
+_WORK = re.compile(r"/?[^\s'\"]*?(?:dotnet-test|base|tree|build)-[0-9a-f]{32}/(?:repo/)?")
+MAX_BUILD_ERROR_TEXT = 200
 
 
 def build_errors(output: str) -> list[str]:
-    """The errors of a failed build as `CODE path:line`, once each and at most `MAX_BUILD_ERRORS`.
-    Only the code (`CS1002`, `S4144`), the file and the line are kept: the message is the tool's
-    words and may quote repo content. The job's work directory is cut from the path."""
+    """The errors of a failed build as `CODE path:line: message`, once each and at most
+    `MAX_BUILD_ERRORS`, so the writer that has to fix them knows what the rule says. The message
+    is the tool's and may quote repo content, so it is cut, and the job's work directories are
+    taken out of it: it reaches the writer as data under a fixed heading, like a failing test's."""
     found: dict[str, None] = {}
     for match in _BUILD_ERROR.finditer(_ANSI.sub("", output)):
         path = _WORK.sub("", match.group("path").strip())
-        if path.startswith("/tmp/") or path.startswith("/workspace/"):
-            path = path.split("/", 3)[-1]
-        found[_clip(f"{match.group('code')} {path}:{match.group('line')}", MAX_NAME)] = None
+        text = _clip(_WORK.sub("", match.group("text")).strip(), MAX_BUILD_ERROR_TEXT)
+        where = f"{match.group('code')} {path}:{match.group('line')}"
+        found[_clip(f"{where}: {text}" if text else where, MAX_BUILD_ERROR_TEXT + MAX_NAME)] = None
     return list(found)[:MAX_BUILD_ERRORS]
 
 

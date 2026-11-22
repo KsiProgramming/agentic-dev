@@ -1991,6 +1991,13 @@ export interface components {
             path: string;
             checks?: components["schemas"]["EvidenceChecks"];
             /**
+             * Pause
+             * @description `always`: the gate pauses for a person once the checks have run. `on_failure`: it passes by itself when no required check failed or could not run, so a gate between a builder and its reviewer only stops a person when the checks cannot send the work back any more.
+             * @default always
+             * @enum {string}
+             */
+            pause: "always" | "on_failure";
+            /**
              * Coverage Min
              * @description The share of the changed executable lines the tests must run for `coverage` to pass, from 0 to 100.
              * @default 80
