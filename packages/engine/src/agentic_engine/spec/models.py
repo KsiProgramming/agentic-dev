@@ -873,6 +873,11 @@ SCAN_TOOLS = frozenset({"scan.lint", "scan.secrets", "scan.dependencies"})
 """Deterministic scanners over the run's repo in the sandbox (4.4): read-only, so allowed
 everywhere. Each returns a findings report (`agentic_runtime.findings.FindingsReport`)."""
 
+BUILD_TOOLS = frozenset({"build.restore"})
+"""Restores the run's repo's Node and Python packages through a registry's egress proxy, then
+builds with no network (13.2). It opens a route out of the sandbox, so only a tool node may call
+one (`tool_node_only`): a step the workflow's author draws, never an agent's choice at run time."""
+
 JIRA_READ_TOOLS = frozenset({"jira.getIssue", "jira.search", "jira.listTransitions"})
 """Tools that read the workspace's Jira (7.2), scoped to its picked projects: allowed everywhere.
 A run naming any `jira.*` tool needs a connected Jira, not a repo."""
@@ -909,6 +914,7 @@ PLATFORM_TOOLS = (
     | CREATE_TOOLS
     | ARTIFACT_TOOLS
     | SCAN_TOOLS
+    | BUILD_TOOLS
     | JIRA_READ_TOOLS
     | JIRA_WRITE_TOOLS
 )
@@ -948,6 +954,7 @@ type IssueCode = Literal[
     "on_review_invalid",
     "copilot_connection_required",
     "no_writer_before",
+    "tool_node_only",
 ]
 
 
@@ -1081,6 +1088,23 @@ def _publish_issue(
             "a human approves what is published",
         )
     return None
+
+
+def build_tool_issues(root: Node) -> list[ValidationIssue]:
+    """Each node under `root` other than a tool node that names a build tool (`build.restore`,
+    13.2), in run order: it opens a route out of the sandbox, so a step the author draws calls it,
+    never an agent."""
+    return [
+        ValidationIssue(
+            code="tool_node_only",
+            path=path,
+            node_id=node.id,
+            message=f"node {node.id!r}: {tool} can only be called by a tool node",
+        )
+        for path, node in iter_nodes(root)
+        if not isinstance(node, ToolNode)
+        for tool in sorted(BUILD_TOOLS.intersection(node_tools(node)))
+    ]
 
 
 def jira_write_issues(root: Node) -> list[ValidationIssue]:
@@ -1358,9 +1382,9 @@ def creates_repo(root: Node) -> bool:
     return any(CREATE_TOOLS.intersection(node_tools(node)) for _, node in iter_nodes(root))
 
 
-REPO_TOOL_PREFIXES = ("repo.", "github.", "scan.")
-"""Tools that work on the run's repo, so a run naming one needs a repo: `repo.*` and `scan.*` in
-its sandbox, `github.*` on its GitHub remote."""
+REPO_TOOL_PREFIXES = ("repo.", "github.", "scan.", "build.")
+"""Tools that work on the run's repo, so a run naming one needs a repo: `repo.*`, `scan.*` and
+`build.*` in its sandbox, `github.*` on its GitHub remote."""
 
 
 def _uses_repo(node: Node) -> bool:
@@ -2376,7 +2400,7 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     issues = duplicate_id_issues(root) + loop_issues(root) + map_issues(root)
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
-    issues += commit_artifacts_issues(root)
+    issues += commit_artifacts_issues(root) + build_tool_issues(root)
     issues += port_issues(root) + artifact_issues(root, inputs) + subflow_issues(root)
     issues += gate_issues(root)
     return in_run_order(root, issues)

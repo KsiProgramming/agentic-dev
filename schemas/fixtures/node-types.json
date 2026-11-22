@@ -204,6 +204,7 @@
           "enum": [
             "artifacts.list",
             "artifacts.read",
+            "build.restore",
             "github.createRepo",
             "github.openPR",
             "jira.comment",

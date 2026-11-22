@@ -6194,7 +6194,8 @@
           "jira_write_not_shown",
           "on_review_invalid",
           "copilot_connection_required",
-          "no_writer_before"
+          "no_writer_before",
+          "tool_node_only"
         ]
       },
       "JiraConnectionOut": {

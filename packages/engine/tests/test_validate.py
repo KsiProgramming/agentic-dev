@@ -54,6 +54,7 @@ INVALID: dict[str, tuple[str, str, str | None]] = {
     "artifact-branch-conflict": ("artifact_conflict", "root.branches[1]", "quality"),
     "artifact-read-before-write": ("artifact_unknown", "root.steps[0].reads[0]", "report"),
     "artifact-write-in-map": ("artifact_conflict", "root.body", "scan"),
+    "build-restore-by-agent": ("tool_node_only", "root.steps[0]", "builder"),
     "bad-node-id": ("schema", "root.id", "Writer/One"),
     "create-repo-after-repo-use": ("create_not_first", "root.steps[2]", "create_repo"),
     "create-repo-by-agent": ("create_not_tool_node", "root.steps[1]", "creator"),

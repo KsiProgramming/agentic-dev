@@ -42,6 +42,7 @@ from agentic_engine.logging import JsonFormatter
 from agentic_engine.policy import PolicyOverrides
 from agentic_engine.spec import (
     ARTIFACT_TOOLS,
+    BUILD_TOOLS,
     CREATE_TOOLS,
     JIRA_READ_TOOLS,
     JIRA_WRITE_TOOLS,
@@ -117,6 +118,7 @@ from agentic_store import (
     waiting_runs,
 )
 from agentic_tools.artifacts import ARTIFACT_TOOL_NAMES
+from agentic_tools.build import BUILD_TOOL_NAMES
 from agentic_tools.github import CREATE_TOOL_NAMES, PUBLISH_TOOL_NAMES, GithubPublisher
 from agentic_tools.jira import JIRA_READ_TOOL_NAMES, JIRA_WRITE_TOOL_NAMES
 from agentic_tools.repo import COMMIT_AUTHOR, READ_TOOL_NAMES, WRITE_TOOL_NAMES, open_repo_tools
@@ -1417,6 +1419,7 @@ def test_the_engine_and_the_tool_servers_agree_on_tool_names() -> None:
     assert CREATE_TOOLS == CREATE_TOOL_NAMES
     assert ARTIFACT_TOOLS == ARTIFACT_TOOL_NAMES
     assert SCAN_TOOLS == SCAN_TOOL_NAMES
+    assert BUILD_TOOLS == BUILD_TOOL_NAMES
 
 
 async def test_the_fake_github_app_clones_and_publishes_local_fixture_repos(

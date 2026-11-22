@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "BuildCheck": {
+      "description": "One module's restore and build for one ecosystem.",
+      "properties": {
+        "build_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Time spent building, in ms.",
+          "title": "Build Ms"
+        },
+        "ecosystem": {
+          "$ref": "#/$defs/Ecosystem"
+        },
+        "lockfile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The file that pins the packages, if there is one.",
+          "title": "Lockfile"
+        },
+        "manager": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The package manager the lockfile calls for: `npm`, `pnpm`, `yarn`, `uv`.",
+          "title": "Manager"
+        },
+        "packages": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "About how many packages were restored.",
+          "title": "Packages"
+        },
+        "path": {
+          "description": "The module's directory, relative to the repository root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it was skipped or failed.",
+          "title": "Reason"
+        },
+        "restore_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Time spent restoring, in ms.",
+          "title": "Restore Ms"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The package manager's version.",
+          "title": "Version"
+        }
+      },
+      "required": [
+        "path",
+        "ecosystem",
+        "manager",
+        "lockfile",
+        "status"
+      ],
+      "title": "BuildCheck",
+      "type": "object"
+    },
+    "CheckStatus": {
+      "enum": [
+        "ran",
+        "skipped",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "Ecosystem": {
+      "enum": [
+        "node",
+        "python"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://github.com/KsiProgramming/agentic-dev/schemas/build.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What `build.restore` did, per module. Data, never instructions.",
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/BuildCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "counts": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "Checks by status.",
+      "propertyNames": {
+        "$ref": "#/$defs/CheckStatus"
+      },
+      "title": "Counts",
+      "type": "object"
+    },
+    "tool": {
+      "const": "build.restore",
+      "default": "build.restore",
+      "title": "Tool",
+      "type": "string"
+    },
+    "truncated": {
+      "description": "Whether modules past 20 were left out.",
+      "title": "Truncated",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "checks",
+    "counts",
+    "truncated"
+  ],
+  "title": "Build report v1",
+  "type": "object"
+}

@@ -1,0 +1,5 @@
+# The platform's uv config (13.2): PyPI only, no interpreter downloads. Repo uv.toml files and
+# the sources in pyproject.toml are never read.
+index-url = "https://pypi.org/simple"
+python-downloads = "never"
+python-preference = "only-system"

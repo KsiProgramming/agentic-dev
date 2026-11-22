@@ -90,9 +90,9 @@ class JobLimits:
 
 
 @dataclass(frozen=True)
-class NugetEgress:
-    """The NuGet egress proxy a restore job reaches (4.8): the internal Docker network it is on,
-    which has no other way out, and its URL on that network."""
+class RegistryEgress:
+    """The egress proxy of one package registry (4.8, 13.2): the internal Docker network a job
+    for that registry runs on, which has no other way out, and the proxy's URL on it."""
 
     network: str
     proxy_url: str
@@ -107,11 +107,11 @@ class _Jobs:
     volume: str
     run_id: UUID
     limits: JobLimits
-    nuget: NugetEgress | None
+    egress: Mapping[JobNetwork, RegistryEgress]
 
     @property
     def networks(self) -> frozenset[JobNetwork]:
-        return frozenset({"none", "nuget"}) if self.nuget else frozenset({"none"})
+        return frozenset({"none", *self.egress})
 
     def run(
         self,
@@ -123,10 +123,10 @@ class _Jobs:
     ) -> tuple[int, bytes, bytes]:
         environment = dict(env)
         network_mode = "none"
-        if network == "nuget":
-            assert self.nuget is not None
-            network_mode = self.nuget.network
-            proxy = self.nuget.proxy_url
+        if network != "none":
+            registry = self.egress[network]
+            network_mode = registry.network
+            proxy = registry.proxy_url
             for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
                 environment[name] = proxy
             environment["NO_PROXY"] = environment["no_proxy"] = ""
@@ -317,8 +317,8 @@ class DockerSandboxManager:
     """Implements `SandboxManager` with one container and one volume per run.
 
     `client` defaults to `docker.from_env()`. `local_root` is the only directory local repo paths
-    may come from (none if unset). Job containers get `job_limits`, and reach NuGet through
-    `nuget` (no `nuget` network for jobs if unset).
+    may come from (none if unset). Job containers get `job_limits`, and reach a package registry
+    through its entry in `egress` (a registry with none has no network for jobs).
     """
 
     def __init__(
@@ -328,14 +328,14 @@ class DockerSandboxManager:
         image: str = DEFAULT_IMAGE,
         limits: SandboxLimits | None = None,
         job_limits: JobLimits | None = None,
-        nuget: NugetEgress | None = None,
+        egress: Mapping[JobNetwork, RegistryEgress] | None = None,
         local_root: Path | None = None,
     ) -> None:
         self._client = client or docker.from_env()
         self._image = image
         self._limits = limits or SandboxLimits()
         self._job_limits = job_limits or JobLimits()
-        self._nuget = nuget
+        self._egress = dict(egress or {})
         self._local_root = local_root
         self._kept: set[UUID] = set()
 
@@ -386,7 +386,7 @@ class DockerSandboxManager:
                 )
                 restored = tuple(b.branch for b in restore)
                 log.info("sandbox %s ready in %.2f s", name, time.monotonic() - started)
-            jobs = _Jobs(self._client, self._image, name, run_id, self._job_limits, self._nuget)
+            jobs = _Jobs(self._client, self._image, name, run_id, self._job_limits, self._egress)
             yield DockerSandbox(container, jobs, restored)
         finally:
             if run_id in self._kept:

@@ -11,11 +11,12 @@ import docker
 from docker.errors import DockerException, ImageNotFound
 from docker.models.containers import Container
 
-from agentic_sandbox.docker_backend import DEFAULT_IMAGE, NugetEgress
+from agentic_sandbox.docker_backend import DEFAULT_IMAGE, RegistryEgress
+from agentic_sandbox.protocol import JobNetwork
 
 # `packages/sandbox`, which holds the sandbox image's Dockerfile.
 _PACKAGE_DIR = Path(__file__).resolve().parents[2]
-# `packages/egress-proxy`, the NuGet egress proxy's image (4.8).
+# `packages/egress-proxy`, the package egress proxy's image (4.8, 13.2).
 _PROXY_DIR = _PACKAGE_DIR.parent / "egress-proxy"
 PROXY_IMAGE = "agentic-dev/egress-proxy:dev"
 
@@ -58,11 +59,17 @@ def ensure_sandbox_image(client: docker.DockerClient, image: str = DEFAULT_IMAGE
 
 @dataclass(frozen=True)
 class EgressForTests:
-    """A NuGet egress proxy started for a test: what the sandbox manager takes, and the proxy's
-    container (its log names every host it refused)."""
+    """A registry's egress proxy started for a test: what the sandbox manager takes, and the
+    proxy's container (its log names every host it refused)."""
 
-    nuget: NugetEgress
+    registry: JobNetwork
+    egress: RegistryEgress
     proxy: Container
+
+    @property
+    def networks(self) -> Mapping[JobNetwork, RegistryEgress]:
+        """What `DockerSandboxManager(egress=...)` takes."""
+        return {self.registry: self.egress}
 
     def refused_hosts(self) -> set[str]:
         log = self.proxy.logs().decode("utf-8", "replace")
@@ -74,20 +81,29 @@ class EgressForTests:
 
 
 @contextmanager
-def nuget_egress(client: docker.DockerClient) -> Generator[EgressForTests]:
-    """The NuGet egress proxy, as compose runs it: on its own internal network (no route out)
-    and on the default bridge. Builds its image if the daemon lacks it; removes both after."""
+def registry_egress(
+    client: docker.DockerClient, registry: JobNetwork = "nuget"
+) -> Generator[EgressForTests]:
+    """A registry's egress proxy, as compose runs it: its config, on its own internal network (no
+    route out) and on the default bridge. Builds its image if the daemon lacks it; removes both
+    after."""
     try:
         client.images.get(PROXY_IMAGE)
     except ImageNotFound:
         client.images.build(path=str(_PROXY_DIR), tag=PROXY_IMAGE, rm=True)
-    name = f"agentic-nuget-test-{uuid4().hex[:8]}"
+    name = f"agentic-{registry}-test-{uuid4().hex[:8]}"
     network = client.networks.create(name, internal=True)
     proxy: Container | None = None
     try:
-        proxy = client.containers.run(PROXY_IMAGE, name=name, detach=True, network=name)
+        proxy = client.containers.run(
+            PROXY_IMAGE,
+            ["tinyproxy", "-d", "-c", f"/etc/tinyproxy/{registry}.conf"],
+            name=name,
+            detach=True,
+            network=name,
+        )
         client.networks.get("bridge").connect(proxy)  # pyright: ignore[reportUnknownMemberType]
-        yield EgressForTests(NugetEgress(name, f"http://{name}:3128"), proxy)
+        yield EgressForTests(registry, RegistryEgress(name, f"http://{name}:3128"), proxy)
     finally:
         if proxy is not None:
             with suppress(DockerException):
