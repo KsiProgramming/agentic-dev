@@ -10,6 +10,7 @@ from typing import Any, Literal, cast, get_args
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_serializer
 
 from agentic_engine.spec import (
+    BUILD_TOOLS,
     COMMIT_TOOLS,
     CREATE_TOOLS,
     JIRA_WRITE_TOOLS,
@@ -45,11 +46,19 @@ step the node is added after."""
 _NODE = TypeAdapter[Node](Node)
 
 AGENT_TOOLS: tuple[str, ...] = tuple(
-    sorted(PLATFORM_TOOLS - PUBLISH_TOOLS - CREATE_TOOLS - JIRA_WRITE_TOOLS - COMMIT_TOOLS)
+    sorted(
+        PLATFORM_TOOLS
+        - PUBLISH_TOOLS
+        - CREATE_TOOLS
+        - JIRA_WRITE_TOOLS
+        - COMMIT_TOOLS
+        - BUILD_TOOLS
+    )
 )
 """The tools an agent may be granted: publishing, creating a repo and writing to Jira are
 irreversible, so only a tool node may call those (`publish_not_tool_node`,
-`create_not_tool_node`, `jira_write_not_tool_node`); committing run artifacts onto a branch
+`create_not_tool_node`, `jira_write_not_tool_node`), and so is `build.restore`, which opens a route
+out (`tool_node_only`); committing run artifacts onto a branch
 (7.5) is the engine's own step, never an agent's."""
 
 UI_WIDGETS = frozenset({"textarea", "checkboxes"})

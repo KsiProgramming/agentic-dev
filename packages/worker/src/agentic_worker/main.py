@@ -137,6 +137,7 @@ from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.logging import configure_logging
 from agentic_engine.policy import PolicyLimitExceeded
 from agentic_engine.spec import (
+    BUILD_TOOLS,
     SPEC_INPUT_ARTIFACT,
     WorkflowSpec,
     creates_repo,
@@ -246,6 +247,7 @@ from agentic_store import (
 )
 from agentic_store.sink import SANDBOX_KEPT_UNTIL
 from agentic_tools.artifacts import open_artifact_tools
+from agentic_tools.build import open_build_tools
 from agentic_tools.github import (
     GithubPublisher,
     GithubTarget,
@@ -1109,6 +1111,9 @@ async def _attempt(
             )
             scanning = await stack.enter_async_context(open_scan_tools(sandbox))
             tools = RunTools([tools, scanning])
+            if uses_build(run.spec):
+                building = await stack.enter_async_context(open_build_tools(sandbox))
+                tools = RunTools([tools, building])
             if target is not None and uses_github(run.spec):
                 assert worker.github is not None  # `_github_target` checked it
                 publishing = await stack.enter_async_context(
@@ -1200,6 +1205,12 @@ async def _log_restored(
     )
     log.info("run %s: %d saved branch(es) restored", run.id, len(branches))
     return last_seq + 1
+
+
+def uses_build(spec: WorkflowSpec) -> bool:
+    """Whether a node of the spec calls `build.restore` (13.2), which opens a route out of the
+    sandbox: the `build` tools are connected only for runs that name it."""
+    return any(BUILD_TOOLS.intersection(node_tools(node)) for _, node in iter_nodes(spec.root))
 
 
 def uses_github(spec: WorkflowSpec) -> bool:

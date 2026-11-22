@@ -73,6 +73,9 @@ INVALID: dict[str, Rejection] = {
     "open-pr-by-agent": Rejection(
         (), "value_error", "'writer': github.openPR can only be called by a tool node"
     ),
+    "build-restore-by-agent": Rejection(
+        (), "value_error", "'builder': build.restore can only be called by a tool node"
+    ),
     "create-repo-by-agent": Rejection(
         (), "value_error", "'creator': github.createRepo can only be called by a tool node"
     ),

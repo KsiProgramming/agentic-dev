@@ -1,0 +1,26 @@
+{
+  "spec_version": "0",
+  "id": "build-restore",
+  "name": "Restore and build, then summarise",
+  "description": "A tool node restores the repo's Node and Python packages through the registry's egress proxy and builds with no network, writing the build report; an agent then summarises it.",
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "tool",
+        "id": "build",
+        "tool": "build.restore",
+        "args": { "path": ".", "ecosystems": "auto" },
+        "writes": "build.json"
+      },
+      {
+        "type": "agent",
+        "id": "summariser",
+        "role": "Build engineer",
+        "instructions": "Your input is the build report: which modules were restored and built, and why any was not. Say in two sentences whether the repository builds.",
+        "reads": ["build.json"]
+      }
+    ]
+  }
+}
