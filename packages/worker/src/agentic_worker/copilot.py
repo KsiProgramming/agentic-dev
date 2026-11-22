@@ -9,7 +9,7 @@ expire; a grant GitHub no longer accepts fails the run with a fixed code before 
 `AGENTIC_RUNTIME=fake` (the dev and e2e stack) still reads the token, so a missing or broken
 connection fails there as it would for real, then runs the stack's fake agents."""
 
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Protocol
 
@@ -17,7 +17,15 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_github import GithubApiError, GithubUserAuth, user_access_token
-from agentic_runtime import AgentRuntime, CopilotRuntime, ToolExecutor
+from agentic_runtime import (
+    AgentEvent,
+    AgentRequest,
+    AgentRun,
+    AgentRuntime,
+    CopilotRuntime,
+    Failed,
+    ToolExecutor,
+)
 from agentic_secrets import KeyProvider, SecretDecryptError, registered
 from agentic_store import (
     GithubUserNeedsAttentionError,
@@ -83,10 +91,52 @@ def token_loader(
     return load
 
 
+type Refused = Callable[[StoredRun], Awaitable[None]]
+"""Called when GitHub refused the run's token mid-run."""
+
+REFUSED_CODE = "copilot_needs_attention"
+
+
+class _Watched:
+    """An `AgentRun` that tells `on_refused` once if the run fails because GitHub refused the
+    token, then passes every event on unchanged."""
+
+    def __init__(self, inner: AgentRun, run: StoredRun, on_refused: Refused) -> None:
+        self._inner = inner
+        self._run = run
+        self._on_refused = on_refused
+
+    def cancel(self) -> None:
+        self._inner.cancel()
+
+    def __aiter__(self) -> AsyncIterator[AgentEvent]:
+        return self._events()
+
+    async def _events(self) -> AsyncIterator[AgentEvent]:
+        async for event in self._inner:
+            if isinstance(event, Failed) and event.error.startswith(f"{REFUSED_CODE}:"):
+                await self._on_refused(self._run)
+            yield event
+
+
+class _Watching:
+    """An `AgentRuntime` whose runs mark their person's connection as needing attention when
+    GitHub refuses the token (a revoked grant, a token that expired inside a long run)."""
+
+    def __init__(self, inner: AgentRuntime, run: StoredRun, on_refused: Refused) -> None:
+        self._inner = inner
+        self._run = run
+        self._on_refused = on_refused
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        return _Watched(self._inner.start(request), self._run, self._on_refused)
+
+
 def copilot_runtimes(
     settings: CopilotSettings,
     load_token: TokenLoader,
     fake: RunRuntimes,
+    on_refused: Refused | None = None,
 ) -> RunRuntimes:
     """Opens the runtime of a run that has a personal GitHub connection. On the fake stack
     (`settings.runtime != "claude"`) that is `fake`, after the token was read."""
@@ -104,11 +154,12 @@ def copilot_runtimes(
             # Imported here: the SDK is only needed once a run really uses it.
             from agentic_runtime.copilot_sdk import SdkConnector
 
-            yield CopilotRuntime(
+            runtime = CopilotRuntime(
                 SdkConnector(token.get_secret_value()),
                 model=settings.copilot_model,
                 tools=tools,
                 secrets=[token.get_secret_value()],
             )
+            yield _Watching(runtime, run, on_refused) if on_refused is not None else runtime
 
     return open_copilot

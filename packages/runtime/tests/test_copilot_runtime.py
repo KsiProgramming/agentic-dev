@@ -209,7 +209,7 @@ async def test_only_granted_tools_are_allowed_and_the_rest_is_denied_and_logged(
 
 
 async def test_an_sdk_error_fails_the_run_and_flags_what_is_worth_retrying() -> None:
-    for status, retryable in [(429, True), (503, True), (401, False), (None, False)]:
+    for status, retryable in [(503, True), (408, True), (400, False), (None, False)]:
         connector = FakeCopilotConnector([SessionError("nope", status_code=status)])
 
         events = await collect_and_check(runtime(connector), request())
@@ -219,6 +219,35 @@ async def test_an_sdk_error_fails_the_run_and_flags_what_is_worth_retrying() -> 
         assert failed.retryable is retryable
         assert "nope" in failed.error
         assert connector.sessions[0].closed
+
+
+async def test_a_refused_token_seat_or_rate_limit_gets_a_fixed_code_not_the_sdks_words() -> None:
+    for status, code, retryable in [
+        (401, "copilot_needs_attention", False),
+        (403, "copilot_no_subscription", False),
+        (429, "copilot_rate_limited", True),
+    ]:
+        connector = FakeCopilotConnector([SessionError("stack trace here", status_code=status)])
+
+        (failed,) = await collect_and_check(runtime(connector), request())
+
+        assert isinstance(failed, Failed)
+        assert failed.error.startswith(f"{code}: ")
+        assert "stack trace" not in failed.error
+        assert failed.retryable is retryable
+
+
+async def test_the_status_in_an_sdk_message_counts_as_the_status() -> None:
+    message = "Authentication failed: Failed to validate SDK token (401): Bad credentials"
+    for connector in (
+        FakeCopilotConnector([SessionError(message)]),
+        FakeCopilotConnector([], open_error=RuntimeError(message)),
+    ):
+        (failed,) = await collect_and_check(runtime(connector), request())
+
+        assert isinstance(failed, Failed)
+        assert failed.error.startswith("copilot_needs_attention: ")
+        assert "Bad credentials" not in failed.error
 
 
 async def test_a_session_that_cannot_open_fails_the_run() -> None:

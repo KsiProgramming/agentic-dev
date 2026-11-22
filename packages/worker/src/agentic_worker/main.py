@@ -219,6 +219,7 @@ from agentic_store import (
     latest_branches,
     leased_run_ids,
     load_secret,
+    mark_github_user_needs_attention,
     max_event_seq,
     open_checkpointer,
     pending_decision,
@@ -428,10 +429,18 @@ def run_runtimes(
             "token (set MASTER_KEY_FILE)"
         )
 
+    async def refused(run: StoredRun) -> None:
+        # GitHub refused the person's token inside the run: their connection waits for them.
+        assert run.copilot_connection_id is not None
+        await mark_github_user_needs_attention(
+            sessions, run.workspace_id, run.copilot_connection_id, "unauthorized"
+        )
+
     copilot = copilot_runtimes(
         settings,
         token_loader(sessions, keys, github_user) if keys is not None else no_token,
         base,
+        refused,
     )
 
     @asynccontextmanager

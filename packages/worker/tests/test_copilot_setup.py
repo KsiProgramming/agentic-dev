@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.spec import parse_spec
 from agentic_github import FakeGithubUserAuth
-from agentic_runtime import ClaudeRuntime, CopilotRuntime
+from agentic_runtime import AgentRequest, ClaudeRuntime, CopilotRuntime, Failed, Message
 from agentic_runtime.fake import FakeRuntime
 from agentic_runtime.testing import MockClaude
 from agentic_secrets import KEY_BYTES, LocalKeyProvider
@@ -22,7 +22,7 @@ from agentic_store import (
     mark_github_user_needs_attention,
     put_github_user_connection,
 )
-from agentic_worker.copilot import token_loader
+from agentic_worker.copilot import _Watching, token_loader  # pyright: ignore[reportPrivateUsage]
 from agentic_worker.errors import RunSetupError
 from agentic_worker.main import WorkerSettings, build_github_user, run_runtimes
 
@@ -119,7 +119,9 @@ async def test_with_a_real_runtime_a_copilot_run_gets_the_copilot_runtime(
     )
 
     async with runtimes(a_copilot_run(), None) as runtime:
-        assert isinstance(runtime, CopilotRuntime)
+        # Watched, so a token GitHub refuses mid-run marks its connection.
+        assert isinstance(runtime, _Watching)
+        assert isinstance(runtime._inner, CopilotRuntime)  # pyright: ignore[reportPrivateUsage]
 
 
 async def test_a_copilot_run_with_no_master_key_fails_with_its_code() -> None:
@@ -228,3 +230,59 @@ async def test_a_connection_marked_by_hand_is_refused_the_same_way(
 
     with pytest.raises(RunSetupError, match=r"copilot_needs_attention.*unauthorized"):
         await token_loader(sessions, keys, auth)(a_copilot_run(workspace_id, connection_id))
+
+
+class _Scripted:
+    """A runtime whose one run emits the given events."""
+
+    def __init__(self, *events: object) -> None:
+        self._events = events
+
+    def start(self, request: AgentRequest) -> "_Scripted":
+        return self
+
+    def cancel(self) -> None: ...
+
+    def __aiter__(self):
+        return self._iterate()
+
+    async def _iterate(self):
+        for event in self._events:
+            yield event
+
+
+async def _collect(runtime: _Watching) -> list[object]:
+    request = AgentRequest(node_id="n", role="r", instructions="i")
+    return [event async for event in runtime.start(request)]
+
+
+async def test_a_token_refused_mid_run_marks_the_connection_and_changes_no_event() -> None:
+    refused: list[StoredRun] = []
+
+    async def on_refused(run: StoredRun) -> None:
+        refused.append(run)
+
+    run = a_copilot_run()
+    failed = Failed(error="copilot_needs_attention: GitHub refused the person's token")
+    inner = _Scripted(Message(text="partial"), failed)
+
+    events = await _collect(_Watching(inner, run, on_refused))  # pyright: ignore[reportArgumentType]
+
+    assert events == [Message(text="partial"), failed]
+    assert refused == [run]
+
+
+async def test_other_failures_and_clean_runs_leave_the_connection_alone() -> None:
+    refused: list[StoredRun] = []
+
+    async def on_refused(run: StoredRun) -> None:
+        refused.append(run)
+
+    for events in (
+        (Failed(error="copilot_rate_limited: try again later", retryable=True),),
+        (Failed(error="Copilot error 500: boom"),),
+        (Message(text="fine"),),
+    ):
+        await _collect(_Watching(_Scripted(*events), a_copilot_run(), on_refused))  # pyright: ignore[reportArgumentType]
+
+    assert refused == []

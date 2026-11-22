@@ -177,10 +177,45 @@ class _Turn:
     saw_usage: bool = False
 
 
+NEEDS_ATTENTION = "copilot_needs_attention"
+NO_SUBSCRIPTION = "copilot_no_subscription"
+RATE_LIMITED = "copilot_rate_limited"
+
+# The SDK's own errors carry the HTTP status in their text, for example "Failed to validate SDK
+# token (401): GitHub returned: Bad credentials" (seen in the 8.2 spike).
+_STATUS_IN_TEXT = re.compile(r"\((\d{3})\)")
+
+
+def status_of(message: str, status_code: int | None = None) -> int | None:
+    """The HTTP status of an SDK error: the one it carries, else the one its text names."""
+    if status_code is not None:
+        return status_code
+    found = _STATUS_IN_TEXT.search(message)
+    return int(found.group(1)) if found else None
+
+
 def failure(error: SessionError) -> Failed:
-    """Map an SDK error to `failed`, flagging the ones worth retrying. The text is the SDK's
-    message; the caller scrubs secrets from it."""
-    status = error.status_code
+    """Map an SDK error to `failed`, flagging the ones worth retrying. A refused token, a refused
+    Copilot seat and a rate limit get a fixed code and sentence (never the SDK's words, so no
+    stack trace or token reaches the console); the rest carry the SDK's message, which the caller
+    scrubs of secrets."""
+    status = status_of(error.message, error.status_code)
+    if status == 401:
+        return Failed(
+            error=f"{NEEDS_ATTENTION}: GitHub refused the person's token; they must connect "
+            "their GitHub account again in Settings > Integrations and rerun"
+        )
+    if status == 403:
+        return Failed(
+            error=f"{NO_SUBSCRIPTION}: GitHub refused Copilot access; the account needs an "
+            "active Copilot seat"
+        )
+    if status == 429:
+        return Failed(
+            error=f"{RATE_LIMITED}: Copilot's rate limit for this account was reached; "
+            "try again later",
+            retryable=True,
+        )
     retryable = status is not None and (status in _RETRYABLE_STATUS or status >= 500)
     where = f" {status}" if status is not None else ""
     return Failed(error=f"Copilot error{where}: {error.message}", retryable=retryable)
@@ -261,7 +296,11 @@ class CopilotRun:
         try:
             session = await self._connector.open(spec)
         except Exception as e:
-            yield Failed(error=f"Copilot could not start: {self._scrub(_describe(e))}")
+            message = self._scrub(_describe(e))
+            if status_of(message) in {401, 403, 429}:
+                yield self._scrubbed(failure(SessionError(message)))
+            else:
+                yield Failed(error=f"Copilot could not start: {message}")
             return
         unsubscribe = session.subscribe(self._put)
         try:
