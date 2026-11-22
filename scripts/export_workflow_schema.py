@@ -1,7 +1,8 @@
 """Write the workflow spec's JSON Schema to schemas/workflow-spec.v0.json, and the scan tools'
 findings report (4.4) to schemas/findings.v1.json, the build report (13.2) to
 schemas/build.v1.json, and the graph operations (5.1) to schemas/graph-ops.v1.json; and the node
-manifests (5.3) to schemas/fixtures/node-types.json, which the web's palette tests read as `GET /node-types` answers."""
+manifests (5.3) to schemas/fixtures/node-types.json, which
+the web's palette tests read as `GET /node-types` answers."""
 
 import json
 from pathlib import Path
