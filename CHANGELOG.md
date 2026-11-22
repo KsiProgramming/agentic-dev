@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 8.3 Provider selection per workspace, workflow and node:
+- Phase 8.3 Provider selection per workspace, workflow and node ([#252](https://github.com/KsiProgramming/agentic-dev/pull/252)):
   - **The same workflow runs on Claude or Copilot, unchanged.** An agent's provider is chosen, most specific first, by the step (`provider` on an agent, a reduce's agent, a router's classifier or an orchestrator's hub), the run (the New run sheet's choice), the workflow (a new `provider` on the spec) and the workspace (Settings › Models and pricing › Default provider), then Claude. It is decided once, when a run is created, and stored on it, so a resume never moves a half-done run. A step's `model` is used only on the provider it was written for; on the other provider the step gets that provider's default (the workspace's Copilot model, if set).
   - **One run, two providers.** The worker gives the engine a runtime per provider, opened the first time an agent asks for it: a Claude-only run never reads a personal token, and a mixed run (Claude builds, Copilot reviews) works. Each agent's start event and each usage row say which provider and model ran it.
   - **Copilot has a cost.** Each call's AI credits (`total_nano_aiu` / 10⁹) are shown beside its tokens and priced at the workspace's price per credit, $0.01 by default (GitHub's price), so budgets stop a Copilot run as they stop a Claude one. It is the list-price value of the usage, not what a person's plan charged.
