@@ -8,6 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 
 import type { ToolTurn } from "../timeline";
 import { describeTool, summarizeTools, toolPreview } from "./tool-describe";
+import { UnifiedDiff } from "./unified-diff";
 
 function took(turn: ToolTurn): number | null {
   return turn.endedAt !== null ? Date.parse(turn.endedAt) - Date.parse(turn.startedAt) : null;
@@ -91,6 +92,7 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
               <span className="hidden min-w-0 shrink-[2] truncate sm:inline">
                 · {turn.status === "running" ? d.doing : d.done}{" "}
                 {d.target ? <span className="font-mono">{d.target}</span> : null}
+                {d.suffix ? ` ${d.suffix}` : null}
               </span>
             </>
           ) : (
@@ -98,6 +100,12 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
               <span className="shrink-0">{turn.status === "running" ? d.doing : d.done}</span>{" "}
               {d.target ? (
                 <span className="min-w-0 truncate font-mono text-foreground">{d.target}</span>
+              ) : null}
+              {d.suffix ? (
+                <>
+                  {" "}
+                  <span className="min-w-0 shrink-[2] truncate">{d.suffix}</span>
+                </>
               ) : null}
             </>
           )}{" "}
@@ -119,6 +127,8 @@ export function ToolCallRow({ turn }: { turn: ToolTurn }) {
             <h4 className="text-caption font-medium text-muted-foreground">Result</h4>
             {turn.output === null ? (
               <p className="text-meta text-muted-foreground">Waiting for the result…</p>
+            ) : turn.name === "repo.diff" && turn.status !== "failed" ? (
+              <UnifiedDiff text={turn.output} label={`${turn.name} result`} />
             ) : (
               <OutputView text={turn.output} label={`${turn.name} result`} />
             )}

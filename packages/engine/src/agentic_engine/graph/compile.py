@@ -84,7 +84,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Final, TypedDict, cast
 from uuid import uuid4
@@ -102,6 +102,7 @@ from agentic_engine.agent import (
     SpecFile,
     run_agent_node,
     sum_usage,
+    work_before_text,
 )
 from agentic_engine.artifacts import (
     ArtifactError,
@@ -202,10 +203,19 @@ from agentic_engine.spec import (
     port_edges,
     router_routes,
     task_writer_key,
+    task_writer_orchestrators,
+    writer_node_ids,
 )
 from agentic_engine.spec.subflows import expression_views
 from agentic_engine.tool import run_tool_node
-from agentic_runtime import AgentEvent, AgentRuntime, ToolExecutor, Usage
+from agentic_runtime import (
+    AgentEvent,
+    AgentRuntime,
+    ReadableWriter,
+    ReadableWriters,
+    ToolExecutor,
+    Usage,
+)
 from agentic_runtime.findings import (
     Check,
     FindingsReport,
@@ -250,6 +260,15 @@ class _Limits:
     providers: ResolvedProviders | None = None
     """The provider and model of each agent-like node, as the run stored them (8.3); none means
     each node's own, on Claude when it names none."""
+    readable: ReadableWriters | None = None
+    """What the repo tools resolve a call's `node` through (13.1); the engine sets it before every
+    step that can read."""
+    writer_ids: frozenset[str] = frozenset()
+    """The run's writer nodes, outside orchestrators (each has its own branch)."""
+    team_ids: frozenset[str] = frozenset()
+    """The orchestrators whose tasks write (each has an integration branch once it merged)."""
+    roles: dict[str, str] = field(default_factory=dict[str, str])
+    """Each agent's and orchestrator's role, for what a later step is told about its work."""
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -260,6 +279,18 @@ class _Limits:
         when the run has no stored resolution."""
         found = self.resolved(node_id)
         return {} if found is None else {"provider": found.provider, "model": found.model}
+
+    def work_text(
+        self, node: AgentNode, writers: Sequence[ReadableWriter], reads_as: str | None
+    ) -> str:
+        """The context `node` is told: the run's, then the work before it (13.1)."""
+        work = work_before_text(node, writers, self.roles, reads_as)
+        return f"{self.context}\n\n{work}" if work and self.context else work or self.context
+
+    def announce(self, writers: Sequence[ReadableWriter]) -> None:
+        """Tell the repo tools which writers the step that is about to run may read."""
+        if self.readable is not None:
+            self.readable.set(list(writers), self.writer_ids | self.team_ids)
 
     def resolved(self, node_id: str) -> ResolvedNode | None:
         """The provider and model stored for the agent-like node `node_id`, if the run has any."""
@@ -427,6 +458,7 @@ def compile_workflow(
     context: RunContext | None = None,
     saver: BranchSaver | None = None,
     providers: ResolvedProviders | None = None,
+    readable: ReadableWriters | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
     commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
@@ -434,7 +466,8 @@ def compile_workflow(
     without one), every agent is told `context` about the run (the repository it works on), and
     all write to `log`, if given. Each step that may commit saves the run's branches through
     `saver` before it is checkpointed (12.2; nothing is saved without one). Each agent runs on
-    the provider and model `providers` stored for its node (8.3; its own when none). With
+    the provider and model `providers` stored for its node (8.3; its own when none). Before each
+    step the engine tells `readable` which writers it may read, and the agent itself (13.1). With
     `checkpointer`, the state is saved after each node, in the run's thread; a spec with a gate
     needs one, since a paused run continues from it. The run's agents are held to `policy`'s
     `agents_alive` and `agents_spawned`, and their usage to `budget`; the spec itself is checked
@@ -462,6 +495,14 @@ def compile_workflow(
     )
     limits.loops = _enclosing_loops(spec.root)
     limits.providers = providers
+    limits.readable = readable
+    limits.writer_ids = frozenset(writer_node_ids(spec.root))
+    limits.team_ids = frozenset(task_writer_orchestrators(spec.root))
+    limits.roles = {
+        n.id: n.role if isinstance(n, AgentNode) else n.hub.role
+        for _, n in iter_nodes(spec.root)
+        if isinstance(n, AgentNode | OrchestratorNode)
+    }
 
     loops: list[LoopNode] = []  # the loops `add` is inside
     top = top_step_of(spec)  # node id → the top-level step it runs in, for saved branches (12.4)
@@ -511,7 +552,9 @@ def compile_workflow(
             case ParallelNode():
                 worker, join = branch_node_id(node), parallel_join_node_id(node)
                 builder.add_node(node.id, _parallel_entry(node, log, limits))
-                builder.add_conditional_edges(node.id, _fan_out_branches(node), [worker, END])
+                builder.add_conditional_edges(
+                    node.id, _fan_out_branches(node, limits), [worker, END]
+                )
                 builder.add_node(
                     worker,
                     _saving(
@@ -530,7 +573,9 @@ def compile_workflow(
                 at = _Orchestration(node, loops[-1] if loops else None)
                 worker, join = task_node_id(node), tasks_join_node_id(node)
                 builder.add_node(node.id, _orchestrator_entry(at, runtime, log, limits))
-                builder.add_conditional_edges(node.id, _fan_out_tasks(at), [worker, join, END])
+                builder.add_conditional_edges(
+                    node.id, _fan_out_tasks(at, limits), [worker, join, END]
+                )
                 builder.add_node(
                     worker,
                     _saving(
@@ -559,7 +604,9 @@ def compile_workflow(
                     return node.id
                 again = replan_node_id(node)
                 builder.add_node(again, _orchestrator_replan(at, runtime, log, limits))
-                builder.add_conditional_edges(again, _fan_out_tasks(at), [worker, join, END])
+                builder.add_conditional_edges(
+                    again, _fan_out_tasks(at, limits), [worker, join, END]
+                )
                 builder.add_conditional_edges(
                     join, _after_tasks(at, then), list(dict.fromkeys([again, then, END]))
                 )
@@ -691,6 +738,7 @@ def _step(
                 refs,
                 route_as=reads,
                 results=state["results"],
+                writers=writers_before(state, limits.writer_ids, limits.team_ids),
             )
 
         if isinstance(node, AgentNode):
@@ -707,6 +755,40 @@ def _integrated_reader(state: RunState) -> str | None:
     return next(
         (o for o in reversed(state["order"]) if (integrated.get(o) or {}).get("merged")), None
     )
+
+
+def writers_before(
+    state: RunState, writer_ids: Collection[str], team_ids: Collection[str] = ()
+) -> list[ReadableWriter]:
+    """The writers whose work the next step may read (13.1), in run order: the writer nodes that
+    completed, and the orchestrators whose integration branch merged a task. Worked out from the
+    checkpointed state (`order`, `results`, `integrated`): a resumed run gets the same answer."""
+    integrated = state.get("integrated", {})
+    found: list[ReadableWriter] = []
+    for node_id in dict.fromkeys(state["order"]):
+        result = state["results"].get(node_id)
+        if node_id in writer_ids and result is not None and result.status == "completed":
+            found.append(ReadableWriter(node_id, "writer"))
+        elif node_id in team_ids and (integrated.get(node_id) or {}).get("merged"):
+            found.append(ReadableWriter(node_id, "integration"))
+    return found
+
+
+def _encode_writers(writers: Sequence[ReadableWriter]) -> list[dict[str, str]]:
+    """Writers as a `Send` payload keeps them (the checkpoint stores JSON)."""
+    return [{"node_id": w.node_id, "kind": w.kind} for w in writers]
+
+
+def _decode_writers(raw: Sequence[Mapping[str, str]] | None) -> tuple[ReadableWriter, ...]:
+    return tuple(
+        ReadableWriter(w["node_id"], "integration" if w["kind"] == "integration" else "writer")
+        for w in raw or ()
+    )
+
+
+def _writers_payload(writers: Sequence[ReadableWriter]) -> list[JsonValue]:
+    """The `writers` a `node_started` carries."""
+    return [{"node_id": w.node_id, "kind": w.kind} for w in writers]
 
 
 def _reads_as(node: Node, reads: str | None) -> str | None:
@@ -766,10 +848,13 @@ async def _run_step(
     branch: int | None = None,
     route_as: str | None = None,
     results: Mapping[str, AgentNodeResult] | None = None,
+    writers: Sequence[ReadableWriter] = (),
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
-    a map or an orchestrator's task, `branch` inside a parallel). `route_as` is what the node is
-    known by to the tools and the runtime: a task's writer key inside an orchestrator. A node that
+    a map or an orchestrator's task, `branch` inside a parallel). `writers` ran before it: an
+    agent with repo read tools is told about them and may read their work (13.1).
+    `route_as` is what the node is known by to the tools and the runtime: a task's writer key
+    inside an orchestrator. A node that
     reads run artifacts runs on the versions in `refs` instead, and one that writes one stores its
     output once it completes. An agent waits for one of the run's `agents_alive` slots before it
     starts, and its usage is counted on the run's budget: once that is spent, the node ends
@@ -829,13 +914,14 @@ async def _run_step(
                 )
             case AgentNode():
                 async with limits.alive:
+                    limits.announce(writers)
                     return await run_agent_node(
                         node,
                         runtime,
                         input,
                         on_event,
                         route_as,
-                        limits.context,
+                        limits.work_text(node, writers, route_as),
                         limits.resolved(node.id),
                     )
 
@@ -850,6 +936,8 @@ async def _run_step(
             started = {"reads": read}
         if isinstance(node, AgentNode) and (provider := limits.provider_payload(node.id)):
             started = {**(started or {}), **provider}
+        if isinstance(node, AgentNode) and READ_TOOLS.intersection(node.tools):
+            started = {**(started or {}), "writers": _writers_payload(writers)}
         await log.emit(NODE_STARTED, node_id=node.id, payload=started, item=item, branch=branch)
     if reads:
         try:
@@ -1185,6 +1273,9 @@ def _fan_out(
                     item_input=_item_input(item),
                     item_artifacts=dict(refs),
                     item_reads=_integrated_reader(state),
+                    item_writers=_encode_writers(
+                        writers_before(state, limits.writer_ids, limits.team_ids)
+                    ),
                 ),
             )
             for i, item in enumerate(items)
@@ -1217,7 +1308,14 @@ def _map_item(
             )
             refs = dict(task.get("item_artifacts", {}))
             scope = _Scope(
-                runtime, tools, log, limits, item=index, refs=refs, reads=task.get("item_reads")
+                runtime,
+                tools,
+                log,
+                limits,
+                item=index,
+                refs=refs,
+                reads=task.get("item_reads"),
+                writers=_decode_writers(task.get("item_writers")),
             )
             ended, result = await _run_inline(map.body, task["item_input"], scope)
             error = _stop_error(ended, result)
@@ -1354,7 +1452,9 @@ def _parallel_started(parallel: ParallelNode) -> dict[str, JsonValue]:
     return started
 
 
-def _fan_out_branches(parallel: ParallelNode) -> Callable[[RunState], Sequence[Send] | str]:
+def _fan_out_branches(
+    parallel: ParallelNode, limits: _Limits
+) -> Callable[[RunState], Sequence[Send] | str]:
     """One `Send` to the worker per branch, each with the parallel's input; to `END` if the
     parallel could not start."""
 
@@ -1371,6 +1471,9 @@ def _fan_out_branches(parallel: ParallelNode) -> Callable[[RunState], Sequence[S
                     branch_input=state["last_text"],
                     branch_artifacts=dict(refs),
                     branch_reads=_integrated_reader(state),
+                    branch_writers=_encode_writers(
+                        writers_before(state, limits.writer_ids, limits.team_ids)
+                    ),
                 ),
             )
             for i in range(len(parallel.branches))
@@ -1400,7 +1503,16 @@ def _parallel_branch(
         await log.emit(PARALLEL_BRANCH_STARTED, node_id=parallel.id, payload=marker)
         refs = dict(task.get("branch_artifacts", {}))
         reads = task.get("branch_reads")
-        scope = _Scope(runtime, tools, log, limits, branch=index, refs=refs, reads=reads)
+        scope = _Scope(
+            runtime,
+            tools,
+            log,
+            limits,
+            branch=index,
+            refs=refs,
+            reads=reads,
+            writers=_decode_writers(task.get("branch_writers")),
+        )
         result, error = await _run_branch(join, index, parallel.branches[index], text, scope)
         end: dict[str, JsonValue] = {**marker, "status": result.status}
         if error:
@@ -1655,7 +1767,8 @@ class _Scope:
     (`item`; a task also `task`: the orchestrator's id and the task's) or a parallel branch
     (`branch`, the innermost), with the run artifacts it sees (`refs`), every node it ran (`ran`,
     shared with the parallels inside it), the artifacts it wrote (`wrote`) and the orchestrator
-    whose integration branch its readers read (`reads`, 6.9)."""
+    whose integration branch its readers read (`reads`, 6.9) and the writers that ran before it
+    (`writers`, 13.1)."""
 
     runtime: AgentRuntime
     tools: ToolExecutor | None
@@ -1668,6 +1781,7 @@ class _Scope:
     wrote: dict[str, ArtifactRef] = field(default_factory=dict[str, ArtifactRef])
     task: tuple[str, str] | None = None
     reads: str | None = None
+    writers: tuple[ReadableWriter, ...] = ()
 
     def route_as(self, node: Node) -> str | None:
         """What `node` is known by to the tools: inside an orchestrator's task, a writer works as
@@ -1712,6 +1826,7 @@ async def _run_inline(node: Node, input: str, scope: _Scope) -> tuple[str, Agent
                 scope.item,
                 scope.branch,
                 scope.route_as(node),
+                writers=scope.writers,
             )
             scope.ran[node.id] = result
             if result.artifact is not None:
@@ -2319,12 +2434,13 @@ async def _plan(
     try:
         try:
             async with limits.alive:
+                limits.announce(scope.writers)
                 result = await run_agent_node(
                     agent,
                     scope.runtime,
                     input,
                     buffer.emit,
-                    context=limits.context,
+                    context=limits.work_text(agent, scope.writers, orchestrator.id),
                     resolved=limits.resolved(orchestrator.id),
                 )
         finally:
@@ -2570,6 +2686,8 @@ async def _make_plan(
     naming a task twice or more agents than `agents_spawned` allows ends the orchestrator. The
     hub's agent already counts on `agents_spawned` (its caller checked it)."""
     orchestrator, node_id, log = at.node, at.id, scope.log
+    ahead = writers_before(state, scope.limits.writer_ids, scope.limits.team_ids)
+    scope = replace(scope, writers=tuple(ahead))
     per_task = agents_spawned(orchestrator.body)
     text = state["last_text"]
     before = at.earlier(state)
@@ -2679,7 +2797,9 @@ def _orchestrator_replan(
     return replan
 
 
-def _fan_out_tasks(at: _Orchestration) -> Callable[[RunState], Sequence[Send] | str]:
+def _fan_out_tasks(
+    at: _Orchestration, limits: _Limits
+) -> Callable[[RunState], Sequence[Send] | str]:
     """One `Send` to the worker per planned task that has not run (the latest round's), with the
     run's artifacts; to the join if there is none; to `END` if the orchestrator failed. Each
     worker's input is `{"task", "input"}` as JSON: the task is data, and its worker's
@@ -2696,6 +2816,7 @@ def _fan_out_tasks(at: _Orchestration) -> Callable[[RunState], Sequence[Send] | 
             return tasks_join_node_id(at.node)
         refs = state.get("artifacts", {})
         iteration = at.iteration(state)
+        writers = _encode_writers(writers_before(state, limits.writer_ids, limits.team_ids))
         sends: list[Send] = []
         for i in todo:
             sent = OrchestratorTask(
@@ -2707,6 +2828,7 @@ def _fan_out_tasks(at: _Orchestration) -> Callable[[RunState], Sequence[Send] | 
                     indent=2,
                 ),
                 task_artifacts=dict(refs),
+                task_writers=writers,
             )
             if iteration is not None:
                 sent["plan_key"] = at.key(state)
@@ -2798,7 +2920,14 @@ def _orchestrator_task(
             marker["iteration"] = sent["iteration"]
         refs = dict(sent.get("task_artifacts", {}))
         scope = _Scope(
-            runtime, tools, log, limits, item=index, refs=refs, task=(orchestrator.id, task_id)
+            runtime,
+            tools,
+            log,
+            limits,
+            item=index,
+            refs=refs,
+            task=(orchestrator.id, task_id),
+            writers=_decode_writers(sent.get("task_writers")),
         )
         cancelled = AgentNodeResult(status="cancelled", text=sent["task_input"], usage=None)
         dropped = False

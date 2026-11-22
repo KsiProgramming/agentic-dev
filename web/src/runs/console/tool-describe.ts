@@ -3,6 +3,7 @@ import {
   FileTextIcon,
   FolderTreeIcon,
   GitCommitHorizontalIcon,
+  GitCompareIcon,
   GitPullRequestIcon,
   KeyRoundIcon,
   PackageIcon,
@@ -24,6 +25,9 @@ export interface ToolDescription {
   doing: string;
   /** What the call acted on (a path, a pattern, a message), shown in mono; may be empty. */
   target: string;
+  /** What follows the target, in the body font: "as test_writer left it" for a read of a
+   * writer's work (13.1). */
+  suffix?: string;
   /** Counts calls of this kind in a group summary: "read 3 files". */
   noun: [singular: string, plural: string];
   verb: string;
@@ -49,6 +53,12 @@ function oneLine(text: string, max = 80): string {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+/** " as test_writer left it" when a read names a writer's work with `node` (13.1). */
+function asWriter(args: unknown): { suffix?: string } {
+  const node = arg(args, "node");
+  return node ? { suffix: `as ${node} left it` } : {};
+}
+
 /** How to show a tool call: its icon, verbs and target. */
 export function describeTool(name: string, args: unknown): ToolDescription {
   switch (name) {
@@ -58,9 +68,22 @@ export function describeTool(name: string, args: unknown): ToolDescription {
         done: "Read",
         doing: "Reading",
         target: arg(args, "path"),
+        ...asWriter(args),
         verb: "read",
         noun: ["file", "files"],
       };
+    case "repo.diff": {
+      const path = arg(args, "path");
+      return {
+        icon: GitCompareIcon,
+        done: "Read the changes of",
+        doing: "Reading the changes of",
+        target: arg(args, "node"),
+        suffix: path && path !== "." ? `in ${path}` : undefined,
+        verb: "read",
+        noun: ["diff", "diffs"],
+      };
+    }
     case "repo.list_files": {
       const path = arg(args, "path");
       return {
@@ -68,6 +91,7 @@ export function describeTool(name: string, args: unknown): ToolDescription {
         done: "Listed",
         doing: "Listing",
         target: !path || path === "." ? "repository root" : path,
+        ...asWriter(args),
         verb: "listed",
         noun: ["folder", "folders"],
       };
@@ -87,6 +111,7 @@ export function describeTool(name: string, args: unknown): ToolDescription {
         done: "Searched for",
         doing: "Searching for",
         target: arg(args, "pattern") || arg(args, "query"),
+        ...asWriter(args),
         verb: "ran",
         noun: ["search", "searches"],
       };

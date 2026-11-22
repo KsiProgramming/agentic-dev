@@ -594,7 +594,7 @@
           "type": "string"
         },
         "tools": {
-          "description": "The repo tools the hub may call while it plans: `repo.list_files`, `repo.read_file`, `repo.search` and `repo.list_modules` only.",
+          "description": "The repo tools the hub may call while it plans: `repo.list_files`, `repo.read_file`, `repo.search`, `repo.list_modules` and `repo.diff` only.",
           "items": {
             "type": "string"
           },

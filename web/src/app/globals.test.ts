@@ -90,6 +90,18 @@ describe.each([
     },
   );
 
+  it.each(["added", "removed"])(
+    "diff %s is ≥ 4.5:1 on its fill and on the background, and the text on the fill too",
+    (kind) => {
+      expect(contrast(theme, `--diff-${kind}`, `--diff-${kind}-muted`)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(theme, `--diff-${kind}`, "--background")).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(theme, "--foreground", `--diff-${kind}-muted`)).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(theme, "--foreground-secondary", `--diff-${kind}-muted`),
+      ).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+
   it("primary text is ≥ 4.5:1 on primary", () => {
     expect(contrast(theme, "--primary-foreground", "--primary")).toBeGreaterThanOrEqual(4.5);
   });

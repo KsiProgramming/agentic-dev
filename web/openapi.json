@@ -6193,7 +6193,8 @@
           "jira_write_without_gate",
           "jira_write_not_shown",
           "on_review_invalid",
-          "copilot_connection_required"
+          "copilot_connection_required",
+          "no_writer_before"
         ]
       },
       "JiraConnectionOut": {
@@ -7627,7 +7628,7 @@
             },
             "type": "array",
             "title": "Tools",
-            "description": "The repo tools the hub may call while it plans: `repo.list_files`, `repo.read_file`, `repo.search` and `repo.list_modules` only."
+            "description": "The repo tools the hub may call while it plans: `repo.list_files`, `repo.read_file`, `repo.search`, `repo.list_modules` and `repo.diff` only."
           }
         },
         "additionalProperties": false,

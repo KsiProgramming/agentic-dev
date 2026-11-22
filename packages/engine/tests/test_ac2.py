@@ -220,7 +220,9 @@ async def test_what_every_agent_receives() -> None:
     team = run.team
 
     # Every agent is told the repo and the request, whatever its input (6.8).
-    assert {r.context for r in team.requests} == {run.context.text()}
+    # Agents after a writer are told about its work too (13.1), after that context.
+    heads = {r.context.split("\n\n# Work before you")[0] for r in team.requests}
+    assert heads == {run.context.text()}
     assert f"<request>\n{REQUEST}\n</request>" in run.context.text()
     # The analysts get the request as their input and only read tools.
     for analyst in ("code_analyst", "test_analyst"):

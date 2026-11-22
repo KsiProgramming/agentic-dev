@@ -31,7 +31,7 @@ from uuid import UUID
 from mcp import Client
 from pydantic import JsonValue
 
-from agentic_runtime.tools import ToolDefinition, ToolOutput
+from agentic_runtime.tools import ReadableWriters, ToolDefinition, ToolOutput
 from agentic_sandbox import Sandbox, SandboxError, Worktree, add_worktree
 from agentic_tools.mcp_bridge import McpToolExecutor
 from agentic_tools.repo.server import SERVER_NAME, RepoLimits, build_repo_server
@@ -183,18 +183,25 @@ async def open_repo_tools(
     writers: Collection[str] = (),
     task_writers: Collection[str] = (),
     limits: RepoLimits | None = None,
+    readable: ReadableWriters | None = None,
 ) -> AsyncGenerator[RepoTools]:
     """The `repo.*` tools for one run, connected in memory: a read-only `repo` server bound to
     `sandbox`, and for each node in `writers` (which needs `run_id`) a writable one bound to its
     worktree, which is created on the node's first call. Each task of an orchestrator in
     `task_writers` (6.1) gets one too, opened on its first call as `<orchestrator>.<task>`. Every
-    client closes on exit, before the caller closes the sandbox."""
+    client closes on exit, before the caller closes the sandbox.
+
+    With `readable` (13.1), every server takes a `node` on its reads and resolves it through it, the
+    same way for the read-only server and each writer's: a writer's branch is read from git refs
+    in `sandbox`, the run's checkout."""
     if (writers or task_writers) and run_id is None:
         raise ValueError("writers need the run id, which names their branches")
 
     def connector(stack: contextlib.AsyncExitStack, writable: bool) -> _Open:
         async def connect(box: Sandbox) -> McpToolExecutor:
-            server = build_repo_server(box, writable=writable, limits=limits)
+            server = build_repo_server(
+                box, writable=writable, limits=limits, readable=readable, refs=sandbox
+            )
             client = await stack.enter_async_context(Client(server))
             return await McpToolExecutor.connect(client, SERVER_NAME)
 
