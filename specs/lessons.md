@@ -70,6 +70,12 @@ Mistakes that reached a real run, and the rule each one left. Read this before y
 - "Nothing found" and "could not run" are different answers: zero results with a failing exit code is the second.
 - A report that says "nothing to build" for a repo in a language it does not handle hides the gap: say which languages were looked at.
 
+### 15. A result named after the test is not there when the test cannot run
+*From 13.4 (2026-11-22).* The first design of fail-to-pass read "failed before" from a linked test's failing result on the base. The spike showed pytest ends a run on an import error with one entry named after the *module* (`tests.test_new`), never the test, so a new test that cannot import the base's code has no result that holds its criterion's id. Enforced by deciding that a linked test is proven when it passes on the change and the base run does not report it as passed, and by the tests that give a base with no result and a base that does not build (`test_evidence_criteria.py`).
+
+- When a check asks "did X fail", ask what the tool reports when X cannot run at all; absence of a pass is the answer a tool can always give.
+- A later pass's input is not the check text alone: a looped hub receives `{input, iteration, previous}`. A test that asserts what a writer receives reads that shape (caught before a real run by `test_sdd_checks.py`, and the lead's instructions say `input`, not "your input").
+
 ## Rules for writing workflows and templates
 
 - **Name the input.** Declare `input` (label, example) when the first step works on a request; mark it `required` when the workflow cannot do anything without it (rule 3).
