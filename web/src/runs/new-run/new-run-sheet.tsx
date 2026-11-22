@@ -11,6 +11,7 @@ import { z } from "zod";
 import { createApiClient } from "@/api/client";
 import { ApiError, codeOf, detailOf, failure, messageOf, validationIssues } from "@/api/errors";
 import {
+  useGithubUser,
   useNewRepoOptions,
   usePolicy,
   useTemplates,
@@ -57,6 +58,7 @@ import {
   toNewRepo,
   type NewRepoValues,
 } from "./new-repo-fields";
+import { ProviderChoice, type RunProvider } from "./provider-choice";
 import { isReady, useReadiness, type Readiness } from "./readiness";
 import { RepoCombobox } from "./repo-combobox";
 import {
@@ -85,6 +87,9 @@ interface Values {
   specFile: SpecFileValues;
   /** "" runs with the workspace's default budget. */
   budget: string;
+  /** Who the run is on (8.2): Claude, or the Copilot of `copilotConnectionId`. */
+  provider: RunProvider;
+  copilotConnectionId: string;
 }
 
 /** What a workflow says about its input (its spec's `input`): a label, help, an example, and
@@ -114,6 +119,11 @@ type RunSource = { template: Template } | { workflow: StoredWorkflowSource };
 const requiresOf = (source: RunSource) =>
   "template" in source ? source.template.requires : source.workflow.requires;
 
+/** A Copilot run uses the starter's own GitHub account, so it needs no Claude key. */
+export function requiredFor(requires: readonly Requirement[], provider: RunProvider) {
+  return provider === "copilot" ? requires.filter((r) => r !== "claude") : requires;
+}
+
 /** The problems of a `policy_limits` refusal, or null for any other body. */
 function policyErrors(error: unknown): string[] | null {
   const detail = detailOf(error);
@@ -136,6 +146,7 @@ function NewRunForm({
   formId,
   onPendingChange,
   onBlockedChange,
+  onProviderChange,
   navigate,
 }: {
   source: RunSource;
@@ -148,6 +159,8 @@ function NewRunForm({
   onPendingChange: (pending: boolean) => void;
   /** Whether the form can be sent as it is: not while a new repo cannot be created. */
   onBlockedChange: (blocked: boolean) => void;
+  /** The provider chosen for the run, so the sheet asks only for the connections it needs. */
+  onProviderChange: (provider: RunProvider) => void;
   navigate?: (url: string) => void;
 }) {
   const router = useRouter();
@@ -190,6 +203,8 @@ function NewRunForm({
             path: z.string(),
           }),
           budget: budgetSchema(),
+          provider: z.enum(["claude", "copilot"]),
+          copilotConnectionId: z.string(),
         })
         .superRefine((values, ctx) => {
           const specProblem = specInput ? specFileError(values.specFile) : null;
@@ -201,6 +216,13 @@ function NewRunForm({
               code: "custom",
               path: ["input"],
               message: "This workflow needs it to know what to do.",
+            });
+          }
+          if (values.provider === "copilot" && values.copilotConnectionId === "") {
+            ctx.addIssue({
+              code: "custom",
+              path: ["copilotConnectionId"],
+              message: "Pick the GitHub account to run as.",
             });
           }
           const typed = values.input.trim();
@@ -232,11 +254,19 @@ function NewRunForm({
       input: "",
       specFile: EMPTY_SPEC_FILE,
       budget: "",
+      provider: "claude",
+      copilotConnectionId: "",
     },
   });
+  const githubUser = useGithubUser({ workspaceId, baseUrl });
   const { isSubmitting } = form.formState;
   const rootError = form.formState.errors.root?.message;
   const repoMode = useWatch({ control: form.control, name: "repoMode" });
+  const copilotConnectionId = useWatch({ control: form.control, name: "copilotConnectionId" });
+  const chosenProvider = useWatch({ control: form.control, name: "provider" });
+  useEffect(() => {
+    onProviderChange(chosenProvider);
+  }, [chosenProvider, onProviderChange]);
   const creating = needsRepo && repoMode === "new";
   const newRepoOptions = useNewRepoOptions({ workspaceId, baseUrl, enabled: creating });
   const blocked = creating && newRepoOptions.data?.can_create !== true;
@@ -276,6 +306,9 @@ function NewRunForm({
           workspace_id: workspaceId,
           trigger: "manual",
           budget_usd: parseBudget(values.budget),
+          ...(values.provider === "copilot"
+            ? { copilot_connection_id: values.copilotConnectionId }
+            : {}),
         },
       });
     } catch (err) {
@@ -296,6 +329,17 @@ function NewRunForm({
         form.setError("specFile", { message: refusal });
         return;
       }
+      const code = codeOf(error);
+      if (
+        code === "copilot_connection_not_found" ||
+        code === "copilot_needs_attention" ||
+        code === "copilot_not_for_triggers"
+      ) {
+        form.setError("copilotConnectionId", {
+          message: message ?? "This GitHub account cannot be used for the run.",
+        });
+        return;
+      }
       if (response.status === 422 && message) {
         const { byField, rest } = parameterErrors(message);
         for (const [name, why] of Object.entries(byField)) {
@@ -306,7 +350,7 @@ function NewRunForm({
         }
         return;
       }
-      if (response.status === 409 && codeOf(error) === "repo_exists") {
+      if (response.status === 409 && code === "repo_exists") {
         form.setError("newRepo.name", { message: message ?? "This repository already exists." });
         return;
       }
@@ -456,6 +500,25 @@ function NewRunForm({
         />
       ) : null}
       <Controller
+        name="provider"
+        control={form.control}
+        render={({ field }) => (
+          <ProviderChoice
+            provider={field.value}
+            connectionId={copilotConnectionId}
+            onChange={(provider, id) => {
+              form.setValue("provider", provider);
+              form.setValue("copilotConnectionId", id);
+              form.clearErrors("copilotConnectionId");
+            }}
+            accounts={githubUser.data}
+            failed={githubUser.isError}
+            error={form.formState.errors.copilotConnectionId?.message}
+            disabled={isSubmitting}
+          />
+        )}
+      />
+      <Controller
         name="budget"
         control={form.control}
         render={({ field, fieldState }) => (
@@ -545,7 +608,9 @@ function SheetBody({
   const chosenId = templateId ?? (list.length === 1 ? (list[0]?.id ?? null) : null);
   const template = list.find((t) => t.id === chosenId) ?? null;
   const parsed = useMemo(() => (template ? parseSchema(template.parameters) : null), [template]);
-  const ready = template ? isReady(readiness, template.requires) : false;
+  const [provider, setProvider] = useState<RunProvider>("claude");
+  const required = template ? requiredFor(template.requires, provider) : [];
+  const ready = template ? isReady(readiness, required) : false;
 
   let body;
   if (templates.isPending) body = <LoadingState rows={4} label="Loading templates…" />;
@@ -579,9 +644,9 @@ function SheetBody({
         ) : null}
         {template && parsed ? (
           <>
-            {template.requires.length > 0 ? (
+            {required.length > 0 ? (
               <ConnectionChecklist
-                requires={template.requires}
+                requires={required}
                 readiness={readiness}
                 workspaceId={workspaceId}
                 baseUrl={baseUrl}
@@ -604,6 +669,7 @@ function SheetBody({
                 formId={formId}
                 onPendingChange={setPending}
                 onBlockedChange={setBlocked}
+                onProviderChange={setProvider}
                 navigate={navigate}
               />
             )}
@@ -710,7 +776,9 @@ function WorkflowSheetBody({
   const formId = useId();
   const [pending, setPending] = useState(false);
   const [blocked, setBlocked] = useState(false);
-  const ready = isReady(readiness, workflow.requires);
+  const [provider, setProvider] = useState<RunProvider>("claude");
+  const required = requiredFor(workflow.requires, provider);
+  const ready = isReady(readiness, required);
   const returnTo = `/workflows/${encodeURIComponent(workflow.id)}?version=${workflow.version}`;
   return (
     <>
@@ -721,9 +789,9 @@ function WorkflowSheetBody({
         </SheetDescription>
       </SheetHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4">
-        {workflow.requires.length > 0 ? (
+        {required.length > 0 ? (
           <ConnectionChecklist
-            requires={workflow.requires}
+            requires={required}
             readiness={readiness}
             workspaceId={workspaceId}
             baseUrl={baseUrl}
@@ -740,6 +808,7 @@ function WorkflowSheetBody({
           formId={formId}
           onPendingChange={setPending}
           onBlockedChange={setBlocked}
+          onProviderChange={setProvider}
           navigate={navigate}
         />
       </div>

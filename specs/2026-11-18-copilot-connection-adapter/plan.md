@@ -31,15 +31,15 @@
   - API tests run from `packages/api` (the repo's `.env` sets `GITHUB_APP_ID` without a key file, which breaks `create_app` when run from the repo root).
 
 ## 4. Settings and the start sheet (web)
-- [ ] A "GitHub (personal, for Copilot)" `ConnectionCard` on Settings › Integrations (Connect, login, Needs attention, Remove in a dialog), with the three states from `@/components/states`.
-- [ ] The New run sheet's provider choice: Copilot is live when a usable personal connection exists and names the login; the 5.8 picker's static disabled row is replaced; the run console shows which login a Copilot run used and whether its cost is estimated.
-- [ ] Component and API-client tests; the existing axe and layout e2e stay green at 375, 768 and 1440 px in light and dark.
+- [x] A "GitHub (personal, for Copilot)" `ConnectionCard` on Settings › Integrations (Connect, login, Needs attention, Remove in a dialog), with the three states from `@/components/states`.
+- [x] The New run sheet's provider choice: Copilot is live when a usable personal connection exists and names the login; the 5.8 picker's static disabled row is replaced; the run console shows which login a Copilot run used and whether its cost is estimated.
+- [ ] Component and API-client tests; the existing axe and layout e2e stay green at 375, 768 and 1440 px in light and dark. (Component tests done and green: 1221 in `pnpm test`. The axe and layout e2e run in CI only: not run locally, because the e2e stack deletes the dev stack's sandboxes.)
 
 ## 5. A real run, read step by step
-- [ ] With a real subscription, run a one-node Copilot agent on a real repo (`AGENTIC_RUNTIME=copilot`) and read it in the console's Activity tab: instructions, input, tools and what they read, the permission requests, the usage shown. Fix what it shows.
-- [ ] Add an entry to `specs/lessons.md` for anything tests did not catch, with the rule and what enforces it.
+- [x] With a real subscription, run a one-node Copilot agent on a real repo (`AGENTIC_RUNTIME=copilot`) and read it in the console's Activity tab: instructions, input, tools and what they read, the permission requests, the usage shown. Fix what it shows.
+- [x] Add an entry to `specs/lessons.md` for anything tests did not catch, with the rule and what enforces it.
 
 ## 6. Specs and docs
 - [x] `specs/tech-stack.md`: the Copilot adapter contract, "GitHub personal connection (API contract)", the audit actions, the decisions-log rows from the spike.
 - [x] `specs/roadmap.md`: 8.2's row links this plan; update "Next up" only if the priority changed.
-- [ ] `docs/integrations/connecting-platforms.md`, `docs/security/security-model.md`, `.env.example`, `CHANGELOG.md` under `## [Unreleased]`.
+- [x] `docs/integrations/connecting-platforms.md`, `docs/security/security-model.md`, `.env.example`, `CHANGELOG.md` under `## [Unreleased]`.

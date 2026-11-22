@@ -125,6 +125,23 @@ test("the header shows the workflow, repo and status from the summary before any
   expect(screen.getByText("Waiting for a worker to pick it up.")).toBeTruthy();
 });
 
+test("8.2: a Copilot run's header says whose Copilot it used; a Claude run has no such fact", async () => {
+  api(detail({ status: "running", queue_stalled_at: null, copilot_login: "ada" }));
+  show();
+
+  const fact = await screen.findByTestId("copilot-login");
+  expect(fact.textContent).toBe("Copilot of ada");
+  expect(within(fact).getByText("ada").className).toContain("font-mono");
+});
+
+test("8.2: a run on Claude shows no Copilot fact", async () => {
+  api(detail({ status: "running", queue_stalled_at: null, copilot_login: null }));
+  show();
+
+  await screen.findByRole("heading", { name: "Generate docs" });
+  expect(screen.queryByTestId("copilot-login")).toBeNull();
+});
+
 test("12.1: a queued run no worker claimed past the threshold says a worker may not be running", async () => {
   api(
     detail({

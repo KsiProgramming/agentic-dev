@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 import { usageOfRun } from "./cost";
 import { groupRuns } from "./date-groups";
 import { canRerun, useRerun } from "./rerun";
-import { RunTrigger } from "./trigger";
+import { CopilotFact, RunTrigger } from "./trigger";
 import {
   badgeStatus,
   expiredLabel,
@@ -87,6 +87,12 @@ function RunName({ run, className }: { run: RunSummary; className?: string }) {
         <IdChip id={run.id} label="run id" focusable={false} className={IN_ROW} />
         <span aria-hidden="true">·</span>
         <RunTrigger run={run} />
+        {run.copilot_login ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <CopilotFact login={run.copilot_login} />
+          </>
+        ) : null}
       </span>
     </div>
   );

@@ -294,7 +294,8 @@ function SheetBody({
 }
 
 /** The provider the starter agent runs on: one radio per provider the engine has, with whether
- * it is connected, and GitHub Copilot, which is not available yet (Milestone 8). */
+ * it is connected, and a disabled GitHub Copilot row: a run picks Copilot when it starts (8.2), per-node
+ * choice comes with 8.3. */
 function ProviderPicker({
   providers,
   loading,
@@ -365,7 +366,9 @@ function ProviderPicker({
         <FolderGit2Icon aria-hidden="true" className="size-4" />
         <span className="flex flex-1 flex-col">
           <span className="font-medium">GitHub Copilot</span>
-          <span className="text-caption">Comes with the Copilot adapter.</span>
+          <span className="text-caption">
+            Chosen when a run starts, on a connected GitHub account.
+          </span>
         </span>
       </label>
       {error ? (

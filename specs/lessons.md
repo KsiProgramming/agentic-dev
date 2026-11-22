@@ -38,6 +38,19 @@ Mistakes that reached a real run, and the rule each one left. Read this before y
 - For every outward write, ask what the run does next and whether it should have waited.
 - **Who answers is not who is connected.** The first real run (7.9) never found the answer: the person who connected Jira answered from the connected account, and the check took every comment of that account for the platform's own. The platform's comments are now told by their footer (`Posted by agentic-dev run`), never by account; tests answer from the connected account (`test_an_answer_from_the_connected_account_still_resumes_the_run`). When a check tells "ours" from "theirs", test with the one-person team.
 
+### 10. A new provider is built on a run, not on its documentation
+*From 8.2 (2026-11-22).* The first reading of Copilot's SDK (docs and PyPI) said it reported no usage, left headless use unstated and did not say whether the app could be a company App. The first real call showed usage per call (tokens and AI credits, with the input count including cache reads and writes), headless use on a person's token and a permission request per custom tool; and it showed that an invalid token fails at `session.create` with a 401. An adapter written from the docs would have estimated usage and guessed the rest. Enforced by 8.2's order (a spike on a real account before the adapter, results in `specs/2026-11-18-copilot-sdk-terms/findings.md`) and by `SdkConnector`'s `translate`, tested on stand-ins shaped like the events the spike printed.
+
+- Before an adapter for a provider, call it for real once with a token, a custom tool and an invalid token, and write down every event and field it returned.
+- Map a refusal by its HTTP status to a fixed code, never by the provider's words (`failure` in `copilot.py`).
+- A provider whose spike could not be run (no account, no subscription) is a conditional go at most.
+
+### 11. The provider a run uses decides what it needs
+*From 8.2.* Every unit test was green while the New run sheet still asked for a Claude key before it would start a Copilot run, so a workspace with only a Copilot subscription (which the mission allows) could not start one from the UI. Found by opening the sheet in a browser against a real stack. Enforced by `requiredFor` in `new-run-sheet.tsx` and the test "a Copilot run needs no Claude key".
+
+- A checklist of connections is the template's requirements minus what the chosen provider does not use; never the template's list as it is.
+- Look at the screen once against a real stack before calling a UI phase done: the rendered sheet showed what the component tests could not.
+
 ## Rules for writing workflows and templates
 
 - **Name the input.** Declare `input` (label, example) when the first step works on a request; mark it `required` when the workflow cannot do anything without it (rule 3).

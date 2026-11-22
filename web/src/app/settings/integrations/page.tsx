@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { LoadingState } from "@/components/states";
 import { ClaudeConnection } from "@/settings/claude-connection";
 import { GithubConnection } from "@/settings/github-connection";
+import { GithubUserConnection } from "@/settings/github-user-connection";
 import { JiraConnection } from "@/settings/jira-connection";
 import { SettingsSection } from "@/settings/settings-nav";
 
@@ -22,11 +23,13 @@ async function ConnectionsForSearchParams({
   const query = await searchParams;
   const github = first(query.github);
   const jira = first(query.jira);
+  const githubUser = first(query.github_user);
   const reason = first(query.reason);
   return (
     <>
       <GithubConnection result={github} reason={github ? reason : undefined} />
       <JiraConnection result={jira} reason={jira ? reason : undefined} />
+      <GithubUserConnection result={githubUser} reason={githubUser ? reason : undefined} />
     </>
   );
 }
