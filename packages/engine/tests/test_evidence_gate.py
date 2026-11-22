@@ -375,13 +375,14 @@ def test_evidence_must_name_a_writer_that_runs_before_the_gate() -> None:
     assert "does not run before the gate" in found(late)[0][1]
 
 
-def test_evidence_needs_a_round_left_and_a_check_on_and_a_path_inside_the_repo() -> None:
-    rounds = found(raw_spec(max_rounds=3))
+def test_max_rounds_may_equal_the_loops_passes_as_the_engine_never_uses_the_last() -> None:
+    assert found(raw_spec(max_rounds=3)) == []  # the loop has 3 passes: the default form value
+
+
+def test_evidence_needs_a_check_on_and_a_path_inside_the_repo() -> None:
     nothing = found(raw_spec(checks={"build": "off", "tests": "off", "analyzers": "off"}))
     outside = found(raw_spec(path="../elsewhere"))
 
-    assert [c for c, _ in rounds] == ["invalid_evidence"]
-    assert "needs a pass left" in rounds[0][1] or "pass left" in rounds[0][1]
     assert [c for c, _ in nothing] == ["invalid_evidence"]
     assert "every check is off" in nothing[0][1]
     assert [c for c, _ in outside] == ["invalid_evidence"]

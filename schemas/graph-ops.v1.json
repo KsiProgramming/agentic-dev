@@ -459,7 +459,7 @@
         },
         "max_rounds": {
           "default": 3,
-          "description": "How many times the checks may send the work back; below the loop's `max_iterations`. After that the gate pauses and shows the failing pack.",
+          "description": "How many times the checks may send the work back. Never on the loop's last pass, whatever this says. After that the gate pauses and shows the failing pack.",
           "maximum": 10,
           "minimum": 1,
           "title": "Max Rounds",

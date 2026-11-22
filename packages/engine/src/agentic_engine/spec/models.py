@@ -216,8 +216,8 @@ class GateEvidence(_Base):
         default=3,
         ge=1,
         le=MAX_EVIDENCE_ROUNDS,
-        description="How many times the checks may send the work back; below the loop's "
-        "`max_iterations`. After that the gate pauses and shows the failing pack.",
+        description="How many times the checks may send the work back. Never on the loop's last "
+        "pass, whatever this says. After that the gate pauses and shows the failing pack.",
     )
 
 
@@ -2490,7 +2490,7 @@ def _evidence_issues(
 ) -> list[ValidationIssue]:
     """Why the evidence of the gate `node` (13.3) cannot run: the gate is not in a loop's body
     (`evidence_not_in_loop`), `node` is no writer that runs before it in that body
-    (`evidence_unknown_writer`), or `max_rounds` or the checks are not usable
+    (`evidence_unknown_writer`), or the checks or path are not usable
     (`invalid_evidence`)."""
     evidence = node.evidence
     if evidence is None:
@@ -2528,16 +2528,6 @@ def _evidence_issues(
                 "evidence_unknown_writer",
                 ".node",
                 f"gate {node.id!r} at {path}: evidence.node {evidence.node!r} {why}",
-            )
-        )
-    if evidence.max_rounds >= loop.max_iterations:
-        found.append(
-            issue(
-                "invalid_evidence",
-                ".max_rounds",
-                f"gate {node.id!r} at {path}: evidence.max_rounds is at least the "
-                f"{loop.max_iterations} passes of loop {loop.id!r}: the writer needs a pass left "
-                "to act on the failures",
             )
         )
     checks = evidence.checks
