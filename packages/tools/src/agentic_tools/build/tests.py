@@ -14,10 +14,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from agentic_tools.build.report import Ecosystem
 from agentic_tools.build.stack import Plan, as_table, toml_table
 
 type TestStatus = Literal["passed", "failed", "skipped", "error"]
+type TestEcosystem = Literal["node", "python", "dotnet"]
 
 MAX_FAILURES = 20
 MAX_MESSAGE = 500
@@ -47,8 +47,10 @@ class TestCheck(BaseModel):
     __test__ = False
 
     path: str = Field(description="The module's directory, relative to the repository root.")
-    ecosystem: Ecosystem
-    runner: str | None = Field(default=None, description="`jest`, `vitest`, `node:test`, `pytest`.")
+    ecosystem: TestEcosystem
+    runner: str | None = Field(
+        default=None, description="`jest`, `vitest`, `node:test`, `pytest`, `dotnet test`."
+    )
     status: TestStatus
     reason: str | None = Field(default=None, description="Why it failed, errored or was skipped.")
     build: Literal["ran", "failed"] | None = Field(
@@ -202,6 +204,74 @@ def parse_junit(text: str) -> Outcome | None:
     )
 
 
+TRX_MARKER = "::trx::"
+
+
+def split_trx(stdout: str) -> tuple[str, list[str]]:
+    """A `dotnet test` job's output as (the runner's own output, each TRX document after the
+    marker)."""
+    head, found, tail = stdout.partition(f"{TRX_MARKER}\n")
+    if not found:
+        return stdout, []
+    # dotnet writes each TRX with a byte-order mark, which would trail the document before it.
+    tail = tail.replace("\ufeff", "")
+    documents = [f"<?xml{part}" for part in tail.split("<?xml") if part.strip()]
+    return head, documents
+
+
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def parse_trx(documents: list[str]) -> Outcome | None:
+    """Counts and failures from TRX documents (one per test project), or None when none is a TRX
+    file. A document with a DTD or entities is skipped: the file is written by repo code."""
+    total = failed = skipped = 0
+    failures: list[TestFailure] = []
+    found = False
+    for text in documents:
+        if "<!DOCTYPE" in text or "<!ENTITY" in text:
+            continue
+        try:
+            root = ET.fromstring(text.strip())
+        except ET.ParseError:
+            continue
+        if _local(root.tag) != "TestRun":
+            continue
+        found = True
+        classes: dict[str, str] = {}
+        for node in root.iter():
+            if _local(node.tag) == "UnitTest":
+                method = next((c for c in node.iter() if _local(c.tag) == "TestMethod"), None)
+                if method is not None and node.get("id"):
+                    classes[node.get("id", "")] = method.get("className", "")
+        for result in root.iter():
+            if _local(result.tag) != "UnitTestResult":
+                continue
+            outcome = result.get("outcome", "")
+            if outcome == "NotExecuted":
+                skipped += 1
+                continue
+            total += 1
+            if outcome == "Passed":
+                continue
+            failed += 1
+            if len(failures) >= MAX_FAILURES:
+                continue
+            message = next((m.text or "" for m in result.iter() if _local(m.tag) == "Message"), "")
+            owner = classes.get(result.get("testId", ""), "")
+            failures.append(
+                TestFailure(
+                    name=_clip(result.get("testName", "a test"), MAX_NAME),
+                    file=_clip(owner, MAX_NAME) or None,
+                    message=_clip(message, MAX_MESSAGE) or None,
+                )
+            )
+    if not found:
+        return None
+    return Outcome(passed=total - failed, failed=failed, skipped=skipped, failures=failures)
+
+
 def split_junit(stdout: str) -> tuple[str, str]:
     """A pytest job's output as (the runner's own output, the JUnit file after the marker)."""
     head, _, tail = stdout.rpartition(f"{JUNIT_MARKER}\n")
@@ -333,7 +403,9 @@ __all__ = [
     "node_runner",
     "parse_junit",
     "parse_node_output",
+    "parse_trx",
     "python_has_pytest",
     "split_junit",
+    "split_trx",
     "tests_failed_reason",
 ]

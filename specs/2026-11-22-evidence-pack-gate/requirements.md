@@ -108,7 +108,7 @@ What changed while building it, and why (decisions-log rows in tech-stack, lesso
 - **The template adopts evidence by option.** "Plan, build and review" takes `checks` (default off) and `check_rounds`; with `checks` its gate moves into the loop's body. The build-from-Jira templates are unchanged: their `commit_specs` step must stay in the root sequence before the gate, so a gate in the loop needs its own design. Default flows, AC-2's conformance and `on_review` follow-ups are as they were.
 - **The hidden step is `<gate>.evidence`**, not `<gate>:evidence`, as every other internal node id uses a `.`.
 - **`scan.lint {node}` and `build.* {node}` run the existing scripts in the extracted tree** (`agentic_tools.tree.TreeSandbox`) instead of through job containers, so the scanners and the build are unchanged.
-- **Not done:** .NET tests, the Docker fixture tests, the e2e run, the spike on real repos and the real Copilot run. See `findings.md`.
+- **Not done:** the Docker fixture tests, the e2e run, the spike on real repos and the real Copilot run. See `findings.md`.
 - **Found on the way:** 13.2's whole `build` package was never committed, as `.gitignore` has `build/` (lessons rule 12).
 
 ## Open questions

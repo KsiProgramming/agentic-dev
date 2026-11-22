@@ -63,6 +63,13 @@ Mistakes that reached a real run, and the rule each one left. Read this before y
 - Anything that decides a loop goes round again must know how many passes are left, and never use the last one.
 - When two mechanisms send work back, count them together, or keep them apart.
 
+### 14. A test runner is built on a run, not on its documentation
+*From 13.3 (2026-11-22).* `build.test` for .NET passed every unit test on a scripted sandbox, and its first run on a real repo found "no tests found": the project was not found (a `find` that prunes a start path named `.`), then the TRX files, which start with a byte-order mark, did not parse, then the test host could not start (tests built for net8.0, an image with one runtime, .NET 10), and zero tests read as "no tests found" instead of a failed run. Enforced by `DOTNET_ROLL_FORWARD=LatestMajor`, the byte-order-mark and zero-tests-with-a-failing-exit tests (`test_build_dotnet_test.py`), and the rule below.
+
+- A job that wraps a tool is run once for real, on a real repo, before it is called done; scripted sandboxes prove the parsing, not that the tool ran.
+- "Nothing found" and "could not run" are different answers: zero results with a failing exit code is the second.
+- A report that says "nothing to build" for a repo in a language it does not handle hides the gap: say which languages were looked at.
+
 ## Rules for writing workflows and templates
 
 - **Name the input.** Declare `input` (label, example) when the first step works on a request; mark it `required` when the workflow cannot do anything without it (rule 3).

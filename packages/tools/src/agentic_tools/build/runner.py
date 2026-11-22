@@ -19,12 +19,13 @@ import posixpath
 import time
 from collections.abc import Sequence
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 from uuid import uuid4
 
 from agentic_sandbox import Sandbox, SandboxError
 from agentic_tools.build import commands
+from agentic_tools.build.dotnet_test import test_dotnet
 from agentic_tools.build.report import MAX_MODULES, BuildCheck, BuildReport, Ecosystem, build_report
 from agentic_tools.build.stack import (
     CONFINE_FAILED,
@@ -40,6 +41,7 @@ from agentic_tools.build.tests import (
     DOES_NOT_BUILD,
     NO_TESTS,
     TestCheck,
+    TestEcosystem,
     TestReport,
     job_script,
     make_report,
@@ -64,6 +66,7 @@ from agentic_tools.build.workdir import (
     safe_requirements,
 )
 from agentic_tools.repo.stack import MODULES_SCRIPT, find_modules
+from agentic_tools.scan.dotnet import DotnetLimits
 
 MAX_SCANNED = 100
 """The most modules looked at for something to restore."""
@@ -80,6 +83,7 @@ class BuildLimits:
     restore_timeout_s: float = 300.0
     build_timeout_s: float = 600.0
     test_timeout_s: float = 600.0
+    dotnet: DotnetLimits = field(default_factory=DotnetLimits)
 
 
 def _under(path: str, directory: str) -> bool:
@@ -367,17 +371,25 @@ async def restore_modules(
 async def test_modules(
     sandbox: Sandbox,
     target: str = ".",
-    ecosystems: Sequence[Ecosystem] = ("node", "python"),
+    ecosystems: Sequence[TestEcosystem] = ("node", "python", "dotnet"),
     limits: BuildLimits | None = None,
 ) -> TestReport:
-    """Restore, build and test the Node and Python modules at or under `target`. Raises
-    `RuntimeError` with a safe message when the repo cannot be read."""
+    """Restore, build and test the Node and Python modules, and the C# projects, at or under
+    `target`. Raises `RuntimeError` with a safe message when the repo cannot be read."""
+    chosen = tuple(dict.fromkeys(ecosystems))
+    limits = limits or BuildLimits()
+    restorer = _Restorer(sandbox, limits)
     try:
-        return await _Restorer(sandbox, limits or BuildLimits()).test_modules(
-            target, tuple(dict.fromkeys(ecosystems))
+        report = await restorer.test_modules(
+            target,
+            tuple(e for e in chosen if e != "dotnet"),  # type: ignore[misc]
         )
     except _Failed as e:
         raise RuntimeError(str(e)) from None
+    if "dotnet" not in chosen or len(report.checks) >= MAX_MODULES:
+        return report
+    found = await test_dotnet(sandbox, target, limits.dotnet, limits.test_timeout_s)
+    return make_report([*report.checks, *([found] if found else [])], truncated=report.truncated)
 
 
 test_modules.__test__ = False  # type: ignore[attr-defined]  # not a pytest test

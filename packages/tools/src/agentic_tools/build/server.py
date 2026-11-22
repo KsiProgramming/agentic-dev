@@ -17,7 +17,7 @@ from agentic_runtime import ReadableWriters
 from agentic_sandbox import Sandbox
 from agentic_tools.build.report import BuildReport, Ecosystem
 from agentic_tools.build.runner import BuildLimits, restore_modules, test_modules
-from agentic_tools.build.tests import TestReport
+from agentic_tools.build.tests import TestEcosystem, TestReport
 from agentic_tools.repo.paths import CONFINE, NOT_FOUND, OUTSIDE, repo_relative
 from agentic_tools.strict import strict_tool
 from agentic_tools.tree import archived_tree
@@ -94,25 +94,26 @@ class _BuildTools:
             str, Field(description="A directory to test, relative to the repository root.")
         ] = ".",
         ecosystems: Annotated[
-            list[Ecosystem] | Literal["auto"],
+            list[TestEcosystem] | Literal["auto"],
             Field(
-                description="`auto` (default): the Node and Python modules under `path`. Or a "
-                "list naming which to test: `node`, `python`."
+                description="`auto` (default): the Node and Python modules and the C# projects "
+                "under `path`. Or a list naming which to test: `node`, `python`, `dotnet`."
             ),
         ] = "auto",
         node: NodeArg = None,
     ) -> TestReport:
-        """Build and test the repository's Node and Python modules: restore their packages
-        (the only step with a network), build, then run the tests with no network. The runner
-        comes from the repo: the `test` script of `package.json`, pytest for Python. The report
+        """Build and test the repository's Node and Python modules and C# projects: restore their
+        packages (the only step with a network), build, then run the tests with no network. The
+        runner comes from the repo: the `test` script of `package.json`, pytest for Python,
+        `dotnet test` for C#. The report
         says, per module, whether it built and how many tests passed and failed, with the
         failing tests named. With `node`, tests what that writer committed."""
         if node is not None:
             async with archived_tree(self._sandbox, self._readable, node) as tree:
                 return await _BuildTools(tree, self._limits).test(path, ecosystems)
         target = await self._checked_path(path)
-        chosen: tuple[Ecosystem, ...] = (
-            ("node", "python") if ecosystems == "auto" else tuple(ecosystems)
+        chosen: tuple[TestEcosystem, ...] = (
+            ("node", "python", "dotnet") if ecosystems == "auto" else tuple(ecosystems)
         )
         try:
             return await test_modules(self._sandbox, target, chosen, self._limits)

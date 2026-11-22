@@ -1,12 +1,5 @@
 {
   "$defs": {
-    "Ecosystem": {
-      "enum": [
-        "node",
-        "python"
-      ],
-      "type": "string"
-    },
     "TestCheck": {
       "description": "One module's build and tests for one ecosystem.",
       "properties": {
@@ -28,7 +21,7 @@
           "title": "Build"
         },
         "ecosystem": {
-          "$ref": "#/$defs/Ecosystem"
+          "$ref": "#/$defs/TestEcosystem"
         },
         "failed": {
           "anyOf": [
@@ -89,7 +82,7 @@
             }
           ],
           "default": null,
-          "description": "`jest`, `vitest`, `node:test`, `pytest`.",
+          "description": "`jest`, `vitest`, `node:test`, `pytest`, `dotnet test`.",
           "title": "Runner"
         },
         "skipped": {
@@ -128,6 +121,14 @@
       ],
       "title": "TestCheck",
       "type": "object"
+    },
+    "TestEcosystem": {
+      "enum": [
+        "node",
+        "python",
+        "dotnet"
+      ],
+      "type": "string"
     },
     "TestFailure": {
       "properties": {
