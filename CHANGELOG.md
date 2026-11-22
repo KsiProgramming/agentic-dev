@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 8.2 Personal GitHub connection and Copilot adapter:
+- Phase 8.2 Personal GitHub connection and Copilot adapter ([#251](https://github.com/KsiProgramming/agentic-dev/pull/251)):
   - **Run on your own Copilot.** A person connects their own GitHub account (Settings › Integrations › "GitHub (personal, for Copilot)"), next to the company's GitHub App, which stays for repos and pull requests. Starting a run, the new Provider choice offers GitHub Copilot with the account it will use; a run uses only that account's token, and a run with no person (a Jira or GitHub trigger, a schedule) stays on Claude. A Copilot run needs no Claude key.
   - **The adapter.** `CopilotRuntime` over the Copilot SDK (`github-copilot-sdk` 1.0.34, pinned): one client and one user token per run, headless; the platform's tools registered as custom tools with the same names and schemas as on Claude; the SDK's built-in shell and file tools off; its permission requests answered from the node's tool grants and denied otherwise. Usage is read per model call, in tokens; Copilot meters AI credits, so a Copilot run shows no cost. Spike evidence from a real Copilot Business seat is in `specs/2026-11-18-copilot-sdk-terms/findings.md`.
   - **Refusals.** A token GitHub refuses, a missing Copilot seat and a rate limit fail the run with `copilot_needs_attention`, `copilot_no_subscription` and `copilot_rate_limited` (never the SDK's words); a refused token also marks that person's connection "Needs attention". Setup failures are `copilot_not_configured`, `copilot_not_connected`, `copilot_unavailable`.
