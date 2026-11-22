@@ -2975,12 +2975,14 @@ class RecordingByRole(ByRole):
         return super().start(request)
 
 
+@pytest.mark.parametrize("checks", [False, True])
 async def test_done_when_a_spec_file_run_opens_a_pr(
     sessions: async_sessionmaker[AsyncSession],
     postgres_url: str,
     redis_url: str,
     tmp_path: Path,
     master_key: Path,
+    checks: bool,
 ) -> None:
     """7.7's "Done when" on fakes: a run of "Build from a spec file" given an uploaded spec, in a
     workspace with no Jira connection, writes `spec-input.md` before its first step, tells every
@@ -3016,7 +3018,7 @@ async def test_done_when_a_spec_file_run_opens_a_pr(
     ):
         run_id = await create_run(
             sessions,
-            build_sdd_file_spec(SddFileParams()),
+            build_sdd_file_spec(SddFileParams(checks=checks)),
             "rate-limits.md",
             RepoSource(url=GITHUB_URL),
             workspace_id=workspace_id,
@@ -3054,6 +3056,11 @@ async def test_done_when_a_spec_file_run_opens_a_pr(
     artifact, _ = found
     assert (artifact.version, artifact.node_id, artifact.content) == (1, "$input", SPEC_FILE_TEXT)
     events = await list_run_events(sessions, run_id)
+    # With `checks` (13.4) the gate sits in the review loop with an evidence pack: on a fake
+    # sandbox the jobs cannot run, which is an `error` that reaches the person, never a send-back.
+    pr_gate = next(e for e in events if e.type == "gate_waiting" and e.node_id == "approve_pr")
+    assert ("evidence" in pr_gate.payload) is checks
+    assert not [e for e in events if e.type == "gate_decided" and e.payload.get("source")]
     first_node = next(i for i, e in enumerate(events) if e.type == "node_started")
     seeded = [i for i, e in enumerate(events) if (e.payload or {}).get("source") == "input"]
     assert len(seeded) == 1 and seeded[0] < first_node

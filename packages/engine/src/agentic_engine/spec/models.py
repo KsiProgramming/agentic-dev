@@ -1297,7 +1297,7 @@ def _links_problem(
         return f"node {node.id!r}: `links_from` takes `pr` and `files`, each a step's id"
     if "files" in links and "pr" not in links:
         return f"node {node.id!r}: `links_from.files` links into a pull request; name it in `pr`"
-    earlier = {n.id: n for at, n in seen if _is_root_step(at)}
+    earlier = {n.id: n for at, n in seen if _is_root_step(at) or _is_root_loop_step(at)}
     pr, files = earlier.get(str(links.get("pr"))), earlier.get(str(links.get("files")))
     if "pr" in links and not (isinstance(pr, ToolNode) and pr.tool in PUBLISH_TOOLS):
         return (
@@ -1313,6 +1313,13 @@ def _links_problem(
 def _is_root_step(path: str) -> bool:
     """Whether the node at `path` is a step of the root sequence."""
     return re.fullmatch(r"root\.steps\[\d+\]", path) is not None
+
+
+def _is_root_loop_step(path: str) -> bool:
+    """Whether the node at `path` is a step of the body of a loop that is a step of the root
+    sequence (13.4): it runs whenever the run gets past that loop, as `on_reject: end` needs
+    (7.8)."""
+    return re.fullmatch(r"root\.steps\[\d+\]\.body\.steps\[\d+\]", path) is not None
 
 
 def _previous_step(path: str, at_path: Mapping[str, Node]) -> Node | None:
@@ -1383,13 +1390,13 @@ def create_repo_issues(root: Node) -> list[ValidationIssue]:
 def commit_artifacts_issues(root: Node) -> list[ValidationIssue]:
     """Why the nodes under `root` that commit run artifacts onto a branch (`repo.commitArtifacts`,
     7.5) cannot run, in run order; empty if they can. Each must be a tool node and a step of the
-    root sequence, read at least one artifact (`reads`: what it commits), name in `into` a writer
-    that runs before it at the top of the run (a writer, or an orchestrator whose tasks write;
-    one in a loop's body counts at its loop's place, 6.9), and give `dir`, a relative folder of
-    the repo (`reference` otherwise). That a gate comes between it and a publish of `into` is
-    `publish_gate_issues`'s check."""
+    root sequence, or of the body of a loop that is one (13.4), read at least one artifact
+    (`reads`: what it commits), name in `into` a writer that runs before it at the top of the run
+    (a writer, or an orchestrator whose tasks write; one in a loop's body counts at its loop's
+    place, 6.9), and give `dir`, a relative folder of the repo (`reference` otherwise). That a gate
+    comes between it and a publish of `into` is `publish_gate_issues`'s check."""
     issues: list[ValidationIssue] = []
-    top = {id(step) for step in root.steps} if isinstance(root, SequenceNode) else {id(root)}
+    top = _ending_steps(root)
     earlier: list[Node] = []
     loops: set[str] = set()
     for path, node in iter_nodes(root):
@@ -1410,7 +1417,10 @@ def _commit_issue(node: Node, tool: str, at_top: bool, earlier: list[Node]) -> s
     if not isinstance(node, ToolNode):
         return f"node {node.id!r}: {tool} can only be called by a tool node"
     if not at_top:
-        return f"node {node.id!r}: {tool} must be a step of the root sequence"
+        return (
+            f"node {node.id!r}: {tool} must be a step of the root sequence, or of the body of a "
+            "loop that is one"
+        )
     if not node.reads:
         return f"node {node.id!r}: {tool} commits the artifacts it reads; give it `reads`"
     if extra := sorted(set(node.args) - {"into", "dir"}):

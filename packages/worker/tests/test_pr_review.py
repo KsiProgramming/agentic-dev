@@ -10,6 +10,7 @@ from uuid import UUID
 import pytest
 from pydantic import JsonValue
 from redis.asyncio import Redis
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.gate import GateDecision
@@ -31,6 +32,7 @@ from agentic_store import (
     put_github_connection,
     record_approval,
 )
+from agentic_store.models import Run
 from agentic_tools.testing import FakeGithub, bare_remote
 
 from .test_worker import (
@@ -115,18 +117,25 @@ async def follow_up(
     )
 
 
+@pytest.mark.parametrize("checks", [False, True])
 async def test_done_when_a_review_comment_starts_a_follow_up_on_the_same_pr(
     sessions: async_sessionmaker[AsyncSession],
     postgres_url: str,
     redis_url: str,
     tmp_path: Path,
     master_key: Path,
+    checks: bool,
 ) -> None:
     """7.6 on fakes: an SDD run opens PR #1; `@agentic-dev fix this` on it starts a follow-up
     that runs the review loop on the PR's code with the review as its context, waits at
     `approve_pr`, and once approved pushes a fast-forward to the same PR, replies on it once and
     comments the links on the Jira issue. A second follow-up, after someone else pushed to the
     PR, fails `pr_head_moved` before doing anything."""
+    async with sessions() as session:
+        # The database outlives a test and the fake GitHub numbers its pull requests from 1 again:
+        # without this the second variant would find the first one's follow-ups on "pull/1".
+        await session.execute(update(Run).where(Run.pr_review.is_not(None)).values(pr_review=None))
+        await session.commit()
     repos = tmp_path / "repos"
     make_repo(repos / "hello")
     remote = bare_remote(repos / "hello", tmp_path / "remote.git")
@@ -158,7 +167,7 @@ async def test_done_when_a_review_comment_starts_a_follow_up_on_the_same_pr(
     ):
         original = await create_run(
             sessions,
-            build_sdd_spec(SddParams(move_to="In Progress")),
+            build_sdd_spec(SddParams(move_to="In Progress", checks=checks)),
             "API-1",
             RepoSource(url=GITHUB_URL),
             workspace_id=workspace_id,
