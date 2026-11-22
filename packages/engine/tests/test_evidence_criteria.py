@@ -434,3 +434,27 @@ def test_a_gate_with_only_the_new_checks_is_not_all_off() -> None:
 
     assert [c for c, _ in found(raw(checks=off))] == ["invalid_evidence"]
     assert found(raw(checks={**off, "coverage": "shown"})) == []
+
+
+async def test_a_build_that_fails_sends_the_writer_the_error_codes_and_places() -> None:
+    broken = report(
+        module(
+            status="failed",
+            reason="does not build",
+            build="failed",
+            ecosystem="dotnet",
+            build_errors=["S4144 tests/Core.Tests/ItemKindTests.cs:35", "CS1002 src/Core/A.cs:3"],
+        )
+    )
+    run = run_of(
+        spec(checks={"build": "required", "coverage": "off", "criteria": "off"}, max_rounds=1),
+        Judged([broken, report(module())]),
+    )
+
+    await run.start()
+
+    [_, second] = (r for r in run.runtime.requests if r.node_id == "writer")
+    assert second.input.startswith("## Build\n\n- does not build")
+    assert "- . does not build" in second.input
+    assert "- error S4144 tests/Core.Tests/ItemKindTests.cs:35" in second.input
+    assert "- error CS1002 src/Core/A.cs:3" in second.input

@@ -57,6 +57,27 @@ def is_criterion_id(text: str) -> bool:
     return _CRITERION.fullmatch(text) is not None
 
 
+MAX_BUILD_ERRORS = 10
+_BUILD_ERROR = re.compile(
+    r"^(?P<path>[^\r\n(]+?)\((?P<line>\d+),\d+\):\s*error\s+(?P<code>[A-Za-z]{1,6}\d{1,5})\b",
+    re.MULTILINE,
+)
+_WORK = re.compile(r"^/.*?/(?:dotnet-test|base|tree|build)-[0-9a-f]{32}/(?:repo/)?")
+
+
+def build_errors(output: str) -> list[str]:
+    """The errors of a failed build as `CODE path:line`, once each and at most `MAX_BUILD_ERRORS`.
+    Only the code (`CS1002`, `S4144`), the file and the line are kept: the message is the tool's
+    words and may quote repo content. The job's work directory is cut from the path."""
+    found: dict[str, None] = {}
+    for match in _BUILD_ERROR.finditer(_ANSI.sub("", output)):
+        path = _WORK.sub("", match.group("path").strip())
+        if path.startswith("/tmp/") or path.startswith("/workspace/"):
+            path = path.split("/", 3)[-1]
+        found[_clip(f"{match.group('code')} {path}:{match.group('line')}", MAX_NAME)] = None
+    return list(found)[:MAX_BUILD_ERRORS]
+
+
 def no_runner(language: str) -> str:
     return f"no supported test runner for {language}"
 
@@ -128,6 +149,11 @@ class TestCheck(BaseModel):
     )
     coverage_reason: str | None = Field(
         default=None, description="With `coverage`: why it was not measured."
+    )
+    build_errors: list[str] = Field(
+        default_factory=lambda: list[str](),
+        description="When the build failed: each error as `CODE path:line` (at most 10), never "
+        "the compiler's words.",
     )
     cases_reason: str | None = Field(
         default=None, description="With `select`: why the tests' results were not read."
@@ -575,6 +601,7 @@ __all__ = [
     "TestFailure",
     "TestOptions",
     "TestReport",
+    "build_errors",
     "criterion_ids",
     "job_script",
     "make_report",

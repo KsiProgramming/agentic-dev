@@ -127,6 +127,7 @@ class _Module(BaseModel):
     coverage: _Coverage | None = None
     coverage_reason: str | None = None
     cases_reason: str | None = None
+    build_errors: list[str] = Field(default_factory=lambda: list[str]())
 
 
 class _TestReport(BaseModel):
@@ -193,7 +194,13 @@ def build_check(report: _TestReport | None, mode: str, error: str | None = None)
     broken = [m for m in ran if m.build == "failed"]
     errors = [m for m in ran if m.status == "error"]
     modules: list[JsonValue] = [
-        {"path": m.path, "ecosystem": m.ecosystem, "build": m.build or "none", "reason": m.reason}
+        {
+            "path": m.path,
+            "ecosystem": m.ecosystem,
+            "build": m.build or "none",
+            "reason": m.reason,
+            "errors": list[JsonValue](m.build_errors),
+        }
         for m in report.checks[:MAX_LISTED]
     ]
     detail: dict[str, JsonValue] = {"modules": modules}
@@ -643,6 +650,9 @@ def send_back_comments(pack: EvidencePack) -> list[GateComment]:
             for m in _items(check.detail.get("modules")):
                 if m.get("build") == "failed":
                     lines.append(f"{m.get('path', '.')} does not build")
+                    errors = m.get("errors")
+                    if isinstance(errors, list):
+                        lines.extend(f"error {e}" for e in errors if isinstance(e, str))
         comments.append(GateComment(item=TITLES[check.kind], text=_bullets(lines)))
     return comments[:MAX_CHANGE_COMMENTS]
 

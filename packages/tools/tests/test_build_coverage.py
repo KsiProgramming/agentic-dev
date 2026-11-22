@@ -272,3 +272,29 @@ def test_the_dotnet_job_prints_cobertura_before_the_trx_files() -> None:
     assert "--filter" in dotnet_script(TestOptions(base=True))
     output = f"x\n::cobertura::\n{COBERTURA}\n::trx::\n"
     assert len(split_cobertura(output)) == 1
+
+
+ANALYZER_OUTPUT = """\
+/workspace/.incoming/dotnet-test-0123456789abcdef0123456789abcdef/tests/Core.Tests/ItemKindTests.cs(35,17): error S4144: Update this method so that its implementation is not identical to 'X'. [/workspace/.incoming/dotnet-test-0123456789abcdef0123456789abcdef/tests/Core.Tests/Core.Tests.csproj]
+/workspace/.incoming/dotnet-test-0123456789abcdef0123456789abcdef/src/Core/A.cs(3,5): error CS1002: ; expected [x.csproj]
+/workspace/.incoming/dotnet-test-0123456789abcdef0123456789abcdef/src/Core/A.cs(3,5): error CS1002: ; expected [x.csproj]
+error NU1101: Unable to find package Foo. No packages exist with this id in source(s): nuget.org
+"""
+
+
+def test_build_errors_keep_the_code_and_place_never_the_tools_words() -> None:
+    from agentic_tools.build.tests import build_errors
+
+    found = build_errors(ANALYZER_OUTPUT)
+
+    assert found == ["S4144 tests/Core.Tests/ItemKindTests.cs:35", "CS1002 src/Core/A.cs:3"]
+    assert "identical" not in " ".join(found)
+
+
+def test_an_analyzer_error_is_a_build_failure_and_a_restore_error_is_not() -> None:
+    from agentic_tools.build.dotnet_test import _COMPILE_ERROR  # pyright: ignore[reportPrivateUsage]
+
+    assert _COMPILE_ERROR.search("x.cs(1,1): error S4144: duplicate")
+    assert _COMPILE_ERROR.search("x.cs(1,1): error CA2201: do not raise")
+    assert not _COMPILE_ERROR.search("error NU1101: Unable to find package")
+    assert not _COMPILE_ERROR.search("error MSB1009: Project file does not exist")

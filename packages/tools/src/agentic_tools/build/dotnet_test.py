@@ -33,6 +33,7 @@ from agentic_tools.build.tests import (
     Outcome,
     TestCheck,
     TestOptions,
+    build_errors,
     parse_trx,
     split_trx,
     tests_failed_reason,
@@ -104,7 +105,9 @@ def split_cobertura(output: str) -> list[str]:
     return [f"<?xml{part}" for part in tail.split("<?xml") if part.strip()]
 
 
-_COMPILE_ERROR = re.compile(r"\berror\s+(CS|VB|FS)\d+", re.IGNORECASE)
+# Any build error but a restore (`NU…`) or an MSBuild one (`MSB…`): the compiler's (`CS…`) and the
+# repo's analyzers', which a repo may raise to errors (`S4144`, `CA2201`, `IDE0005`).
+_COMPILE_ERROR = re.compile(r"\berror\s+(?!NU\d|MSB\d)[A-Za-z]{1,6}\d{1,5}\b")
 
 
 async def test_dotnet(
@@ -194,7 +197,15 @@ async def _run(
             return base.model_copy(update={"reason": NO_TESTS, "build": "ran"})
         if _COMPILE_ERROR.search(f"{output}\n{job.stderr}"):
             reason = BASE_DID_NOT_BUILD if options.base else DOES_NOT_BUILD
-            return base.model_copy(update={"status": "failed", "reason": reason, "build": "failed"})
+            errors = build_errors(f"{output}\n{job.stdout}\n{job.stderr}")
+            return base.model_copy(
+                update={
+                    "status": "failed",
+                    "reason": reason,
+                    "build": "failed",
+                    "build_errors": errors,
+                }
+            )
         return base.model_copy(update={"status": "error", "reason": "test run failed"})
     counts = {
         "passed": outcome.passed,

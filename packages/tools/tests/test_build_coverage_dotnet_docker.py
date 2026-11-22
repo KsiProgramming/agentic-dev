@@ -112,15 +112,27 @@ async def sandbox(
             ]
         )
         assert done.exit_code == 0, done.stderr
+        # A second writer whose repo raises an analyzer rule to an error, as a real repo does.
+        bad = await add_worktree(box, run_id, "bad")
+        script = (
+            "printf '[*.cs]\ndotnet_diagnostic.CA1822.severity = error\n' > .editorconfig && "
+            "printf 'namespace Calc;\n\npublic class Bad\n{\n    public int One() => 1;\n}\n' "
+            "> src/Calc/Bad.cs && git add -A && git -c user.name=t -c user.email=t@e.invalid "
+            "-c commit.gpgsign=false commit -q -m bad"
+        )
+        done = await bad.exec(["sh", "-c", script])
+        assert done.exit_code == 0, done.stderr
         yield box
 
 
-async def call(sandbox: Sandbox, run_id: UUID, **arguments: Any) -> dict[str, Any]:
-    readable = ReadableWriters(lambda node: branch_name(run_id, node))
-    readable.set([ReadableWriter("writer", "writer")], known=("writer",))
+async def call(
+    sandbox: Sandbox, run_id: UUID, node: str = "writer", **arguments: Any
+) -> dict[str, Any]:
+    readable = ReadableWriters(lambda name: branch_name(run_id, name))
+    readable.set([ReadableWriter(node, "writer")], known=("writer", "bad"))
     async with Client(build_build_server(sandbox, readable=readable)) as client:
         result = await client.call_tool(
-            "test", {"node": "writer", "ecosystems": ["dotnet"], **arguments}
+            "test", {"node": node, "ecosystems": ["dotnet"], **arguments}
         )
     assert not result.is_error, result.content
     payload = cast("dict[str, Any]", result.structured_content or {})
@@ -161,3 +173,14 @@ async def test_on_the_base_a_test_project_that_does_not_build_fails_before(
 
     assert (base["status"], base["reason"]) == ("failed", "the base run did not build"), base
     assert base["cases"] == []
+
+
+async def test_an_analyzer_error_is_a_build_failure_with_its_code_and_place(
+    sandbox: Sandbox, run_id: UUID
+) -> None:
+    # The repo's .editorconfig makes CA1822 an error: the build fails, which is the writer's to
+    # fix, and the report says which rule and where, never the tool's words.
+    bad = await call(sandbox, run_id, node="bad")
+
+    assert (bad["status"], bad["reason"], bad["build"]) == ("failed", "does not build", "failed")
+    assert bad["build_errors"] == ["CA1822 src/Calc/Bad.cs:5"], bad
