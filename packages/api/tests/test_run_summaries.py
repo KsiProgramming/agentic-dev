@@ -496,3 +496,49 @@ async def test_the_stale_threshold_comes_from_the_settings(
         run = (await client.get(f"/runs/{run_id}")).json()
 
     assert at(run["queue_stalled_at"]) - at(run["queued_at"]) == timedelta(seconds=300)
+
+
+async def test_the_gate_view_carries_the_plans_of_the_writes_it_guards(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    """Phase 13.8: `GET /runs/{id}/gate` shows what approving does, as the tools planned it: a
+    plan survives the event log and the API unchanged, and one that cannot be read is left out."""
+    plan = {
+        "node_id": "move",
+        "tool": "jira.transition",
+        "action": "transition",
+        "summary": "Move API-1 from To Do to Done",
+        "target": {
+            "kind": "issue",
+            "label": "API-1",
+            "url": "https://acme.atlassian.net/browse/API-1",
+        },
+        "fields": {"key": "API-1", "from_status": "To Do", "to_status": "Done"},
+        "body": None,
+        "pending": [],
+        "expect": {"status": "To Do", "transition_id": "31"},
+        "error": None,
+    }
+    broken = {"tool": "jira.comment"}  # no action, no target: not a plan
+    run_id = await add_run(
+        sessions,
+        workspace,
+        ("run_started", {}),
+        ("gate_waiting", {"title": "Approve", "plans": [plan, broken]}),
+    )
+
+    response = await client.get(f"/runs/{run_id}/gate")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["plans"] == [plan]
+
+
+async def test_a_gate_with_no_plans_shows_none(
+    client: AsyncClient, sessions: async_sessionmaker[AsyncSession], workspace: UUID
+) -> None:
+    run_id = await add_run(sessions, workspace, *WAITING)
+
+    response = await client.get(f"/runs/{run_id}/gate")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["plans"] == []

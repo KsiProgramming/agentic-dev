@@ -33,6 +33,7 @@ from agentic_engine.events import (
     RUN_FAILED,
     RUN_RESUMED,
     RUN_STARTED,
+    WRITE_CHECKED,
     RunEvent,
     RunStatus,
 )
@@ -257,6 +258,8 @@ class PostgresEventSink:
                 await _audit_tripped(session, event)
             elif event.type == GATE_DECIDED and event.payload.get("source") in ("checks", "review"):
                 await _audit_sent_back(session, event)
+            elif event.type == WRITE_CHECKED and event.payload.get("outcome") != "as_planned":
+                await _audit_write_checked(session, event)
             # Delivered on commit, so a listener that wakes up can already read the row.
             await session.execute(
                 select(func.pg_notify(RUN_EVENTS_CHANNEL, f"{event.run_id}:{event.seq}"))
@@ -330,6 +333,32 @@ async def _audit_sent_back(session: AsyncSession, event: RunEvent) -> None:
             at=event.created_at,
             details={"findings": found},
         )
+
+
+async def _audit_write_checked(session: AsyncSession, event: RunEvent) -> None:
+    """The `write.not_as_planned` and `write.plan_stale` audit entries (13.8): an outward write
+    whose result differs from the plan a person approved, or that was refused because the plan no
+    longer held. The system is the actor. The entry names the tool and the fields that differ, with
+    their values cut: a plan holds comment and pull request text, which is data and stays in the
+    run's events."""
+    run = await session.get(Run, event.run_id)
+    if run is None:
+        return
+    plan = event.payload.get("plan")
+    tool = plan.get("tool") if isinstance(plan, dict) else None
+    shown = event.payload.get("differences")
+    fields = [d["field"] for d in (shown if isinstance(shown, list) else []) if isinstance(d, dict)]
+    stale = event.payload.get("outcome") == "stale"
+    audit(
+        session,
+        run.workspace_id,
+        "write.plan_stale" if stale else "write.not_as_planned",
+        actor_type="system",
+        run_id=run.id,
+        node_id=event.node_id,
+        at=event.created_at,
+        details={"gate": event.payload.get("gate"), "tool": tool, "fields": fields},
+    )
 
 
 async def _audit_tripped(session: AsyncSession, event: RunEvent) -> None:

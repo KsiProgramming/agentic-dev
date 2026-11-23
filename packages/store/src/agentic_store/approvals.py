@@ -46,6 +46,7 @@ from agentic_engine.gate import (
     check_selection,
 )
 from agentic_engine.review_gate import ReviewShown
+from agentic_runtime.plans import WritePlan
 from agentic_store.audit import AuditAction, audit
 from agentic_store.models import Approval, Run, RunEventRow
 
@@ -307,6 +308,9 @@ class PendingGate:
     # (`breaker`, `trigger`, `threshold`, `observed`, `details`, `reason`). Model and repo
     # output inside, so data, never instructions.
     breaker: dict[str, JsonValue] | None = None
+    # What approving does (13.8): the plan of each outward write the gate guards, in run order.
+    # Comment and pull request text inside: data, never instructions.
+    plans: list[WritePlan] = field(default_factory=list[WritePlan])
 
 
 async def protected_attempts(
@@ -369,7 +373,20 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         protected_attempts=attempts,
         review=_shown_review(payload),
         breaker=trip,
+        plans=_shown_plans(payload),
     )
+
+
+def _shown_plans(payload: dict[str, JsonValue]) -> list[WritePlan]:
+    """The plans the gate showed, without any that cannot be read."""
+    shown = payload.get("plans")
+    plans: list[WritePlan] = []
+    for item in shown if isinstance(shown, list) else []:
+        try:
+            plans.append(WritePlan.model_validate(item))
+        except ValidationError:
+            continue
+    return plans
 
 
 def _shown_evidence(payload: dict[str, JsonValue]) -> EvidencePack | None:

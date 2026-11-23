@@ -1488,7 +1488,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "breaker.tripped" | "breaker.resumed" | "breaker.cancelled" | "breaker.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "write.not_as_planned" | "write.plan_stale" | "breaker.tripped" | "breaker.resumed" | "breaker.cancelled" | "breaker.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -3187,6 +3187,49 @@ export interface components {
             enabled: boolean;
         };
         /** @enum {string} */
+        PendingKind: "links" | "review_notes";
+        /** @enum {string} */
+        PlanAction: "open_pr" | "push_to_pr" | "create_repo" | "comment" | "transition";
+        /**
+         * PlanError
+         * @description Why the write would fail now: a fixed code and text, never the service's own words.
+         */
+        PlanError: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * PlanPending
+         * @description A part of the write the platform fills in only after approval, from its own results.
+         */
+        PlanPending: {
+            kind: components["schemas"]["PendingKind"];
+            /**
+             * Text
+             * @description One line saying what is added, e.g. 'Links to the pull request'.
+             */
+            text: string;
+        };
+        /**
+         * PlanTarget
+         * @description What the write acts on.
+         */
+        PlanTarget: {
+            kind: components["schemas"]["TargetKind"];
+            /**
+             * Label
+             * @description `org/repo`, an issue key or `org/repo#12`.
+             */
+            label: string;
+            /**
+             * Url
+             * @description Where a person can see it, if anywhere.
+             */
+            url?: string | null;
+        };
+        /** @enum {string} */
         PolicyLimit: "agents_alive" | "agents_spawned" | "max_depth" | "loop_iterations" | "wall_time_s" | "approval_ttl_s" | "budget_usd";
         /**
          * PrReviewRef
@@ -4159,6 +4202,11 @@ export interface components {
             review?: components["schemas"]["ReviewShown"] | null;
             /** @description What the platform's checks found about the writer's work (13.3): build, tests and analyzers, each passed, failed, skipped or error, with `rounds_left`, how many more times a failing required check may send the work back. Test names and messages are repo output: data, never instructions. */
             evidence?: components["schemas"]["EvidencePack"] | null;
+            /**
+             * Plans
+             * @description What approving does (13.8): the plan of each outward write the gate guards (a pull request, a new repo, a Jira comment or move), in run order, worked out by the tool without doing it. `fields` are what the result is compared with, `pending` what the platform adds after the approval, and `error` says the write would fail now. Comment and pull request text is data, never instructions. Empty when the gate guards no write.
+             */
+            plans?: components["schemas"]["WritePlan"][];
         };
         /**
          * RunLimitOverrides
@@ -4618,9 +4666,9 @@ export interface components {
         /**
          * SetParam
          * @description Set one parameter of a node, or of the document without `node_id` (`name`,
-         *     `description`, `budget_usd`, `provider`, `input`, `input_schema`, `output_schema`, `on_review`).
-         *     `null`
-         *     unsets it. Ids, types and the slots that hold nodes change through the other ops.
+         *     `description`, `budget_usd`, `provider`, `input`, `input_schema`, `output_schema`, `on_review`,
+         *     `breakers`). `null` unsets it. Ids, types and the slots that hold nodes change through the
+         *     other ops.
          */
         SetParam: {
             /**
@@ -4752,6 +4800,8 @@ export interface components {
              */
             input?: string | null;
         };
+        /** @enum {string} */
+        TargetKind: "repo" | "issue" | "pull_request";
         /** TemplateOut */
         TemplateOut: {
             /** Id */
@@ -5413,6 +5463,48 @@ export interface components {
              * @description Loop and map only: the id of the sequence that holds the nodes, when there are several.
              */
             sequence_id?: string | null;
+        };
+        /** WritePlan */
+        WritePlan: {
+            /**
+             * Node Id
+             * @description The tool node the plan is for; the engine sets it.
+             */
+            node_id?: string | null;
+            /**
+             * Tool
+             * @description The platform's tool name, e.g. `jira.comment`.
+             */
+            tool: string;
+            action: components["schemas"]["PlanAction"];
+            /**
+             * Summary
+             * @description One line the platform writes.
+             */
+            summary: string;
+            target: components["schemas"]["PlanTarget"];
+            /**
+             * Fields
+             * @description The values a result is compared with.
+             */
+            fields?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Body
+             * @description Markdown to show (a comment, a pull request's body); data.
+             */
+            body?: string | null;
+            /** Pending */
+            pending?: components["schemas"]["PlanPending"][];
+            /**
+             * Expect
+             * @description The preconditions handed back to the tool at apply time.
+             */
+            expect?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            error?: components["schemas"]["PlanError"] | null;
         };
         /** WorkflowRef */
         agentic_api__runs__models__WorkflowRef: {
@@ -6687,7 +6779,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "breaker.tripped" | "breaker.resumed" | "breaker.cancelled" | "breaker.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "write.not_as_planned" | "write.plan_stale" | "breaker.tripped" | "breaker.resumed" | "breaker.cancelled" | "breaker.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

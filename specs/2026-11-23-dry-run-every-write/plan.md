@@ -64,9 +64,9 @@ The plan contract and the tools' plan modes come first, then the engine plans be
 
 ## 4. Store, API and audit
 
-- [ ] `agentic_store`: `pending_gate` returns `plans` from the last `gate_waiting`. The audit gains `write.not_as_planned` (from `write_checked` `differs`) and `write.plan_stale` (from `stale`), actor system, with the node, the tool and the fields.
-- [ ] API (`runs/routes.py`, `runs/models.py`): `GET /runs/{id}/gate` `plans` (`WritePlanView`). Regenerate the OpenAPI spec and the web client.
-- [ ] Tests, run from `packages/api` (the root `.env` breaks `create_app` in tests): the gate view's `plans`, the audit rows, and one `plans` payload over the round trip.
+- [x] `agentic_store`: `pending_gate` returns `plans` from the last `gate_waiting`. The audit gains `write.not_as_planned` (from `write_checked` `differs`) and `write.plan_stale` (from `stale`), actor system, with the node, the tool and the fields.
+- [x] API (`runs/routes.py`, `runs/models.py`): `GET /runs/{id}/gate` `plans` (`WritePlanView`). Regenerate the OpenAPI spec and the web client.
+- [x] Tests, run from `packages/api` (the root `.env` breaks `create_app` in tests): the gate view's `plans`, the audit rows, and one `plans` payload over the round trip.
 
 ## 5. What approving does, in the web
 
