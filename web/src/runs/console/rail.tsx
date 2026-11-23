@@ -73,19 +73,27 @@ const STATUS_ICON: Record<TaskStatus, { icon: LucideIcon; className: string }> =
 
 const TASK_LABEL = { pending: "Not started", dropped: "Dropped" } as const;
 
-function statusLabel(status: TaskStatus): string {
+function statusLabel(status: TaskStatus, paused = false): string {
   return status === "pending" || status === "dropped"
     ? TASK_LABEL[status]
-    : stepBadge(status).label;
+    : stepBadge(status, paused).label;
 }
 
 /** A step's, map item's or task's status as the marker: an icon, with its label for screen
  * readers (status is never colour alone). */
-export function StatusMarker({ status, small = false }: { status: TaskStatus; small?: boolean }) {
+export function StatusMarker({
+  status,
+  small = false,
+  paused = false,
+}: {
+  status: TaskStatus;
+  small?: boolean;
+  paused?: boolean;
+}) {
   return (
     <>
       <StatusIcon status={status} small={small} />
-      <span className="sr-only">{statusLabel(status)}</span>
+      <span className="sr-only">{statusLabel(status, paused)}</span>
     </>
   );
 }

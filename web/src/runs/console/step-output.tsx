@@ -29,6 +29,7 @@ import { FindingsView } from "../findings/findings-view";
 import type { NodeKind } from "../graph/spec-graph";
 import type { RouterInfo, Step, SubflowInfo } from "../timeline";
 import { AgentMessage } from "./agent-message";
+import { BreakerDetails } from "./breaker-details";
 import { GateDecision } from "./gate-decision";
 import { OrchestratorPlan } from "./orchestrator-plan";
 import { isLongOutput } from "./long-output";
@@ -319,6 +320,8 @@ export function StepOutput({
   if (step.port) parts.push(<PortErrors key="error" stepId={step.id} port={step.port} />);
   else if (step.error) parts.push(<ErrorLine key="error" error={step.error} />);
   if (step.gate) parts.push(<GateDecision key="gate" gate={step.gate} />);
+  // Why a circuit breaker paused the step (13.7), also once it was resumed.
+  if (step.paused) parts.push(<BreakerDetails key="breaker" trip={step.paused} />);
   if (extra) parts.push(<div key="extra">{extra}</div>);
   if (step.router) parts.push(<RouteChoice key="route" step={step} router={step.router} />);
   if (step.subflow) parts.push(<SubflowCall key="call" subflow={step.subflow} />);

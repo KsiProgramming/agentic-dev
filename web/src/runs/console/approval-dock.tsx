@@ -42,8 +42,8 @@ function useDockHeight(element: HTMLElement | null): number {
   return height;
 }
 
-const DockBar = forwardRef<HTMLElement, { children: ReactNode }>(function DockBar(
-  { children },
+const DockBar = forwardRef<HTMLElement, { children: ReactNode; label: string }>(function DockBar(
+  { children, label },
   ref,
 ) {
   return (
@@ -51,7 +51,7 @@ const DockBar = forwardRef<HTMLElement, { children: ReactNode }>(function DockBa
       ref={ref}
       id={DOCK_ID}
       tabIndex={-1}
-      aria-label="Approval needed"
+      aria-label={label}
       data-testid="approval-dock"
       // Above the page, below the header's menus, sheets and dialogs (z-50). It spans the content
       // column only: the sidebar is 4rem wide as a rail (lg) and 15rem in full (xl).
@@ -89,7 +89,10 @@ export function ApprovalDock({
     <>
       {/* The space the dock takes, so the end of the page scrolls clear of it. */}
       <div aria-hidden="true" data-testid="dock-spacer" style={{ height }} />
-      <DockBar ref={setElement}>
+      <DockBar
+        ref={setElement}
+        label={gate.breaker ? "Paused by a circuit breaker" : "Approval needed"}
+      >
         <div className="mx-auto flex w-full max-w-content flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:px-6">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <CirclePauseIcon
@@ -112,11 +115,15 @@ export function ApprovalDock({
           </div>
           {sent ? (
             <p role="status" className="text-meta font-medium">
-              {sent === "approve"
-                ? "Approved"
-                : sent === "changes"
-                  ? "Changes requested"
-                  : "Rejected"}
+              {gate.breaker
+                ? sent === "approve"
+                  ? "Resumed"
+                  : "Cancelled"
+                : sent === "approve"
+                  ? "Approved"
+                  : sent === "changes"
+                    ? "Changes requested"
+                    : "Rejected"}
               . The run carries on shortly.
             </p>
           ) : (

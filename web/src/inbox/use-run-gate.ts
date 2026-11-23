@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createApiClient } from "@/api/client";
 import { ApiError } from "@/api/errors";
 import type { components } from "@/api/schema";
+import { parseBreaker } from "@/runs/breaker";
 import { parseArtifacts } from "@/runs/artifacts/artifacts";
 import { parseEvidence } from "@/runs/evidence";
 import { parseReview } from "@/runs/review";
@@ -12,6 +13,7 @@ import {
   parseChanges,
   parseProtectedAttempts,
   parseSelection,
+  pausedTitle,
   type PendingGate,
 } from "@/runs/gates";
 
@@ -33,9 +35,10 @@ export interface InboxGate extends PendingGate {
 }
 
 export function toInboxGate(body: RunGate): InboxGate {
+  const breaker = parseBreaker(body.breaker);
   return {
     nodeId: body.node_id,
-    title: body.title ?? "Approve?",
+    title: breaker ? pausedTitle(breaker) : (body.title ?? "Approve?"),
     prompt: body.prompt ?? null,
     artifact: body.artifact,
     changes: parseChanges(body.changes),
@@ -50,6 +53,7 @@ export function toInboxGate(body: RunGate): InboxGate {
     evidence: parseEvidence(body.evidence),
     review: parseReview(body.review),
     protectedAttempts: parseProtectedAttempts(body.protected_attempts),
+    breaker,
     repoUrl: body.repo?.url ?? null,
     base: body.base ?? null,
     branches: body.branches.map((b) => ({ nodeId: b.node_id, branch: b.branch })),

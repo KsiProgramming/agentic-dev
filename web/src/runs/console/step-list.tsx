@@ -71,7 +71,7 @@ function StepButton({
       )}
     >
       <span className="flex h-5 shrink-0 items-center">
-        <StatusMarker status={step.status} />
+        <StatusMarker status={step.status} paused={step.pausedNow} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-1.5">

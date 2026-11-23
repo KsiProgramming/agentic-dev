@@ -26,7 +26,7 @@ import { pendingGate, type PendingGate } from "../gates";
 import { RunMap } from "../graph/run-map";
 import { allSpecNodes, type NodeKind } from "../graph/spec-graph";
 import { displayStatus } from "../status";
-import { badgeStatus, runTimes, statusLabel, wallClockLine } from "../summaries";
+import { badgeStatus, isPaused, runTimes, statusLabel, wallClockLine } from "../summaries";
 import { usageOfRun } from "../cost";
 import { withCalls } from "../calls";
 import { specParents } from "../spec-parents";
@@ -100,8 +100,8 @@ export function headerFacts(
 ): HeaderFacts {
   const shown =
     run && events.length === 0 && (stream === "connecting" || stream === "live")
-      ? { status: badgeStatus(run.status), label: statusLabel(run.status) }
-      : displayStatus(stream, gate !== null);
+      ? { status: badgeStatus(run.status), label: statusLabel(run.status, isPaused(run)) }
+      : displayStatus(stream, gate !== null, gate?.breaker != null);
   // A run whose gate expired is cancelled, worded "Expired" (in Cancelled's grey).
   const status =
     shown.status === "cancelled" && (timeline.expired || run?.expired)
@@ -157,11 +157,13 @@ function lastPullRequest(steps: Step[]): string | null {
 }
 
 /** In the waiting gate's output: the decision is made in the dock at the bottom of the page. */
-function WaitingMarker() {
+function WaitingMarker({ paused = false }: { paused?: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-meta" data-testid="waiting-marker">
       <CirclePauseIcon aria-hidden="true" className="size-4 text-status-waiting" />
-      <span className="font-medium">Waiting for approval</span>
+      <span className="font-medium">
+        {paused ? "Paused by a circuit breaker" : "Waiting for approval"}
+      </span>
       <Button
         type="button"
         variant="link"
@@ -263,7 +265,7 @@ function Console({
   const now = useNow(1000, live);
   const follow = useFollowScroll(events.length, status === "live");
   const { view, tab, step: asked, update } = useConsoleParams();
-  useConsoleWaiting(gate !== null);
+  useConsoleWaiting(gate !== null, gate?.breaker != null);
 
   // The summary (repo, PR, failure reason) moves on with the run: fetch it again when it does.
   useEffect(() => {
@@ -366,6 +368,9 @@ function Console({
     };
   } else if (gate?.waitFor) {
     banner = { kind: "answers", gate, runId, waitingMs: run ? runTimes(run, now).waitingMs : 0 };
+  } else if (gate?.breaker) {
+    const stepRow = rows.find((r) => r.step.id === gate.nodeId) ?? null;
+    banner = { kind: "paused", gate, runId, step: stepRow };
   } else if (gate) {
     banner = { kind: "waiting", gate, runId };
   } else if (facts.status.label === "Expired") {
@@ -402,6 +407,7 @@ function Console({
         written={written}
         baseUrl={baseUrl}
         protectedAttempts={events.filter((e) => e.type === "protected_path_refused").length}
+        breakerTrips={events.filter((e) => e.type === "breaker_tripped").length}
         noModelCalls={
           (timeline.endedAt ?? run?.finished_at ?? null) !== null &&
           run !== undefined &&
@@ -543,7 +549,7 @@ function Console({
                       gate &&
                       selected.step.id === gate.nodeId &&
                       selected.step.status === "waiting" ? (
-                        <WaitingMarker />
+                        <WaitingMarker paused={gate.breaker != null} />
                       ) : null
                     }
                   />
@@ -570,7 +576,7 @@ function Console({
                 actions={stepActions}
                 extra={
                   gate && selected.step.id === gate.nodeId && selected.step.status === "waiting" ? (
-                    <WaitingMarker />
+                    <WaitingMarker paused={gate.breaker != null} />
                   ) : null
                 }
               />
@@ -581,7 +587,7 @@ function Console({
 
       {/* Announced once when a gate starts waiting; the dock itself never takes focus. */}
       <div aria-live="polite" className="sr-only">
-        {gate ? `Approval needed: ${gate.title}` : ""}
+        {gate ? (gate.breaker ? gate.title : `Approval needed: ${gate.title}`) : ""}
       </div>
       {gate && !gate.waitFor ? (
         <ApprovalDock key={gate.nodeId} runId={runId} gate={gate} baseUrl={baseUrl} />

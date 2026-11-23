@@ -209,8 +209,11 @@ export function useGateDecision({
       setRequesting(false);
       setDetails(false);
       // The gate goes away once the run moves on; the toast keeps the outcome visible.
-      const done =
-        decision === "approve"
+      const done = gate.breaker
+        ? decision === "approve"
+          ? "Resumed"
+          : "Cancelled"
+        : decision === "approve"
           ? "Approved"
           : decision === "changes"
             ? "Changes requested"

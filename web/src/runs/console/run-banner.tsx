@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 
 import type { PendingGate } from "../gates";
 import { DOCK_ID } from "./approval-dock";
+import { ApproveButton, GateDecisionDialogs, RejectButton } from "./decision-controls";
+import { useGateDecision } from "./use-gate-decision";
 import type { StepRow } from "./step-entries";
 
 /** What needs the user, under the run's figures: why it failed, the gate it waits at, or why its
@@ -20,6 +22,7 @@ import type { StepRow } from "./step-entries";
 export type BannerState =
   | { kind: "failed"; step: StepRow | null; reason: string }
   | { kind: "waiting"; gate: PendingGate; runId: string }
+  | { kind: "paused"; gate: PendingGate; runId: string; step: StepRow | null }
   | { kind: "answers"; gate: PendingGate; runId: string; waitingMs: number }
   | { kind: "expired"; reason: string };
 
@@ -33,6 +36,9 @@ export function RunBanner({
   baseUrl?: string;
 }) {
   if (banner.kind === "answers") return <AnswersBanner banner={banner} baseUrl={baseUrl} />;
+  if (banner.kind === "paused") {
+    return <PausedBanner banner={banner} onGoToStep={onGoToStep} baseUrl={baseUrl} />;
+  }
   if (banner.kind === "failed") {
     return (
       <Alert variant="destructive" data-testid="run-banner" data-kind="failed">
@@ -99,6 +105,53 @@ export function RunBanner({
       <AlertDescription className="break-words">
         {banner.reason}: nobody approved or rejected the gate before its time to live ran out.
       </AlertDescription>
+    </Alert>
+  );
+}
+
+/** A run a circuit breaker paused (13.7): why, when the pause expires, and the two things a
+ * person can do, Resume and Cancel run (the dock at the bottom has them too). */
+function PausedBanner({
+  banner,
+  onGoToStep,
+  baseUrl,
+}: {
+  banner: Extract<BannerState, { kind: "paused" }>;
+  onGoToStep: (key: string) => void;
+  baseUrl?: string;
+}) {
+  const { gate, runId, step } = banner;
+  const decision = useGateDecision({ runId, gate, baseUrl, shortcuts: false });
+  return (
+    <Alert variant="waiting" role={undefined} data-testid="run-banner" data-kind="paused">
+      <CirclePauseIcon aria-hidden="true" />
+      <AlertTitle className="flex flex-wrap items-center gap-x-2 break-words">
+        <span>Paused by a circuit breaker: {gate.breaker?.reason}</span>
+        {gate.expiresAt ? (
+          <ExpiresIn iso={gate.expiresAt} className="font-normal text-status-waiting" />
+        ) : null}
+      </AlertTitle>
+      <AlertDescription className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {step ? (
+          <Button type="button" variant="link" size="sm" onClick={() => onGoToStep(step.key)}>
+            Go to step
+          </Button>
+        ) : null}
+        {decision.sent ? (
+          <span role="status" className="font-medium">
+            {decision.sent === "approve" ? "Resumed" : "Cancelled"}. The run carries on shortly.
+          </span>
+        ) : (
+          <>
+            <ApproveButton decision={decision} shortcut={false} />
+            <RejectButton decision={decision} shortcut={false} />
+          </>
+        )}
+        {decision.error && !decision.rejecting ? (
+          <span className="text-status-failed">{decision.error}</span>
+        ) : null}
+      </AlertDescription>
+      <GateDecisionDialogs decision={decision} />
     </Alert>
   );
 }

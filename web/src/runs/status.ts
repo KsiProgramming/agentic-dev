@@ -6,13 +6,14 @@ import type { StreamStatus } from "./types";
 export function displayStatus(
   stream: StreamStatus,
   waitingAtGate: boolean,
+  paused = false,
 ): { status: RunStatus; label: string } {
   switch (stream) {
     case "connecting":
       return { status: "queued", label: "Connecting" };
     case "live":
       return waitingAtGate
-        ? { status: "waiting", label: "Needs approval" }
+        ? { status: "waiting", label: paused ? "Paused" : "Needs approval" }
         : { status: "running", label: "Running" };
     case "completed":
       return { status: "succeeded", label: "Succeeded" };

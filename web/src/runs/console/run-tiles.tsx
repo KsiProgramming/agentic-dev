@@ -122,6 +122,7 @@ export function RunTiles({
   written,
   noModelCalls,
   protectedAttempts = 0,
+  breakerTrips = 0,
   baseUrl,
 }: {
   facts: HeaderFacts;
@@ -134,13 +135,17 @@ export function RunTiles({
   noModelCalls: boolean;
   /** How many times a writer tried to change a protected path (13.5); the tile shows above 0. */
   protectedAttempts?: number;
+  /** How many times a circuit breaker paused the run (13.7); the tile shows above 0. */
+  breakerTrips?: number;
   baseUrl?: string;
 }) {
   const usage = facts.usage;
   const dash = <span className="text-placeholder">—</span>;
   return (
     <section aria-label="Run figures">
-      <StatStrip columns={protectedAttempts > 0 ? 6 : 5}>
+      <StatStrip
+        columns={(5 + (protectedAttempts > 0 ? 1 : 0) + (breakerTrips > 0 ? 1 : 0)) as 5 | 6 | 7}
+      >
         <StatTile
           label="Active time"
           value={<Duration data-testid="run-duration" ms={facts.activeMs} />}
@@ -217,6 +222,13 @@ export function RunTiles({
             label="Protected files"
             value={<span data-testid="run-protected">{protectedAttempts}</span>}
             secondary={protectedAttempts === 1 ? "change refused" : "changes refused"}
+          />
+        ) : null}
+        {breakerTrips > 0 ? (
+          <StatTile
+            label="Breakers"
+            value={<span data-testid="run-breakers">{breakerTrips}</span>}
+            secondary={breakerTrips === 1 ? "pause" : "pauses"}
           />
         ) : null}
         <Output

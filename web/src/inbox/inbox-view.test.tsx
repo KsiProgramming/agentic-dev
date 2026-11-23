@@ -281,6 +281,41 @@ test("Approve decides the gate and moves on to the next one", async () => {
   await waitFor(() => expect(listedTitles()).toEqual(["Approve the docs"]));
 });
 
+test("a run a circuit breaker paused is reviewed with what tripped, Resume and Cancel run", async () => {
+  wide();
+  const reason = "repo.read_file failed 3 times with the same error in one step";
+  const paused = runSummary({
+    ...older,
+    waiting_gate: { node_id: "b", title: null, breaker: "repeat", reason, expires_at: LATER },
+  });
+  const breaker = {
+    breaker: "repeat",
+    trigger: "errors",
+    threshold: 3,
+    observed: 3,
+    details: { tool: "repo.read_file", arguments: { path: "gone.md" }, error: "no such file" },
+    reason,
+  } as const;
+  api([paused], {
+    [older.id]: gateOf(older.id, { node_id: "b", title: null, artifact: "", breaker }),
+  });
+  show();
+
+  const review = await screen.findByTestId("inbox-review");
+  expect(within(review).getByRole("heading", { level: 2 }).textContent).toContain("Paused:");
+  const details = within(review).getByTestId("breaker-details");
+  expect(details.textContent).toContain("3 errors, reached 3");
+  expect(details.textContent).toContain("no such file");
+  expect(within(review).queryByText("Approving lets the run go on")).toBeNull();
+  expect(within(review).queryByRole("button", { name: /Approve|Reject/ })).toBeNull();
+  expect(within(review).getByRole("button", { name: /Cancel run/ })).toBeTruthy();
+
+  fireEvent.click(within(review).getByRole("button", { name: /Resume/ }));
+  await waitFor(() =>
+    expect(decisions.get(older.id)).toEqual({ node_id: "b", decision: "approve" }),
+  );
+});
+
 const REVIEW = {
   from: "review.json",
   version: 1,

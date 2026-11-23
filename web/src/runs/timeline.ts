@@ -1,5 +1,6 @@
 import { parseArtifact, parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { parseEvidence, type Evidence } from "./evidence";
+import { parseBreaker, type BreakerTrip } from "./breaker";
 import { parseReview, type Review } from "./review";
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
 import {
@@ -202,6 +203,14 @@ export interface Step {
   subflow: SubflowInfo | null;
   /** The branches its writers committed on, saved outside the sandbox (12.2), by branch. */
   savedBranches: SavedBranch[];
+  /** The circuit breaker that paused the step (13.7), from its `breaker_tripped`: kept after the
+   * run was resumed, so the step still says what it was paused for. */
+  paused: BreakerTrip | null;
+  /** True while the run waits for a person to resume or cancel the pause. */
+  pausedNow: boolean;
+  /** Set once a person resumed the step: the breaker and reason it was paused for, from its
+   * next `node_started`'s `resumed_after`. */
+  resumedAfter: { breaker: string; reason: string } | null;
 }
 
 /** The stored workflow version a subflow calls (6.5), from its `node_started`. */
@@ -503,6 +512,9 @@ function newStep(id: string, at: string): Step {
     orchestrator: null,
     subflow: null,
     savedBranches: [],
+    paused: null,
+    pausedNow: false,
+    resumedAfter: null,
   };
 }
 
@@ -826,6 +838,15 @@ class Builder {
         step.provider = payload.provider;
         step.model = str(payload.model);
       }
+      const resumed = payload.resumed_after;
+      step.resumedAfter =
+        resumed && typeof resumed === "object" && !Array.isArray(resumed)
+          ? {
+              breaker: str((resumed as Record<string, unknown>).breaker) ?? "",
+              reason: str((resumed as Record<string, unknown>).reason) ?? "",
+            }
+          : step.resumedAfter;
+      step.pausedNow = false;
       step.writers = parseWriters(payload.writers);
       step.protectedPaths = parseProtectedPaths(payload.protected);
       step.reviewInput = parseReviewInput(payload.review);
@@ -891,8 +912,16 @@ class Builder {
           step.router.reason = str(payload.reason);
         }
         return;
+      case "breaker_tripped":
+        step.paused = parseBreaker(payload);
+        return;
       case "gate_waiting":
         step.status = "waiting";
+        if (typeof payload.breaker === "string") {
+          // A circuit-breaker pause (13.7), not a gate: the step reads "Paused".
+          step.pausedNow = true;
+          return;
+        }
         step.gate = {
           title: str(payload.title) ?? "Approve?",
           decision: null,
@@ -912,6 +941,10 @@ class Builder {
         return;
       case "gate_decided": {
         step.status = "running";
+        if (payload.source === "breaker") {
+          step.pausedNow = false;
+          return;
+        }
         const selection = payload.selection;
         step.gate = {
           title: step.gate?.title ?? "Approve?",

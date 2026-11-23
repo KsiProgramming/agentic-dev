@@ -10,6 +10,7 @@ import {
   judgedEvidencePack,
   GATE,
   MAP,
+  REPEATER,
   REPO_READER,
   SCANS,
   startReviewRun,
@@ -303,6 +304,40 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByRole("dialog", { name: /Reject/ })).toBeVisible();
       await expectNoSeriousIssues(page);
       await page.keyboard.press("Escape");
+    });
+
+    test("a run paused by a circuit breaker has no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(request, [REPEATER], "E2E paused a11y", DOCS_DEMO_URL);
+      await open(page, `/runs/${runId}`);
+      const dock = page.getByTestId("approval-dock").filter({ visible: true });
+      await expect(dock).toBeVisible({ timeout: 60_000 });
+      await expectNoSeriousIssues(page);
+
+      await dock.getByRole("button", { name: "Review details" }).click();
+      await expect(page.getByTestId("gate-details")).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+
+      await dock.getByRole("button", { name: /Cancel run/ }).click();
+      await expect(page.getByRole("dialog", { name: "Cancel this run?" })).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await page.keyboard.press("Escape");
+      await request.post(`${apiURL}/runs/${runId}/cancel`);
+    });
+
+    test("the inbox, with a paused run under review, has no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(request, [REPEATER], "E2E paused inbox a11y", DOCS_DEMO_URL);
+      await open(page, `/inbox?run=${runId}`);
+      const review = page.getByTestId("inbox-review").filter({ visible: true });
+      await expect(review.getByTestId("breaker-details")).toBeVisible({ timeout: 60_000 });
+      await expectNoSeriousIssues(page);
+      await request.post(`${apiURL}/runs/${runId}/cancel`);
     });
 
     test("the inbox, with a gate under review, has no serious a11y issues", async ({

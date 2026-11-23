@@ -43,9 +43,9 @@ One breaker (repeat) goes end to end first, through engine, store, API and conso
 
 Read `specs/design-language.md`, tech-stack → UI design system, and `web/AGENTS.md` first.
 
-- [ ] `@/runs/summaries`: `badgeStatus` and `statusLabel` map a waiting run with `breaker` to "Paused" (the waiting colour). `@/runs/status` `displayStatus` does the same for the live console. The page title prefix reads "● Paused".
-- [ ] `@/runs/timeline`: fold `breaker_tripped` and `gate_waiting.breaker` into the step: status "Paused", and `GateInfo.breaker`.
-- [ ] `BreakerDetails` (`web/src/runs/console/breaker-details.tsx`), all through `@/components/display`:
+- [x] `@/runs/summaries`: `badgeStatus` and `statusLabel` map a waiting run with `breaker` to "Paused" (the waiting colour). `@/runs/status` `displayStatus` does the same for the live console. The page title prefix reads "● Paused".
+- [x] `@/runs/timeline`: fold `breaker_tripped` and `gate_waiting.breaker` into the step: status "Paused", and `GateInfo.breaker`.
+- [x] `BreakerDetails` (`web/src/runs/console/breaker-details.tsx`), all through `@/components/display`:
   - the breaker as a neutral badge and the reason as text;
   - the threshold and what was seen;
   - the tool (mono) and its `describeTool` line;
@@ -54,14 +54,14 @@ Read `specs/design-language.md`, tech-stack → UI design system, and `web/AGENT
   - the path as `TruncatedPath` with the declared globs (mono);
   - the flipped file and its flip count.
   - It has loading, error and empty states (rule 5).
-- [ ] `run-banner.tsx`: the paused variant ("Paused by a circuit breaker: <reason>", `ExpiresIn`, Go to step, Resume, Cancel run).
-- [ ] `approval-dock.tsx` and `decision-controls.tsx`: labels Resume and Cancel run for a breaker pause. Cancel run asks in a dialog. `A` and `R` keep working.
-- [ ] Step Output (`step-output.tsx`) shows `BreakerDetails` for the tripped step. Step Input (`step-input.tsx`) shows "Paused before" from `node_started.resumed_after`.
-- [ ] `run-tiles.tsx`: a "Breakers" tile only above zero, in the same responsive grid rule as Protected files.
-- [ ] Inbox (`inbox-review.tsx`, `use-run-gate.ts`): a breaker pause's review is `BreakerDetails`, Resume and Cancel run.
+- [x] `run-banner.tsx`: the paused variant ("Paused by a circuit breaker: <reason>", `ExpiresIn`, Go to step, Resume, Cancel run).
+- [x] `approval-dock.tsx` and `decision-controls.tsx`: labels Resume and Cancel run for a breaker pause. Cancel run asks in a dialog. `A` and `R` keep working.
+- [x] Step Output (`step-output.tsx`) shows `BreakerDetails` for the tripped step. Step Input (`step-input.tsx`) shows "Paused before" from `node_started.resumed_after`.
+- [x] `run-tiles.tsx`: a "Breakers" tile only above zero, in the same responsive grid rule as Protected files.
+- [x] Inbox (`inbox-review.tsx`, `use-run-gate.ts`): a breaker pause's review is `BreakerDetails`, Resume and Cancel run.
 - [x] Audit log formatter: the four `breaker.*` actions (done with group 2, so the typed action map stays whole).
-- [ ] Vitest: `breaker-details.test.tsx`, the banner, dock labels, the timeline fold, `badgeStatus`, and the Inbox review.
-- [ ] e2e:
+- [x] Vitest: `breaker-details.test.tsx`, the banner, dock labels, the timeline fold, `badgeStatus`, and the Inbox review.
+- [x] e2e (written; not yet run, since the running stack needs its worker rebuilt with the fake `[fake:repeat-failing-call]` script):
   - Add a test-only scripted repeat to the stack's fake runtime (`fake_runtime_factory`): an agent whose instructions start with `[fake:repeat-failing-call]` calls `repo.read_file` on a missing path until it is stopped.
   - `web/e2e/breaker.spec.ts`: the banner, Resume (the run goes on), Cancel (a confirm dialog), and the Inbox entry.
   - Add the paused console to `a11y.spec.ts` and `layout.spec.ts`.

@@ -11,6 +11,10 @@ const BADGE: Record<StepStatus, { status: RunStatus; label: string }> = {
 };
 
 /** How a step, map item or tool call shows its status: a design-system status and its wording. */
-export function stepBadge(status: StepStatus): { status: RunStatus; label: string } {
-  return BADGE[status];
+export function stepBadge(
+  status: StepStatus,
+  paused = false,
+): { status: RunStatus; label: string } {
+  // A step a circuit breaker paused (13.7) reads "Paused", in the waiting colour.
+  return paused && status === "waiting" ? { status: "waiting", label: "Paused" } : BADGE[status];
 }

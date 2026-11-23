@@ -272,6 +272,7 @@ from agentic_worker.artifacts import MirroredArtifactStore
 from agentic_worker.branches import SandboxBranchSaver
 from agentic_worker.copilot import copilot_runtimes, token_loader
 from agentic_worker.errors import RunSetupError
+from agentic_worker.fake_scripts import RepeatingFakeRuntime
 from agentic_worker.integrate import SandboxIntegrator
 from agentic_worker.providers import ProviderRouter, RoutedRuntimes, run_providers
 from agentic_worker.review import SandboxGateReview
@@ -409,17 +410,21 @@ def build_keys(settings: WorkerSettings) -> KeyProvider | None:
 
 def fake_runtime_factory(settings: WorkerSettings) -> RuntimeFactory:
     """The stack's fake agents: they echo their input, fitted to a typed node's schema (6.8), so
-    a hub plans and a typed reviewer answers on a stack with no provider."""
+    a hub plans and a typed reviewer answers on a stack with no provider. An agent whose
+    instructions start with `[fake:repeat-failing-call]` repeats a failing call (13.7, e2e)."""
     if settings.fake_step_delay_s > 0:
         delay = settings.fake_step_delay_s
         # Tool calls wait twice as long as a chunk: a live work block stays on screen a while.
-        return lambda tools: FakeRuntime(
-            default=lambda text: slow_echo_script(text, delay),
-            tools=tools,
-            call_delay_s=2 * delay,
-            fit_schemas=True,
+        return lambda tools: RepeatingFakeRuntime(
+            FakeRuntime(
+                default=lambda text: slow_echo_script(text, delay),
+                tools=tools,
+                call_delay_s=2 * delay,
+                fit_schemas=True,
+            ),
+            tools,
         )
-    return lambda tools: FakeRuntime(tools=tools, fit_schemas=True)
+    return lambda tools: RepeatingFakeRuntime(FakeRuntime(tools=tools, fit_schemas=True), tools)
 
 
 def fixed_runtimes(make_runtime: RuntimeFactory) -> RunRuntimes:

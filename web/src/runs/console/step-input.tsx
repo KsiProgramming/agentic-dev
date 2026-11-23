@@ -458,6 +458,15 @@ export function StepInput({
             <ReviewInputList input={row.step.reviewInput} />
           </Field>
         ) : null}
+        {row.step.resumedAfter ? (
+          <Field label="Paused before">
+            {/* Why the step was paused, as the resumed agent was told (13.7): data, as text. */}
+            <p data-testid="paused-before" className="break-words">
+              A circuit breaker paused an earlier attempt: {row.step.resumedAfter.reason}. A person
+              resumed it, and the agent was told so.
+            </p>
+          </Field>
+        ) : null}
         {row.step.protectedPaths ? (
           <Field label="Protected paths">
             {/* What this writer was told it can read but not change (13.5). */}
