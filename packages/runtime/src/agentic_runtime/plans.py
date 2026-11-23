@@ -42,7 +42,9 @@ class PlanPending(BaseModel):
     """A part of the write the platform fills in only after approval, from its own results."""
 
     kind: PendingKind
-    text: str = Field(description="One line saying what is added, e.g. 'Links to the pull request'.")
+    text: str = Field(
+        description="One line saying what is added, e.g. 'Links to the pull request'."
+    )
 
 
 class PlanError(BaseModel):
@@ -136,9 +138,7 @@ def same_plan(shown: WritePlan, again: WritePlan) -> list[Difference]:
 
 def describe(differences: list[Difference]) -> str:
     """What changed, as one line for a `plan_stale` failure (the fields and their values, cut)."""
-    parts = [
-        f"{d.field}: {_short(d.planned)} -> {_short(d.actual)}" for d in differences[:5]
-    ]
+    parts = [f"{d.field}: {_short(d.planned)} -> {_short(d.actual)}" for d in differences[:5]]
     more = len(differences) - 5
     return "; ".join(parts) + (f" (and {more} more)" if more > 0 else "")
 

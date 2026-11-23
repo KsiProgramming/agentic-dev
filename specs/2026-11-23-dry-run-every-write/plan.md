@@ -32,13 +32,13 @@ The plan contract and the tools' plan modes come first, then the engine plans be
 
 ## 2. The engine plans before a gate
 
-- [ ] `agentic_engine.spec.models`: `planned_writes(root) -> dict[gate_id, list[write_id]]`. A gate gets every outward write after it in run order, up to the next gate that counts for that write under validation's scope rule (`_runs_in`, `within`). `wait_for` plans nothing. Tests: SDD with and without checks and review (`approve_pr` plans `publish`, `jira_update` and `move`), docs, audit fix, new repo (`approve_repo` plans `create_repo`), and SDD's `post_questions` plans `ask_jira`.
-- [ ] `graph/compile.py`:
+- [x] `agentic_engine.spec.models`: `planned_writes(root) -> dict[gate_id, list[write_id]]`. A gate gets every outward write after it in run order, up to the next gate that counts for that write under validation's scope rule (`_runs_in`, `within`). `wait_for` plans nothing. Tests: SDD with and without checks and review (`approve_pr` plans `publish`, `jira_update` and `move`), docs, audit fix, new repo (`approve_repo` plans `create_repo`), and SDD's `post_questions` plans `ask_jira`.
+- [x] `graph/compile.py`:
   - `plan_node_id(gate)` (`<gate>.plan`) and `_plan(gate, tools, log, limits)`, placed after `<gate>.evidence` and `<gate>.review` and skipped on their send-back.
   - It resolves each write's arguments with the helpers the tool node uses (`_with_issue_from`, `_with_body_from`), puts the `links_from` and `notes_from` placeholders in, and calls each tool with `plan: true` through the executor, routed as the write node (`node_id=write.id`).
   - It writes `writes_planned` and stores `RunState.plans[write_id] = {gate, plan}`, so the last gate's plans win.
-- [ ] `agentic_engine.gate.gate_request` and the runner: `gate_waiting` carries `plans`. `events.py`: `WRITES_PLANNED`, documented.
-- [ ] Engine tests (`test_write_plans.py`, fake runtime and fake tools):
+- [x] `agentic_engine.gate.gate_request` and the runner: `gate_waiting` carries `plans`. `events.py`: `WRITES_PLANNED`, documented.
+- [x] Engine tests (`test_write_plans.py`, fake runtime and fake tools):
   - The SDD gate shows three plans, in run order.
   - The plans of a gate in a loop are made again on each pass.
   - A gate that sends the work back plans nothing.

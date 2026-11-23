@@ -30,6 +30,7 @@ from agentic_engine.templates import (
 from agentic_runtime import Message, ToolDefinition, ToolOutput
 from agentic_runtime.fake import ECHO_USAGE, CallTool, FakeRuntime
 from agentic_runtime.pricing import DEFAULT_PRICES
+from agentic_runtime.testing import is_plan_call, plan_answer
 
 COMMENT = "The limit lives in `gateway/limits.py`."
 
@@ -48,6 +49,8 @@ class Tools:
     async def call(
         self, name: str, arguments: dict[str, object], *, node_id: str | None = None
     ) -> ToolOutput:
+        if is_plan_call(arguments):
+            return plan_answer(name, arguments)
         self.calls.append((name, arguments, node_id))
         return ToolOutput(text=f"{name} ok")
 

@@ -3514,3 +3514,62 @@ class WorkflowSpec(_Base):
         ):
             raise ValueError("; ".join(messages(issues)))
         return self
+
+
+def planned_writes(root: Node) -> dict[str, list[str]]:
+    """Each gate under `root` → the outward writes it shows a plan of (13.8), in run order.
+
+    A gate plans every outward write that comes after it, up to the next gate that certainly runs
+    before that write (the publish rules' scope: `_runs_in`, `within`), since from there on
+    that gate is the one a person decides at. A write on a route the gate is not on is not
+    planned by it: the two never run in one pass. A write may be planned by more than one gate,
+    and at apply time the plans of the last gate that ran are used. A `wait_for` plans nothing: it
+    is no decision.
+
+    SDD's `approve_pr` sits in a route of a router in a loop, so it plans the pull request and
+    both Jira writes, while `post_questions` plans only the comment that asks."""
+    nodes = list(iter_nodes(root))
+    loops: set[str] = set()
+    runs_at: list[str] = []
+    for path, node in nodes:
+        if isinstance(node, LoopNode):
+            loops.add(path)
+        runs_at.append(_runs_in(path, loops))
+
+    def decides(node: Node) -> bool:
+        return isinstance(node, GateNode) and not isinstance(node, WaitForNode)
+
+    planned: dict[str, list[str]] = {}
+    for at, (path, node) in enumerate(nodes):
+        if not decides(node):
+            continue
+        for later, (write_path, write) in enumerate(nodes[at + 1 :], start=at + 1):
+            if not (isinstance(write, ToolNode) and write.tool in OUTWARD_WRITE_TOOLS):
+                continue
+            if _exclusive_routes(path, write_path):
+                continue
+            decided_between = any(
+                decides(nodes[i][1])
+                and within(write_path, scope_of(runs_at[i]))
+                and not _exclusive_routes(nodes[i][0], write_path)
+                for i in range(at + 1, later)
+            )
+            if not decided_between:
+                planned.setdefault(node.id, []).append(write.id)
+    return planned
+
+
+_ROUTE = re.compile(r"\.(routes\[\d+\]\.then|default)")
+
+
+def _exclusive_routes(left: str, right: str) -> bool:
+    """Whether the nodes at `left` and `right` are on different routes of one router, so one
+    pass runs at most one of them."""
+    for match in _ROUTE.finditer(left):
+        route = left[: match.end()]
+        router = left[: match.start()]
+        if (right == router or right.startswith((f"{router}.", f"{router}["))) and not within(
+            right, route
+        ):
+            return True
+    return False

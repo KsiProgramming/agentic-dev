@@ -570,11 +570,23 @@ async def _wait(
     ]
     if error is not None:
         payload["changes_error"] = error
+    # What approving does (13.8): the plans of the writes this gate guards, in run order.
+    if plans := gate_plans(state, gate_id):
+        payload["plans"] = plans
     if isinstance(ttl := request.get("ttl_s"), int):
         payload["expires_at"] = (datetime.now(UTC) + timedelta(seconds=ttl)).isoformat()
     await log.emit(NODE_STARTED, node_id=gate_id)
     await log.emit(GATE_WAITING, node_id=gate_id, payload=payload)
     return _result(log, state, "waiting", waiting_at=gate_id)
+
+
+def gate_plans(state: RunState, gate_id: str) -> list[JsonValue]:
+    """The plans `gate_id` made of the writes it guards (13.8), as the state holds them."""
+    return [
+        entry["plan"]
+        for entry in state.get("write_plans", {}).values()
+        if entry.get("gate") == gate_id
+    ]
 
 
 def _task_writers(result: AgentNodeResult) -> list[str]:

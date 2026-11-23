@@ -16,6 +16,7 @@ from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.spec import Node, WorkflowSpec, parse_spec, publish_gate_errors
 from agentic_runtime import Message, ToolDefinition, ToolOutput
 from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
+from agentic_runtime.testing import is_plan_call, plan_answer
 
 NODE: TypeAdapter[Node] = TypeAdapter(Node)
 PULL: dict[str, JsonValue] = {
@@ -40,6 +41,8 @@ class FakePublisher:
     async def call(
         self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
     ) -> ToolOutput:
+        if is_plan_call(arguments):
+            return plan_answer(name, arguments)
         self.calls.append((name, arguments, node_id))
         return self.output
 

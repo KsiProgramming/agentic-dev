@@ -144,6 +144,7 @@ from agentic_engine.events import (
     ROUTE_CHOSEN,
     TASK_COMPLETED,
     TASK_STARTED,
+    WRITES_PLANNED,
     NullEventSink,
     RunEventLog,
 )
@@ -221,6 +222,7 @@ from agentic_engine.spec import (
     iter_nodes,
     node_tools,
     orchestrator_plan_schema,
+    planned_writes,
     port_edges,
     router_routes,
     task_writer_key,
@@ -229,6 +231,7 @@ from agentic_engine.spec import (
 )
 from agentic_engine.spec.subflows import expression_views
 from agentic_engine.tool import run_tool_node
+from agentic_engine.write_plan import failing_plan, plan_call
 from agentic_runtime import (
     AgentEvent,
     AgentRuntime,
@@ -247,6 +250,7 @@ from agentic_runtime.findings import (
     clip_message,
     merge_reports,
 )
+from agentic_runtime.plans import WritePlan
 
 _logger = logging.getLogger("agentic_engine")
 
@@ -433,6 +437,12 @@ def review_node_id(gate: GateNode) -> str:
     return f"{gate.id}.review"
 
 
+def plan_node_id(gate: GateNode) -> str:
+    """The LangGraph node that asks the writes `gate` guards for their plans (13.8), the last
+    step before the gate. Its plans are in the state the gate's pause shows."""
+    return f"{gate.id}.plan"
+
+
 def check_node_id(loop: LoopNode) -> str:
     """The LangGraph node that ends each iteration of `loop`. `NodeId` has no `.`, so no spec
     node can take this name."""
@@ -524,6 +534,8 @@ def recursion_limit(spec: WorkflowSpec) -> int:
     spec's own bounds: a run that takes more steps fails (`GraphRecursionError`) instead of going
     on to LangGraph's default."""
 
+    planned = planned_writes(spec.root)
+
     def steps(node: Node) -> int:
         match node:
             case SequenceNode():
@@ -543,7 +555,15 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return 2 + (steps(node.call) if node.call is not None else 0)
             case ToolNode() if creates_repo(node):
                 return 2  # and its `<id>.ready` node
-            case AgentNode() | ToolNode() | GateNode() | ReduceNode():
+            case GateNode():
+                # The gate, and the steps before it: its checks, its review and its plan (13.8).
+                return (
+                    1
+                    + (node.evidence is not None)
+                    + (node.review is not None)
+                    + (node.id in planned)
+                )
+            case AgentNode() | ToolNode() | ReduceNode():
                 return 1
 
     return steps(spec.root) + 10
@@ -633,6 +653,8 @@ def compile_workflow(
         if isinstance(n, AgentNode | OrchestratorNode)
     }
 
+    planned = planned_writes(spec.root)  # gate id → the outward writes it shows plans of
+    writes = {n.id: n for _, n in iter_nodes(spec.root) if isinstance(n, ToolNode)}
     loops: list[LoopNode] = []  # the loops `add` is inside
     top = top_step_of(spec)  # node id → the top-level step it runs in, for saved branches (12.4)
 
@@ -776,13 +798,21 @@ def compile_workflow(
                 builder.add_node(ready, _repo_ready)
                 builder.add_edge(ready, then)
                 return node.id
-            case GateNode() if node.evidence is not None or node.review is not None:
+            case GateNode() if (
+                node.evidence is not None or node.review is not None or node.id in planned
+            ):
                 builder.add_node(
                     node.id,
                     _saving(_step(node, runtime, tools, log, limits), log, limits, top[node.id]),
                 )
                 go_on(node.id, node.id, then)
                 first = node.id
+                if node.id in planned:
+                    planning = plan_node_id(node)
+                    guarded = [writes[w] for w in planned[node.id]]
+                    builder.add_node(planning, _plan_writes(node, guarded, tools, log, limits))
+                    builder.add_edge(planning, first)
+                    first = planning
                 if node.review is not None:
                     reading = review_node_id(node)
                     builder.add_node(reading, _review(node, tools, log, limits))
@@ -1125,6 +1155,65 @@ def _review(
         return {"evidence": {key: found.model_dump(mode="json", by_alias=True)}}
 
     return read
+
+
+def _plan_writes(
+    gate: GateNode,
+    guarded: list[ToolNode],
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Asks the outward writes `gate` guards for their plans (13.8) before it pauses: each tool's
+    plan mode, called by the engine through the run's tools (never by an agent), with the
+    arguments the write's own step will resolve. A step of its own, after the checks and the
+    review, so a restart between it and the gate plans nothing twice, and a pass the checks or the
+    review sent back plans nothing. The plans are kept in the state (`write_plans`), and the
+    runner shows them with the gate (`gate_waiting`)."""
+
+    async def plan(state: RunState) -> RunUpdate:
+        found = _evidence_input(gate, state)
+        reviewed = _review_input(gate, state)
+        if tools is None or (found is not None and found.comments):
+            return {}
+        if reviewed is not None and reviewed.send:
+            return {}
+        if found is not None and found.proceed and reviewed is None:
+            return {}  # the gate passes by itself: nobody decides here
+        made: list[WritePlan] = []
+        for write in guarded:
+            made.append(await _plan_write(write, state, tools, limits))
+        shown: list[JsonValue] = [p.model_dump(mode="json") for p in made]
+        await log.emit(WRITES_PLANNED, node_id=gate.id, payload={"gate": gate.id, "plans": shown})
+        return {
+            "write_plans": {
+                p.node_id or "": {"gate": gate.id, "plan": p.model_dump(mode="json")} for p in made
+            }
+        }
+
+    return plan
+
+
+async def _plan_write(
+    write: ToolNode,
+    state: RunState,
+    tools: ToolExecutor,
+    limits: _Limits,
+    expect: Mapping[str, JsonValue] | None = None,
+) -> WritePlan:
+    """The plan of `write` as its tool answers it now, the arguments resolved the way the write's
+    own step will resolve them. What the platform adds after the approval (the review's notes, a
+    comment's links) is left out and named in `pending`."""
+    without_notes = write.model_copy(
+        update={"args": {k: v for k, v in write.args.items() if k != "notes_from"}}
+    )
+    try:
+        called = await _with_body_from(without_notes, limits.artifacts, state.get("artifacts", {}))
+        called = _with_links(called, state["results"])
+        called = _with_issue_from(called, limits.request)
+    except (ArtifactError, ToolArgsError) as e:
+        return failing_plan(write, write.args, f"unresolved: {e}")
+    return await plan_call(write, called, tools, expect)
 
 
 def _review_input(node: StepNode, state: RunState) -> ReviewInput | None:

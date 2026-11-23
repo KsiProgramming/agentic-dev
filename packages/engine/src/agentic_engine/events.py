@@ -31,6 +31,15 @@ EVIDENCE_COLLECTED: Final = "evidence_collected"
 """A gate's checks ran on a writer's work (13.3), before the gate: the evidence pack
 (`gate`, `node`, `path`, `checks`, `rounds_left`) and `sent_back`, whether a failed
 required check sent the work back to the writer without a pause."""
+WRITES_PLANNED: Final = "writes_planned"
+"""The engine asked each outward write a gate guards for its plan (13.8), before the gate paused:
+the `gate` and its `plans` (`agentic_runtime.plans.WritePlan`), in run order. A plan that would
+fail is among them, with its `error`."""
+WRITE_CHECKED: Final = "write_checked"
+"""An outward write ran against the plan a person approved (13.8): the `gate`, the `plan`, the
+`result` (the tool's structured answer), the `outcome` (`as_planned`, `differs` or `stale`) and
+the `differences` (`{field, planned, actual}`). `stale` is a write the tool refused because what
+it was planned against changed: nothing was written."""
 REVIEW_COLLECTED: Final = "review_collected"
 """A gate read the independent review's findings (13.6), before the gate: the report it read
 (`from`, `version`), `counts` by severity, how many findings `blocking`, the `failed_lenses`, the

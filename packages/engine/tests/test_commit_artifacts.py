@@ -19,6 +19,7 @@ from agentic_engine.policy import PLATFORM_POLICY
 from agentic_engine.spec import parse_spec, validate_workflow
 from agentic_runtime import AgentRequest, AgentRun, Message, ToolDefinition, ToolOutput
 from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
+from agentic_runtime.testing import is_plan_call, plan_answer
 
 BRIEF = IssueBrief(
     key="PROJ-12",
@@ -283,6 +284,8 @@ class Tools:
     async def call(
         self, name: str, arguments: dict[str, Any], *, node_id: str | None = None
     ) -> ToolOutput:
+        if is_plan_call(arguments):
+            return plan_answer(name, arguments)
         self.calls.append((name, arguments))
         if name == "github.openPR":
             return ToolOutput(text=PR_URL, data={"url": PR_URL, "number": 7})

@@ -2234,14 +2234,47 @@
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
       "seq": 148,
-      "type": "node_started",
+      "type": "writes_planned",
       "node_id": "approve_pr",
-      "payload": {},
+      "payload": {
+        "gate": "approve_pr",
+        "plans": [
+          {
+            "node_id": "publish",
+            "tool": "github.openPR",
+            "action": "open_pr",
+            "summary": "Plan of github.openPR on implement",
+            "target": {
+              "kind": "repo",
+              "label": "implement",
+              "url": null
+            },
+            "fields": {},
+            "body": "Agents planned, built and reviewed this change; the run was approved at a gate before this pull request was opened. Review it as you would any change: agents can be wrong.\n\n## Signup validation (pass 2)",
+            "pending": [
+              {
+                "kind": "review_notes",
+                "text": "The review's comments that are not dismissed are added to the description."
+              }
+            ],
+            "expect": {},
+            "error": null
+          }
+        ]
+      },
       "created_at": "2026-11-23T12:02:28Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
       "seq": 149,
+      "type": "node_started",
+      "node_id": "approve_pr",
+      "payload": {},
+      "created_at": "2026-11-23T12:02:29Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000136",
+      "seq": 150,
       "type": "gate_waiting",
       "node_id": "approve_pr",
       "payload": {
@@ -2324,13 +2357,36 @@
             "size": 1632
           }
         ],
-        "expires_at": "2026-11-26T12:02:29Z"
+        "plans": [
+          {
+            "node_id": "publish",
+            "tool": "github.openPR",
+            "action": "open_pr",
+            "summary": "Plan of github.openPR on implement",
+            "target": {
+              "kind": "repo",
+              "label": "implement",
+              "url": null
+            },
+            "fields": {},
+            "body": "Agents planned, built and reviewed this change; the run was approved at a gate before this pull request was opened. Review it as you would any change: agents can be wrong.\n\n## Signup validation (pass 2)",
+            "pending": [
+              {
+                "kind": "review_notes",
+                "text": "The review's comments that are not dismissed are added to the description."
+              }
+            ],
+            "expect": {},
+            "error": null
+          }
+        ],
+        "expires_at": "2026-11-26T12:02:30Z"
       },
-      "created_at": "2026-11-23T12:02:29Z"
+      "created_at": "2026-11-23T12:02:30Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 150,
+      "seq": 151,
       "type": "run_resumed",
       "node_id": null,
       "payload": {
@@ -2344,11 +2400,11 @@
           "approve_pr"
         ]
       },
-      "created_at": "2026-11-23T12:02:30Z"
+      "created_at": "2026-11-23T12:02:31Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 151,
+      "seq": 152,
       "type": "gate_decided",
       "node_id": "approve_pr",
       "payload": {
@@ -2359,19 +2415,19 @@
           "3cfd6f0dc85df7603bc2c22a34aca83ebf2a36ed4a9f2184d4e4c3bcae2eafd2"
         ]
       },
-      "created_at": "2026-11-23T12:02:31Z"
-    },
-    {
-      "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 152,
-      "type": "node_completed",
-      "node_id": "approve_pr",
-      "payload": {},
       "created_at": "2026-11-23T12:02:32Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
       "seq": 153,
+      "type": "node_completed",
+      "node_id": "approve_pr",
+      "payload": {},
+      "created_at": "2026-11-23T12:02:33Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000136",
+      "seq": 154,
       "type": "artifact_written",
       "node_id": "approve_pr",
       "payload": {
@@ -2381,41 +2437,41 @@
         "size": 100,
         "sha256": "696cf161fd4f013b9ad7ca192dd691e02b58f2fdc0774c9f585bf3215c34d72d"
       },
-      "created_at": "2026-11-23T12:02:33Z"
+      "created_at": "2026-11-23T12:02:34Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 154,
+      "seq": 155,
       "type": "loop_condition_evaluated",
       "node_id": "review_loop",
       "payload": {
         "iteration": 2,
         "result": true
       },
-      "created_at": "2026-11-23T12:02:34Z"
+      "created_at": "2026-11-23T12:02:35Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 155,
+      "seq": 156,
       "type": "node_completed",
       "node_id": "review_loop",
       "payload": {
         "stop_reason": "condition",
         "iterations": 2
       },
-      "created_at": "2026-11-23T12:02:35Z"
-    },
-    {
-      "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 156,
-      "type": "node_started",
-      "node_id": "publish",
-      "payload": {},
       "created_at": "2026-11-23T12:02:36Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
       "seq": 157,
+      "type": "node_started",
+      "node_id": "publish",
+      "payload": {},
+      "created_at": "2026-11-23T12:02:37Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000136",
+      "seq": 158,
       "type": "tool_call",
       "node_id": "publish",
       "payload": {
@@ -2428,11 +2484,11 @@
           "body": "Agents planned, built and reviewed this change; the run was approved at a gate before this pull request was opened. Review it as you would any change: agents can be wrong.\n\n## Signup validation (pass 2)\n\n## Review notes\n\n1 medium, from 1 lens; 1 dismissed by the approver.\n\n- **medium** `form.py:3` (security): Name this."
         }
       },
-      "created_at": "2026-11-23T12:02:37Z"
+      "created_at": "2026-11-23T12:02:38Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 158,
+      "seq": 159,
       "type": "tool_result",
       "node_id": "publish",
       "payload": {
@@ -2441,11 +2497,11 @@
         "output": "opened #12",
         "is_error": false
       },
-      "created_at": "2026-11-23T12:02:38Z"
+      "created_at": "2026-11-23T12:02:39Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 159,
+      "seq": 160,
       "type": "pr_opened",
       "node_id": "publish",
       "payload": {
@@ -2455,23 +2511,23 @@
         "base": "main",
         "commit": "cccccccccccccccccccccccccccccccccccccccc"
       },
-      "created_at": "2026-11-23T12:02:39Z"
-    },
-    {
-      "run_id": "00000000-0000-4000-8000-000000000136",
-      "seq": 160,
-      "type": "node_completed",
-      "node_id": "publish",
-      "payload": {},
       "created_at": "2026-11-23T12:02:40Z"
     },
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
       "seq": 161,
+      "type": "node_completed",
+      "node_id": "publish",
+      "payload": {},
+      "created_at": "2026-11-23T12:02:41Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000136",
+      "seq": 162,
       "type": "run_completed",
       "node_id": null,
       "payload": {},
-      "created_at": "2026-11-23T12:02:41Z"
+      "created_at": "2026-11-23T12:02:42Z"
     }
   ]
 }

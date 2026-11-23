@@ -387,6 +387,10 @@ async def test_an_untested_criterion_goes_back_to_the_lead_under_a_criteria_head
     assert tools.jobs[0]["select"] == ["AC-001"]
     assert tools.jobs[0]["coverage"] is True
     assert run.waits()[-1] == "approve_pr"
+    # 13.8: the pass the checks sent back planned nothing, and the checks gate that passed by itself
+    # planned nothing either: only the gate a person decides at shows the plan.
+    planned = [e.node_id for e in run.sink.events if e.type == "writes_planned"]
+    assert planned == ["approve_pr"]
 
 
 async def test_what_the_writers_receive_with_checks_on() -> None:
