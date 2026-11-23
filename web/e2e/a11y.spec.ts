@@ -7,6 +7,7 @@ import {
   COMBINE,
   DOCS_DEMO_URL,
   evidencePack,
+  judgedEvidencePack,
   GATE,
   MAP,
   REPO_READER,
@@ -332,6 +333,20 @@ for (const colorScheme of ["light", "dark"] as const) {
         await request.post(`${apiURL}/runs/${runId}/cancel`);
       });
     }
+
+    test("the inbox, a gate with coverage and criteria, has no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startRun(request, [WRITER, GATE], "E2E criteria a11y");
+      await withEvidence(page, judgedEvidencePack());
+      await open(page, `/inbox?run=${runId}`);
+      const review = page.getByTestId("inbox-review").filter({ visible: true });
+      await expect(review.getByTestId("evidence")).toBeVisible({ timeout: 30_000 });
+      await expect(review.getByRole("list", { name: "Acceptance criteria" })).toBeVisible();
+      await expectNoSeriousIssues(page);
+      await request.post(`${apiURL}/runs/${runId}/cancel`);
+    });
 
     test("the gate review sheet has no serious a11y issues", async ({ page, request }) => {
       test.setTimeout(120_000);

@@ -134,6 +134,11 @@ class EvidenceInput(BaseModel):
 
     pack: dict[str, JsonValue]
     comments: list[GateComment] = Field(default_factory=list[GateComment])
+    proceed: bool = Field(
+        default=False,
+        description="The gate passes by itself: its policy is `pause: on_failure` and every "
+        "required check passed (13.4).",
+    )
 
 
 class GateReview(Protocol):
@@ -453,6 +458,8 @@ async def run_gate_node(
     Otherwise it pauses and shows the pack."""
     if evidence is not None and evidence.comments:
         return await _sent_back(node, evidence, log)
+    if evidence is not None and evidence.proceed:
+        return await _passed(node, input, log)
     shown: SelectionShown | None = None
     document: JsonValue = None
     if node.select is not None:
@@ -522,6 +529,18 @@ async def _sent_back(node: GateNode, evidence: EvidenceInput, log: RunEventLog) 
     )
     data: dict[str, JsonValue] = {"decision": "changes", "source": "checks", "comments": items}
     return AgentNodeResult(status="completed", text=changes_text(comments), usage=None, data=data)
+
+
+async def _passed(node: GateNode, input: str, log: RunEventLog) -> AgentNodeResult:
+    """The gate's checks passed and its policy does not pause on a pass (13.4): it approves by
+    itself, with no one named. `source` is not `checks`, which means a send-back."""
+    # The gate never paused, so the runner did not announce its start.
+    await log.emit(NODE_STARTED, node_id=node.id)
+    await log.emit(
+        GATE_DECIDED, node_id=node.id, payload={"decision": "approve", "source": "checks_passed"}
+    )
+    data: dict[str, JsonValue] = {"decision": "approve", "source": "checks_passed"}
+    return AgentNodeResult(status="completed", text=input, usage=None, data=data)
 
 
 async def run_wait_node(

@@ -13,6 +13,7 @@ from agentic_tools.build.tests import (
     JUNIT_MARKER,
     MAX_FAILURES,
     MAX_MESSAGE,
+    TestOptions,
     parse_junit,
     parse_node_output,
 )
@@ -126,7 +127,7 @@ class TestSandbox(BuildSandbox):
         timeout_s: float,
         env: Mapping[str, str] | None = None,
     ) -> ExecResult:
-        if argv[-1] == "test":
+        if len(argv) > 3 and argv[3] == "test":
             self.test_jobs.append((network, argv[2]))
             return self.tested
         return await super().run_job(argv, network=network, cwd=cwd, timeout_s=timeout_s, env=env)
@@ -292,3 +293,77 @@ def test_a_junit_file_with_entities_is_refused() -> None:
 
     assert parse_junit(bomb) is None
     assert parse_junit("not xml") is None
+
+
+# --- 13.4: cases, coverage of the changed lines, the base run -------------------------------------
+
+CRITERIA_JUNIT = """<testsuites><testsuite tests="2">
+<testcase classname="tests.test_t" name="test_ac_001_ok"/>
+<testcase classname="tests.test_t" name="test_other"/>
+</testsuite></testsuites>"""
+COVERAGE_JSON = json.dumps(
+    {"meta": {"v": 1}, "files": {"a.py": {"executed_lines": [1, 2], "missing_lines": [3, 4]}}}
+)
+
+
+async def test_python_reports_cases_and_coverage_of_the_changed_lines() -> None:
+    out = f"..\n::coverage::\n{COVERAGE_JSON}\n{JUNIT_MARKER}\n{CRITERIA_JUNIT}"
+    box = TestSandbox({".": PY}, ExecResult(0, out, ""))
+    options = TestOptions(select=("AC-001", "AC-002"), coverage=True, changes={"a.py": {2, 3, 4}})
+
+    [check] = (await run_tests(box, ".", ("python",), options=options)).checks  # type: ignore[arg-type]
+
+    assert [(c.name, c.status, c.ids) for c in check.cases] == [
+        ("tests.test_t::test_ac_001_ok", "passed", ["AC-001"])
+    ]
+    assert check.coverage is not None
+    assert (check.coverage.changed, check.coverage.covered) == (3, 1)
+    assert check.coverage.files[0].uncovered == [(3, 4)]
+    assert check.coverage_reason is None
+    assert "coverage run" in box.test_jobs[0][1]  # the coverage script ran, with no network
+    assert box.test_jobs[0][0] == "none"
+
+
+async def test_coverage_that_cannot_be_read_says_so() -> None:
+    out = f"..\n::coverage::\nnot json\n{JUNIT_MARKER}\n{CRITERIA_JUNIT}"
+    box = TestSandbox({".": PY}, ExecResult(0, out, ""))
+
+    [check] = (
+        await run_tests(box, ".", ("python",), options=TestOptions(coverage=True))  # type: ignore[arg-type]
+    ).checks
+
+    assert check.coverage is None
+    assert check.coverage_reason == "coverage could not be measured"
+
+
+async def test_the_base_run_selects_by_id_and_a_missing_result_is_not_an_error() -> None:
+    box = TestSandbox({".": PY}, ExecResult(1, f"{JUNIT_MARKER}\n{CRITERIA_JUNIT}", ""))
+    options = TestOptions(select=("AC-001",), base=True)
+
+    [check] = (await run_tests(box, ".", ("python",), options=options)).checks  # type: ignore[arg-type]
+
+    assert [c.ids for c in check.cases] == [["AC-001"]]
+    assert "-k" in box.test_jobs[0][1]
+    assert check.coverage is None
+
+
+async def test_a_base_run_that_leaves_no_junit_file_is_an_error_not_a_pass() -> None:
+    box = TestSandbox({".": PY}, ExecResult(2, "", ""))
+
+    [check] = (
+        await run_tests(box, ".", ("python",), options=TestOptions(select=("AC-001",), base=True))  # type: ignore[arg-type]
+    ).checks
+
+    assert (check.status, check.reason) == ("error", "test run failed")
+
+
+async def test_node_gives_fixed_reasons_for_coverage_and_per_test_results() -> None:
+    box = TestSandbox({".": node_module()}, ExecResult(0, "Tests:       3 passed, 3 total\n", ""))
+    options = TestOptions(select=("AC-001",), coverage=True)
+
+    [check] = (await run_tests(box, ".", ("node",), options=options)).checks  # type: ignore[arg-type]
+
+    assert check.status == "passed"
+    assert check.coverage is None and check.cases == []
+    assert check.coverage_reason == "coverage is not measured for node yet"
+    assert check.cases_reason == "per-test results are not read for node yet"

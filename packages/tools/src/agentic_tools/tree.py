@@ -8,7 +8,7 @@ afterwards. The checkout and the worktrees are never touched.
 """
 
 import posixpath
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from uuid import uuid4
 
@@ -23,6 +23,7 @@ from agentic_sandbox import (
     SandboxError,
     archive,
     branch_has_commits,
+    branch_patch,
 )
 
 # Runs the script `$2` (with `$0` named `$3` and arguments `$4...`) in the directory `$1`.
@@ -121,6 +122,33 @@ async def archived_tree(
     try:
         try:
             await archive(sandbox, branch, directory)
+        except (BranchNotFoundError, SandboxError):
+            raise ToolError("could not read the writer's work") from None
+        yield TreeSandbox(sandbox, directory)
+    finally:
+        with suppress(SandboxError, ValueError):
+            await sandbox.exec(["rm", "-rf", "--", directory])
+
+
+@asynccontextmanager
+async def overlaid_tree(
+    sandbox: Sandbox,
+    readable: ReadableWriters | None,
+    node: str,
+    pick: Callable[[str], Sequence[str]],
+) -> AsyncGenerator[TreeSandbox]:
+    """The run's base tree (the commit the run started from) with some of `node`'s files laid
+    over it, for the length of the block (13.4). `pick` gets the unified diff of the writer's
+    work against the base and returns the repo-relative paths to take from the writer's branch:
+    its tests, so a test the change added runs against the code it was written to check."""
+    branch = await branch_of(sandbox, readable, node)
+    directory = posixpath.join(sandbox.staging_dir, f"base-{uuid4().hex}")
+    try:
+        try:
+            await archive(sandbox, branch, directory, base=True)
+            chosen = list(pick(await branch_patch(sandbox, branch)))
+            if chosen:
+                await archive(sandbox, branch, directory, paths=chosen)
         except (BranchNotFoundError, SandboxError):
             raise ToolError("could not read the writer's work") from None
         yield TreeSandbox(sandbox, directory)

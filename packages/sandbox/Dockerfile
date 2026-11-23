@@ -89,6 +89,13 @@ RUN set -eu; \
     get /opt/pnpm "https://registry.npmjs.org/pnpm/-/pnpm-${PNPM_VERSION}.tgz" "$PNPM_SHA512"; \
     get /opt/yarn-berry "https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-${YARN_BERRY_VERSION}.tgz" "$YARN_BERRY_SHA512"
 
+# coverage.py (13.4): one pure-Python wheel for both architectures, checked against its sha256 (the
+# one PyPI lists). `build.test` installs it into a module's venv from this file, offline.
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS coverage
+ARG COVERAGE_VERSION=7.17.1
+ARG COVERAGE_SHA256=fda1023828e4a9f4a40ef06783e005f3630f805f839edc679c87f597f33e041f
+RUN set -eu; apk add --no-cache curl; mkdir /wheels;     curl -fsSL --retry 3 -o "/wheels/coverage-${COVERAGE_VERSION}-py3-none-any.whl"       "https://files.pythonhosted.org/packages/18/61/7ad3e5f92557c73044d3dfaf88cc65fb7b1ad589c744e8629af8e6370224/coverage-${COVERAGE_VERSION}-py3-none-any.whl";     echo "${COVERAGE_SHA256}  /wheels/coverage-${COVERAGE_VERSION}-py3-none-any.whl" | sha256sum -c -
+
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
 # git for the repo tools; the rest is what the .NET SDK needs on alpine, and python3 (3.12 on this
@@ -114,6 +121,7 @@ COPY --from=scanners /dl/bin/ /usr/local/bin/
 COPY --from=osv-db /osv/ /opt/osv/
 COPY scan/ /opt/scan/
 COPY buildcfg/ /opt/build/
+COPY --from=coverage /wheels/ /opt/build/wheels/
 
 # No system or user git config is read: every git call sets what it needs on its command line.
 # Scanners keep no cache (the root is read-only; /tmp is small) and read the baked OSV database.
