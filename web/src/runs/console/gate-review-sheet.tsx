@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import {
   Sheet,
@@ -14,6 +14,7 @@ import { LG_UP, useMediaQuery } from "@/lib/use-media-query";
 
 import type { FileChange } from "../gates";
 import { GateFilesView, type GateFile } from "./gate-files";
+import type { ReviewFocus } from "./use-gate-decision";
 
 /**
  * The wide sheet with a gate's changed files (tech-stack → Review sheet): a side sheet of
@@ -29,6 +30,8 @@ export function GateReviewSheet({
   files,
   onEdit,
   onDiscard,
+  review,
+  focus,
   notice,
   footer,
   body,
@@ -40,6 +43,10 @@ export function GateReviewSheet({
   files: GateFile[];
   onEdit?: (change: FileChange, text: string) => void;
   onDiscard?: (change: FileChange) => void;
+  /** The independent review's comments (13.6), listed above the files and shown in the diff. */
+  review?: ComponentProps<typeof GateFilesView>["review"];
+  /** The comment the approver chose in the review's list: the sheet opens at its file and line. */
+  focus?: ReviewFocus | null;
   /** Shown above the files, e.g. why a decision was refused. */
   notice?: ReactNode;
   footer?: ReactNode;
@@ -66,6 +73,8 @@ export function GateReviewSheet({
             wide={wide}
             onEdit={onEdit}
             onDiscard={onDiscard}
+            review={review}
+            focus={focus}
           />
         )}
         {footer ? (

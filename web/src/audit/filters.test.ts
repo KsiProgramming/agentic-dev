@@ -49,6 +49,7 @@ test("the API query takes the category's actions and whole local days", () => {
     "gate.rejected",
     "gate.changes_requested",
     "gate.sent_back_by_checks",
+    "gate.sent_back_by_review",
     "gate.expired",
   ]);
   expect(query.run_id).toBe(RUN);

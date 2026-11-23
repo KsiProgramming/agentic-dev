@@ -7,6 +7,7 @@ import { createApiClient } from "@/api/client";
 import { ApiError, failure } from "@/api/errors";
 
 import type { GateSelection, PendingGate } from "../gates";
+import type { ReviewComment } from "../review";
 import { useGateEdits, type GateEdits } from "./use-gate-edits";
 import { useGateShortcuts } from "./use-gate-shortcuts";
 
@@ -59,6 +60,24 @@ function useGateChoice(select: GateSelection | null): GateChoice | null {
   };
 }
 
+/** What the API says when it refuses the dismissals of an approval (13.6), for people. */
+const DISMISSAL_REFUSED: Record<string, string> = {
+  dismiss_not_allowed: "Comments can only be dismissed when approving.",
+  unknown_dismissal:
+    "A comment you dismissed is not on this gate. Reload the review and dismiss again.",
+  duplicate_dismissal: "A comment was dismissed twice. Reload the review and dismiss again.",
+};
+
+/** The comment the approver chose to look at: its file (the writer's node and the path) and
+ * line, which the diff opens at. */
+export interface ReviewFocus {
+  nodeId: string;
+  path: string;
+  line: number | null;
+  /** Bumped by each choice, so choosing the same comment again scrolls to it again. */
+  nonce: number;
+}
+
 export interface GateDecision {
   runId: string;
   baseUrl: string | undefined;
@@ -66,6 +85,13 @@ export interface GateDecision {
   edits: GateEdits;
   /** A selection gate's chosen items (6.7); null for a gate that does not select. */
   choice: GateChoice | null;
+  /** The review comments dismissed so far (13.6); an approval sends them. */
+  dismissed: ReadonlySet<string>;
+  toggleDismiss: (fingerprint: string) => void;
+  /** The comment chosen in the review's list; the review sheet opens at its file and line. */
+  focus: ReviewFocus | null;
+  /** Opens the review sheet at the comment's file and line. */
+  openAt: (comment: ReviewComment) => void;
   /** The decision being sent. */
   pending: Decision | null;
   /** The decision the API accepted. */
@@ -113,8 +139,29 @@ export function useGateDecision({
   const [rejecting, setRejecting] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const busy = pending !== null || sent !== null;
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
+  const [focus, setFocus] = useState<ReviewFocus | null>(null);
   const edits = useGateEdits(gate.changes);
   const choice = useGateChoice(gate.select);
+
+  function toggleDismiss(fingerprint: string) {
+    setDismissed((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(fingerprint)) next.add(fingerprint);
+      return next;
+    });
+  }
+
+  function openAt(comment: ReviewComment) {
+    if (!comment.nodeId) return;
+    setFocus((previous) => ({
+      nodeId: comment.nodeId ?? "",
+      path: comment.path,
+      line: comment.line,
+      nonce: (previous?.nonce ?? 0) + 1,
+    }));
+    setDetails(true);
+  }
 
   async function decide(decision: Decision, comment?: string, comments?: ChangeComment[]) {
     if (busy) return;
@@ -122,6 +169,13 @@ export function useGateDecision({
       setError(choice.blocked);
       return;
     }
+    // The dismissals go in the review's own order, whatever order they were chosen in.
+    const dismissals =
+      decision === "approve"
+        ? (gate.review?.comments ?? [])
+            .map((c) => c.fingerprint)
+            .filter((fingerprint) => dismissed.has(fingerprint))
+        : [];
     setPending(decision);
     setError(null);
     try {
@@ -146,6 +200,7 @@ export function useGateDecision({
               }
             : {}),
           ...(decision === "approve" && choice ? { selection: choice.keys } : {}),
+          ...(dismissals.length > 0 ? { dismissed: dismissals } : {}),
         },
       });
       if (!data) throw new ApiError(response.status, body, "The decision was not accepted");
@@ -165,7 +220,9 @@ export function useGateDecision({
       toast.success(`${done}: ${gate.title}`);
       onDecided?.(decision);
     } catch (err) {
-      setError(failure(err));
+      const refused =
+        err instanceof ApiError && err.status === 422 ? DISMISSAL_REFUSED[err.code ?? ""] : null;
+      setError(refused ?? failure(err));
     } finally {
       setPending(null);
     }
@@ -183,6 +240,10 @@ export function useGateDecision({
     gate,
     edits,
     choice,
+    dismissed,
+    toggleDismiss,
+    focus,
+    openAt,
     pending,
     sent,
     busy,

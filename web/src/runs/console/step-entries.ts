@@ -392,6 +392,13 @@ export function selectedLine(gate: GateInfo): string | null {
   return `Selected ${gate.selection.length} of ${gate.select.keys.length} ${what}`;
 }
 
+/** Who sent the work back without a person (13.3, 13.6): "Sent back by checks", "Sent back by
+ * review", or both when the checks did and the review would have too. */
+export function sentBackBy(gate: Pick<GateInfo, "source" | "alsoReview">): string {
+  if (gate.source === "review") return "Sent back by review";
+  return gate.alsoReview ? "Sent back by checks and review" : "Sent back by checks";
+}
+
 /** One line on what a step did, for its row: the agent's answer, the tool's call, the gate's
  * decision, or how far a container got. Plain text: it comes from agent and repo content. */
 export function stepOutline(step: Step): string | null {
@@ -403,8 +410,8 @@ export function stepOutline(step: Step): string | null {
       const edits = step.gate.edits.length;
       return edits > 0 ? `Approved with edits to ${count(edits, "file")}` : "Approved";
     }
-    if (step.gate.decision === "changes" && step.gate.source === "checks") {
-      return `Sent back by checks (${count(step.gate.comments.length, "comment")})`;
+    if (step.gate.decision === "changes" && step.gate.source) {
+      return `${sentBackBy(step.gate)} (${count(step.gate.comments.length, "comment")})`;
     }
     if (step.gate.decision === "changes") {
       return `Asked for changes (${count(step.gate.comments.length, "comment")})`;

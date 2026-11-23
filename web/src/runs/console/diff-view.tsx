@@ -17,6 +17,8 @@ import "monaco-editor/languages/definitions/register.all.js";
 import { useTheme } from "next-themes";
 import { useEffect, useId, useRef, useState } from "react";
 
+import { zoneElement, zoneHeight, type ZoneComment } from "./review-zone";
+
 // Monaco from the app's own bundle (no CDN), with its editor worker. This module is only loaded
 // in the browser, through `next/dynamic`, when a gate's review sheet opens.
 self.MonacoEnvironment = {
@@ -39,6 +41,11 @@ export interface DiffViewProps {
   onChange?: (text: string) => void;
   /** The accessible names of the two sides. */
   labels: { original: string; modified: string };
+  /** Review comments (13.6) shown as view zones under their lines on the modified side: a
+   * progressive enhancement, the review's list is the accessible path. */
+  comments?: ZoneComment[];
+  /** A line to bring into view on the modified side; `nonce` makes the same line count again. */
+  reveal?: { line: number; nonce: number } | null;
 }
 
 /** A Monaco diff of one file: what it was on the left (or above, inline) and what it is now. */
@@ -50,6 +57,8 @@ export default function DiffView({
   sideBySide,
   onChange,
   labels,
+  comments,
+  reveal,
 }: DiffViewProps) {
   const { resolvedTheme } = useTheme();
   // The editor owns its text once mounted: feeding edits back as `modified` would make
@@ -77,8 +86,42 @@ export default function DiffView({
     [],
   );
 
+  // The comments' view zones sit on the modified editor, which exists once the diff mounted.
+  const [mounted, setMounted] = useState(false);
+  const zoned = comments;
+  useEffect(() => {
+    const editor = diff.current?.getModifiedEditor();
+    if (!mounted || !editor || !zoned || zoned.length === 0) return;
+    let ids: string[] = [];
+    editor.changeViewZones((accessor) => {
+      ids = zoned.map((comment) =>
+        accessor.addZone({
+          afterLineNumber: comment.line,
+          heightInPx: zoneHeight(comment),
+          domNode: zoneElement(comment),
+        }),
+      );
+    });
+    return () => {
+      // The editor may be gone already when the sheet closes.
+      try {
+        editor.changeViewZones((accessor) => ids.forEach((id) => accessor.removeZone(id)));
+      } catch {
+        /* disposed with the diff */
+      }
+    };
+  }, [mounted, zoned]);
+
+  useEffect(() => {
+    const editor = diff.current?.getModifiedEditor();
+    if (!mounted || !editor || !reveal) return;
+    editor.revealLineInCenterIfOutsideViewport(reveal.line);
+    editor.setPosition({ lineNumber: reveal.line, column: 1 });
+  }, [mounted, reveal]);
+
   const onMount: DiffOnMount = (editor) => {
     diff.current = editor;
+    setMounted(true);
     const after = editor.getModifiedEditor();
     after.onDidChangeModelContent(() => changed.current?.(after.getValue()));
   };

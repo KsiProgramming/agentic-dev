@@ -1,5 +1,6 @@
 import { parseArtifact, parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { parseEvidence, type Evidence } from "./evidence";
+import { parseReview, type Review } from "./review";
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
 import {
   parseChanges,
@@ -86,10 +87,19 @@ export interface GateInfo {
   comments: { item: string; text: string }[];
   /** What rejecting does: cancel the run, or end it here as completed. */
   onReject: "cancel" | "end";
-  /** Who sent the work back: `checks` when the platform's checks did, with no person (13.3). */
-  source: "checks" | null;
+  /** Who sent the work back: `checks` (13.3) or `review` (13.6) when the platform did, with no
+   * person. */
+  source: "checks" | "review" | null;
+  /** Set when the checks sent the work back and the review would have too (`source: checks`
+   * with `review: true`). */
+  alsoReview: boolean;
   /** What the checks found about the writer's work before this pass of the gate (13.3). */
   evidence: Evidence | null;
+  /** What the independent review found before this pass of the gate (13.6): its comments once
+   * the gate showed them, only its counts for a pass the review sent back. */
+  review: Review | null;
+  /** The fingerprints of the comments the approval dismissed (13.6). */
+  dismissed: string[];
 }
 
 /** A branch saved outside the sandbox (12.2), as its step's last `branch_saved` or
@@ -114,6 +124,19 @@ export interface SavedBranch {
 export interface WorkBefore {
   nodeId: string;
   kind: "writer" | "integration";
+}
+
+/** What an independent review agent was given (13.6), from its `node_started`'s `review`: the
+ * writer it reviews, the spec and its version, the size of the diff and whether it had the
+ * evidence pack. */
+export interface ReviewInput {
+  of: string;
+  spec: string | null;
+  specVersion: number | null;
+  files: number;
+  added: number;
+  removed: number;
+  evidence: boolean;
 }
 
 /** What a writer was told it cannot change (13.5), from its `node_started`'s `protected`: the
@@ -167,6 +190,8 @@ export interface Step {
   /** The paths a writer step may read but not change (13.5); `null` for a step that was told
    * nothing (it does not write, or a run from before 13.5). */
   protectedPaths: ProtectedPaths | null;
+  /** What a review agent was given (13.6); `null` for any other step. */
+  reviewInput: ReviewInput | null;
   /** What a `dedupe` or `vote` reduce merged (4.5): its `node_completed`'s `merged`. */
   merged: MergeCounts | null;
   /** Set for a router node (4.6): its routes, the one it took and why, and that route's steps. */
@@ -396,6 +421,26 @@ function parseWriters(value: unknown): WorkBefore[] | null {
   });
 }
 
+function parseReviewInput(value: unknown): ReviewInput | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const of = str(input.of);
+  if (of === null) return null;
+  const diff =
+    typeof input.diff === "object" && input.diff !== null
+      ? (input.diff as Record<string, unknown>)
+      : {};
+  return {
+    of,
+    spec: str(input.spec),
+    specVersion: num(input.spec_version),
+    files: num(diff.files) ?? 0,
+    added: num(diff.added) ?? 0,
+    removed: num(diff.removed) ?? 0,
+    evidence: input.evidence === true,
+  };
+}
+
 function parsePort(value: unknown): PortFailure | null {
   if (typeof value !== "object" || value === null) return null;
   const port = value as Record<string, unknown>;
@@ -440,6 +485,7 @@ function newStep(id: string, at: string): Step {
     provider: null,
     model: null,
     writers: null,
+    reviewInput: null,
     protectedPaths: null,
     gate: null,
     prUrl: null,
@@ -535,6 +581,8 @@ class Builder {
   /** The latest evidence pack of each gate (13.3): its `evidence_collected` comes before the
    * gate's own events, and a pass sent back by the checks never pauses. */
   private evidence = new Map<string, Evidence | null>();
+  /** The latest `review_collected` of each gate (13.6), by the same rule. */
+  private reviews = new Map<string, Review | null>();
   /** The `item` and `branch` tags each step's events carry: a router in a map runs once per
    * item, under the same id. */
   private tags = new WeakMap<Step, { item: number | null; branch: number | null }>();
@@ -581,6 +629,9 @@ class Builder {
     switch (event.type) {
       case "evidence_collected":
         this.evidence.set(nodeId, parseEvidence(payload));
+        return;
+      case "review_collected":
+        this.reviews.set(nodeId, parseReview(payload));
         return;
       case "loop_iteration_started": {
         const loop = this.container(nodeId, at, item, branch);
@@ -777,6 +828,7 @@ class Builder {
       }
       step.writers = parseWriters(payload.writers);
       step.protectedPaths = parseProtectedPaths(payload.protected);
+      step.reviewInput = parseReviewInput(payload.review);
       if (payload.items !== undefined) {
         step.items ??= [];
         step.itemCount = num(payload.items);
@@ -852,7 +904,10 @@ class Builder {
           comments: [],
           onReject: payload.on_reject === "end" ? "end" : "cancel",
           source: null,
+          alsoReview: false,
           evidence: parseEvidence(payload.evidence) ?? this.evidence.get(nodeId) ?? null,
+          review: parseReview(payload.review) ?? this.reviews.get(nodeId) ?? null,
+          dismissed: [],
         };
         return;
       case "gate_decided": {
@@ -870,8 +925,12 @@ class Builder {
             : null,
           comments: parseComments(payload.comments),
           onReject: step.gate?.onReject ?? "cancel",
-          source: payload.source === "checks" ? "checks" : null,
+          source:
+            payload.source === "checks" || payload.source === "review" ? payload.source : null,
+          alsoReview: payload.source === "checks" && payload.review === true,
           evidence: step.gate?.evidence ?? this.evidence.get(nodeId) ?? null,
+          review: step.gate?.review ?? this.reviews.get(nodeId) ?? null,
+          dismissed: strings(payload.dismissed),
         };
         return;
       }

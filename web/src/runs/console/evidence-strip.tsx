@@ -3,9 +3,10 @@ import { useId } from "react";
 
 import { Duration, Percent, StatStrip, StatTile, TruncatedPath } from "@/components/display";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusBadge, type RunStatus } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 
+import { reviewHeadline, reviewOutcome, type Review, type ReviewOutcome } from "../review";
 import {
   CHECK_BADGE,
   CHECK_LABEL,
@@ -29,12 +30,15 @@ const LISTED = 8;
  */
 export function EvidenceStrip({
   evidence,
+  review = null,
   loading = false,
   error,
   onRetry,
   className,
 }: {
   evidence: Evidence | null;
+  /** What the independent review found (13.6): one more tile, with its outcome. */
+  review?: Review | null;
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -43,8 +47,9 @@ export function EvidenceStrip({
   const headingId = useId();
   if (loading) return <LoadingState rows={2} label="Loading the checks…" className={className} />;
   if (error) return <ErrorState message={error} onRetry={onRetry} className={className} />;
-  if (!evidence) return null;
-  if (evidence.checks.length === 0) {
+  if (!evidence && !review) return null;
+  if (!evidence || evidence.checks.length === 0) {
+    if (review) return <ReviewTile review={review} className={className} />;
     return (
       <EmptyState
         icon={FlaskConicalIcon}
@@ -90,6 +95,57 @@ export function EvidenceStrip({
       {evidence.checks.map((check) => (
         <CheckDetails key={check.kind} check={check} />
       ))}
+      {review ? <ReviewTile review={review} /> : null}
+    </section>
+  );
+}
+
+const REVIEW_BADGE: Record<ReviewOutcome, { status: RunStatus; label: string }> = {
+  passed: { status: "succeeded", label: "Passed" },
+  sent_back: { status: "failed", label: "Sent back" },
+  could_not_run: { status: "failed", label: "Could not run" },
+  blocking: { status: "waiting", label: "Needs a decision" },
+};
+
+/**
+ * The independent review (13.6) as one tile: its outcome as a `StatusBadge` (Passed, Sent back,
+ * Could not run) and "2 high · 5 comments" under it. It is a strip of its own with one cell
+ * across the whole width, so it never leaves an empty cell beside the checks. The comments
+ * themselves are `ReviewComments`.
+ */
+export function ReviewTile({ review, className }: { review: Review; className?: string }) {
+  const headingId = useId();
+  const outcome = reviewOutcome(review);
+  const { status, label } = REVIEW_BADGE[outcome];
+  const failed = review.failedLenses.length;
+  return (
+    <section
+      aria-labelledby={headingId}
+      data-testid="review-tile"
+      className={cn("flex min-w-0 flex-col gap-2", className)}
+    >
+      <h3 id={headingId} className="sr-only">
+        Independent review of {review.from}
+      </h3>
+      <StatStrip columns={2} className="md:grid-cols-1">
+        <StatTile
+          label="Review"
+          value={<StatusBadge status={status} label={label} className="text-caption" />}
+          secondary={
+            <>
+              {reviewHeadline(review)}
+              {failed > 0 ? ` · ${failed} ${failed === 1 ? "lens" : "lenses"} could not run` : ""}
+            </>
+          }
+        />
+      </StatStrip>
+      {outcome === "sent_back" ? (
+        <p className="text-meta text-foreground-secondary" role="status">
+          {review.roundsLeft > 0
+            ? "The review found blocking comments. The writer goes again."
+            : "The review found blocking comments and has no send-backs left: you decide."}
+        </p>
+      ) : null}
     </section>
   );
 }

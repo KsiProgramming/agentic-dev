@@ -135,6 +135,9 @@ describe("buildTimeline on a recorded docs run", () => {
       onReject: "cancel",
       source: null,
       evidence: null,
+      review: null,
+      alsoReview: false,
+      dismissed: [],
     });
   });
 

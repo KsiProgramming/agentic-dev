@@ -38,6 +38,7 @@ import { AgentMessage } from "./agent-message";
 import type { GateFile } from "./gate-files";
 import { EvidenceStrip } from "./evidence-strip";
 import { ProtectedAttempts } from "./protected-attempts";
+import { ReviewComments } from "./review-comments";
 import { GateReviewSheet } from "./gate-review-sheet";
 import { SelectionChecklist } from "./selection-checklist";
 import type { GateDecision } from "./use-gate-decision";
@@ -89,11 +90,13 @@ export function ApproveButton({
     );
   }
   const blocked = choice?.blocked ?? null;
-  const label = choice
+  const dismissed = decision.dismissed.size;
+  const base = choice
     ? `Approve with ${choice.count} selected`
     : edits > 0
       ? `Approve with ${plural(edits, "edit")}`
       : "Approve";
+  const label = dismissed > 0 ? `${base}, ${dismissed} dismissed` : base;
   return (
     <>
       <Button
@@ -253,16 +256,27 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
           files={files}
           onEdit={edits.edit}
           onDiscard={edits.discard}
+          review={
+            gate.review
+              ? {
+                  review: gate.review,
+                  dismissed: decision.dismissed,
+                  onToggleDismiss: decision.toggleDismiss,
+                }
+              : null
+          }
+          focus={decision.focus}
           notice={
             error && !rejecting ? (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : gate.evidence ||
+              gate.review ||
               gate.runArtifacts.length > 0 ||
               gate.protectedAttempts.length > 0 ? (
               <div className="flex flex-col gap-3">
-                <EvidenceStrip evidence={gate.evidence} />
+                <EvidenceStrip evidence={gate.evidence} review={gate.review} />
                 <ProtectedAttempts attempts={gate.protectedAttempts} />
                 <GateRunArtifacts runId={decision.runId} gate={gate} baseUrl={decision.baseUrl} />
               </div>
@@ -296,8 +310,13 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
               </SheetDescription>
             </SheetHeader>
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
-              <EvidenceStrip evidence={gate.evidence} />
+              <EvidenceStrip evidence={gate.evidence} review={gate.review} />
               <ProtectedAttempts attempts={gate.protectedAttempts} />
+              <ReviewComments
+                review={gate.review}
+                dismissed={decision.dismissed}
+                onToggleDismiss={decision.toggleDismiss}
+              />
               <div>
                 <GateArtifact gate={gate} />
               </div>

@@ -36,6 +36,7 @@ import {
 } from "@/runs/console/decision-controls";
 import { EvidenceStrip } from "@/runs/console/evidence-strip";
 import { ProtectedAttempts } from "@/runs/console/protected-attempts";
+import { ReviewComments } from "@/runs/console/review-comments";
 import { StatusLabel } from "@/runs/console/gate-files";
 import { SelectionChecklist } from "@/runs/console/selection-checklist";
 import { useGateDecision, type Decision } from "@/runs/console/use-gate-decision";
@@ -166,7 +167,13 @@ function GateReview({
         />
       </StatStrip>
 
-      <EvidenceStrip evidence={gate.evidence} />
+      <EvidenceStrip evidence={gate.evidence} review={gate.review} />
+      <ReviewComments
+        review={gate.review}
+        dismissed={decision.dismissed}
+        onToggleDismiss={decision.toggleDismiss}
+        onSelect={decision.openAt}
+      />
       <ProtectedAttempts attempts={gate.protectedAttempts} />
 
       {decision.choice ? (
