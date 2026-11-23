@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 13.5 Protect the grader:
+- Phase 13.5 Protect the grader ([#257](https://github.com/KsiProgramming/agentic-dev/pull/257)):
   - **A writer cannot change what judges it.** `repo.write_file` and `repo.commit` refuse protected paths: the platform's CI and analyzer config always (`.github/workflows/**`, `.editorconfig`, `ruff.toml`, `Directory.Build.props`, ...), the workflow's own `protect.paths`, and the files an earlier writer's approved work holds. `protect: {paths, allow}` is a new top-level field; only an `allow`ed node, with a gate after it, may change a protected path. The refusal is a fixed text, one `protected_path_refused` event per attempt (path and rule, never content), counted on the run (`protected_attempts` on `GET /runs` and `GET /runs/{id}`, a new `runs` column) and listed at the gate (`GET /runs/{id}/gate`), whose `changes` mark protected files.
   - **`start_from` for test-first flows.** An agent or orchestrator may start its branch (an orchestrator's integration branch, so its hub and tasks read it) from an earlier writer's tip, with a gate between them; the files that writer changed are frozen for it. The start point and frozen files are kept in the checkpoint. New validation codes: `invalid_protect`, `allow_unknown_writer`, `protected_change_without_gate`, `start_from_unknown_writer`, `start_from_without_gate`, `start_from_not_allowed`.
   - **Agents are told.** Every writer gets a "# Protected paths" section; `node_started` carries `protected`.
