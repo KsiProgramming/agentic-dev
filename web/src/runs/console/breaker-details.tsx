@@ -70,8 +70,8 @@ export function BreakerDetails({
   const spent = amount(details.spent_usd ?? details.cost_usd);
   const average = amount(details.average_usd);
   const path = text(details.path);
-  const globs = strings(details.declared ?? details.globs);
-  const flips = amount(details.flips);
+  const globs = strings(details.paths ?? details.declared ?? details.globs);
+  const flips = amount(details.flips) ?? (trip.breaker === "flip_flop" ? trip.observed : null);
   return (
     <section
       aria-labelledby={headingId}
