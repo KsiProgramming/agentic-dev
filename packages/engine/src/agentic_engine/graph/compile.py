@@ -115,6 +115,7 @@ from agentic_engine.artifacts import (
     write_artifact,
 )
 from agentic_engine.branches import BranchSaver, owner_node
+from agentic_engine.breakers import BreakerTripped, BreakerWatch
 from agentic_engine.budget import BudgetMeter
 from agentic_engine.commit import run_commit_node
 from agentic_engine.events import (
@@ -251,6 +252,11 @@ _logger = logging.getLogger("agentic_engine")
 
 type CompiledWorkflow = CompiledStateGraph[RunState]
 type StepNode = AgentNode | ToolNode | GateNode
+
+
+def _watch(node_id: str, limits: "_Limits") -> BreakerWatch:
+    """The circuit-breaker watch of one execution of the agent step `node_id` (13.7)."""
+    return BreakerWatch(node_id, limits.policy.breakers)
 
 
 class CompileError(ValueError):
@@ -1328,10 +1334,15 @@ async def _run_step(
         node = node.model_copy(update={"output_schema": FINDINGS_SCHEMA})
         reviewing, input, review_started = built
 
+    # One watch per execution of a step that runs an agent (13.7).
+    watch = None if isinstance(node, ToolNode | GateNode | WaitForNode) else _watch(node.id, limits)
+
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item, branch)
         if isinstance(event, Usage) and limits.budget is not None:
             limits.budget.add(event, node.id)
+        if watch is not None:
+            watch.see(event)
 
     # Streamed text is merged so the log gets at most one `text_delta` per 250 ms.
     buffer = DeltaBuffer(write)
@@ -1442,7 +1453,7 @@ async def _run_step(
             result = await run()
         finally:
             await buffer.close()
-    except (asyncio.CancelledError, PolicyLimitExceeded):
+    except (asyncio.CancelledError, PolicyLimitExceeded, BreakerTripped):
         await log.emit(NODE_CANCELLED, node_id=node.id, item=item, branch=branch)
         raise
     port: PortFailure | None = None
@@ -2872,10 +2883,13 @@ async def _classify(
     )
     log, limits = scope.log, scope.limits
 
+    watch = _watch(router.id, limits)
+
     async def write(event: AgentEvent) -> None:
         await log.agent_event(router.id, event, scope.item, scope.branch)
         if isinstance(event, Usage) and limits.budget is not None:
             limits.budget.add(event, router.id)
+        watch.see(event)
 
     buffer = DeltaBuffer(write)
     try:
@@ -2891,7 +2905,7 @@ async def _classify(
                 )
         finally:
             await buffer.close()
-    except (asyncio.CancelledError, PolicyLimitExceeded):
+    except (asyncio.CancelledError, PolicyLimitExceeded, BreakerTripped):
         await log.emit(NODE_CANCELLED, node_id=router.id, **scope.tag())
         raise
     return _check_output(agent, result)
@@ -2966,10 +2980,13 @@ async def _plan(
     )
     log, limits = scope.log, scope.limits
 
+    watch = _watch(orchestrator.id, limits)
+
     async def write(event: AgentEvent) -> None:
         await log.agent_event(orchestrator.id, event)
         if isinstance(event, Usage) and limits.budget is not None:
             limits.budget.add(event, orchestrator.id)
+        watch.see(event)
 
     buffer = DeltaBuffer(write)
     try:
@@ -2986,7 +3003,7 @@ async def _plan(
                 )
         finally:
             await buffer.close()
-    except (asyncio.CancelledError, PolicyLimitExceeded):
+    except (asyncio.CancelledError, PolicyLimitExceeded, BreakerTripped):
         await log.emit(NODE_CANCELLED, node_id=orchestrator.id)
         raise
     return _check_output(agent, result)

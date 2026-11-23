@@ -53,6 +53,12 @@ POLICY_LIMIT_EXCEEDED: Final = "policy_limit_exceeded"
 hit it, if one did. A `node_failed` or `run_failed` naming the reason follows. For
 `limit: "budget_usd"` the amounts are USD decimal strings, and `model` names a model with no price
 when that is why the budget could not be held."""
+BREAKER_TRIPPED: Final = "breaker_tripped"
+"""A circuit breaker tripped on a step (13.7), after the running steps ended `node_cancelled`:
+`breaker` (`repeat`), `trigger` (`calls` or `errors`), `threshold`, `observed`, `details` (what
+was seen: the tool, its arguments cut short, its error; never file content) and `reason`, a fixed
+sentence. `gate_waiting` follows on the same node, with `breaker`, and the run waits for a person
+to resume or cancel it."""
 PR_OPENED: Final = "pr_opened"
 """A publishing tool node opened a pull request: `url`, `number`, `head`, `base`, `commit`."""
 REPO_CREATED: Final = "repo_created"

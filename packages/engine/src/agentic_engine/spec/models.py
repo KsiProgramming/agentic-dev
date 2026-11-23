@@ -27,6 +27,7 @@ from agentic_engine.expr import (
     compile_value,
 )
 from agentic_engine.policy import (
+    BREAKER_RANGES,
     BUDGET_MAX_USD,
     BUDGET_MIN_USD,
     PLATFORM_POLICY,
@@ -1168,6 +1169,7 @@ type IssueCode = Literal[
     "review_unknown_writer",
     "review_not_in_loop",
     "invalid_gate_review",
+    "breakers_out_of_range",
 ]
 
 
@@ -3340,6 +3342,46 @@ def protect_issues(root: Node, protect: ProtectPolicy | None) -> list[Validation
     return issues
 
 
+class BreakersSpec(_Base):
+    """A workflow's own circuit-breaker thresholds (13.7), over its workspace's. Each field a
+    workflow does not set keeps the workspace's. A value outside the platform range
+    (`BREAKER_RANGES`) is a `breakers_out_of_range` issue; no field turns a breaker off."""
+
+    repeat_calls: int | None = Field(
+        default=None, description="Calls of one tool with the same arguments in one step (2-50)."
+    )
+    repeat_errors: int | None = Field(
+        default=None, description="Errors with the same text from one tool in one step (2-50)."
+    )
+    cost_multiple: float | None = Field(
+        default=None, description="A step's cost as a multiple of its node's average (1.5-20)."
+    )
+    cost_floor_usd: float | None = Field(
+        default=None, description="USD a step must also cost above the average to trip (0-1000)."
+    )
+    flip_flops: int | None = Field(
+        default=None, description="Times a step rewrites a file back to an earlier content (1-10)."
+    )
+
+
+def breakers_issues(breakers: BreakersSpec | None) -> list[ValidationIssue]:
+    """`breakers_out_of_range` for each threshold of `breakers` outside its platform range."""
+    if breakers is None:
+        return []
+    issues: list[ValidationIssue] = []
+    for name, (low, high) in BREAKER_RANGES.items():
+        value = getattr(breakers, name)
+        if value is not None and not low <= value <= high:
+            issues.append(
+                ValidationIssue(
+                    code="breakers_out_of_range",
+                    path=f"breakers.{name}",
+                    message=f"breakers: {name} must be between {low:g} and {high:g}, not {value:g}",
+                )
+            )
+    return issues
+
+
 class WorkflowSpec(_Base):
     """A versioned workflow document with a single root node."""
 
@@ -3379,6 +3421,11 @@ class WorkflowSpec(_Base):
         description="Files no writer may change, besides the platform's own list (CI and "
         "analyzer config, always protected), and the writers allowed to change them (13.5).",
     )
+    breakers: BreakersSpec | None = Field(
+        default=None,
+        description="Circuit-breaker thresholds of this workflow, over the workspace's, within "
+        "the platform's ranges (13.7).",
+    )
     on_review: OnReview | None = Field(
         default=None,
         description="Lets a review comment on the pull request the workflow opened "
@@ -3397,6 +3444,7 @@ class WorkflowSpec(_Base):
             structure_issues(self.root, inputs)
             + on_review_issues(self.root, self.on_review)
             + protect_issues(self.root, self.protect)
+            + breakers_issues(self.breakers)
         ):
             raise ValueError("; ".join(messages(issues)))
         return self

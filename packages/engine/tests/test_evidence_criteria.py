@@ -13,7 +13,7 @@ from pydantic import JsonValue
 from agentic_engine.policy import PLATFORM_POLICY
 from agentic_engine.spec import GateEvidence, WorkflowSpec, parse_spec, validate_workflow
 from agentic_runtime import Message, ToolOutput
-from agentic_runtime.fake import ECHO_USAGE, CallTool, FakeRuntime
+from agentic_runtime.fake import ECHO_USAGE, CallTool, FakeRuntime, Step
 
 from .test_evidence_gate import APPROVE, Checks, Run, by_kind, pack_of
 
@@ -165,14 +165,20 @@ def spec(
 
 def run_of(workflow: WorkflowSpec, tools: Judged) -> Run:
     run = Run(workflow, tools)
-    work = [
-        CallTool("repo.write_file", {"path": "a.py", "content": "x"}),
-        CallTool("repo.commit", {"message": "work"}),
-        Message(text="Done."),
-        ECHO_USAGE,
+    # Each repetition differs, as a writer's work does: the same call five times in one step is
+    # what the repeat breaker (13.7) pauses.
+    work: list[Step] = [
+        step
+        for i in range(6)
+        for step in (
+            CallTool("repo.write_file", {"path": "a.py", "content": f"x{i}"}),
+            CallTool("repo.commit", {"message": f"work {i}"}),
+            Message(text="Done."),
+            ECHO_USAGE,
+        )
     ]
     run.runtime = FakeRuntime(
-        {"speccer": [Message(text=SPEC), ECHO_USAGE], "writer": work * 6}, tools=tools
+        {"speccer": [Message(text=SPEC), ECHO_USAGE], "writer": work}, tools=tools
     )
     return run
 

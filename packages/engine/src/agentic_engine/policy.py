@@ -13,6 +13,7 @@ a workspace's budget is a default that a workflow (its spec's `budget_usd`) and 
 replace (`with_budget`).
 """
 
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Annotated, Final, Literal
 
@@ -48,6 +49,49 @@ BRANCH_RETENTION_MAX_DAYS: Final = 90
 REVIEW_ROUNDS: Final = 3
 """How many follow-up runs a pull request review may start by default (7.6)."""
 REVIEW_ROUNDS_MAX: Final = 10
+
+
+BREAKER_RANGES: Final[dict[str, tuple[float, float]]] = {
+    "repeat_calls": (2, 50),
+    "repeat_errors": (2, 50),
+    "cost_multiple": (1.5, 20),
+    "cost_floor_usd": (0, 1_000),
+    "flip_flops": (1, 10),
+}
+"""The platform range of each circuit-breaker threshold (13.7), wherever it is set (workspace,
+workflow). A value outside it is clamped when resolved, and refused when a workflow sets it."""
+
+
+class BreakerPolicy(BaseModel):
+    """The thresholds of the four circuit breakers (13.7): the engine pauses a step that crosses
+    one. Defaults are the platform's; a workspace and a workflow may tune each within
+    `BREAKER_RANGES`, never turn one off."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repeat_calls: int = Field(
+        default=5, description="Calls of one tool with the same arguments in one step."
+    )
+    repeat_errors: int = Field(
+        default=3, description="Errors with the same text from one tool in one step."
+    )
+    cost_multiple: float = Field(
+        default=3.0, description="A step's cost, as a multiple of its node's average."
+    )
+    cost_floor_usd: float = Field(
+        default=0.5, description="USD a step must also cost above its node's average to trip."
+    )
+    flip_flops: int = Field(
+        default=2, description="Times one step rewrites a file back to an earlier content."
+    )
+
+
+def clamp_breakers(values: Mapping[str, float]) -> dict[str, float]:
+    """`values` (threshold name → value) with each value held to its `BREAKER_RANGES`."""
+    return {
+        name: min(BREAKER_RANGES[name][1], max(BREAKER_RANGES[name][0], value))
+        for name, value in values.items()
+    }
 
 
 class Policy(BaseModel):
@@ -86,6 +130,11 @@ class Policy(BaseModel):
         default=REVIEW_ROUNDS,
         description="Follow-up runs that review comments on one pull request may start "
         "(`@<app> fix this`).",
+    )
+    # A default, so the policy frozen on a run created before phase 13.7 still loads.
+    breakers: BreakerPolicy = Field(
+        default_factory=BreakerPolicy,
+        description="When the engine pauses a step: the circuit-breaker thresholds (13.7).",
     )
 
 
@@ -143,6 +192,16 @@ def effective_policy(overrides: PolicyOverrides | None = None) -> Policy:
         for name, value in overrides.model_dump(exclude_none=True).items():
             base[name] = value if name == "budget_usd" else min(ceiling(name), value)
     return Policy.model_validate(base)
+
+
+def with_breakers(policy: Policy, spec_breakers: Mapping[str, float] | None) -> Policy:
+    """`policy` with the workflow's own thresholds (its spec's `breakers`, the fields it set) over
+    the workspace's, each held to its `BREAKER_RANGES`. The workspace's own are already in
+    `policy.breakers`, over the platform's defaults."""
+    merged = clamp_breakers({**policy.breakers.model_dump(), **(spec_breakers or {})})
+    for name in ("repeat_calls", "repeat_errors", "flip_flops"):
+        merged[name] = round(merged[name])
+    return policy.model_copy(update={"breakers": BreakerPolicy.model_validate(merged)})
 
 
 def with_budget(

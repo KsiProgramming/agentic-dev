@@ -22,9 +22,11 @@ from agentic_engine.artifacts import (
     write_artifact,
 )
 from agentic_engine.branches import BranchSaver
+from agentic_engine.breakers import BreakerTripped
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
     ARTIFACT_WRITTEN,
+    BREAKER_TRIPPED,
     GATE_WAITING,
     NODE_STARTED,
     POLICY_LIMIT_EXCEEDED,
@@ -54,7 +56,7 @@ from agentic_engine.graph.state import (
     initial_state,
 )
 from agentic_engine.integrate import BranchIntegrator
-from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
+from agentic_engine.policy import APPROVAL_TTL_S, PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.protect import folded_writers, mark_protected
 from agentic_engine.providers import ResolvedProviders
 from agentic_engine.spec import INPUT_WRITER, WorkflowSpec
@@ -154,6 +156,7 @@ async def run_workflow(
         _config(spec, log.run_id),
         budget,
         review,
+        ttl_s=policy.approval_ttl_s,
     )
 
 
@@ -226,7 +229,9 @@ async def resume_workflow(
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
     if not saved:
         first = await _initial(log, input, artifacts, inputs)
-        return await _finish(log, lambda: graph, first, config, budget, review, spec.protect)
+        return await _finish(
+            log, lambda: graph, first, config, budget, review, spec.protect, policy.approval_ttl_s
+        )
     # A step cut off once its tasks had all saved their results has no `next`, but its tasks are
     # still in the checkpoint: the graph has not applied them, so it goes on. Only a graph that
     # ended has neither.
@@ -239,7 +244,9 @@ async def resume_workflow(
     elif asks and decision:
         resume = decision.model_dump(mode="json")
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
-    return await _finish(log, lambda: graph, start, config, budget, review, spec.protect)
+    return await _finish(
+        log, lambda: graph, start, config, budget, review, spec.protect, policy.approval_ttl_s
+    )
 
 
 async def rerun_workflow(
@@ -320,7 +327,9 @@ async def rerun_workflow(
     )
     await _emit_fallback(log, providers)
     start = None if seeded else await _initial(log, input, artifacts, inputs)
-    return await _finish(log, lambda: graph, start, config, budget, review, spec.protect)
+    return await _finish(
+        log, lambda: graph, start, config, budget, review, spec.protect, policy.approval_ttl_s
+    )
 
 
 async def seed_inputs(
@@ -382,11 +391,13 @@ async def _finish(
     budget: BudgetMeter | None = None,
     review: GateReview | None = None,
     protect: ProtectPolicy | None = None,
+    ttl_s: int = APPROVAL_TTL_S,
 ) -> WorkflowRunResult:
     """Build the graph and invoke it from `start` (`None` continues from the checkpoint, a
     `Command` continues a paused gate), then report the end, or the pause at a gate. A failure
     to build is logged like one from the graph. A run that has spent its `budget`, before it
-    starts or as it goes, ends `failed` (`_stopped`)."""
+    starts or as it goes, ends `failed` (`_stopped`). A circuit breaker that trips (13.7) pauses
+    the run (`_paused_by_breaker`), waiting `ttl_s`."""
     graph: CompiledWorkflow | None = None
     try:
         graph = build()
@@ -397,10 +408,16 @@ async def _finish(
     except PolicyLimitExceeded as over:
         assert graph is not None, "only the graph and the budget check raise it"
         return await _stopped(log, graph, config, over)
+    except BreakerTripped as tripped:
+        assert graph is not None, "only the graph raises it"
+        return await _paused_by_breaker(log, graph, config, tripped, ttl_s)
     except asyncio.CancelledError as e:
         if over := next((a for a in e.args if isinstance(a, PolicyLimitExceeded)), None):
             await log_policy_stop(log, over)
             raise
+        if tripped := next((a for a in e.args if isinstance(a, BreakerTripped)), None):
+            assert graph is not None
+            return await _paused_by_breaker(log, graph, config, tripped, ttl_s)
         # `task.cancel("cancelled by user")` names why; a bare cancel is the caller's.
         reason = next((a for a in e.args if isinstance(a, str) and a), "caller cancelled")
         await log.emit(RUN_CANCELLED, payload={"reason": reason})
@@ -433,6 +450,31 @@ async def _stopped(
     if graph.checkpointer is not None and (saved := (await graph.aget_state(config)).values):
         state = RunState(**saved)
     return _result(log, state, "failed", stopped_at=over.node_id)
+
+
+async def _paused_by_breaker(
+    log: RunEventLog,
+    graph: CompiledWorkflow,
+    config: RunnableConfig,
+    tripped: BreakerTripped,
+    ttl_s: int,
+) -> WorkflowRunResult:
+    """Pause a run whose step tripped a circuit breaker (13.7): the running steps already ended
+    `node_cancelled`. Writes `breaker_tripped`, then `gate_waiting` on the same node (payload
+    `breaker`, `ttl_s`, `expires_at`), and ends the attempt `waiting`. The run goes on from its
+    last checkpoint when a person resumes it: the tripped step runs again from its start."""
+    state = initial_state("")
+    if graph.checkpointer is not None and (saved := (await graph.aget_state(config)).values):
+        state = RunState(**saved)
+    await log.emit(BREAKER_TRIPPED, node_id=tripped.node_id, payload=tripped.payload())
+    waiting: dict[str, JsonValue] = {
+        "breaker": tripped.breaker,
+        "reason": tripped.reason,
+        "ttl_s": ttl_s,
+        "expires_at": (datetime.now(UTC) + timedelta(seconds=ttl_s)).isoformat(),
+    }
+    await log.emit(GATE_WAITING, node_id=tripped.node_id, payload=waiting)
+    return _result(log, state, "waiting", waiting_at=tripped.node_id)
 
 
 async def _paused_gate(

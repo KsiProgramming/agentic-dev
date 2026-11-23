@@ -4,15 +4,15 @@ One breaker (repeat) goes end to end first, through engine, store, API and conso
 
 ## 1. Breaker policy, the watcher and the pause (engine)
 
-- [ ] `agentic_engine.policy`: add `BreakerPolicy` (`repeat_calls`, `repeat_errors`, `cost_multiple`, `cost_floor_usd`, `flip_flops`) with the defaults and `BREAKER_RANGES`. Add `Policy.breakers`, defaulted so runs frozen before 13.7 still load. Add `with_breakers(policy, spec_breakers)`, which applies workflow over workspace over platform, clamped to the ranges.
-- [ ] `agentic_engine.spec`: add `WorkflowSpec.breakers` (optional, per field). Validation reports `breakers_out_of_range`. Regenerate the JSON Schema in `schemas/`.
-- [ ] `agentic_engine.breakers` (new):
+- [x] `agentic_engine.policy`: add `BreakerPolicy` (`repeat_calls`, `repeat_errors`, `cost_multiple`, `cost_floor_usd`, `flip_flops`) with the defaults and `BREAKER_RANGES`. Add `Policy.breakers`, defaulted so runs frozen before 13.7 still load. Add `with_breakers(policy, spec_breakers)`, which applies workflow over workspace over platform, clamped to the ranges.
+- [x] `agentic_engine.spec`: add `WorkflowSpec.breakers` (optional, per field). Validation reports `breakers_out_of_range`. Regenerate the JSON Schema in `schemas/`.
+- [x] `agentic_engine.breakers` (new):
   - `BreakerWatch`, one per step execution. `see(event)` raises `BreakerTripped` with `breaker`, `trigger`, `threshold`, `observed`, `details` and `reason`.
   - The repeat breaker: canonical arguments with `description` dropped; error text with whitespace collapsed and cut at 500 characters.
-- [ ] `events.py`: add `BREAKER_TRIPPED` with its payload documented.
-- [ ] `graph/compile.py`: create a watch where each agent, classifier and hub step starts. Feed it beside `limits.budget.add`, at the three `on_event` sites (agent, router classifier, orchestrator hub), and in orchestrator tasks and review lenses through the agent path.
-- [ ] `graph/run.py` `_finish`: catch `BreakerTripped` (also as a `CancelledError` arg, as `PolicyLimitExceeded` is caught). The running nodes end `node_cancelled`. Then write `breaker_tripped`, then `gate_waiting` on the tripped node with `breaker`, `ttl_s` from `approval_ttl_s` and `expires_at`, and return `waiting` (`waiting_at` is the tripped node).
-- [ ] Engine tests (`test_breakers.py`, fake runtime):
+- [x] `events.py`: add `BREAKER_TRIPPED` with its payload documented.
+- [x] `graph/compile.py`: create a watch where each agent, classifier and hub step starts. Feed it beside `limits.budget.add`, at the three `on_event` sites (agent, router classifier, orchestrator hub), and in orchestrator tasks and review lenses through the agent path.
+- [x] `graph/run.py` `_finish`: catch `BreakerTripped` (also as a `CancelledError` arg, as `PolicyLimitExceeded` is caught). The running nodes end `node_cancelled`. Then write `breaker_tripped`, then `gate_waiting` on the tripped node with `breaker`, `ttl_s` from `approval_ttl_s` and `expires_at`, and return `waiting` (`waiting_at` is the tripped node).
+- [x] Engine tests (`test_breakers.py`, fake runtime):
   - A scripted agent repeating a failing call pauses at 3 errors. One repeating a successful call pauses at 5.
   - The thresholds come from `Policy.breakers`.
   - A trip inside one parallel branch cancels the other, and the run ends `waiting`.
