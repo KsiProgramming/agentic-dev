@@ -9,6 +9,14 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
+- Phase 13.7 Circuit breakers:
+  - **The engine pauses a step that works badly.** A watch per agent step trips on the same call 5 times or the same error 3 times, a cost of 3 × the node's average (and $0.50 over it), a write outside the node's declared `paths`, or 2 flips of a file; the run ends `waiting` with `breaker_tripped` and `gate_waiting.breaker`, `runs.breaker_trips` counts the pauses.
+  - **Resume or Cancel run** through `POST /runs/{id}/approvals` (`approve` / `reject`; anything else is `422 breaker_decision_invalid`). Resume runs the paused step again from its start, told why in a "# Paused before" section; steps that completed are not run again; a pause uses no loop pass; an unanswered pause expires ("Breaker pause expired").
+  - **Declared paths are refused.** `paths` on a writer agent; `repo.write_file` and `repo.commit` refuse a path outside it (also for Copilot, whose `tool_call` arrives after the tool ran).
+  - **Thresholds** in `Policy.breakers`: workflow (`breakers` in the spec) over workspace (`PUT /workspaces/{id}/policy`) over platform, clamped to ranges, frozen on the run; new validation codes `breakers_out_of_range`, `paths_without_writes`, `invalid_paths`. Cost baselines are frozen on the run (`runs.cost_baselines`). Migrations `0043` and `0044`.
+  - **Web.** "Paused" status, a banner, dock and Inbox with Resume and Cancel run, `BreakerDetails` on the step, a Breakers tile, a Circuit breakers section in Settings, and the four `breaker.*` audit actions.
+  - **Not in this change:** the e2e run on a rebuilt stack and the real run with Claude (see `specs/2026-11-23-circuit-breakers/validation.md`); a step resumed after a worker crash is not told "# Paused before" again.
+  - Docs: security model, technical flows, tech-stack (contract, tool layer, security, UI, decisions), the plan.
 - Phase 13.6 Independent review ([#258](https://github.com/KsiProgramming/agentic-dev/pull/258)):
   - **Review agents the engine keeps independent.** `review: {of?, spec_from?}` on an agent: the engine builds its input (`## Spec`, `## Change` from `repo.diff`, `## Evidence`), never the previous step's output; it has only the five read tools, no artifact tools, no `reads` and a typed findings answer; its reads come from the reviewed writer's committed work in git refs. `of` unset is the latest writer, so a stored composite works in any caller. `node_started.review` says what it was given.
   - **Six lenses** (correctness, security, performance, tests, API compatibility, accessibility) and `review_flow`: a `parallel` (join `settled`) of lenses and a `dedupe` reduce that writes `review.json`. Correctness also checks in-code suppressions and `.csproj` analyzer settings (13.5's gap), tests flags weak tests (13.4's gap). The findings categories gain `correctness`, `performance`, `compatibility` and `accessibility`.

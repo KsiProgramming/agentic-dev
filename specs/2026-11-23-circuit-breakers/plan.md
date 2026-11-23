@@ -83,22 +83,22 @@ Read `specs/design-language.md`, tech-stack → UI design system, and `web/AGENT
 
 ## 5. Thresholds: workspace, workflow, builder (API, web)
 
-- [ ] `PUT /workspaces/{id}/policy` takes `breakers`. `GET` returns `defaults`, `ranges`, `overrides` and `effective` for them. Add API tests.
-- [ ] `create_run` and rerun resolve `with_breakers` and freeze them in `runs.policy`. `POST /workflows/{id}/validate` gives the same errors as the spec.
-- [ ] Node manifests: `paths` in the agent manifest and `breakers` as a document param, both `advanced`. Add a shared case to `schemas/fixtures/graph-ops.json` if `breakers` is a document param.
-- [ ] Web: a "Circuit breakers" card in `web/src/settings/run-limits.tsx` (units, ranges in help text, the sticky save bar, Reset to defaults). The builder's side panel shows `paths` and `breakers` from the manifest with no new code beyond the field types. Add Vitest for the card.
+- [x] `PUT /workspaces/{id}/policy` takes `breakers`. `GET` returns `defaults`, `ranges`, `overrides` and `effective` for them. Add API tests.
+- [x] `create_run` and rerun resolve `with_breakers` and freeze them in `runs.policy`. `POST /workflows/{id}/validate` gives the same errors as the spec.
+- [x] Node manifests: `paths` in the agent manifest and `breakers` as a document param, both `advanced`. Add a shared case to `schemas/fixtures/graph-ops.json` if `breakers` is a document param.
+- [x] Web: a "Circuit breakers" card in `web/src/settings/run-limits.tsx` (units, ranges in help text, the sticky save bar, Reset to defaults). The builder's side panel shows `paths` and `breakers` from the manifest with no new code beyond the field types. Add Vitest for the card.
 
 ## 6. Specs, docs and the real run
 
-- [ ] `specs/tech-stack.md`:
+- [x] `specs/tech-stack.md`:
   - a "Circuit breakers (API contract)" section (breakers, thresholds and ranges, events, pause and resume, the approvals codes, the cost baseline, "# Paused before");
   - Security & secrets: breaker thresholds beside the policy limits;
   - Tool layer: declared paths beside protected paths;
   - UI design system: Run console banner, dock, step status and tile, Inbox, Settings card;
   - decisions log rows for each decision in `requirements.md`, and the Copilot `tool_call` order.
-- [ ] `specs/roadmap.md`: add `[Plan](2026-11-23-circuit-breakers/requirements.md)` to the 13.7 row.
-- [ ] `docs/architecture/technical-flows.md` (the pause and resume flow) and `docs/security/` (breakers as a guardrail).
-- [ ] `CHANGELOG.md` under `## [Unreleased]`.
+- [x] `specs/roadmap.md`: add `[Plan](2026-11-23-circuit-breakers/requirements.md)` to the 13.7 row.
+- [x] `docs/architecture/technical-flows.md` (the pause and resume flow) and `docs/security/` (breakers as a guardrail).
+- [x] `CHANGELOG.md` under `## [Unreleased]`.
 - [ ] Real Claude run (`AGENTIC_RUNTIME=claude`, real repo): a one-agent workflow told to read a file that does not exist "until it succeeds".
   - Read step by step in the console: it pauses at 3 errors with the reason; Resume; the resumed agent's Activity shows that it read "# Paused before" and acted differently; the run goes on.
   - Then try one paths trip on a writer with `paths: ["docs/**"]` asked to edit `README.md`.

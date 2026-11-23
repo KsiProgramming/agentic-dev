@@ -190,6 +190,13 @@ An agent that is told to make a check pass can change what the check reads. The 
 - **What is shown.** Every refusal is a `protected_path_refused` event (path and rule, never content), counted on the run and listed at the gate with the protected files marked in the diff.
 - **What is not covered.** Analyzer settings inside a `.csproj` and suppressions written in code (`# noqa`, `#pragma warning disable`) are not protected paths; the evidence step lints by the run's base analyzer config files, which covers a relaxed `ruff.toml`, `.editorconfig` or `[tool.ruff]`, and the reviewers of 13.6 are meant to catch the rest. Sealed tests outside the sandbox are 17.3.
 
+## Circuit breakers (13.7)
+
+- **What they catch.** An agent calling the same tool the same way again and again, repeating the same error, a step costing several times its node's usual cost, a write outside the paths the node declared, and a file rewritten back and forth. Each pauses the run before more is spent or written.
+- **A cap refuses.** A write outside a node's declared `paths` never lands: the watch pauses on the `tool_call`, and `repo.write_file` and `repo.commit` refuse it too, so no provider's event order can let it through. No setting turns a breaker off; a workspace or workflow tunes a threshold within a platform range.
+- **What a person sees.** The reason, the tool and its arguments (cut short), the error text, the path or the cost, as text. These are model and repo output, so they are data: the resumed agent gets them between tags in a "# Paused before" section, never as instructions. Events and audit rows hold hashes and counts, never file content.
+- **Who decides.** Resume and Cancel run only, through the approval endpoint, recorded in the audit log (`breaker.resumed`, `breaker.cancelled`). A pause nobody answers expires and cancels the run (`breaker.expired`).
+
 ## Independent review (13.6)
 
 A reviewer that shares the writer's framing agrees with it. The platform runs reviewers that start fresh, and enforces that on the node, in the engine, not in instructions:

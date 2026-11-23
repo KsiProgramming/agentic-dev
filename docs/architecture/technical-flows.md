@@ -132,6 +132,16 @@ sequenceDiagram
 
 ---
 
+### Pause by a circuit breaker (13.7)
+
+A step that crosses a breaker's threshold ends the same way a budget stop does, but the run is paused, not failed:
+
+1. The step's `BreakerWatch` raises `BreakerTripped` from an agent event. The running steps end `node_cancelled`.
+2. The runner writes `breaker_tripped`, then `gate_waiting` on the tripped node with `breaker`, and the attempt ends `waiting`. The worker is released; the run's checkpoint is the last completed step.
+3. A person reads the reason in the console banner or the Inbox and posts `approve` (Resume) or `reject` (Cancel run) to `POST /runs/{id}/approvals`. The run is queued again.
+4. The worker finds the pause (`pending_breaker_pause`) and calls `resume_workflow` with it. Resume writes `gate_decided` (`source: "breaker"`), then goes on from the checkpoint: the paused step runs again from its start with a "# Paused before" section in its context. Cancel writes `run_cancelled` and runs nothing.
+5. A pause nobody answers expires after the approval time to live and cancels the run.
+
 ## 5. Delivering a change: from sandbox to pull request
 
 The sandbox has **no network and no credentials**, so commits leave it as data and are pushed by the worker.
