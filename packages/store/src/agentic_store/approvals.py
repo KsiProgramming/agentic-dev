@@ -7,6 +7,11 @@ a run spends at gates never uses up its retries. The gate a run waits at is the 
 `gate_waiting` event, whose `changes` are the files an approval may edit and whose `select` the
 items a selection gate's approval may choose (6.7). A gate past its
 `gate_expires_at` takes no decision: the run is being cancelled (`agentic_store.expiry`).
+
+A run a circuit breaker paused (13.7) waits the same way: its `gate_waiting` has a `breaker`.
+Resume is an `approve` and Cancel run a `reject`; nothing else is a decision there
+(`InvalidBreakerDecisionError`). `pending_breaker_pause` hands the worker the trip and the
+decision.
 """
 
 from dataclasses import dataclass, field
@@ -19,7 +24,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.artifacts import GateArtifact
-from agentic_engine.events import GATE_WAITING, PROTECTED_PATH_REFUSED
+from agentic_engine.events import (
+    BREAKER_TRIPPED,
+    GATE_DECIDED,
+    GATE_WAITING,
+    PROTECTED_PATH_REFUSED,
+)
 from agentic_engine.evidence import EvidencePack
 from agentic_engine.gate import (
     DismissalError,
@@ -99,6 +109,11 @@ class InvalidDismissalError(ApprovalError):
         self.code: DismissalErrorCode = code
 
 
+class InvalidBreakerDecisionError(ApprovalError):
+    """A circuit-breaker pause (13.7) takes only Resume (`approve`) and Cancel run (`reject`),
+    with no edits, selection, comments or dismissals."""
+
+
 _CHANGES = TypeAdapter(list[FileChange])
 
 
@@ -130,6 +145,9 @@ async def record_approval(
                 raise WrongGateError(f"run {run_id} is waiting at gate {gate!r}, not {node_id!r}")
             if payload.get("wait_for"):
                 raise NotAGateError(f"{node_id!r} waits for an answer on Jira, not for a decision")
+            breaker = isinstance(payload.get("breaker"), str)
+            if breaker:
+                _check_breaker_decision(decision)
             iteration = await _pass(session, run_id, node_id)
             if decision.decision == "changes":
                 allowed = payload.get("on_changes")
@@ -189,7 +207,9 @@ async def record_approval(
             audit(
                 session,
                 workspace_id,
-                _AUDIT_ACTION[decision.decision],
+                _BREAKER_AUDIT_ACTION[decision.decision]
+                if breaker
+                else _AUDIT_ACTION[decision.decision],
                 run_id=run_id,
                 node_id=node_id,
                 # Paths only: the edited contents stay in the approval and the run's events.
@@ -205,6 +225,22 @@ _AUDIT_ACTION: dict[str, AuditAction] = {
     "reject": "gate.rejected",
     "changes": "gate.changes_requested",
 }
+
+
+_BREAKER_AUDIT_ACTION: dict[str, AuditAction] = {
+    "approve": "breaker.resumed",
+    "reject": "breaker.cancelled",
+}
+
+
+def _check_breaker_decision(decision: GateDecision) -> None:
+    """Raise `InvalidBreakerDecisionError` unless `decision` is a plain Resume or Cancel run."""
+    if decision.decision == "changes":
+        raise InvalidBreakerDecisionError("a circuit-breaker pause takes no request for changes")
+    if decision.edits or decision.selection is not None or decision.dismissed:
+        raise InvalidBreakerDecisionError(
+            "a circuit-breaker pause takes no edits, selection or dismissals"
+        )
 
 
 def _audit_details(decision: GateDecision, edited: list[str]) -> dict[str, JsonValue]:
@@ -267,6 +303,10 @@ class PendingGate:
     # What the independent review found (13.6), if the gate has a review: comments on the lines
     # they name, the lenses that could not run and the send-backs left.
     review: ReviewShown | None = None
+    # The circuit breaker that paused the run (13.7), if one did: its `breaker_tripped` payload
+    # (`breaker`, `trigger`, `threshold`, `observed`, `details`, `reason`). Model and repo
+    # output inside, so data, never instructions.
+    breaker: dict[str, JsonValue] | None = None
 
 
 async def protected_attempts(
@@ -303,6 +343,11 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         row = await _last_gate_waiting(session, run_id)
         passes = 1 if row is None else await _pass(session, run_id, row[0])
         attempts = await protected_attempts(session, run_id)
+        trip = (
+            await _last_trip(session, run_id, row[0])
+            if row is not None and isinstance(row[1].get("breaker"), str)
+            else None
+        )
     if row is None:
         raise RunNotWaitingError(f"run {run_id} has not paused at a gate")
     node_id, payload = row
@@ -323,6 +368,7 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         evidence=_shown_evidence(payload),
         protected_attempts=attempts,
         review=_shown_review(payload),
+        breaker=trip,
     )
 
 
@@ -379,6 +425,67 @@ async def pending_decision(
             "comments": approval.comments or [],
             "dismissed": approval.dismissed,
         }
+    )
+
+
+@dataclass(frozen=True)
+class BreakerPauseRecord:
+    """A run paused by a circuit breaker and what its person decided (13.7): the step
+    (`node_id`), the `breaker_tripped` payload and the recorded `decision`."""
+
+    node_id: str
+    trip: dict[str, JsonValue]
+    decision: GateDecision
+
+
+async def pending_breaker_pause(
+    sessions: async_sessionmaker[AsyncSession], run_id: UUID
+) -> BreakerPauseRecord | None:
+    """The circuit-breaker pause the run is at and the decision recorded for it. `None` when the
+    run's last pause is a gate's, when nobody has decided it, or when the engine has applied
+    the decision already (a `gate_decided` follows the pause)."""
+    async with sessions() as session:
+        last = (
+            await session.execute(
+                select(RunEventRow.seq, RunEventRow.node_id, RunEventRow.payload)
+                .where(RunEventRow.run_id == run_id, RunEventRow.type == GATE_WAITING)
+                .order_by(RunEventRow.seq.desc())
+                .limit(1)
+            )
+        ).first()
+        if last is None or last.node_id is None or not isinstance(last.payload.get("breaker"), str):
+            return None
+        applied = await session.scalar(
+            select(RunEventRow.seq)
+            .where(
+                RunEventRow.run_id == run_id,
+                RunEventRow.type == GATE_DECIDED,
+                RunEventRow.seq > last.seq,
+            )
+            .limit(1)
+        )
+        trip = await _last_trip(session, run_id, last.node_id)
+    if applied is not None or trip is None:
+        return None
+    decision = await pending_decision(sessions, run_id)
+    if decision is None:
+        return None
+    return BreakerPauseRecord(last.node_id, trip, decision)
+
+
+async def _last_trip(
+    session: AsyncSession, run_id: UUID, node_id: str
+) -> dict[str, JsonValue] | None:
+    """The payload of the last `breaker_tripped` event of `node_id`."""
+    return await session.scalar(
+        select(RunEventRow.payload)
+        .where(
+            RunEventRow.run_id == run_id,
+            RunEventRow.type == BREAKER_TRIPPED,
+            RunEventRow.node_id == node_id,
+        )
+        .order_by(RunEventRow.seq.desc())
+        .limit(1)
     )
 
 

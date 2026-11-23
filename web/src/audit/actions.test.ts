@@ -72,6 +72,32 @@ describe("describe", () => {
       "Rejected approve",
     ],
     [
+      "a circuit breaker pause",
+      {
+        action: "breaker.tripped",
+        actor: { type: "system", id: null },
+        node_id: "b",
+        details: {
+          breaker: "repeat",
+          trigger: "errors",
+          threshold: 3,
+          observed: 3,
+          tool: "repo.read_file",
+        },
+      },
+      "A circuit breaker paused b: repeat tripped · on repo.read_file",
+    ],
+    [
+      "a resume after a pause",
+      { action: "breaker.resumed", node_id: "b", details: { comment: "try again" } },
+      "Resumed b after a circuit breaker · “try again”",
+    ],
+    [
+      "a cancel at a pause",
+      { action: "breaker.cancelled", node_id: "b", details: { comment: null } },
+      "Cancelled the run paused at b by a circuit breaker",
+    ],
+    [
       "a Claude key",
       {
         action: "connection.added",
@@ -323,6 +349,10 @@ test("each category has its actions", () => {
     "gate.sent_back_by_checks",
     "gate.sent_back_by_review",
     "gate.expired",
+    "breaker.tripped",
+    "breaker.resumed",
+    "breaker.cancelled",
+    "breaker.expired",
   ]);
   expect(actionsOf("workflows")).toEqual([
     "workflow.created",

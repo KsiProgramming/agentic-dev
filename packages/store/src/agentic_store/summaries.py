@@ -69,6 +69,8 @@ class RunSummaryRow:
     usage: "RunUsageRow"
     # How many times a writer tried to change a protected path (13.5).
     protected_attempts: int
+    # How many times a circuit breaker paused the run (13.7).
+    breaker_trips: int
     times: "RunTimesRow"
     # What became of the run's sandbox: kept until when, or removed (12.3).
     sandbox: SandboxInfo
@@ -176,6 +178,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.estimated_usd,
         Run.cost_complete,
         Run.protected_attempts,
+        Run.breaker_trips,
         Run.policy["budget_usd"].astext.label("budget_usd"),
         Run.active_ms,
         Run.waiting_ms,
@@ -232,6 +235,7 @@ def _summary(
             budget_usd=Decimal(row.budget_usd) if row.budget_usd is not None else None,
         ),
         protected_attempts=row.protected_attempts,
+        breaker_trips=row.breaker_trips,
         times=RunTimesRow(
             active_ms=row.active_ms,
             waiting_ms=row.waiting_ms,

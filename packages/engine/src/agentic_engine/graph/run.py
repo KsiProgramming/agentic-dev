@@ -3,6 +3,7 @@ paused at a gate."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
@@ -27,6 +28,7 @@ from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
     ARTIFACT_WRITTEN,
     BREAKER_TRIPPED,
+    GATE_DECIDED,
     GATE_WAITING,
     NODE_STARTED,
     POLICY_LIMIT_EXCEEDED,
@@ -40,7 +42,13 @@ from agentic_engine.events import (
     NullEventSink,
     RunEventLog,
 )
-from agentic_engine.gate import FileChange, GateDecision, GateReview, GateReviewError
+from agentic_engine.gate import (
+    FileChange,
+    GateDecision,
+    GateReview,
+    GateReviewError,
+    decided_payload,
+)
 from agentic_engine.graph.checkpoint import Checkpointer, thread_config
 from agentic_engine.graph.compile import (
     CompiledWorkflow,
@@ -64,6 +72,20 @@ from agentic_engine.spec.models import ProtectPolicy
 from agentic_runtime import AgentRuntime, ProtectedPaths, ReadableWriters, ToolExecutor
 
 RUN_END = {"completed": RUN_COMPLETED, "failed": RUN_FAILED, "cancelled": RUN_CANCELLED}
+
+BREAKER_CANCELLED_REASON = "Cancelled after a circuit breaker"
+"""The `reason` of the `run_cancelled` event of a run whose person chose Cancel run at a pause."""
+
+
+@dataclass(frozen=True)
+class BreakerPause:
+    """A run paused by a circuit breaker (13.7), and what its person decided: `trip` is the
+    `breaker_tripped` event's payload and `node_id` the step it paused. `decision` is `approve`
+    (Resume) or `reject` (Cancel run)."""
+
+    node_id: str
+    trip: Mapping[str, JsonValue]
+    decision: GateDecision
 
 
 async def run_workflow(
@@ -183,6 +205,7 @@ async def resume_workflow(
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
     protected: ProtectedPaths | None = None,
+    breaker: BreakerPause | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -196,6 +219,11 @@ async def resume_workflow(
     pauses at the gate again, and the pause is announced again. A `suspended` run (it created its
     repo) just goes on.
 
+    A run a circuit breaker paused (13.7) continues with `breaker`: `gate_decided`
+    (`source: "breaker"`) follows `run_resumed`. Resume (approve) goes on from the checkpoint, so
+    the paused step runs again from its start, told why it was paused; Cancel run (reject) ends
+    the run `cancelled` with `BREAKER_CANCELLED_REASON` and runs nothing.
+
     `spent` is what the run's earlier attempts spent: a run that has already spent its budget
     stops before it runs another node.
     """
@@ -203,6 +231,7 @@ async def resume_workflow(
     budget = budget_meter(policy, spent)
     if inputs and artifacts is None:
         artifacts = InMemoryArtifactStore()
+    resuming = breaker is not None and breaker.decision.decision == "approve"
     graph = compile_workflow(
         spec,
         runtime,
@@ -219,6 +248,7 @@ async def resume_workflow(
         providers=providers,
         readable=readable,
         protected=protected,
+        paused={breaker.node_id: breaker.trip} if breaker is not None and resuming else None,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
@@ -227,6 +257,12 @@ async def resume_workflow(
     ran = dict.fromkeys(saved.get("order", []))  # a node in a loop runs once per iteration
     completed = [n for n in ran if results[n].status == "completed"]
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
+    if breaker is not None:
+        decided = {**decided_payload(breaker.decision, {}), "source": "breaker"}
+        await log.emit(GATE_DECIDED, node_id=breaker.node_id, payload=decided)
+        if not resuming:
+            await log.emit(RUN_CANCELLED, payload={"reason": BREAKER_CANCELLED_REASON})
+            return _result(log, RunState(**saved) if saved else initial_state(""), "cancelled")
     if not saved:
         first = await _initial(log, input, artifacts, inputs)
         return await _finish(

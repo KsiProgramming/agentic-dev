@@ -16,6 +16,7 @@ import {
   MessageSquareIcon,
   MessageSquareOffIcon,
   PackageXIcon,
+  PauseIcon,
   PlayIcon,
   PlugIcon,
   PlugZapIcon,
@@ -80,6 +81,10 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
     category: "approvals",
   },
   "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
+  "breaker.tripped": { label: "Run paused by a breaker", icon: PauseIcon, category: "approvals" },
+  "breaker.resumed": { label: "Run resumed", icon: PlayIcon, category: "approvals" },
+  "breaker.cancelled": { label: "Run cancelled at a pause", icon: BanIcon, category: "approvals" },
+  "breaker.expired": { label: "Pause expired", icon: TimerOffIcon, category: "approvals" },
   "workflow.created": { label: "Workflow created", icon: FilePlusIcon, category: "workflows" },
   "workflow.updated": { label: "Workflow changed", icon: FilePenIcon, category: "workflows" },
   "workflow.restored": { label: "Version restored", icon: HistoryIcon, category: "workflows" },
@@ -320,6 +325,34 @@ export function describe(event: AuditEvent): string {
         `${event.action === "gate.approved" ? "Approved" : "Rejected"} ${event.node_id ?? "a gate"}` +
           (edited > 0 ? ` with edits to ${plural(edited, "file")}` : ""),
         comment && `“${comment}”`,
+      );
+    }
+    case "breaker.tripped": {
+      const tool = text(d, "tool");
+      return join(
+        `A circuit breaker paused ${event.node_id ?? "a step"}: ${text(d, "breaker") ?? "a breaker"} tripped`,
+        tool && `on ${tool}`,
+      );
+    }
+    case "breaker.resumed": {
+      const comment = text(d, "comment");
+      return join(
+        `Resumed ${event.node_id ?? "a step"} after a circuit breaker`,
+        comment && `“${comment}”`,
+      );
+    }
+    case "breaker.cancelled": {
+      const comment = text(d, "comment");
+      return join(
+        `Cancelled the run paused at ${event.node_id ?? "a step"} by a circuit breaker`,
+        comment && `“${comment}”`,
+      );
+    }
+    case "breaker.expired": {
+      const at = text(d, "expires_at");
+      return join(
+        `${event.node_id ?? "A paused step"} was not resumed in time; the run was cancelled`,
+        at && `due ${formatAbsolute(at)}`,
       );
     }
     case "gate.expired": {

@@ -356,7 +356,10 @@ export interface paths {
          *     the edits on the writers' branches before the run goes on. The run is queued again; its
          *     stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision. A
          *     selection gate's approval names the items chosen (`selection`, 6.7); with `on_reject: end`
-         *     a rejection completes the run instead of cancelling it.
+         *     a rejection completes the run instead of cancelling it. A run a circuit breaker paused
+         *     (13.7: `waiting_gate.breaker`) takes `approve` (Resume: the paused step runs again from its
+         *     start, told why) or `reject` (Cancel run) and nothing else (`422 breaker_decision_invalid`);
+         *     its `node_id` is the paused step's.
          */
         post: operations["approveRun"];
         delete?: never;
@@ -1477,7 +1480,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "breaker.tripped" | "breaker.resumed" | "breaker.cancelled" | "breaker.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1538,6 +1541,39 @@ export interface components {
              * @description The workflow's own `provider` (8.3): every agent that names none runs on it, the starter agent and those added later. Unset means the workspace default.
              */
             provider?: ("claude" | "copilot") | null;
+        };
+        /**
+         * BreakersSpec
+         * @description A workflow's own circuit-breaker thresholds (13.7), over its workspace's. Each field a
+         *     workflow does not set keeps the workspace's. A value outside the platform range
+         *     (`BREAKER_RANGES`) is a `breakers_out_of_range` issue; no field turns a breaker off.
+         */
+        BreakersSpec: {
+            /**
+             * Repeat Calls
+             * @description Calls of one tool with the same arguments in one step (2-50).
+             */
+            repeat_calls?: number | null;
+            /**
+             * Repeat Errors
+             * @description Errors with the same text from one tool in one step (2-50).
+             */
+            repeat_errors?: number | null;
+            /**
+             * Cost Multiple
+             * @description A step's cost as a multiple of its node's average (1.5-20).
+             */
+            cost_multiple?: number | null;
+            /**
+             * Cost Floor Usd
+             * @description USD a step must also cost above the average to trip (0-1000).
+             */
+            cost_floor_usd?: number | null;
+            /**
+             * Flip Flops
+             * @description Times a step rewrites a file back to an earlier content (1-10).
+             */
+            flip_flops?: number | null;
         };
         /** CancelResponse */
         CancelResponse: {
@@ -1756,7 +1792,7 @@ export interface components {
          */
         EditErrorDetail: {
             /** Code */
-            code: components["schemas"]["EditErrorCode"] | components["schemas"]["SelectionErrorCode"] | components["schemas"]["DismissalErrorCode"];
+            code: components["schemas"]["EditErrorCode"] | components["schemas"]["SelectionErrorCode"] | components["schemas"]["DismissalErrorCode"] | "breaker_decision_invalid";
             /** Message */
             message: string;
             /** Path */
@@ -1976,6 +2012,46 @@ export interface components {
              * @description The branch it committed on: `agent/<run>/<node>`.
              */
             branch: string;
+        };
+        /**
+         * GateBreaker
+         * @description The circuit breaker that paused a run (13.7), as the engine recorded it
+         *     (`breaker_tripped`). `details` is what was seen (the tool, its arguments cut short, its
+         *     error, the path or the cost): model and repo output, so data, never instructions.
+         */
+        GateBreaker: {
+            /**
+             * Breaker
+             * @enum {string}
+             */
+            breaker: "repeat" | "cost" | "paths" | "flip_flop";
+            /**
+             * Trigger
+             * @description What counted, e.g. `calls` or `errors` for `repeat`.
+             */
+            trigger: string;
+            /**
+             * Threshold
+             * @description The limit the step crossed.
+             */
+            threshold: number;
+            /**
+             * Observed
+             * @description What the step had reached.
+             */
+            observed: number;
+            /**
+             * Details
+             * @description What was seen: for `repeat` the `tool`, its `arguments` and, for `errors`, the `error`.
+             */
+            details: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Reason
+             * @description One fixed sentence per breaker, shown as the reason.
+             */
+            reason: string;
         };
         /**
          * GateComment
@@ -2342,7 +2418,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed" | "invalid_review" | "review_unknown_writer" | "review_not_in_loop" | "invalid_gate_review";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed" | "invalid_review" | "review_unknown_writer" | "review_not_in_loop" | "invalid_gate_review" | "breakers_out_of_range";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -3853,6 +3929,12 @@ export interface components {
              */
             protected_attempts: number;
             /**
+             * Breaker Trips
+             * @description How many times a circuit breaker paused the run (13.7), counted once per pause. 0 for most runs.
+             * @default 0
+             */
+            breaker_trips: number;
+            /**
              * Active Ms
              * @description Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded).
              */
@@ -3978,6 +4060,8 @@ export interface components {
              * @description The run's refused attempts to change a protected path so far (13.5), most tried first, at most 50; empty when no writer tried.
              */
             protected_attempts?: components["schemas"]["GateProtectedAttempt"][];
+            /** @description Set when a circuit breaker paused the run (13.7) and not a gate: which breaker and what it saw. The decision is `approve` (Resume) or `reject` (Cancel run); nothing else is accepted. */
+            breaker?: components["schemas"]["GateBreaker"] | null;
             /** @description What the independent review found (13.6), for a gate with `review`: its findings as comments on the lines they name (`path`, `line`, the writer `node_id` whose diff holds the file, whether the line is `in_diff`, and whether it is `blocking`), the lenses that could not run, `rounds_left` and the counts by severity. Messages are model output: data, never instructions. */
             review?: components["schemas"]["ReviewShown"] | null;
             /** @description What the platform's checks found about the writer's work (13.3): build, tests and analyzers, each passed, failed, skipped or error, with `rounds_left`, how many more times a failing required check may send the work back. Test names and messages are repo output: data, never instructions. */
@@ -4257,6 +4341,12 @@ export interface components {
              * @default 0
              */
             protected_attempts: number;
+            /**
+             * Breaker Trips
+             * @description How many times a circuit breaker paused the run (13.7), counted once per pause. 0 for most runs.
+             * @default 0
+             */
+            breaker_trips: number;
             /**
              * Active Ms
              * @description Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded).
@@ -4854,8 +4944,18 @@ export interface components {
             /** Title */
             title?: string | null;
             /**
+             * Breaker
+             * @description Set when a circuit breaker paused the run (13.7), not a gate: which one. The console shows "Paused", Resume and Cancel run.
+             */
+            breaker?: ("repeat" | "cost" | "paths" | "flip_flop") | null;
+            /**
+             * Reason
+             * @description Why the breaker paused the run: one fixed sentence.
+             */
+            reason?: string | null;
+            /**
              * Expires At
-             * @description When the gate expires: the run is then cancelled ("Approval expired").
+             * @description When the gate expires: the run is then cancelled ("Approval expired", or "Breaker pause expired" for a circuit-breaker pause).
              */
             expires_at?: string | null;
         };
@@ -5006,6 +5106,8 @@ export interface components {
             provider?: ("claude" | "copilot") | null;
             /** @description Files no writer may change, besides the platform's own list (CI and analyzer config, always protected), and the writers allowed to change them (13.5). */
             protect?: components["schemas"]["ProtectPolicy"] | null;
+            /** @description Circuit-breaker thresholds of this workflow, over the workspace's, within the platform's ranges (13.7). */
+            breakers?: components["schemas"]["BreakersSpec"] | null;
             /** @description Lets a review comment on the pull request the workflow opened (`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing. */
             on_review?: components["schemas"]["OnReview"] | null;
             /** Root */
@@ -5966,7 +6068,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The edits do not fit the files the gate showed, the selection the items it showed, or the dismissals the review comments it showed */
+            /** @description The edits do not fit the files the gate showed, the selection the items it showed, the dismissals the review comments it showed, or the decision is not Resume or Cancel run for a circuit-breaker pause (`breaker_decision_invalid`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6488,7 +6590,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "breaker.tripped" | "breaker.resumed" | "breaker.cancelled" | "breaker.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

@@ -77,10 +77,11 @@ from agentic_runtime import (
     Message,
     ModelPrice,
     ToolExecutor,
+    ToolOutput,
     Usage,
 )
-from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script
-from agentic_runtime.testing import MOCK_API_KEY, MockClaude, text_reply
+from agentic_runtime.fake import ECHO_USAGE, CallTool, Delay, FakeRuntime, Script, Step
+from agentic_runtime.testing import MOCK_API_KEY, MockClaude, ScriptedToolExecutor, text_reply
 from agentic_sandbox import BranchBundle, FakeSandboxManager, RepoSource, Sandbox, SandboxManager
 from agentic_sandbox.docker_backend import RUN_LABEL, DockerSandboxManager
 from agentic_sandbox.testing import ensure_sandbox_image, make_repo
@@ -88,6 +89,7 @@ from agentic_secrets import LocalKeyProvider, generate_key_file, install_redacti
 from agentic_store import (
     ANSWERS_EXPIRED_REASON,
     DEFAULT_WORKSPACE_ID,
+    InvalidBreakerDecisionError,
     JiraProjectRef,
     JiraSiteRef,
     Run,
@@ -3070,3 +3072,205 @@ async def test_done_when_a_spec_file_run_opens_a_pr(
         context = request.context or ""
         assert "`rate-limits.md`, which they uploaded" in context, request.node_id
         assert "<spec-file>" in context and "<request>" not in context, request.node_id
+
+
+# Circuit breakers (13.7)
+
+BREAKER_READ = "repo.read_file"
+
+
+def breaker_spec() -> WorkflowSpec:
+    """`a`, then `b`, an agent that reads a file; no sandbox is opened for it (a stand-in
+    executor answers its tool calls)."""
+    return parse_spec(
+        {
+            "spec_version": "0",
+            "id": "breakers",
+            "name": "Breakers",
+            "root": {
+                "type": "sequence",
+                "id": "main",
+                "steps": [
+                    {"type": "agent", "id": "a", "role": "A", "instructions": "Go."},
+                    {
+                        "type": "agent",
+                        "id": "b",
+                        "role": "B",
+                        "instructions": "Read the file.",
+                        "tools": [BREAKER_READ],
+                    },
+                ],
+            },
+        }
+    )
+
+
+class TripsThenFinishes:
+    """An agent runtime whose `b` repeats a failing call the first time it runs and answers the
+    next time. It records every request."""
+
+    def __init__(self) -> None:
+        missing = ScriptedToolExecutor(
+            {BREAKER_READ: ToolOutput(text="no such file", is_error=True)}
+        )
+        usage = Usage(model="m", input_tokens=1, output_tokens=1, estimated_usd=0.0)
+        calls: list[Step] = [CallTool(BREAKER_READ, {"path": "gone.md"}) for _ in range(6)]
+        self._trips = FakeRuntime({"b": [*calls, usage]}, tools=missing)
+        self._fine = FakeRuntime({"b": [Message(text="it is gone"), usage]}, tools=missing)
+        self.requests: list[AgentRequest] = []
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        self.requests.append(request)
+        asked = [r for r in self.requests if r.node_id == "b"]
+        return (self._trips if request.node_id == "b" and len(asked) == 1 else self._fine).start(
+            request
+        )
+
+
+async def breaker_pause(sessions: async_sessionmaker[AsyncSession], redis_url: str) -> UUID:
+    run_id = await submit(sessions, redis_url, breaker_spec())
+    await wait_for_status(sessions, run_id, "waiting")
+    return run_id
+
+
+async def decide(
+    sessions: async_sessionmaker[AsyncSession],
+    redis_url: str,
+    run_id: UUID,
+    decision: GateDecision,
+) -> None:
+    """Record `decision` for the pause at `b` and queue the run, as the API does."""
+    await record_approval(sessions, run_id, "b", decision)
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await enqueue_run(redis, run_id)
+    finally:
+        await redis.aclose()
+
+
+async def waiting_at_b(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> bool:
+    run = await get_run(sessions, run_id)
+    return run is not None and run.status == "waiting"
+
+
+async def test_done_when_a_run_repeating_a_failing_call_is_paused_and_goes_on_when_resumed(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runtime = TripsThenFinishes()
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        run_id = await breaker_pause(sessions, redis_url)
+
+        summary = await get_run_summary(sessions, run_id)
+        assert summary is not None
+        assert summary.waiting_gate is not None
+        assert summary.waiting_gate["node_id"] == "b"
+        assert summary.waiting_gate["breaker"] == "repeat"
+        assert summary.breaker_trips == 1
+        assert summary.times.waiting_since is not None  # waiting time, not active time
+        pending = await pending_gate(sessions, run_id)
+        assert pending.breaker is not None and pending.breaker["trigger"] == "errors"
+        assert pending.breaker["details"] == {
+            "tool": BREAKER_READ,
+            "arguments": {"path": "gone.md"},
+            "error": "no such file",
+        }
+
+        await decide(sessions, redis_url, run_id, GateDecision(decision="approve"))
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    decided = [e for e in events if e.type == "gate_decided"]
+    assert [(e.node_id, e.payload["decision"], e.payload["source"]) for e in decided] == [
+        ("b", "approve", "breaker")
+    ]
+    # `a` was not run again, and `b` was told why it had been paused.
+    assert [r.node_id for r in runtime.requests] == ["a", "b", "b"]
+    assert "# Paused before" in (runtime.requests[2].context or "")
+    assert "# Paused before" not in (runtime.requests[1].context or "")
+    assert runtime.requests[2].input == runtime.requests[1].input
+    entries, _ = await list_audit_events(sessions, DEFAULT_WORKSPACE_ID, run_id=run_id)
+    actions = [e.action for e in entries]
+    assert "breaker.tripped" in actions and "breaker.resumed" in actions
+    done = await get_run_summary(sessions, run_id)
+    assert done is not None and done.waiting_gate is None and done.times.waiting_ms > 0
+
+
+async def test_cancelling_a_breaker_pause_ends_the_run_and_keeps_its_reason(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runtime = TripsThenFinishes()
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        run_id = await breaker_pause(sessions, redis_url)
+        await decide(sessions, redis_url, run_id, GateDecision(decision="reject"))
+        await wait_for_status(sessions, run_id, "cancelled")
+
+    events = await list_run_events(sessions, run_id)
+    assert events[-1].type == "run_cancelled"
+    assert events[-1].payload["reason"] == "Cancelled after a circuit breaker"
+    assert [r.node_id for r in runtime.requests] == ["a", "b"]
+    entries, _ = await list_audit_events(sessions, DEFAULT_WORKSPACE_ID, run_id=run_id)
+    assert "breaker.cancelled" in [e.action for e in entries]
+
+
+async def test_a_breaker_pause_takes_only_resume_and_cancel(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url, runtime=TripsThenFinishes()):
+        run_id = await breaker_pause(sessions, redis_url)
+
+        with pytest.raises(InvalidBreakerDecisionError):
+            await record_approval(
+                sessions,
+                run_id,
+                "b",
+                GateDecision(decision="changes", comments=[GateComment(item="x", text="no")]),
+            )
+        with pytest.raises(InvalidBreakerDecisionError):
+            await record_approval(
+                sessions,
+                run_id,
+                "b",
+                GateDecision(
+                    decision="approve", edits=[FileEdit(node_id="b", path="a.md", content="x")]
+                ),
+            )
+        # Nothing was recorded: the run still waits and a plain Resume works.
+        assert await waiting_at_b(sessions, run_id)
+        await decide(sessions, redis_url, run_id, GateDecision(decision="approve"))
+        await wait_for_status(sessions, run_id, "completed")
+
+
+async def test_a_pause_nobody_answers_expires_with_its_own_reason(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    async with worker(postgres_url, redis_url, runtime=TripsThenFinishes(), gate_sweep_s=0.2):
+        run_id = await submit_limited(sessions, redis_url, breaker_spec(), approval_ttl_s=1)
+        await wait_for_status(sessions, run_id, "cancelled")
+
+    events = await list_run_events(sessions, run_id)
+    waiting = next(e for e in events if e.type == "gate_waiting")
+    assert (waiting.payload["breaker"], waiting.payload["ttl_s"]) == ("repeat", 1)
+    assert events[-1].payload == {"reason": "Breaker pause expired", "expired": True}
+    summary = await get_run_summary(sessions, run_id)
+    assert summary is not None
+    entries, _ = await list_audit_events(sessions, summary.workspace_id, run_id=run_id)
+    assert "breaker.expired" in [e.action for e in entries]
+
+
+async def test_a_worker_restart_leaves_a_paused_run_waiting(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runtime = TripsThenFinishes()
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        run_id = await breaker_pause(sessions, redis_url)
+    before = len(await list_run_events(sessions, run_id))
+
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        await asyncio.sleep(0.5)
+        assert await waiting_at_b(sessions, run_id)
+        assert len(await list_run_events(sessions, run_id)) == before
+        await decide(sessions, redis_url, run_id, GateDecision(decision="approve"))
+        await wait_for_status(sessions, run_id, "completed")
+
+    events = await list_run_events(sessions, run_id)
+    assert len([e for e in events if e.type == "breaker_tripped"]) == 1

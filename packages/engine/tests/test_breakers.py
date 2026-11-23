@@ -4,6 +4,7 @@ with the reason."""
 
 import asyncio
 from collections.abc import Mapping, Sequence
+from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -11,7 +12,15 @@ from pydantic import JsonValue
 
 from agentic_engine.breakers import BreakerTripped, BreakerWatch, breaker_reason, error_key
 from agentic_engine.events import InMemoryEventSink, RunEvent
-from agentic_engine.graph import checkpoint_serde, run_workflow
+from agentic_engine.gate import GateDecision
+from agentic_engine.graph import (
+    BREAKER_CANCELLED_REASON,
+    BreakerPause,
+    WorkflowRunResult,
+    checkpoint_serde,
+    resume_workflow,
+    run_workflow,
+)
 from agentic_engine.policy import (
     BREAKER_RANGES,
     PLATFORM_POLICY,
@@ -20,7 +29,7 @@ from agentic_engine.policy import (
     with_breakers,
 )
 from agentic_engine.spec import WorkflowSpec, parse_spec, validate_workflow
-from agentic_runtime import ToolCall, ToolOutput, ToolResult, Usage
+from agentic_runtime import Message, ToolCall, ToolOutput, ToolResult, Usage
 from agentic_runtime.fake import CallTool, Delay, FakeRuntime, Step
 from agentic_runtime.testing import ScriptedToolExecutor
 
@@ -354,3 +363,182 @@ def test_a_spec_with_thresholds_in_range_is_valid_and_one_outside_cannot_be_pars
     assert parse_spec(document(repeat_calls=10)).breakers is not None
     with pytest.raises(ValueError, match="breakers"):
         parse_spec(document(repeat_calls=1))
+
+
+# Resume and cancel
+
+
+class Paused:
+    """A run a breaker paused at step `b` (after `a` completed), and what happens next."""
+
+    def __init__(self, tools: ScriptedToolExecutor | None = None) -> None:
+        self.workflow = spec({"type": "sequence", "id": "s", "steps": [agent("a"), agent("b")]})
+        self.tools = tools or missing()
+        self.sink = InMemoryEventSink()
+        self.checkpointer = InMemorySaver(serde=checkpoint_serde())
+        self.run_id = uuid4()
+        self.first = FakeRuntime({"a": [USAGE], "b": calling(6)}, tools=self.tools)
+
+    async def start(self) -> WorkflowRunResult:
+        return await run_workflow(
+            self.workflow,
+            self.first,
+            "the request",
+            run_id=self.run_id,
+            sink=self.sink,
+            checkpointer=self.checkpointer,
+            tools=self.tools,
+        )
+
+    def pause(self) -> BreakerPause:
+        trip = tripped_of(self.sink.events)
+        return BreakerPause(
+            node_id=str(trip.node_id), trip=trip.payload, decision=GateDecision(decision="approve")
+        )
+
+    async def resume(self, runtime: FakeRuntime, decision: str = "approve") -> WorkflowRunResult:
+        pause = self.pause()
+        pause = BreakerPause(pause.node_id, pause.trip, GateDecision(decision=decision))  # pyright: ignore[reportArgumentType]
+        return await resume_workflow(
+            self.workflow,
+            runtime,
+            "the request",
+            run_id=self.run_id,
+            sink=self.sink,
+            checkpointer=self.checkpointer,
+            next_seq=len(self.sink.events) + 1,
+            attempt=2,
+            tools=self.tools,
+            breaker=pause,
+        )
+
+
+def after_pause(paused: Paused) -> list[RunEvent]:
+    first = max(i for i, e in enumerate(paused.sink.events) if e.type == "gate_waiting")
+    return paused.sink.events[first + 1 :]
+
+
+async def test_resume_runs_the_paused_step_again_and_not_the_ones_that_completed() -> None:
+    paused = Paused()
+    assert (await paused.start()).status == "waiting"
+    second = FakeRuntime({"b": [Message(text="read it another way"), USAGE]}, tools=found())
+
+    result = await paused.resume(second)
+
+    assert result.status == "completed"
+    assert [r.node_id for r in second.requests] == ["b"]
+    events = after_pause(paused)
+    assert [e.type for e in events if e.type.startswith(("run_", "gate_"))] == [
+        "run_resumed",
+        "gate_decided",
+        "run_completed",
+    ]
+    [decided] = [e for e in events if e.type == "gate_decided"]
+    assert decided.node_id == "b"
+    assert (decided.payload["decision"], decided.payload["source"]) == ("approve", "breaker")
+
+
+async def test_the_resumed_agent_is_told_why_and_its_input_is_unchanged() -> None:
+    paused = Paused()
+    await paused.start()
+    [first] = [r for r in paused.first.requests if r.node_id == "b"]
+    second = FakeRuntime({"b": [Message(text="done"), USAGE]}, tools=found())
+
+    await paused.resume(second)
+
+    [again] = second.requests
+    assert "# Paused before" in again.context
+    assert "repo.read_file failed 3 times with the same error in one step" in again.context
+    assert "<breaker-details>" in again.context
+    assert '"path": "a.md"' in again.context
+    assert again.input == first.input
+    assert "# Paused before" not in first.context
+    [started] = [e for e in after_pause(paused) if e.type == "node_started" and e.node_id == "b"]
+    assert started.payload["resumed_after"] == {
+        "breaker": "repeat",
+        "reason": "repo.read_file failed 3 times with the same error in one step",
+    }
+
+
+async def test_a_step_that_was_not_paused_gets_no_such_section() -> None:
+    paused = Paused()
+    await paused.start()
+    second = FakeRuntime({"b": [USAGE]}, tools=found())
+
+    await paused.resume(second)
+
+    assert all("# Paused before" not in r.context for r in paused.first.requests)
+    started = [e for e in paused.sink.events if e.type == "node_started" and e.node_id == "a"]
+    assert all("resumed_after" not in e.payload for e in started)
+
+
+async def test_a_step_that_trips_again_pauses_again_with_fresh_counters() -> None:
+    paused = Paused()
+    await paused.start()
+    again = FakeRuntime({"b": calling(6)}, tools=missing())
+
+    result = await paused.resume(again)
+
+    assert result.status == "waiting"
+    assert result.waiting_at == "b"
+    assert [e.type for e in paused.sink.events if e.type == "tool_result"] == ["tool_result"] * 6
+    assert len([e for e in paused.sink.events if e.type == "gate_waiting"]) == 2
+
+
+async def test_cancel_ends_the_run_cancelled_and_runs_nothing() -> None:
+    paused = Paused()
+    await paused.start()
+    second = FakeRuntime({"b": [USAGE]}, tools=found())
+
+    result = await paused.resume(second, "reject")
+
+    assert result.status == "cancelled"
+    assert second.requests == []
+    events = after_pause(paused)
+    assert [e.type for e in events] == ["run_resumed", "gate_decided", "run_cancelled"]
+    assert events[-1].payload == {"reason": BREAKER_CANCELLED_REASON}
+
+
+async def test_a_pause_uses_no_loop_pass() -> None:
+    sink = InMemoryEventSink()
+    workflow = spec(
+        {
+            "type": "loop",
+            "id": "l",
+            "until": 'results.w.text == "finished"',
+            "max_iterations": 3,
+            "body": agent("w"),
+        }
+    )
+    checkpointer = InMemorySaver(serde=checkpoint_serde())
+    run_id = uuid4()
+    tripping = FakeRuntime({"w": calling(6)}, tools=missing())
+    result = await run_workflow(
+        workflow, tripping, run_id=run_id, sink=sink, checkpointer=checkpointer, tools=missing()
+    )
+    assert result.status == "waiting"
+    assert [e.payload["iteration"] for e in sink.events if e.type == "loop_iteration_started"] == [
+        1
+    ]
+
+    pause = BreakerPause("w", tripped_of(sink.events).payload, GateDecision(decision="approve"))
+    resumed = FakeRuntime({"w": [Message(text="going on"), USAGE]}, tools=found())
+    await resume_workflow(
+        workflow,
+        resumed,
+        run_id=run_id,
+        sink=sink,
+        checkpointer=checkpointer,
+        next_seq=len(sink.events) + 1,
+        attempt=2,
+        tools=found(),
+        breaker=pause,
+    )
+
+    # The paused step went on in pass 1, so all three passes were still there to use.
+    assert [e.payload["iteration"] for e in sink.events if e.type == "loop_iteration_started"] == [
+        1,
+        2,
+        3,
+    ]
+    assert len(resumed.requests) == 3

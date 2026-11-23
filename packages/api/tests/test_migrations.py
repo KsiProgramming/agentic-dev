@@ -40,7 +40,7 @@ async def test_upgrade_head_creates_run_tables(postgres_url: str) -> None:
         table_names = list(tables)
     await engine.dispose()
 
-    assert version == "0042_review_dismissals"
+    assert version == "0043_circuit_breakers"
     assert {
         "runs",
         "run_events",
@@ -771,3 +771,52 @@ async def test_the_jira_triggers_revision_downgrades_and_upgrades(postgres_url: 
 
     await asyncio.to_thread(command.upgrade, config, "head")
     assert triggers <= await table_names(postgres_url)
+
+
+async def test_the_circuit_breakers_revision_backfills_trips_and_downgrades(
+    postgres_url: str,
+) -> None:
+    """13.7: `runs.breaker_trips` is counted from the `breaker_tripped` events already logged, and
+    going back drops it with `cost_baselines`."""
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option("sqlalchemy.url", postgres_url)
+    # The database is shared: bring it to head, then back to the revision before this one.
+    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.downgrade, config, "0042_review_dismissals")
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        run = (
+            await conn.execute(
+                text(
+                    "INSERT INTO runs (id, workspace_id, status, spec, policy) VALUES "
+                    "(gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'waiting', "
+                    "'{}', '{}') RETURNING id"
+                )
+            )
+        ).scalar_one()
+        for seq, kind in enumerate(["run_started", "breaker_tripped", "breaker_tripped"], 1):
+            await conn.execute(
+                text(
+                    "INSERT INTO run_events (run_id, seq, type, payload, created_at) "
+                    "VALUES (:run, :seq, :type, '{}', now())"
+                ),
+                {"run": run, "seq": seq, "type": kind},
+            )
+
+    await asyncio.to_thread(command.upgrade, config, "head")
+    columns = await run_columns(postgres_url)
+    async with engine.connect() as conn:
+        trips = (
+            await conn.execute(text("SELECT breaker_trips FROM runs WHERE id = :run"), {"run": run})
+        ).scalar_one()
+    await asyncio.to_thread(command.downgrade, config, "0042_review_dismissals")
+    gone = await run_columns(postgres_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM run_events WHERE run_id = :run"), {"run": run})
+        await conn.execute(text("DELETE FROM runs WHERE id = :run"), {"run": run})
+    await engine.dispose()
+
+    assert {"breaker_trips", "cost_baselines"} <= columns
+    assert trips == 2
+    assert not {"breaker_trips", "cost_baselines"} & gone

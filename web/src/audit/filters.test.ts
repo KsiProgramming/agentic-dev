@@ -51,6 +51,10 @@ test("the API query takes the category's actions and whole local days", () => {
     "gate.sent_back_by_checks",
     "gate.sent_back_by_review",
     "gate.expired",
+    "breaker.tripped",
+    "breaker.resumed",
+    "breaker.cancelled",
+    "breaker.expired",
   ]);
   expect(query.run_id).toBe(RUN);
   expect(query.since).toBe(new Date(2026, 9, 1).toISOString());

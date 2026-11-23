@@ -108,6 +108,7 @@ export function runSummary(overrides: Partial<RunSummary> = {}): RunSummary {
       cost_complete: true,
     },
     protected_attempts: 0,
+    breaker_trips: 0,
     ...overrides,
   };
 }

@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.events import (
+    BREAKER_TRIPPED,
     GATE_DECIDED,
     GATE_WAITING,
     NODE_FAILED,
@@ -74,6 +75,8 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     | `run_failed` | `failed`, `finished_at`, clears `waiting_gate`; `failure_reason` = `error` |
     | an end event with `sandbox_kept_until` | `sandbox_kept_until` (12.3) |
     | `protected_path_refused` | adds one to `protected_attempts` (13.5) |
+    | `breaker_tripped` | adds one to `breaker_trips` (13.7) |
+    | `gate_waiting` with a `breaker` | `waiting_gate` also holds `breaker` and `reason` |
     | `usage` | adds its tokens and `estimated_usd`; `cost_complete=false` if it has no price |
 
     and the time columns (see `time_values`).
@@ -101,9 +104,18 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
         if isinstance(wait := payload.get("wait_for"), dict):
             # A step that waits for an answer (7.9): what is checked, and what the console shows.
             values["waiting_gate"] = {**values["waiting_gate"], "wait_for": wait}
+        if isinstance(breaker := payload.get("breaker"), str):
+            # A pause a circuit breaker caused (13.7), not a gate: which breaker and why.
+            values["waiting_gate"] = {
+                **values["waiting_gate"],
+                "breaker": breaker,
+                "reason": payload.get("reason"),
+            }
         values["gate_expires_at"] = expires_at
     elif event.type == PROTECTED_PATH_REFUSED:
         values["protected_attempts"] = Run.protected_attempts + 1
+    elif event.type == BREAKER_TRIPPED:
+        values["breaker_trips"] = Run.breaker_trips + 1
     elif event.type == PR_OPENED and isinstance(url := payload.get("url"), str):
         values["pr_url"] = url
     elif event.type == REPO_CREATED and isinstance(branch := payload.get("default_branch"), str):
@@ -241,6 +253,8 @@ class PostgresEventSink:
                 await _audit_end(session, event)
             elif event.type == REPO_CREATED:
                 await _audit_repo_created(session, event)
+            elif event.type == BREAKER_TRIPPED:
+                await _audit_tripped(session, event)
             elif event.type == GATE_DECIDED and event.payload.get("source") in ("checks", "review"):
                 await _audit_sent_back(session, event)
             # Delivered on commit, so a listener that wakes up can already read the row.
@@ -316,6 +330,32 @@ async def _audit_sent_back(session: AsyncSession, event: RunEvent) -> None:
             at=event.created_at,
             details={"findings": found},
         )
+
+
+async def _audit_tripped(session: AsyncSession, event: RunEvent) -> None:
+    """The `breaker.tripped` audit entry (13.7): the engine, not a person, paused the run. It
+    names the breaker and what it saw (the tool), never arguments, errors or contents."""
+    run = await session.get(Run, event.run_id)
+    if run is None:
+        return
+    details = event.payload.get("details")
+    tool = details.get("tool") if isinstance(details, dict) else None
+    audit(
+        session,
+        run.workspace_id,
+        "breaker.tripped",
+        actor_type="system",
+        run_id=run.id,
+        node_id=event.node_id,
+        at=event.created_at,
+        details={
+            "breaker": event.payload.get("breaker"),
+            "trigger": event.payload.get("trigger"),
+            "threshold": event.payload.get("threshold"),
+            "observed": event.payload.get("observed"),
+            "tool": tool,
+        },
+    )
 
 
 async def _audit_repo_created(session: AsyncSession, event: RunEvent) -> None:
