@@ -6,7 +6,7 @@ the engine on the real tools."""
 
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -247,9 +247,10 @@ def checked(run: SddRun) -> list[tuple[str | None, str, list[str]]]:
     """Each `write_checked`: the write, its outcome and the fields that differ."""
     found: list[tuple[str | None, str, list[str]]] = []
     for event in run.sink.events:
-        if event.type == "write_checked" and event.payload is not None:
-            diffs = [d["field"] for d in event.payload["differences"]]  # type: ignore[index, union-attr]
-            found.append((event.node_id, str(event.payload["outcome"]), diffs))
+        if event.type == "write_checked":
+            payload = event.payload or {}
+            shown = cast(list[dict[str, str]], payload["differences"])
+            found.append((event.node_id, str(payload["outcome"]), [d["field"] for d in shown]))
     return found
 
 
@@ -460,9 +461,9 @@ class Simple:
 
     def outcomes(self) -> list[tuple[str | None, str]]:
         return [
-            (e.node_id, str(e.payload["outcome"]))
+            (e.node_id, str((e.payload or {})["outcome"]))
             for e in self.sink.events
-            if e.type == "write_checked" and e.payload is not None
+            if e.type == "write_checked"
         ]
 
 
@@ -480,8 +481,8 @@ async def test_a_plan_that_would_fail_stops_the_batch_before_anything_is_written
     await run.start()
     waiting = [e for e in run.sink.events if e.type == "gate_waiting"][-1]
     assert waiting.payload is not None
-    would_fail = [p for p in waiting.payload["plans"] if p.get("error")]  # type: ignore[union-attr]
-    assert [p["error"]["code"] for p in would_fail] == ["transition_unavailable"]
+    shown = [WritePlan.model_validate(p) for p in cast(list[Any], waiting.payload["plans"])]
+    assert [p.error.code for p in shown if p.error] == ["transition_unavailable"]
 
     done = await run.resume()
 

@@ -4,7 +4,7 @@ tools are fakes that answer the plan calls; the real ones are `agentic_tools.jir
 `agentic_tools.github` (their tests, and the real run in findings.md)."""
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -247,7 +247,7 @@ async def test_the_sdd_gate_shows_the_pull_request_and_both_jira_writes() -> Non
     assert run.waiting_at() == "approve_pr"
     waiting = [e for e in run.sink.events if e.type == "gate_waiting"][-1]
     assert waiting.payload is not None
-    plans = [WritePlan.model_validate(p) for p in waiting.payload["plans"]]
+    plans = [WritePlan.model_validate(p) for p in cast(list[Any], waiting.payload["plans"])]
     assert [(p.node_id, p.tool) for p in plans] == [
         ("publish", "github.openPR"),
         ("jira_update", "jira.comment"),

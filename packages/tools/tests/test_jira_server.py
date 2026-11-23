@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -515,9 +515,11 @@ async def test_the_manifests_do_not_show_plan_or_expect() -> None:
     async with open_jira_tools(Access(), run_id=RUN) as tools:
         for definition in tools.definitions():
             schema = definition.input_schema
-            assert "plan" not in schema.get("properties", {}), definition.name
-            assert "expect" not in schema.get("properties", {}), definition.name
-            assert "plan" not in schema.get("required", []), definition.name
+            shown = cast(dict[str, Any], schema.get("properties", {}))
+            required = cast(list[str], schema.get("required", []))
+            assert "plan" not in shown, definition.name
+            assert "expect" not in shown, definition.name
+            assert "plan" not in required, definition.name
 
 
 async def test_a_read_tool_refuses_plan_and_expect() -> None:

@@ -86,11 +86,11 @@ Read `specs/design-language.md`, tech-stack → UI design system, and `web/AGENT
 
 ## 6. Specs, docs and a real run
 
-- [ ] `specs/tech-stack.md`:
+- [x] `specs/tech-stack.md`:
   - a "Write plans (API contract)" section with the contract, the plan step, the batch check, `expect`, `write_checked`, the audit actions and `GET /runs/{id}/gate` `plans`;
   - a Tool layer bullet with the rule "every outward write tool has a plan mode";
   - a UI design system → "What approving does (13.8)" subsection;
   - decisions-log rows for the choices in requirements.md, replacing 7.2's "stays in 13.8" note.
-- [ ] `specs/roadmap.md`: add the `[Plan](2026-11-23-dry-run-every-write/requirements.md)` link to the 13.8 row. `CHANGELOG.md`: an entry under `## [Unreleased]`.
-- [ ] `docs/` (security model or the gates guide, whichever describes what a gate shows): one paragraph on the plans and `plan_stale`.
-- [ ] A real run (validation.md), recorded in `specs/2026-11-23-dry-run-every-write/findings.md`. If it shows a mistake the tests missed, add a `lessons.md` entry in the same PR.
+- [x] `specs/roadmap.md`: add the `[Plan](2026-11-23-dry-run-every-write/requirements.md)` link to the 13.8 row. `CHANGELOG.md`: an entry under `## [Unreleased]`.
+- [x] `docs/` (security model or the gates guide, whichever describes what a gate shows): one paragraph on the plans and `plan_stale`.
+- [ ] A real run (validation.md), recorded in `specs/2026-11-23-dry-run-every-write/findings.md`. If it shows a mistake the tests missed, add a `lessons.md` entry in the same PR. Not run in the session that built it: the open checks are listed in `findings.md`.

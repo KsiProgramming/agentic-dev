@@ -503,7 +503,7 @@ async def test_the_gate_view_carries_the_plans_of_the_writes_it_guards(
 ) -> None:
     """Phase 13.8: `GET /runs/{id}/gate` shows what approving does, as the tools planned it: a
     plan survives the event log and the API unchanged, and one that cannot be read is left out."""
-    plan = {
+    plan: dict[str, Any] = {
         "node_id": "move",
         "tool": "jira.transition",
         "action": "transition",

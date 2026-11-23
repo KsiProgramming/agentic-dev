@@ -1,11 +1,12 @@
 """The "Answer a Jira issue" template (7.2): one reading analyst, a gate on its comment, and a
 gated `jira.comment` on the issue the run was started with."""
 
+from typing import cast
 from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from agentic_engine.agent import RunContext
 from agentic_engine.artifacts import InMemoryArtifactStore
@@ -49,8 +50,8 @@ class Tools:
     async def call(
         self, name: str, arguments: dict[str, object], *, node_id: str | None = None
     ) -> ToolOutput:
-        if is_plan_call(arguments):
-            return plan_answer(name, arguments)
+        if is_plan_call(cast(dict[str, JsonValue], arguments)):
+            return plan_answer(name, cast(dict[str, JsonValue], arguments))
         self.calls.append((name, arguments, node_id))
         return ToolOutput(text=f"{name} ok")
 
