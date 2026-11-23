@@ -41,6 +41,16 @@ class Integration(BaseModel):
     conflicts: dict[str, list[str]] = Field(default_factory=dict[str, list[str]])
 
 
+class StartedBranch(BaseModel):
+    """A writer's branch started from another's (13.5): the `start` commit and the `files` the
+    other writer changed against the run's base."""
+
+    model_config = ConfigDict(frozen=True)
+
+    start: str
+    files: list[str] = Field(default_factory=list[str])
+
+
 class BranchIntegrator(Protocol):
     """Merges task branches into an orchestrator's integration branch."""
 
@@ -55,6 +65,15 @@ class BranchIntegrator(Protocol):
         """Start the branches of the task writers `keys` from `orchestrator_id`'s integration
         branch instead of the run's base (6.9), leaving a branch that exists as it is; nothing
         if the integration branch does not exist yet. Raises `IntegrationError` if git fails."""
+        ...
+
+    async def start_writer(
+        self, node_id: str, source: str, *, orchestrator: bool = False
+    ) -> StartedBranch:
+        """Start the branch of the writer `node_id` (for an `orchestrator`, its integration branch
+        and worktree, which its hub reads) at the tip of `source`'s branch (13.5), leaving a
+        branch that exists as it is, and say which files `source` changed against the run's base.
+        Raises `IntegrationError` if `source` has no branch or git fails."""
         ...
 
 

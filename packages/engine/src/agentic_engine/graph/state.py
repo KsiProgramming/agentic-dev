@@ -113,6 +113,12 @@ class RunState(TypedDict):
     the comments that send the work back (if they do), so the gate that follows reads them
     and a restart between the two runs no check twice. Its send-backs are counted in
     `rounds` under the same key. Checkpoints saved before phase 13.3 have none.
+
+    `frozen` holds, by node id (13.5), what a writer that `start_from` another was started from:
+    the `writer`, the `gate` that approved its work, the `start` commit and the `files` it changed
+    against the run's base, which the node and its tasks may read but not change. Kept in the
+    checkpoint so a resume, a restore and a rerun from a step give the same answer. Checkpoints
+    saved before phase 13.5 have none.
     """
 
     input: str
@@ -130,6 +136,7 @@ class RunState(TypedDict):
     rounds: Annotated[dict[str, int], merge_counts]
     integrated: Annotated[dict[str, dict[str, JsonValue]], merge_integrated]
     evidence: NotRequired[Annotated[dict[str, dict[str, JsonValue]], merge_integrated]]
+    frozen: NotRequired[Annotated[dict[str, dict[str, JsonValue]], merge_integrated]]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -149,6 +156,7 @@ class RunUpdate(TypedDict, total=False):
     rounds: dict[str, int]
     evidence: dict[str, dict[str, JsonValue]]
     integrated: dict[str, dict[str, JsonValue]]
+    frozen: dict[str, dict[str, JsonValue]]
 
 
 class MapItem(TypedDict):

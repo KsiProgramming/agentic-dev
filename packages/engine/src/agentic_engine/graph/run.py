@@ -57,7 +57,7 @@ from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.providers import ResolvedProviders
 from agentic_engine.spec import INPUT_WRITER, WorkflowSpec
-from agentic_runtime import AgentRuntime, ReadableWriters, ToolExecutor
+from agentic_runtime import AgentRuntime, ProtectedPaths, ReadableWriters, ToolExecutor
 
 RUN_END = {"completed": RUN_COMPLETED, "failed": RUN_FAILED, "cancelled": RUN_CANCELLED}
 
@@ -81,6 +81,7 @@ async def run_workflow(
     inputs: Mapping[str, str] | None = None,
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -145,6 +146,7 @@ async def run_workflow(
             saver=saver,
             providers=providers,
             readable=readable,
+            protected=protected,
         ),
         start,
         _config(spec, log.run_id),
@@ -175,6 +177,7 @@ async def resume_workflow(
     inputs: Mapping[str, str] | None = None,
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -210,6 +213,7 @@ async def resume_workflow(
         saver=saver,
         providers=providers,
         readable=readable,
+        protected=protected,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
@@ -259,6 +263,7 @@ async def rerun_workflow(
     inputs: Mapping[str, str] | None = None,
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> WorkflowRunResult:
     """Start `run_id`, a rerun of `source_run` from its top-level step `from_node` (12.4), as
     `run_workflow` would, but from `source_run`'s checkpoint taken before that step
@@ -292,6 +297,7 @@ async def rerun_workflow(
         saver=saver,
         providers=providers,
         readable=readable,
+        protected=protected,
     )
     config = _config(spec, run_id)
     carried = await seed_rerun(

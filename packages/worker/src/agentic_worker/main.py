@@ -176,7 +176,13 @@ from agentic_jira import (
     check_and_answer,
     renew_jira_webhooks,
 )
-from agentic_runtime import AgentRuntime, ClaudeRuntime, ReadableWriters, ToolExecutor
+from agentic_runtime import (
+    AgentRuntime,
+    ClaudeRuntime,
+    ProtectedPaths,
+    ReadableWriters,
+    ToolExecutor,
+)
 from agentic_runtime.claude import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS, DEFAULT_MODEL
 from agentic_runtime.fake import FakeRuntime, slow_echo_script
 from agentic_sandbox import (
@@ -1045,6 +1051,7 @@ async def _attempt(
         integrator: SandboxIntegrator | None = None
         saver: SandboxBranchSaver | None = None
         readable: ReadableWriters | None = None
+        protected: ProtectedPaths | None = None
         artifacts: ArtifactStore = PostgresArtifactStore(worker.sessions, run.id)
         mirror_dir: str | None = None
         if to_create and target is not None:
@@ -1101,6 +1108,8 @@ async def _attempt(
             # One per attempt: the engine tells it which writers the next step may read, and
             # the repo tools resolve a call's `node` through it (13.1).
             readable = ReadableWriters(lambda node: branch_name(run.id, node))
+            # The engine sets its rules and hears each refusal (13.5); the repo tools refuse.
+            protected = ProtectedPaths()
             tools = await stack.enter_async_context(
                 open_repo_tools(
                     sandbox,
@@ -1108,6 +1117,7 @@ async def _attempt(
                     writers=writers,
                     task_writers=tasked,
                     readable=readable,
+                    protected=protected,
                 )
             )
             scanning = await stack.enter_async_context(open_scan_tools(sandbox, readable=readable))
@@ -1160,6 +1170,7 @@ async def _attempt(
             saver,
             first=first,
             readable=readable,
+            protected=protected,
         )
         if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
@@ -1485,6 +1496,7 @@ async def _workflow(
     *,
     first: bool | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph: start it when it has no event before this attempt
     (`first`, else `last_seq == 0`), from a step of another run if it is a rerun from a step
@@ -1526,6 +1538,7 @@ async def _workflow(
                 on_seeded=copy_artifacts,
                 providers=run_providers(run),
                 readable=readable,
+                protected=protected,
             )
         except (StepNotFoundError, StepNotReachedError) as e:
             log.warning("run %s cannot start from its step: %s", run.id, e)
@@ -1553,6 +1566,7 @@ async def _workflow(
             inputs=run_inputs(run),
             providers=run_providers(run),
             readable=readable,
+            protected=protected,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -1576,6 +1590,7 @@ async def _workflow(
         inputs=run_inputs(run),
         providers=run_providers(run),
         readable=readable,
+        protected=protected,
     )
 
 

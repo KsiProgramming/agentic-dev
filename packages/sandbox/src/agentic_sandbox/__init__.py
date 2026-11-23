@@ -14,8 +14,10 @@ from agentic_sandbox.fake import FakeSandbox, FakeSandboxManager
 from agentic_sandbox.integrate import (
     IntegrationOutcome,
     MergeSource,
+    StartedWriter,
     integrate_branches,
     start_branches,
+    start_writer,
 )
 from agentic_sandbox.protocol import (
     ARTIFACT_NAME,
@@ -86,6 +88,7 @@ __all__ = [
     "SandboxError",
     "SandboxManager",
     "Snapshot",
+    "StartedWriter",
     "Worktree",
     "add_worktree",
     "archive",
@@ -103,5 +106,6 @@ __all__ = [
     "show_file",
     "snapshot_worktrees",
     "start_branches",
+    "start_writer",
     "wip_branch",
 ]

@@ -2,7 +2,7 @@
 them. The real executors are MCP servers bridged by `agentic_tools`; adapters only route calls
 here."""
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Literal, Protocol
 
@@ -152,7 +152,8 @@ class ProtectedPaths:
     orchestrator's rules. `refused` is called back for each refusal."""
 
     def __init__(
-        self, on_refused: Callable[[str, str, str, ProtectRule], None] | None = None
+        self,
+        on_refused: Callable[[str, str, str, ProtectRule], Awaitable[None] | None] | None = None,
     ) -> None:
         self._rules: tuple[ProtectRule, ...] = ()
         self._allow: dict[str, tuple[str, ...]] = {}
@@ -190,7 +191,13 @@ class ProtectedPaths:
             None,
         )
 
-    def refused(self, node_id: str, tool: str, path: str, rule: ProtectRule) -> None:
+    def freeze(self, node_id: str, rules: Sequence[ProtectRule]) -> None:
+        """Hold `node_id` (and its tasks) to `rules` as frozen files, replacing its earlier ones."""
+        self._frozen[node_id] = tuple(rules)
+
+    async def refused(self, node_id: str, tool: str, path: str, rule: ProtectRule) -> None:
         """Tell the engine about one refusal."""
         if self.on_refused is not None:
-            self.on_refused(node_id, tool, path, rule)
+            done = self.on_refused(node_id, tool, path, rule)
+            if done is not None:
+                await done

@@ -6,13 +6,14 @@ import logging
 from collections.abc import Sequence
 from uuid import UUID
 
-from agentic_engine.integrate import Integration, IntegrationError, MergeRequest
+from agentic_engine.integrate import Integration, IntegrationError, MergeRequest, StartedBranch
 from agentic_sandbox import (
     MergeSource,
     Sandbox,
     SandboxError,
     integrate_branches,
     start_branches,
+    start_writer,
 )
 
 log = logging.getLogger("agentic_worker")
@@ -59,3 +60,15 @@ class SandboxIntegrator:
                 len(keys),
                 orchestrator_id,
             )
+
+    async def start_writer(
+        self, node_id: str, source: str, *, orchestrator: bool = False
+    ) -> StartedBranch:
+        try:
+            started = await start_writer(
+                self._sandbox, self._run_id, node_id, source, worktree=orchestrator
+            )
+        except SandboxError as e:
+            raise IntegrationError(str(e)) from e
+        log.info("run %s: %s starts from the work of %s", self._run_id, node_id, source)
+        return StartedBranch(start=started.start, files=started.files)

@@ -496,7 +496,7 @@ class _RepoTools:
             raise ToolError("path must name a file")
         if any(part.lower() == ".git" for part in relative.split("/")):
             raise ToolError(f"cannot write inside .git: {path}")
-        self._refuse_protected("repo.write_file", [relative])
+        await self._refuse_protected("repo.write_file", [relative])
         data = content.encode()
         if len(data) > self._limits.max_write_bytes:
             raise ToolError(
@@ -547,7 +547,7 @@ class _RepoTools:
         more = f" (and {len(paths) - len(shown)} more)" if len(paths) > len(shown) else ""
         return f"{sha} on {branch}: {', '.join(shown)}{more}"
 
-    def _refuse_protected(self, tool: str, paths: list[str]) -> None:
+    async def _refuse_protected(self, tool: str, paths: list[str]) -> None:
         """Refuse a change to any of the repo-relative `paths` that is protected for this node:
         one `refused` call per path and one fixed text, the first path's."""
         if self._protected is None or self._node_id is None:
@@ -558,7 +558,7 @@ class _RepoTools:
             if (rule := self._protected.rule_for(self._node_id, p)) is not None
         ]
         for path, rule in hits:
-            self._protected.refused(self._node_id, tool, path, rule)
+            await self._protected.refused(self._node_id, tool, path, rule)
         if hits:
             text = refusal_text(*hits[0])
             if len(hits) > 1:
@@ -574,7 +574,7 @@ class _RepoTools:
             raise ToolError("could not commit")
         staged = [p for p in result.stdout.split("\0") if p]
         try:
-            self._refuse_protected("repo.commit", staged)
+            await self._refuse_protected("repo.commit", staged)
         except ToolError:
             await self._sandbox.exec(["sh", "-c", f"{_GIT} reset -q"])
             raise

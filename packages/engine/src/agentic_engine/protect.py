@@ -4,7 +4,16 @@ The platform's own list is always on, with no switch: only a workflow's `protect
 node, and then a gate must follow it. A workflow adds its own patterns in `protect.paths`; the
 files an earlier writer changed are frozen for a writer that `start_from` it (see `RunState`)."""
 
+from collections.abc import Mapping, Sequence
+
+from pydantic import JsonValue
+
+from agentic_engine.spec.models import ProtectPolicy
+from agentic_runtime import ProtectRule
 from agentic_runtime.paths import first_match
+
+MAX_FROZEN_SHOWN = 50
+"""How many frozen files a writer is told by name; the rest are counted."""
 
 PLATFORM_PROTECTED: tuple[tuple[str, str], ...] = (
     (".github/workflows/**", "CI: a writer that edits the pipeline decides what is checked"),
@@ -37,3 +46,72 @@ base (`scan.lint config: "base"`)."""
 def platform_rule(path: str) -> str | None:
     """The platform default glob that protects `path`, or None."""
     return first_match(PLATFORM_GLOBS, path)
+
+
+def static_rules(protect: ProtectPolicy | None) -> list[ProtectRule]:
+    """The rules every writer is held to: the platform's list, then the workflow's `paths`."""
+    rules = [ProtectRule(glob, "default") for glob in PLATFORM_GLOBS]
+    if protect is not None:
+        rules += [ProtectRule(glob, "workflow") for glob in protect.paths]
+    return rules
+
+
+def frozen_rules(saved: Mapping[str, JsonValue]) -> list[ProtectRule]:
+    """The rules of the files a writer started from another's cannot change, from its `frozen`
+    entry in the run's state."""
+    files = saved.get("files")
+    writer, gate = saved.get("writer"), saved.get("gate")
+    return [
+        ProtectRule(f, "frozen", writer=str(writer), gate=str(gate) if gate else None)
+        for f in (files if isinstance(files, list) else [])
+        if isinstance(f, str)
+    ]
+
+
+def protected_payload(
+    rules: Sequence[ProtectRule], allow: Sequence[str] = ()
+) -> dict[str, JsonValue]:
+    """The `protected` a writer's `node_started` carries (13.5): the `patterns` (the platform's
+    and the workflow's), the `frozen` files, and where they came from (`frozen_from`, `gate`)."""
+    frozen = [r for r in rules if r.kind == "frozen"]
+    payload: dict[str, JsonValue] = {
+        "patterns": [r.glob for r in rules if r.kind != "frozen"],
+        "frozen": [r.glob for r in frozen],
+    }
+    if frozen:
+        payload["frozen_from"] = frozen[0].writer
+        payload["gate"] = frozen[0].gate
+    if allow:
+        payload["allow"] = list(allow)
+    return payload
+
+
+def protected_text(rules: Sequence[ProtectRule], allow: Sequence[str] = ()) -> str:
+    """The "# Protected paths" section every writer is told (13.5), after "# Work before you":
+    the platform's list, the workflow's patterns and the files frozen at a gate. Written from the
+    spec and the run's state, never from model output; the frozen files are capped."""
+    defaults = [r.glob for r in rules if r.kind == "default"]
+    workflow = [r.glob for r in rules if r.kind == "workflow"]
+    frozen = [r for r in rules if r.kind == "frozen"]
+    lines = [
+        "# Protected paths",
+        "",
+        "You can read these paths but not change them: a write to one is refused, the attempt is "
+        "counted and shown to the person who reviews your work. If one must change, say so in "
+        "your answer.",
+        "",
+        "- By the platform (CI and analyzer config): " + ", ".join(f"`{g}`" for g in defaults),
+    ]
+    if workflow:
+        lines.append("- By this workflow: " + ", ".join(f"`{g}`" for g in workflow))
+    if frozen:
+        first = frozen[0]
+        shown = frozen[:MAX_FROZEN_SHOWN]
+        more = len(frozen) - len(shown)
+        files = ", ".join(f"`{r.glob}`" for r in shown) + (f" and {more} more" if more else "")
+        lines.append(
+            f"- Approved at `{first.gate}` from `{first.writer}`, on your branch already: {files}"
+        )
+    if allow:
+        lines.append("- You may change: " + ", ".join(f"`{g}`" for g in allow))
+    return "\n".join(lines)

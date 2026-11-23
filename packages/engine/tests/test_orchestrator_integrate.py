@@ -19,6 +19,7 @@ from agentic_engine.integrate import (
     Integration,
     IntegrationError,
     MergeRequest,
+    StartedBranch,
     conflict_error,
 )
 from agentic_engine.spec import WorkflowSpec
@@ -79,6 +80,11 @@ class Merger:
         # As in the sandbox: nothing until the integration branch exists (its first merge).
         if self.calls:
             self.started.append(list(keys))
+
+    async def start_writer(
+        self, node_id: str, source: str, *, orchestrator: bool = False
+    ) -> StartedBranch:
+        return StartedBranch(start="0" * 40)
 
     @property
     def keys(self) -> list[list[str]]:

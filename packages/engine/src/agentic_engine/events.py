@@ -96,6 +96,13 @@ TASK_COMPLETED: Final = "task_completed"
 another task did not complete; `dropped` when it never started because a task failed and the hub
 will replan, 6.2), and `error` if it did not complete."""
 
+PROTECTED_PATH_REFUSED: Final = "protected_path_refused"
+"""A writer tried to change a protected path (13.5) and a repo tool refused: `tool`
+(`repo.write_file` or `repo.commit`), `path` and `rule`: `kind` (`default`, `workflow` or
+`frozen`) with the `pattern` (default, workflow) or the `writer` and `gate` that approved the file
+(frozen); `task` is the task's writer key inside an orchestrator. Never the file's content. A
+refusal does not pause or send back the run."""
+
 ARTIFACT_WRITTEN: Final = "artifact_written"
 """A node wrote a run artifact (4.3), before its `node_completed`: `name`, `version`,
 `media_type`, `size` (bytes) and `sha256`. The content is in the run's artifact store."""

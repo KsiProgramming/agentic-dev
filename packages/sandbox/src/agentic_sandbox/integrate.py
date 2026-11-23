@@ -8,6 +8,9 @@ merged, so a call repeated after a crash merges nothing twice. A source that con
 and listed with its conflicting paths; the integration branch keeps every source merged before
 it, and the sources after it are still merged.
 
+`start_writer` starts one writer's branch from another writer's tip (13.5), and says which files
+that writer changed against the base, which the later writer cannot change.
+
 `start_branches` starts writers' branches from the integration branch instead of the clone's
 `HEAD` (6.9: an orchestrator in a loop, whose later iterations build on the work merged so far).
 Such a source with no commits of its own is `empty` too.
@@ -22,7 +25,7 @@ from uuid import UUID
 
 from agentic_sandbox.errors import SandboxError
 from agentic_sandbox.protocol import Sandbox
-from agentic_sandbox.worktree import AGENT_IDENTITY, GIT_SAFETY, Worktree
+from agentic_sandbox.worktree import AGENT_IDENTITY, GIT_SAFETY, Worktree, add_worktree
 
 _WRONG_BRANCH = 9
 _MERGE_FAILED = 10
@@ -171,6 +174,66 @@ async def start_branches(sandbox: Sandbox, run_id: UUID, target: str, keys: Sequ
     if result.exit_code != 0:
         raise SandboxError(f"could not start task branches from {target_branch}")
     return result.stdout.strip() != "missing"
+
+
+# `$1` the new branch, `$2` the source branch, `$3` the checkout, `$4` and `$5` the identity. Prints
+# the source's tip, then (NUL separated) the files it changed against the checkout's `HEAD`, the
+# run's base, both sides of a rename. Exits 11 if the source branch does not exist.
+_START_WRITER_SCRIPT = f"""
+target=$1
+source=$2
+checkout=$3
+name=$4
+email=$5
+g() {{
+  git -C "$checkout" -c safe.directory="$checkout" -c user.name="$name" \
+    -c user.email="$email" {" ".join(GIT_SAFETY)} "$@"
+}}
+tip=$(g rev-parse --verify -q "refs/heads/$source^{{commit}}") || exit 11
+if ! g rev-parse --verify -q "refs/heads/$target" >/dev/null; then
+  g branch -q "$target" "$tip" || exit 1
+fi
+base=$(g rev-parse --verify -q 'HEAD^{{commit}}') || exit 1
+printf '%s\\0' "$tip"
+g -c core.quotePath=false diff --name-only -z --no-renames "$base" "$tip" || exit 1
+"""
+
+_SOURCE_MISSING = 11
+
+
+@dataclass(frozen=True)
+class StartedWriter:
+    """A writer's branch started from another's (13.5): the `start` commit (the source's tip) and
+    the `files` the source changed against the run's base."""
+
+    start: str
+    files: list[str]
+
+
+async def start_writer(
+    sandbox: Sandbox, run_id: UUID, key: str, source: str, *, worktree: bool = False
+) -> StartedWriter:
+    """Make the branch of the writer `key` at the tip of the branch of `source` (a writer, or an
+    orchestrator's integration branch), unless it exists: a resumed run keeps its commits. With
+    `worktree`, also make its worktree (an orchestrator's integration branch, which its hub reads
+    before any task merged). Raises `SandboxError` if `source` has no branch or git fails."""
+    target_branch = Worktree.of(sandbox, run_id, key).branch
+    source_branch = Worktree.of(sandbox, run_id, source).branch
+    argv = [
+        "sh", "-c", _START_WRITER_SCRIPT, "start_writer",
+        target_branch, source_branch, sandbox.workdir, *AGENT_IDENTITY,
+    ]  # fmt: skip
+    result = await sandbox.exec(argv)
+    if result.exit_code == _SOURCE_MISSING:
+        raise SandboxError(f"{source} has no work to start {key} from")
+    if result.exit_code != 0 or result.truncated:
+        raise SandboxError(f"could not start {target_branch} from {source_branch}")
+    tip, _, rest = result.stdout.partition("\0")
+    if len(tip) != 40:
+        raise SandboxError(f"could not start {target_branch} from {source_branch}")
+    if worktree:
+        await add_worktree(sandbox, run_id, key)
+    return StartedWriter(start=tip, files=[f for f in rest.split("\0") if f])
 
 
 def _parse(branch: str, stdout: str, keys: list[str]) -> IntegrationOutcome:
