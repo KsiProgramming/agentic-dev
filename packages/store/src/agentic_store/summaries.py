@@ -67,6 +67,8 @@ class RunSummaryRow:
     # Why a cancelled run was cancelled: by its user, or its approval expired.
     cancel_reason: str | None
     usage: "RunUsageRow"
+    # How many times a writer tried to change a protected path (13.5).
+    protected_attempts: int
     times: "RunTimesRow"
     # What became of the run's sandbox: kept until when, or removed (12.3).
     sandbox: SandboxInfo
@@ -173,6 +175,7 @@ def _select() -> Select[*tuple[Any, ...]]:
         Run.cache_write_tokens,
         Run.estimated_usd,
         Run.cost_complete,
+        Run.protected_attempts,
         Run.policy["budget_usd"].astext.label("budget_usd"),
         Run.active_ms,
         Run.waiting_ms,
@@ -228,6 +231,7 @@ def _summary(
             cost_complete=row.cost_complete,
             budget_usd=Decimal(row.budget_usd) if row.budget_usd is not None else None,
         ),
+        protected_attempts=row.protected_attempts,
         times=RunTimesRow(
             active_ms=row.active_ms,
             waiting_ms=row.waiting_ms,

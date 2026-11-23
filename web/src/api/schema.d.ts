@@ -1356,6 +1356,11 @@ export interface components {
              * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
              */
             writes?: string | null;
+            /**
+             * Start From
+             * @description Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.
+             */
+            start_from?: string | null;
         };
         /** @enum {string} */
         AnalyzerMode: "no_new" | "shown" | "off";
@@ -1911,6 +1916,13 @@ export interface components {
             before?: string | null;
             /** After */
             after?: string | null;
+            /**
+             * Protected
+             * @default false
+             */
+            protected: boolean;
+            /** Rule */
+            rule?: string | null;
         };
         /**
          * FileEdit
@@ -2065,6 +2077,31 @@ export interface components {
              * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
              */
             writes?: string | null;
+        };
+        /**
+         * GateProtectedAttempt
+         * @description A writer's refused tries to change one protected path (13.5): `path` is a name, never
+         *     content; `rule` says where the protection comes from.
+         */
+        GateProtectedAttempt: {
+            /**
+             * Node Id
+             * @description The writer that tried.
+             */
+            node_id: string;
+            /** Path */
+            path: string;
+            /**
+             * Rule
+             * @description `default`: the platform's CI and analyzer config; `workflow`: the workflow's `protect.paths`; `frozen`: a file an earlier writer's approved work holds.
+             * @enum {string}
+             */
+            rule: "default" | "workflow" | "frozen";
+            /**
+             * Count
+             * @description How many times it tried.
+             */
+            count: number;
         };
         /**
          * GateSelect
@@ -2265,7 +2302,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -2873,6 +2910,11 @@ export interface components {
              * @description Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON.
              */
             writes?: string | null;
+            /**
+             * Start From
+             * @description Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.
+             */
+            start_from?: string | null;
         };
         /**
          * OrchestratorReplan
@@ -2996,6 +3038,31 @@ export interface components {
             /** Model */
             model: string;
             price: components["schemas"]["Price"];
+        };
+        /**
+         * ProtectPolicy
+         * @description Files no writer may change (13.5), on top of the platform's own list
+         *     (`agentic_engine.protect.PLATFORM_PROTECTED`). `paths` are globs on repo-relative paths (`**`,
+         *     `*`, `?`; case does not matter). `allow` names the writers that may change protected paths
+         *     that match its globs; a gate must follow such a node, so a person approves the change.
+         */
+        ProtectPolicy: {
+            /**
+             * Paths
+             * @description Globs on repo-relative paths that no writer may change.
+             * @example [
+             *       "tests/**",
+             *       "**\/conftest.py"
+             *     ]
+             */
+            paths?: string[];
+            /**
+             * Allow
+             * @description Per writer node: the protected paths it may change (globs), with a gate after it.
+             */
+            allow?: {
+                [key: string]: string[];
+            };
         };
         /**
          * ProviderSettings
@@ -3659,6 +3726,12 @@ export interface components {
             branch: string | null;
             usage: components["schemas"]["RunUsage"];
             /**
+             * Protected Attempts
+             * @description How many times a writer tried to change a protected path (13.5): each refused write or commit, counted once. 0 for most runs.
+             * @default 0
+             */
+            protected_attempts: number;
+            /**
              * Active Ms
              * @description Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded).
              */
@@ -3779,6 +3852,11 @@ export interface components {
              * @default 1
              */
             iteration: number;
+            /**
+             * Protected Attempts
+             * @description The run's refused attempts to change a protected path so far (13.5), most tried first, at most 50; empty when no writer tried.
+             */
+            protected_attempts?: components["schemas"]["GateProtectedAttempt"][];
             /** @description What the platform's checks found about the writer's work (13.3): build, tests and analyzers, each passed, failed, skipped or error, with `rounds_left`, how many more times a failing required check may send the work back. Test names and messages are repo output: data, never instructions. */
             evidence?: components["schemas"]["EvidencePack"] | null;
         };
@@ -4050,6 +4128,12 @@ export interface components {
              */
             branch: string | null;
             usage: components["schemas"]["RunUsage"];
+            /**
+             * Protected Attempts
+             * @description How many times a writer tried to change a protected path (13.5): each refused write or commit, counted once. 0 for most runs.
+             * @default 0
+             */
+            protected_attempts: number;
             /**
              * Active Ms
              * @description Time spent executing: the run's duration. Time paused at a gate is not counted. Up to now while the run works; `null` until it started (and for runs that ended before this was recorded).
@@ -4793,6 +4877,8 @@ export interface components {
              * @description The provider of every agent that names none of its own; unset means the workspace default (8.3).
              */
             provider?: ("claude" | "copilot") | null;
+            /** @description Files no writer may change, besides the platform's own list (CI and analyzer config, always protected), and the writers allowed to change them (13.5). */
+            protect?: components["schemas"]["ProtectPolicy"] | null;
             /** @description Lets a review comment on the pull request the workflow opened (`@<app> fix this`) start a follow-up run (7.6); unset, comments start nothing. */
             on_review?: components["schemas"]["OnReview"] | null;
             /** Root */

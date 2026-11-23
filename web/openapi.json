@@ -4527,6 +4527,19 @@
             ],
             "title": "Writes",
             "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON."
+          },
+          "start_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start From",
+            "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them."
           }
         },
         "additionalProperties": false,
@@ -5743,6 +5756,22 @@
               }
             ],
             "title": "After"
+          },
+          "protected": {
+            "type": "boolean",
+            "title": "Protected",
+            "default": false
+          },
+          "rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule"
           }
         },
         "additionalProperties": false,
@@ -6053,6 +6082,43 @@
         ],
         "title": "GateNode",
         "description": "A human decision point: the run pauses here until someone approves or rejects. Its input\n(the previous node's output) is shown to the approver and passes through unchanged, unless\nit selects (6.7): then its output is the artifact's items the approver chose."
+      },
+      "GateProtectedAttempt": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "The writer that tried."
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "rule": {
+            "type": "string",
+            "enum": [
+              "default",
+              "workflow",
+              "frozen"
+            ],
+            "title": "Rule",
+            "description": "`default`: the platform's CI and analyzer config; `workflow`: the workflow's `protect.paths`; `frozen`: a file an earlier writer's approved work holds."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "How many times it tried."
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "path",
+          "rule",
+          "count"
+        ],
+        "title": "GateProtectedAttempt",
+        "description": "A writer's refused tries to change one protected path (13.5): `path` is a name, never\ncontent; `rule` says where the protection comes from."
       },
       "GateSelect": {
         "properties": {
@@ -6428,7 +6494,13 @@
           "tool_node_only",
           "evidence_not_in_loop",
           "evidence_unknown_writer",
-          "invalid_evidence"
+          "invalid_evidence",
+          "invalid_protect",
+          "allow_unknown_writer",
+          "protected_change_without_gate",
+          "start_from_unknown_writer",
+          "start_from_without_gate",
+          "start_from_not_allowed"
         ]
       },
       "JiraConnectionOut": {
@@ -7988,6 +8060,19 @@
             ],
             "title": "Writes",
             "description": "Write the node's output as this run artifact (a new version each time it runs); a `.json` artifact must be JSON."
+          },
+          "start_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start From",
+            "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them."
           }
         },
         "additionalProperties": false,
@@ -8272,6 +8357,44 @@
           "price"
         ],
         "title": "PriceOverride"
+      },
+      "ProtectPolicy": {
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 64,
+            "title": "Paths",
+            "description": "Globs on repo-relative paths that no writer may change.",
+            "examples": [
+              [
+                "tests/**",
+                "**/conftest.py"
+              ]
+            ]
+          },
+          "allow": {
+            "patternProperties": {
+              "^[a-z][a-z0-9_-]{0,62}$": {
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": "array"
+              }
+            },
+            "type": "object",
+            "title": "Allow",
+            "description": "Per writer node: the protected paths it may change (globs), with a gate after it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ProtectPolicy",
+        "description": "Files no writer may change (13.5), on top of the platform's own list\n(`agentic_engine.protect.PLATFORM_PROTECTED`). `paths` are globs on repo-relative paths (`**`,\n`*`, `?`; case does not matter). `allow` names the writers that may change protected paths\nthat match its globs; a gate must follow such a node, so a person approves the change."
       },
       "ProviderSettings": {
         "properties": {
@@ -9723,6 +9846,12 @@
           "usage": {
             "$ref": "#/components/schemas/RunUsage"
           },
+          "protected_attempts": {
+            "type": "integer",
+            "title": "Protected Attempts",
+            "description": "How many times a writer tried to change a protected path (13.5): each refused write or commit, counted once. 0 for most runs.",
+            "default": 0
+          },
           "active_ms": {
             "anyOf": [
               {
@@ -9997,6 +10126,14 @@
             "title": "Iteration",
             "description": "Which pass of the gate this is: it pauses once per pass in a loop.",
             "default": 1
+          },
+          "protected_attempts": {
+            "items": {
+              "$ref": "#/components/schemas/GateProtectedAttempt"
+            },
+            "type": "array",
+            "title": "Protected Attempts",
+            "description": "The run's refused attempts to change a protected path so far (13.5), most tried first, at most 50; empty when no writer tried."
           },
           "evidence": {
             "anyOf": [
@@ -10592,6 +10729,12 @@
           },
           "usage": {
             "$ref": "#/components/schemas/RunUsage"
+          },
+          "protected_attempts": {
+            "type": "integer",
+            "title": "Protected Attempts",
+            "description": "How many times a writer tried to change a protected path (13.5): each refused write or commit, counted once. 0 for most runs.",
+            "default": 0
           },
           "active_ms": {
             "anyOf": [
@@ -12248,6 +12391,17 @@
             ],
             "title": "Provider",
             "description": "The provider of every agent that names none of its own; unset means the workspace default (8.3)."
+          },
+          "protect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProtectPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Files no writer may change, besides the platform's own list (CI and analyzer config, always protected), and the writers allowed to change them (13.5)."
           },
           "on_review": {
             "anyOf": [

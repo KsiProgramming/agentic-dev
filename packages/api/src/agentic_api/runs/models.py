@@ -472,6 +472,19 @@ class GateBranch(BaseModel):
     branch: str = Field(description="The branch it committed on: `agent/<run>/<node>`.")
 
 
+class GateProtectedAttempt(BaseModel):
+    """A writer's refused tries to change one protected path (13.5): `path` is a name, never
+    content; `rule` says where the protection comes from."""
+
+    node_id: str = Field(description="The writer that tried.")
+    path: str
+    rule: Literal["default", "workflow", "frozen"] = Field(
+        description="`default`: the platform's CI and analyzer config; `workflow`: the "
+        "workflow's `protect.paths`; `frozen`: a file an earlier writer's approved work holds."
+    )
+    count: int = Field(description="How many times it tried.")
+
+
 class RunGate(BaseModel):
     """The gate a run waits at, as its pause showed it to the approver, and what approving
     does: the writers' branches go on towards `base` of `repo`. `prompt`, `artifact` and the
@@ -516,6 +529,11 @@ class RunGate(BaseModel):
     )
     iteration: int = Field(
         default=1, description="Which pass of the gate this is: it pauses once per pass in a loop."
+    )
+    protected_attempts: list[GateProtectedAttempt] = Field(
+        default_factory=list[GateProtectedAttempt],
+        description="The run's refused attempts to change a protected path so far (13.5), most "
+        "tried first, at most 50; empty when no writer tried.",
     )
     evidence: EvidencePack | None = Field(
         default=None,
@@ -613,6 +631,11 @@ class RunSummary(BaseModel):
         "repo the run created; `null` when it is the repo's default branch, not known yet."
     )
     usage: RunUsage
+    protected_attempts: int = Field(
+        default=0,
+        description="How many times a writer tried to change a protected path (13.5): each "
+        "refused write or commit, counted once. 0 for most runs.",
+    )
     active_ms: int | None = Field(
         description="Time spent executing: the run's duration. Time paused at a gate is not "
         "counted. Up to now while the run works; `null` until it started (and for runs that "

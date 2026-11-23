@@ -524,6 +524,9 @@ class Run(Base):
     estimated_usd: Mapped[Decimal] = mapped_column(Numeric(16, 8), server_default="0")
     # False once a usage event had no price: `estimated_usd` is then a lower bound.
     cost_complete: Mapped[bool] = mapped_column(Boolean, server_default=true())
+    # How many times a writer tried to change a protected path (13.5), one per
+    # `protected_path_refused` event.
+    protected_attempts: Mapped[int] = mapped_column(Integer, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
