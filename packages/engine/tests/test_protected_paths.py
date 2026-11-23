@@ -14,7 +14,7 @@ from pydantic import JsonValue
 
 from agentic_engine.agent import RunContext
 from agentic_engine.events import InMemoryEventSink, RunEvent
-from agentic_engine.gate import GateDecision
+from agentic_engine.gate import FileChange, GateDecision
 from agentic_engine.graph import checkpoint_serde, resume_workflow, run_workflow
 from agentic_engine.integrate import (
     BranchIntegrator,
@@ -403,3 +403,76 @@ async def test_a_restart_during_the_step_keeps_the_frozen_set_and_the_start_poin
     assert [e.payload["path"] for e in run.events("protected_path_refused")] == [
         "tests/test_cart.py"
     ]
+
+
+class Review:
+    """A gate review that reports each writer's files, as the sandbox would against the base."""
+
+    def __init__(self) -> None:
+        self.asked: list[list[str]] = []
+
+    async def changes(self, ran: Sequence[str]) -> list[FileChange]:
+        self.asked.append([n for n in ran if n in ("test_writer", "implementer")])
+        files = {
+            "test_writer": ["tests/test_cart.py", "tests/test_totals.py"],
+            "implementer": [*TESTS, "src/cart.py", ".github/workflows/ci.yml"],
+        }
+        return [
+            FileChange(node_id=n, path=p, status="added", editable=False, reason="too_large")
+            for n in self.asked[-1]
+            for p in files[n]
+        ]
+
+    async def apply(self, gate_id: str, edits: Sequence[Any]) -> dict[str, str]:
+        return {}
+
+    async def commit(self, edits: Sequence[Any], message: str) -> dict[str, str]:
+        return {}
+
+
+async def test_the_gate_shows_the_started_writers_files_once_and_marks_the_protected_ones() -> None:
+    run = Run()
+    review = Review()
+    first = await run_workflow(
+        run.spec,
+        run.runtime,
+        "go",
+        run_id=run.run_id,
+        sink=run.sink,
+        checkpointer=run.checkpoints,
+        tools=run.tools,
+        context=CONTEXT,
+        integrator=run.integrator,
+        readable=run.readable(),
+        protected=run.protected,
+        review=review,
+    )
+    assert first.waiting_at == "approve_tests"
+    second = await resume_workflow(
+        run.spec,
+        run.runtime,
+        "go",
+        run_id=run.run_id,
+        sink=run.sink,
+        checkpointer=run.checkpoints,
+        next_seq=run.sink.events[-1].seq + 1,
+        attempt=2,
+        decision=APPROVE,
+        tools=run.tools,
+        context=CONTEXT,
+        integrator=run.integrator,
+        readable=run.readable(),
+        protected=run.protected,
+        review=review,
+    )
+
+    assert second.waiting_at == "final"
+    assert review.asked[0] == ["test_writer"]  # the first gate: only the test writer ran
+    assert review.asked[-1] == ["implementer"]  # the last: the test writer is in its diff
+    shown = run.events("gate_waiting")[-1].payload["changes"]
+    assert isinstance(shown, list)
+    by_path = {c["path"]: c for c in shown}  # type: ignore[index]
+    assert set(by_path) == {*TESTS, "src/cart.py", ".github/workflows/ci.yml"}
+    assert by_path["tests/test_cart.py"]["rule"] == "frozen"
+    assert by_path[".github/workflows/ci.yml"]["rule"] == "default"
+    assert "protected" not in by_path["src/cart.py"]

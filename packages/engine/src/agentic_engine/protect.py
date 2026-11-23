@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 
 from pydantic import JsonValue
 
+from agentic_engine.gate import FileChange
 from agentic_engine.spec.models import ProtectPolicy
 from agentic_runtime import ProtectRule
 from agentic_runtime.paths import first_match
@@ -66,6 +67,43 @@ def frozen_rules(saved: Mapping[str, JsonValue]) -> list[ProtectRule]:
         for f in (files if isinstance(files, list) else [])
         if isinstance(f, str)
     ]
+
+
+def mark_protected(
+    changes: Sequence["FileChange"],
+    state_frozen: Mapping[str, Mapping[str, JsonValue]],
+    protect: ProtectPolicy | None,
+) -> list["FileChange"]:
+    """`changes` with each file that matches a protection rule marked (13.5): the platform's
+    list and the workflow's patterns, and, for a writer that started from another's approved
+    work, those files as frozen. A writer in `protect.allow` still shows a change to a path it was
+    allowed as protected: a person approved it at a gate, and sees why."""
+    rules = static_rules(protect)
+    marked: list[FileChange] = []
+    for change in changes:
+        owner = change.node_id.partition(".")[0]
+        own = rules + frozen_rules(state_frozen.get(owner, {}))
+        found = next((r for r in own if r.kind == "frozen" and r.covers(change.path)), None)
+        found = found or next((r for r in rules if r.covers(change.path)), None)
+        marked.append(
+            change.model_copy(update={"protected": True, "rule": found.kind})
+            if found is not None
+            else change
+        )
+    return marked
+
+
+def folded_writers(
+    ran: Sequence[str], state_frozen: Mapping[str, Mapping[str, JsonValue]]
+) -> list[str]:
+    """`ran` without the writers a later writer started from (13.5): their files are shown once,
+    inside the later writer's diff, which is against the run's base and so holds them."""
+    sources = {
+        str(saved.get("writer"))
+        for node, saved in state_frozen.items()
+        if node in ran and saved.get("writer")
+    }
+    return [n for n in ran if n not in sources]
 
 
 def protected_payload(
