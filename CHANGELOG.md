@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 13.7 Circuit breakers:
+- Phase 13.7 Circuit breakers ([#259](https://github.com/KsiProgramming/agentic-dev/pull/259)):
   - **The engine pauses a step that works badly.** A watch per agent step trips on the same call 5 times or the same error 3 times, a cost of 3 × the node's average (and $0.50 over it), a write outside the node's declared `paths`, or 2 flips of a file; the run ends `waiting` with `breaker_tripped` and `gate_waiting.breaker`, `runs.breaker_trips` counts the pauses.
   - **Resume or Cancel run** through `POST /runs/{id}/approvals` (`approve` / `reject`; anything else is `422 breaker_decision_invalid`). Resume runs the paused step again from its start, told why in a "# Paused before" section; steps that completed are not run again; a pause uses no loop pass; an unanswered pause expires ("Breaker pause expired").
   - **Declared paths are refused.** `paths` on a writer agent; `repo.write_file` and `repo.commit` refuse a path outside it (also for Copilot, whose `tool_call` arrives after the tool ran).
