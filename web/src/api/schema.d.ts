@@ -1361,6 +1361,8 @@ export interface components {
              * @description Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.
              */
             start_from?: string | null;
+            /** @description Make this an independent reviewer (13.6): the engine builds its input from the spec and the reviewed writer's change, it has only read tools, and its answer is findings. Not with `reads`, `input_schema` or `output_schema`. */
+            review?: components["schemas"]["ReviewOf"] | null;
         };
         /** @enum {string} */
         AnalyzerMode: "no_new" | "shown" | "off";
@@ -2072,6 +2074,8 @@ export interface components {
             on_changes?: number | null;
             /** @description Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects. */
             evidence?: components["schemas"]["GateEvidence"] | null;
+            /** @description Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`. */
+            review?: components["schemas"]["GateReview"] | null;
             /**
              * Writes
              * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
@@ -2102,6 +2106,37 @@ export interface components {
              * @description How many times it tried.
              */
             count: number;
+        };
+        /**
+         * GateReview
+         * @description What a gate does with an independent review's findings (13.6). Findings at or above
+         *     `block_at` send the work back to the writer without a person (at most `max_rounds` times, never
+         *     on the loop's last pass, and counted with the gate's `evidence`); the rest reach the approver
+         *     as comments on the lines they name.
+         */
+        GateReview: {
+            /**
+             * From
+             * @description The findings (`.json`) artifact written before the gate in the loop's body: the merged report of the review.
+             * @example findings.json
+             */
+            from: string;
+            /**
+             * @description The least severe finding that sends the work back: `high` also sends back `critical`.
+             * @default high
+             */
+            block_at: components["schemas"]["Severity"];
+            /**
+             * Max Rounds
+             * @description How many times the review may send the work back, together with the gate's `evidence`. Never on the loop's last pass, whatever this says.
+             * @default 3
+             */
+            max_rounds: number;
+            /**
+             * Notes
+             * @description A Markdown run artifact the approval writes the comments that were not dismissed to, as a new version, for `github.openPR`'s `notes_from`.
+             */
+            notes?: string | null;
         };
         /**
          * GateSelect
@@ -2302,7 +2337,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed" | "invalid_review" | "review_unknown_writer" | "review_not_in_loop" | "invalid_gate_review";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -3409,6 +3444,25 @@ export interface components {
         /** @enum {string} */
         ReviewKind: "issue_comment" | "review" | "review_comment";
         /**
+         * ReviewOf
+         * @description Makes an agent an independent reviewer (13.6). The engine builds its input (the spec, the
+         *     reviewed writer's change and its evidence pack, never the previous step's output), gives it
+         *     only read tools, answers findings typed by the engine, and points its reads at the reviewed
+         *     writer's committed work.
+         */
+        ReviewOf: {
+            /**
+             * Of
+             * @description The writer (or an orchestrator whose body writes) whose work is reviewed: a node that completes before this one. Unset means the latest such writer in run order, so a stored review composite works in any caller.
+             */
+            of?: string | null;
+            /**
+             * Spec From
+             * @description A Markdown run artifact written before this node: the spec the change is reviewed against.
+             */
+            spec_from?: string | null;
+        };
+        /**
          * Route
          * @description One way a router can go: `then` runs when this route is chosen.
          */
@@ -4334,6 +4388,8 @@ export interface components {
             path: string;
             value: components["schemas"]["JsonValue"];
         };
+        /** @enum {string} */
+        Severity: "info" | "low" | "medium" | "high" | "critical";
         /**
          * SpecFileFromRepo
          * @description A Markdown spec file in the run's repo, read at the run's ref when it is created (7.7).
@@ -4676,6 +4732,8 @@ export interface components {
             on_changes?: number | null;
             /** @description Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects. */
             evidence?: components["schemas"]["GateEvidence"] | null;
+            /** @description Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`. */
+            review?: components["schemas"]["GateReview"] | null;
             /**
              * Writes
              * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.

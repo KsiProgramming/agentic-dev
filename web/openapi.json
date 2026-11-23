@@ -4540,6 +4540,17 @@
             ],
             "title": "Start From",
             "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them."
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewOf"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Make this an independent reviewer (13.6): the engine builds its input from the spec and the reviewed writer's change, it has only read tools, and its answer is findings. Not with `reads`, `input_schema` or `output_schema`."
           }
         },
         "additionalProperties": false,
@@ -6055,6 +6066,17 @@
             ],
             "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects."
           },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`."
+          },
           "writes": {
             "anyOf": [
               {
@@ -6119,6 +6141,56 @@
         ],
         "title": "GateProtectedAttempt",
         "description": "A writer's refused tries to change one protected path (13.5): `path` is a name, never\ncontent; `rule` says where the protection comes from."
+      },
+      "GateReview": {
+        "properties": {
+          "from": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+            "title": "From",
+            "description": "The findings (`.json`) artifact written before the gate in the loop's body: the merged report of the review.",
+            "examples": [
+              "findings.json"
+            ]
+          },
+          "block_at": {
+            "$ref": "#/components/schemas/Severity",
+            "description": "The least severe finding that sends the work back: `high` also sends back `critical`.",
+            "default": "high"
+          },
+          "max_rounds": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Rounds",
+            "description": "How many times the review may send the work back, together with the gate's `evidence`. Never on the loop's last pass, whatever this says.",
+            "default": 3
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes",
+            "description": "A Markdown run artifact the approval writes the comments that were not dismissed to, as a new version, for `github.openPR`'s `notes_from`."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from"
+        ],
+        "title": "GateReview",
+        "description": "What a gate does with an independent review's findings (13.6). Findings at or above\n`block_at` send the work back to the writer without a person (at most `max_rounds` times, never\non the loop's last pass, and counted with the gate's `evidence`); the rest reach the approver\nas comments on the lines they name."
       },
       "GateSelect": {
         "properties": {
@@ -6500,7 +6572,11 @@
           "protected_change_without_gate",
           "start_from_unknown_writer",
           "start_from_without_gate",
-          "start_from_not_allowed"
+          "start_from_not_allowed",
+          "invalid_review",
+          "review_unknown_writer",
+          "review_not_in_loop",
+          "invalid_gate_review"
         ]
       },
       "JiraConnectionOut": {
@@ -9140,6 +9216,44 @@
           "review_comment"
         ]
       },
+      "ReviewOf": {
+        "properties": {
+          "of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,62}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of",
+            "description": "The writer (or an orchestrator whose body writes) whose work is reviewed: a node that completes before this one. Unset means the latest such writer in run order, so a stored review composite works in any caller."
+          },
+          "spec_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+                "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+                "examples": [
+                  "findings.json"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec From",
+            "description": "A Markdown run artifact written before this node: the spec the change is reviewed against."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ReviewOf",
+        "description": "Makes an agent an independent reviewer (13.6). The engine builds its input (the spec, the\nreviewed writer's change and its evidence pack, never the previous step's output), gives it\nonly read tools, answers findings typed by the engine, and points its reads at the reviewed\nwriter's committed work."
+      },
       "Route": {
         "properties": {
           "id": {
@@ -11197,6 +11311,16 @@
         "title": "SetParam",
         "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `provider`, `input`, `input_schema`, `output_schema`, `on_review`).\n`null`\nunsets it. Ids, types and the slots that hold nodes change through the other ops."
       },
+      "Severity": {
+        "type": "string",
+        "enum": [
+          "info",
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ]
+      },
       "SpecFileFromRepo": {
         "properties": {
           "source": {
@@ -11947,6 +12071,17 @@
               }
             ],
             "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects."
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`."
           },
           "writes": {
             "anyOf": [

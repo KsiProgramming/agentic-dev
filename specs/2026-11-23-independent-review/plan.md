@@ -4,17 +4,19 @@ One PR, in this order. The tree keeps working after each group. Nothing changes 
 
 ## 1. Spec, findings categories and validation (`packages/runtime`, `packages/engine`)
 
-- [ ] `agentic_runtime.findings`: add the categories `correctness`, `performance`, `compatibility` and `accessibility` (additive). Regenerate `schemas/findings.v1.json`.
-- [ ] `ReviewOf` (`of: NodeId | None`, `spec_from: ArtifactName | None`, Markdown only) as `AgentNode.review`. `GateReview` (`from`, `block_at: Severity = "high"`, `max_rounds`, `notes: ArtifactName | None`, Markdown only) as `GateNode.review`. Schema errors for `review` with `select` or `on_changes`, as for `evidence`.
-- [ ] `notes_from` on `github.openPR` args (a Markdown artifact).
-- [ ] Validation issues, each with an actionable message:
+> Added while building group 1: **a `parallel` may be in a loop's body** (it was `not_allowed_in_loop`), because the lenses' parallel sits in the writer's loop. Decisions-log row in tech-stack; `parallel_results` are kept per pass (`test_parallel_in_loop.py`).
+
+- [x] `agentic_runtime.findings`: add the categories `correctness`, `performance`, `compatibility` and `accessibility` (additive). Regenerate `schemas/findings.v1.json`.
+- [x] `ReviewOf` (`of: NodeId | None`, `spec_from: ArtifactName | None`, Markdown only) as `AgentNode.review`. `GateReview` (`from`, `block_at: Severity = "high"`, `max_rounds`, `notes: ArtifactName | None`, Markdown only) as `GateNode.review`. Schema errors for `review` with `select` or `on_changes`, as for `evidence`.
+- [ ] `notes_from` on `github.openPR` args (a Markdown artifact): validated as an artifact read (`artifact_unknown`); the engine handling is group 4.
+- [x] Validation issues, each with an actionable message:
   - `invalid_review`: a review agent with a tool outside the review read tools, with `reads`, `input_schema` or `output_schema`, or in an orchestrator's worker or a map;
   - `review_unknown_writer`: `of` is not a writer or an orchestrator whose body writes that completes before the node, or no writer runs before it when `of` is unset;
   - `review_not_in_loop`: a gate `review` outside a loop's body;
   - `invalid_gate_review`: `from` is not a `.json` artifact written before the gate in the same body, or it is not typed as findings;
   - `artifact_unknown` for a `spec_from`, `notes` or `notes_from` that nothing writes before.
-- [ ] Regenerate the JSON Schema and node manifests, so the side panel edits `review` on an agent and on a gate (5.4).
-- [ ] Valid and invalid fixtures under `packages/engine/tests/fixtures/specs/`, and validation tests.
+- [x] Regenerate the JSON Schema and node manifests, so the side panel edits `review` on an agent and on a gate (5.4).
+- [x] Valid and invalid fixtures (the two review fixtures follow in group 8) under `packages/engine/tests/fixtures/specs/`, and validation tests.
 
 ## 2. Review agents and lens presets (`packages/engine`, `packages/runtime`)
 

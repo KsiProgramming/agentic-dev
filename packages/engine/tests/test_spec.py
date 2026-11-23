@@ -157,9 +157,6 @@ INVALID: dict[str, Rejection] = {
     "parallel-in-map": Rejection(
         (), "value_error", "map 'each' at root: parallel 'review' at root.body cannot be inside"
     ),
-    "parallel-in-loop": Rejection(
-        (), "value_error", "loop 'revise' at root: parallel 'review' at root.body cannot be inside"
-    ),
     "port-invalid-schema": Rejection(
         (), "value_error", "output_schema: it is not a valid JSON Schema at /properties/findings"
     ),

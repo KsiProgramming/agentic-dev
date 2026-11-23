@@ -280,6 +280,9 @@ class _Limits:
     """The orchestrators whose tasks write (each has an integration branch once it merged)."""
     roles: dict[str, str] = field(default_factory=dict[str, str])
     """Each agent's and orchestrator's role, for what a later step is told about its work."""
+    parallel_loops: dict[str, str] = field(default_factory=dict[str, str])
+    """Each parallel in a loop's body → the innermost loop around it (13.6): its branches' outcomes
+    are kept per pass, so a later pass never joins an earlier one's."""
     evidence_loops: dict[str, tuple[str, int]] = field(default_factory=dict[str, tuple[str, int]])
     """Each gate with evidence (13.3) → its loop's id and `max_iterations`: the checks never send
     the work back on the loop's last pass, which would end the loop with the work unapproved."""
@@ -532,6 +535,7 @@ def compile_workflow(
     )
     limits.loops = _enclosing_loops(spec.root)
     limits.evidence_loops = _evidence_loops(spec.root)
+    limits.parallel_loops = _parallel_loops(spec.root)
     limits.providers = providers
     limits.readable = readable
     if protected is not None:
@@ -611,7 +615,7 @@ def compile_workflow(
                     input_schema=ParallelBranch,
                 )
                 builder.add_edge(worker, join)
-                builder.add_node(join, _parallel_join(node, log))
+                builder.add_node(join, _parallel_join(node, log, limits))
                 go_on(join, node.id, then)
                 return node.id
             case OrchestratorNode():
@@ -1685,16 +1689,21 @@ def _fan_out_branches(
     parallel could not start."""
 
     def route(state: RunState) -> Sequence[Send] | str:
-        if parallel.id in state["results"]:
+        # A result here is the entry's refusal (failed); a finished earlier pass's is not.
+        if (
+            refused := state["results"].get(parallel.id)
+        ) is not None and refused.status == "failed":
             return END
         worker = branch_node_id(parallel)
         refs = state.get("artifacts", {})
+        key = _outcomes_key(parallel, state, limits)
         return [
             Send(
                 worker,
                 ParallelBranch(
                     index=i,
                     branch_input=state["last_text"],
+                    outcomes_key=key,
                     branch_artifacts=dict(refs),
                     branch_reads=_integrated_reader(state),
                     branch_writers=_encode_writers(
@@ -1720,9 +1729,10 @@ def _parallel_branch(
     results go into `results` (not `order`, the run's path, which a branch that fails under a join
     that is met does not stop), its outcome into `parallel_results`, and the run artifacts it
     wrote into `artifacts`; its later steps read what its earlier ones wrote."""
-    join = _BranchJoin(parallel)
+    joins: dict[str, _BranchJoin] = {}  # one per pass: a loop's later pass starts undecided
 
     async def work(task: ParallelBranch) -> RunUpdate:
+        join = joins.setdefault(task.get("outcomes_key", parallel.id), _BranchJoin(parallel))
         index, text = task["index"], task["branch_input"]
         branch_id = parallel.branches[index].id
         marker: dict[str, JsonValue] = {"index": index, "branch_id": branch_id}
@@ -1755,7 +1765,7 @@ def _parallel_branch(
         return {
             "results": scope.ran,
             "usage": usage,
-            "parallel_results": {parallel.id: {branch_id: outcome}},
+            "parallel_results": {task.get("outcomes_key", parallel.id): {branch_id: outcome}},
             "artifacts": scope.wrote,
         }
 
@@ -1793,15 +1803,35 @@ async def _run_branch(
     return result, error
 
 
+def _outcomes_key(parallel: ParallelNode, state: RunState, limits: _Limits) -> str:
+    """Where `parallel`'s branches' outcomes are kept this pass: its id, or inside a loop (13.6)
+    `<id>#<iteration>`."""
+    loop = limits.parallel_loops.get(parallel.id)
+    if loop is None:
+        return parallel.id
+    return f"{parallel.id}#{state['iterations'].get(loop, 0)}"
+
+
+def _parallel_loops(root: Node) -> dict[str, str]:
+    """Each parallel in a loop's body → the id of the innermost loop around it."""
+    loops: dict[str, str] = {}
+    for _, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            for _, inner in iter_nodes(node.body):
+                if isinstance(inner, ParallelNode):
+                    loops[inner.id] = node.id
+    return loops
+
+
 def _parallel_join(
-    parallel: ParallelNode, log: RunEventLog
+    parallel: ParallelNode, log: RunEventLog, limits: _Limits
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     """Ends the parallel by its join, from its branches' checkpointed outcomes. Its output is the
     completed branches' outputs in branch order (`data`: `outputs` by branch id, and the ids of
     the branches that `completed`, `failed` and were `cancelled`)."""
 
     async def join(state: RunState) -> RunUpdate:
-        by_id = state.get("parallel_results", {}).get(parallel.id, {})
+        by_id = state.get("parallel_results", {}).get(_outcomes_key(parallel, state, limits), {})
         outcomes = [(b.id, by_id[b.id]) for b in parallel.branches if b.id in by_id]
         result, payload = _joined(parallel, outcomes)
         await log.emit(NODE_END[result.status], node_id=parallel.id, payload=payload)

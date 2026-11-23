@@ -34,7 +34,7 @@ from agentic_engine.policy import (
     PolicyLimit,
 )
 from agentic_engine.ports import schema_problem
-from agentic_runtime.findings import FindingsReport
+from agentic_runtime.findings import FindingsReport, Severity
 from agentic_runtime.paths import glob_problem
 from agentic_runtime.request import Provider
 
@@ -79,6 +79,31 @@ class _Base(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, json_schema_mode_override="validation")
 
 
+class ReviewOf(_Base):
+    """Makes an agent an independent reviewer (13.6). The engine builds its input (the spec, the
+    reviewed writer's change and its evidence pack, never the previous step's output), gives it
+    only read tools, answers findings typed by the engine, and points its reads at the reviewed
+    writer's committed work."""
+
+    of: NodeId | None = Field(
+        default=None,
+        description="The writer (or an orchestrator whose body writes) whose work is reviewed: a "
+        "node that completes before this one. Unset means the latest such writer in run order, "
+        "so a stored review composite works in any caller.",
+    )
+    spec_from: ArtifactName | None = Field(
+        default=None,
+        description="A Markdown run artifact written before this node: the spec the change is "
+        "reviewed against.",
+    )
+
+    @model_validator(mode="after")
+    def _markdown_spec(self) -> Self:
+        if self.spec_from is not None and not self.spec_from.endswith(".md"):
+            raise ValueError(f"review.spec_from {self.spec_from!r} must be a Markdown artifact")
+        return self
+
+
 class AgentNode(_Base):
     """One agent turn: a role and instructions run on a provider."""
 
@@ -108,6 +133,12 @@ class AgentNode(_Base):
         description="Start this writer's branch on top of the earlier writer's (13.5): its "
         "files are frozen for this node, which can read but not change them. A gate must come "
         "between them.",
+    )
+    review: ReviewOf | None = Field(
+        default=None,
+        description="Make this an independent reviewer (13.6): the engine builds its input from "
+        "the spec and the reviewed writer's change, it has only read tools, and its answer is "
+        "findings. Not with `reads`, `input_schema` or `output_schema`.",
     )
 
     @model_validator(mode="after")
@@ -256,6 +287,54 @@ class GateEvidence(_Base):
     )
 
 
+MAX_REVIEW_ROUNDS = 10
+"""The most times a gate's review may send the work back (`GateReview.max_rounds`)."""
+
+
+class GateReview(_Base):
+    """What a gate does with an independent review's findings (13.6). Findings at or above
+    `block_at` send the work back to the writer without a person (at most `max_rounds` times, never
+    on the loop's last pass, and counted with the gate's `evidence`); the rest reach the approver
+    as comments on the lines they name."""
+
+    from_: ArtifactName = Field(
+        alias="from",
+        description="The findings (`.json`) artifact written before the gate in the loop's body: "
+        "the merged report of the review.",
+    )
+    block_at: Severity = Field(
+        default="high",
+        description="The least severe finding that sends the work back: `high` also sends back "
+        "`critical`.",
+    )
+    max_rounds: int = Field(
+        default=3,
+        ge=1,
+        le=MAX_REVIEW_ROUNDS,
+        description="How many times the review may send the work back, together with the "
+        "gate's `evidence`. Never on the loop's last pass, whatever this says.",
+    )
+    notes: ArtifactName | None = Field(
+        default=None,
+        description="A Markdown run artifact the approval writes the comments that were not "
+        "dismissed to, as a new version, for `github.openPR`'s `notes_from`.",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_mode_override="validation",
+        validate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+    @model_validator(mode="after")
+    def _kinds(self) -> Self:
+        if self.notes is not None and not self.notes.endswith(".md"):
+            raise ValueError(f"review.notes {self.notes!r} must be a Markdown artifact")
+        return self
+
+
 class GateNode(_Base):
     """A human decision point: the run pauses here until someone approves or rejects. Its input
     (the previous node's output) is shown to the approver and passes through unchanged, unless
@@ -298,6 +377,13 @@ class GateNode(_Base):
         "never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: "
         "a person approves or rejects.",
     )
+    review: GateReview | None = Field(
+        default=None,
+        description="Act on an independent review's findings (13.6): those at `block_at` or "
+        "above send the work back like a request for changes, never on the loop's last pass; "
+        "the rest reach the approver as comments. Only a gate in a loop's body, and not with "
+        "`select` or `on_changes`.",
+    )
     writes: ArtifactName | None = Field(
         default=None,
         description="With `select`, store the chosen items as this run artifact. With "
@@ -307,6 +393,13 @@ class GateNode(_Base):
 
     @model_validator(mode="after")
     def _writes_selection(self) -> Self:
+        if self.review is not None and self.select is not None:
+            raise ValueError(f"gate {self.id!r}: `review` cannot be used with `select`")
+        if self.review is not None and self.on_changes is not None:
+            raise ValueError(
+                f"gate {self.id!r}: `review` cannot be used with `on_changes`: the review sends "
+                "the work back, and a person approves or rejects"
+            )
         if self.writes is not None and self.select is None and self.on_changes is None:
             raise ValueError(f"gate {self.id!r}: `writes` needs `select` or `on_changes`")
         if self.evidence is not None and self.select is not None:
@@ -355,8 +448,15 @@ class WaitForNode(GateNode):
 
     @model_validator(mode="after")
     def _plain(self) -> Self:
-        if self.select is not None or self.on_changes is not None or self.writes is not None:
-            raise ValueError(f"wait_for {self.id!r}: takes no `select`, `on_changes` or `writes`")
+        if (
+            self.select is not None
+            or self.on_changes is not None
+            or self.writes is not None
+            or self.review is not None
+        ):
+            raise ValueError(
+                f"wait_for {self.id!r}: takes no `select`, `on_changes`, `review` or `writes`"
+            )
         return self
 
 
@@ -1064,6 +1164,10 @@ type IssueCode = Literal[
     "start_from_unknown_writer",
     "start_from_without_gate",
     "start_from_not_allowed",
+    "invalid_review",
+    "review_unknown_writer",
+    "review_not_in_loop",
+    "invalid_gate_review",
 ]
 
 
@@ -1513,9 +1617,9 @@ def _uses_repo(node: Node) -> bool:
 def loop_issues(root: Node) -> list[ValidationIssue]:
     """Why the loops under `root` cannot run, in run order (depth first); empty if they can. A
     loop's `until` must be a valid condition, and its body must not hold a publisher, a Jira
-    write, a repo creator, another loop, a map or a parallel: the issue is on that node, which
-    is the one to move. A gate (7.8) and a writer may be in it. An orchestrator may be in it
-    (6.9): its worker is checked by `orchestrator_issues`, and its writers, which commit on task
+    write, a repo creator, another loop or a map: the issue is on that node, which is the one
+    to move. A gate (7.8), a writer and a parallel (13.6) may be in it. An orchestrator may be in
+    it (6.9): its worker is checked by `orchestrator_issues`, and its writers, which commit on task
     branches merged into its integration branch, are allowed."""
     issues: list[ValidationIssue] = []
     for path, node in iter_nodes(root):
@@ -1577,7 +1681,7 @@ def _not_in_loop(node: Node) -> str | None:
         case MapNode():
             return "map"
         case ParallelNode():
-            return "parallel"
+            return None  # 13.6: the review's lenses run again each pass
         case OrchestratorNode():
             return None  # 6.9: planned afresh each iteration, on one integration branch
         case _ if tools & PUBLISH_TOOLS:
@@ -1937,6 +2041,82 @@ def start_from_issues(root: Node) -> list[ValidationIssue]:
                 "start_from_without_gate",
                 f"{where}: a gate must come between {source!r} and this node, so a person "
                 "approves the work it starts from",
+            )
+    return issues
+
+
+def review_issues(root: Node) -> list[ValidationIssue]:
+    """Why the review agents under `root` cannot run (13.6), in run order: a tool outside the
+    read tools, `reads`, an `input_schema` or an `output_schema`, or a place in a map or an
+    orchestrator's body (`invalid_review`: the engine builds its input and types its answer); or
+    `of` is no writer that completes before it, or none runs before it when `of` is unset
+    (`review_unknown_writer`)."""
+    ordered = list(iter_nodes(root))
+    tasked = task_node_ids(root)
+    mapped = {
+        inner.id
+        for _, node in ordered
+        if isinstance(node, MapNode)
+        for _, inner in iter_nodes(node)
+    }
+    writers = writer_node_ids(root) | task_writer_orchestrators(root)
+    loops = {p for p, n in ordered if isinstance(n, LoopNode)}
+    issues: list[ValidationIssue] = []
+    for index, (path, node) in enumerate(ordered):
+        if not isinstance(node, AgentNode) or node.review is None:
+            continue
+        where = f"agent {node.id!r} at {path}"
+
+        def issue(
+            code: IssueCode, field: str, message: str, path: str = path, node: Node = node
+        ) -> None:
+            issues.append(
+                ValidationIssue(code=code, path=f"{path}{field}", node_id=node.id, message=message)
+            )
+
+        if other := sorted(set(node.tools) - READ_TOOLS):
+            issue(
+                "invalid_review",
+                ".tools",
+                f"{where}: a review agent may only read the repo (repo.list_files, "
+                f"repo.read_file, repo.search, repo.list_modules, repo.diff), not {other}",
+            )
+        for name, present in (
+            ("reads", bool(node.reads)),
+            ("input_schema", node.input_schema is not None),
+            ("output_schema", node.output_schema is not None),
+        ):
+            if present:
+                issue(
+                    "invalid_review",
+                    f".{name}",
+                    f"{where}: a review agent cannot have `{name}`: the engine builds its input "
+                    "and types its findings",
+                )
+        if node.id in mapped or node.id in tasked:
+            issue(
+                "invalid_review",
+                "",
+                f"{where}: a review agent cannot be in a map or an orchestrator's body",
+            )
+            continue
+        candidates = [
+            (i, n)
+            for i, (_, n) in enumerate(ordered)
+            if n.id in writers
+            and (node.review.of is None or n.id == node.review.of)
+            and _subtree_end(ordered, i) < index
+            and within(path, scope_of(_runs_in(ordered[i][0], loops)))
+        ]
+        if not candidates:
+            named = node.review.of
+            issue(
+                "review_unknown_writer",
+                ".review.of" if named else ".review",
+                f"{where}: `review.of` {named!r} is not a writer, or an orchestrator whose body "
+                "writes, that completes before this node"
+                if named
+                else f"{where}: no writer runs before this node, so there is no change to review",
             )
     return issues
 
@@ -2305,6 +2485,18 @@ def _walk_artifacts(root: Node, inputs: Collection[str] = ()) -> _ArtifactFlow:
                 )
                 if isinstance(body_from, str) and body_from not in seen:
                     unknown(node, f"{path}.args.body_from", body_from, "takes its body from")
+                notes_from = (
+                    node.args.get("notes_from")
+                    if isinstance(node, ToolNode) and node.tool in PUBLISH_TOOLS
+                    else None
+                )
+                if isinstance(notes_from, str) and notes_from not in seen:
+                    unknown(node, f"{path}.args.notes_from", notes_from, "takes its notes from")
+                spec_from = (
+                    node.review.spec_from if isinstance(node, AgentNode) and node.review else None
+                )
+                if spec_from is not None and spec_from not in seen:
+                    unknown(node, f"{path}.review.spec_from", spec_from, "reviews against")
                 return {**seen, node.writes: node} if node.writes else seen
             case ReduceNode():
                 return {**seen, node.writes: node} if node.writes else seen
@@ -2333,6 +2525,9 @@ def _walk_artifacts(root: Node, inputs: Collection[str] = ()) -> _ArtifactFlow:
                         evidence.criteria_from,
                         "reads its criteria from",
                     )
+                if node.review is not None and node.review.notes is not None:
+                    # Approving writes the comments that were not dismissed to `notes`.
+                    seen = {**seen, node.review.notes: _UNTYPED}
                 if node.select is None:
                     return seen
                 name = node.select.artifact
@@ -2626,7 +2821,7 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
     issues += commit_artifacts_issues(root) + build_tool_issues(root)
     issues += port_issues(root) + artifact_issues(root, inputs) + subflow_issues(root)
-    issues += gate_issues(root) + start_from_issues(root)
+    issues += gate_issues(root) + start_from_issues(root) + review_issues(root)
     return in_run_order(root, issues)
 
 
@@ -2746,6 +2941,60 @@ def _evidence_issues(
     return found
 
 
+def _gate_review_issues(path: str, node: GateNode, loop: LoopNode | None) -> list[ValidationIssue]:
+    """Why the review of the gate `node` (13.6) cannot run: the gate is not in a loop's body
+    (`review_not_in_loop`), or `from` is not a `.json` artifact written before the gate in that
+    body, typed as findings (`invalid_gate_review`)."""
+    review = node.review
+    if review is None:
+        return []
+
+    def issue(code: IssueCode, field: str, message: str) -> ValidationIssue:
+        return ValidationIssue(
+            code=code, path=f"{path}.review{field}", node_id=node.id, message=message
+        )
+
+    if loop is None:
+        return [
+            issue(
+                "review_not_in_loop",
+                "",
+                f"gate {node.id!r} at {path}: review needs the gate to be in a loop's body, "
+                "which its findings send the work back to",
+            )
+        ]
+    name = review.from_
+    writer: ArtifactWriter | None = None
+    for _, inner in iter_nodes(loop.body):
+        if inner.id == node.id:
+            break
+        if isinstance(inner, AgentNode | ToolNode | ReduceNode) and inner.writes == name:
+            writer = inner
+    if not name.endswith(".json") or writer is None:
+        why = (
+            "must be a .json artifact"
+            if not name.endswith(".json")
+            else f"is not written before the gate in the body of loop {loop.id!r}"
+        )
+        return [
+            issue(
+                "invalid_gate_review",
+                ".from",
+                f"gate {node.id!r} at {path}: review.from {name!r} {why}",
+            )
+        ]
+    if output_schema(writer) != FINDINGS_SCHEMA:
+        return [
+            issue(
+                "invalid_gate_review",
+                ".from",
+                f"gate {node.id!r} at {path}: review.from {name!r} is not typed as findings: "
+                "write it from a `dedupe` or `vote` reduce, or an agent with the findings schema",
+            )
+        ]
+    return []
+
+
 def gate_issues(root: Node) -> list[ValidationIssue]:
     """Why the gates under `root` cannot run (6.7): a `select.preselect` that is not a valid
     condition over `item` (`invalid_expression`), and `on_reject: end` on a gate that is not a
@@ -2799,6 +3048,7 @@ def gate_issues(root: Node) -> list[ValidationIssue]:
                     )
                 )
         issues.extend(_evidence_issues(root, path, node, in_loop.get(id(node))))
+        issues.extend(_gate_review_issues(path, node, in_loop.get(id(node))))
         if node.on_reject == "end" and id(node) not in top:
             message = (
                 f'gate {node.id!r} at {path}: on_reject "end" needs the gate to be a step of '

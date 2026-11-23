@@ -7,7 +7,30 @@
     "icon": "bot",
     "parameters": {
       "$defs": {
-        "JsonValue": {}
+        "JsonValue": {},
+        "ReviewOf": {
+          "additionalProperties": false,
+          "description": "Makes an agent an independent reviewer (13.6). The engine builds its input (the spec, the\nreviewed writer's change and its evidence pack, never the previous step's output), gives it\nonly read tools, answers findings typed by the engine, and points its reads at the reviewed\nwriter's committed work.",
+          "properties": {
+            "of": {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string",
+              "description": "The writer (or an orchestrator whose body writes) whose work is reviewed: a node that completes before this one. Unset means the latest such writer in run order, so a stored review composite works in any caller.",
+              "title": "Of"
+            },
+            "spec_from": {
+              "description": "A Markdown run artifact written before this node: the spec the change is reviewed against.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string",
+              "title": "Spec from"
+            }
+          },
+          "title": "ReviewOf",
+          "type": "object"
+        }
       },
       "additionalProperties": false,
       "description": "One agent turn: a role and instructions run on a provider.",
@@ -127,6 +150,11 @@
           "type": "string",
           "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.",
           "title": "Start from"
+        },
+        "review": {
+          "$ref": "#/$defs/ReviewOf",
+          "description": "Make this an independent reviewer (13.6): the engine builds its input from the spec and the reviewed writer's change, it has only read tools, and its answer is findings. Not with `reads`, `input_schema` or `output_schema`.",
+          "title": "Review"
         }
       },
       "required": [
@@ -165,6 +193,11 @@
         "ui:widget": "checkboxes"
       },
       "start_from": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "review": {
         "ui:options": {
           "advanced": true
         }
@@ -478,6 +511,49 @@
           "title": "GateEvidence",
           "type": "object"
         },
+        "GateReview": {
+          "additionalProperties": false,
+          "description": "What a gate does with an independent review's findings (13.6). Findings at or above\n`block_at` send the work back to the writer without a person (at most `max_rounds` times, never\non the loop's last pass, and counted with the gate's `evidence`); the rest reach the approver\nas comments on the lines they name.",
+          "properties": {
+            "from": {
+              "description": "The findings (`.json`) artifact written before the gate in the loop's body: the merged report of the review.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "title": "From step",
+              "type": "string"
+            },
+            "block_at": {
+              "$ref": "#/$defs/Severity",
+              "default": "high",
+              "description": "The least severe finding that sends the work back: `high` also sends back `critical`.",
+              "title": "Block at"
+            },
+            "max_rounds": {
+              "default": 3,
+              "description": "How many times the review may send the work back, together with the gate's `evidence`. Never on the loop's last pass, whatever this says.",
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Max rounds",
+              "type": "integer"
+            },
+            "notes": {
+              "description": "A Markdown run artifact the approval writes the comments that were not dismissed to, as a new version, for `github.openPR`'s `notes_from`.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string",
+              "title": "Notes"
+            }
+          },
+          "required": [
+            "from"
+          ],
+          "title": "GateReview",
+          "type": "object"
+        },
         "GateSelect": {
           "additionalProperties": false,
           "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key.",
@@ -527,6 +603,16 @@
           ],
           "title": "GateSelect",
           "type": "object"
+        },
+        "Severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -575,6 +661,11 @@
           "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects.",
           "title": "Evidence"
         },
+        "review": {
+          "$ref": "#/$defs/GateReview",
+          "description": "Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`.",
+          "title": "Review"
+        },
         "writes": {
           "description": "With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.",
           "examples": [
@@ -613,6 +704,11 @@
         }
       },
       "evidence": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "review": {
         "ui:options": {
           "advanced": true
         }
@@ -757,6 +853,49 @@
           "title": "GateEvidence",
           "type": "object"
         },
+        "GateReview": {
+          "additionalProperties": false,
+          "description": "What a gate does with an independent review's findings (13.6). Findings at or above\n`block_at` send the work back to the writer without a person (at most `max_rounds` times, never\non the loop's last pass, and counted with the gate's `evidence`); the rest reach the approver\nas comments on the lines they name.",
+          "properties": {
+            "from": {
+              "description": "The findings (`.json`) artifact written before the gate in the loop's body: the merged report of the review.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "title": "From step",
+              "type": "string"
+            },
+            "block_at": {
+              "$ref": "#/$defs/Severity",
+              "default": "high",
+              "description": "The least severe finding that sends the work back: `high` also sends back `critical`.",
+              "title": "Block at"
+            },
+            "max_rounds": {
+              "default": 3,
+              "description": "How many times the review may send the work back, together with the gate's `evidence`. Never on the loop's last pass, whatever this says.",
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Max rounds",
+              "type": "integer"
+            },
+            "notes": {
+              "description": "A Markdown run artifact the approval writes the comments that were not dismissed to, as a new version, for `github.openPR`'s `notes_from`.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string",
+              "title": "Notes"
+            }
+          },
+          "required": [
+            "from"
+          ],
+          "title": "GateReview",
+          "type": "object"
+        },
         "GateSelect": {
           "additionalProperties": false,
           "description": "What a selection gate asks the approver to choose from (6.7): the items of a JSON run\nartifact. Approving names the chosen items by their key.",
@@ -806,6 +945,16 @@
           ],
           "title": "GateSelect",
           "type": "object"
+        },
+        "Severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "type": "string"
         }
       },
       "additionalProperties": false,
@@ -854,6 +1003,11 @@
           "$ref": "#/$defs/GateEvidence",
           "description": "Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects.",
           "title": "Evidence"
+        },
+        "review": {
+          "$ref": "#/$defs/GateReview",
+          "description": "Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`.",
+          "title": "Review"
         },
         "writes": {
           "description": "With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.",

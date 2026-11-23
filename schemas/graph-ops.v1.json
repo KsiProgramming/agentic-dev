@@ -222,6 +222,18 @@
           "title": "Reads",
           "type": "array"
         },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewOf"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Make this an independent reviewer (13.6): the engine builds its input from the spec and the reviewed writer's change, it has only read tools, and its answer is findings. Not with `reads`, `input_schema` or `output_schema`."
+        },
         "role": {
           "minLength": 1,
           "title": "Role",
@@ -604,6 +616,18 @@
           "description": "More guidance for the approver, shown with the input.",
           "title": "Prompt"
         },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateReview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`."
+        },
         "select": {
           "anyOf": [
             {
@@ -666,6 +690,57 @@
         "title"
       ],
       "title": "GateNode",
+      "type": "object"
+    },
+    "GateReview": {
+      "additionalProperties": false,
+      "description": "What a gate does with an independent review's findings (13.6). Findings at or above\n`block_at` send the work back to the writer without a person (at most `max_rounds` times, never\non the loop's last pass, and counted with the gate's `evidence`); the rest reach the approver\nas comments on the lines they name.",
+      "properties": {
+        "block_at": {
+          "$ref": "#/$defs/Severity",
+          "default": "high",
+          "description": "The least severe finding that sends the work back: `high` also sends back `critical`."
+        },
+        "from": {
+          "description": "The findings (`.json`) artifact written before the gate in the loop's body: the merged report of the review.",
+          "examples": [
+            "findings.json"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+          "title": "From",
+          "type": "string"
+        },
+        "max_rounds": {
+          "default": 3,
+          "description": "How many times the review may send the work back, together with the gate's `evidence`. Never on the loop's last pass, whatever this says.",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Rounds",
+          "type": "integer"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A Markdown run artifact the approval writes the comments that were not dismissed to, as a new version, for `github.openPR`'s `notes_from`.",
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "title": "GateReview",
       "type": "object"
     },
     "GateSelect": {
@@ -1479,6 +1554,46 @@
       "title": "RemoveNode",
       "type": "object"
     },
+    "ReviewOf": {
+      "additionalProperties": false,
+      "description": "Makes an agent an independent reviewer (13.6). The engine builds its input (the spec, the\nreviewed writer's change and its evidence pack, never the previous step's output), gives it\nonly read tools, answers findings typed by the engine, and points its reads at the reviewed\nwriter's committed work.",
+      "properties": {
+        "of": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The writer (or an orchestrator whose body writes) whose work is reviewed: a node that completes before this one. Unset means the latest such writer in run order, so a stored review composite works in any caller.",
+          "title": "Of"
+        },
+        "spec_from": {
+          "anyOf": [
+            {
+              "description": "A run artifact's name: letters, digits, `.`, `_` and `-`, ending in `.json`, `.md` or `.txt`, which give its media type.",
+              "examples": [
+                "findings.json"
+              ],
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A Markdown run artifact written before this node: the spec the change is reviewed against.",
+          "title": "Spec From"
+        }
+      },
+      "title": "ReviewOf",
+      "type": "object"
+    },
     "Route": {
       "additionalProperties": false,
       "description": "One way a router can go: `then` runs when this route is chosen.",
@@ -1883,6 +1998,16 @@
       "title": "SetParam",
       "type": "object"
     },
+    "Severity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "type": "string"
+    },
     "SubflowNode": {
       "additionalProperties": false,
       "description": "Runs another stored workflow, by id and version, as one step of this one (6.5).\n\nThe called workflow is read from the run's workspace when the run is created and runs inside\nthis run: its nodes share the run's repo, sandbox, limits, budget, artifacts and event log,\nand their ids are its own. Its input is the subflow's input, or the value\nof `input`; its output is the called workflow's. A spec names the workflow only: the engine\nattaches the called workflow's root (`call`) when it resolves the run (`expand_workflow`). A\nnode of the called workflow whose id the run already uses runs as `<subflow>-<id>`; the\ncalled workflow's own expressions still name it by its id.",
@@ -2120,6 +2245,18 @@
           "default": null,
           "description": "More guidance for the approver, shown with the input.",
           "title": "Prompt"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateReview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`."
         },
         "select": {
           "anyOf": [
