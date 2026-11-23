@@ -10,6 +10,7 @@ and the evidence pack of that writer (`## Evidence`). Every heading is always pr
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import JsonValue
 
@@ -132,6 +133,10 @@ LENSES: dict[str, Lens] = {
 """The six lens presets (13.6)."""
 
 DEFAULT_LENSES = ("correctness", "security", "performance")
+
+BlockAt = Literal["info", "low", "medium", "high", "critical"]
+"""A severity as a template option (a plain `Literal`, so the options' JSON Schema has no
+`$defs`)."""
 
 
 def lens_instructions(lens: Lens) -> str:

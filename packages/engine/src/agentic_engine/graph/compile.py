@@ -1157,6 +1157,8 @@ def _reads_as(node: Node, reads: str | None) -> str | None:
     `repo.*` reads go to that orchestrator's integration branch, the work merged so far (6.9); a
     node that writes, publishes or reads nothing calls as itself (`None`)."""
     tools = set(node_tools(node))
+    if isinstance(node, AgentNode) and node.review is not None:
+        return None  # a review agent reads the reviewed writer's refs, as itself (13.6)
     if reads is None or not tools & READ_TOOLS or tools & (WRITE_TOOLS | PUBLISH_TOOLS):
         return None
     return reads

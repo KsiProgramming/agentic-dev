@@ -66,14 +66,13 @@ from typing import Annotated, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from agentic_engine.policy import PLATFORM_POLICY
-from agentic_engine.review import DEFAULT_LENSES, LENSES, review_flow
+from agentic_engine.review import DEFAULT_LENSES, LENSES, BlockAt, review_flow
 from agentic_engine.spec import (
     ANSWER_TTL_S,
     MAX_ANSWER_TTL_S,
     SPEC_INPUT_ARTIFACT,
     WorkflowSpec,
 )
-from agentic_runtime.findings import Severity
 from agentic_runtime.pricing import DEFAULT_PRICES
 from agentic_runtime.request import Provider
 
@@ -464,7 +463,7 @@ class SddFileParams(BaseModel):
         f"{', '.join(LENSES)}. Each runs every pass, so each costs one agent turn per pass.",
         json_schema_extra={"items": {"enum": list(LENSES)}},
     )
-    review_block_at: Severity = Field(
+    review_block_at: BlockAt = Field(
         default="high",
         description="With `review`: the least severe finding that sends the work back (`high` "
         "also sends back `critical`).",
