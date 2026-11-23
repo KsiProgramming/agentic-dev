@@ -55,7 +55,7 @@ async def test_editable_files_come_with_both_sides(sandbox: Sandbox) -> None:
     changes = await review.changes(["writer", "approve"])
 
     by_path = {c.path: c for c in changes}
-    assert by_path["README.md"].model_dump(exclude={"node_id", "path"}) == {
+    assert by_path["README.md"].model_dump(exclude={"node_id", "path", "protected", "rule"}) == {
         "old_path": None,
         "status": "modified",
         "editable": True,
