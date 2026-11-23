@@ -72,17 +72,17 @@ The plan contract and the tools' plan modes come first, then the engine plans be
 
 Read `specs/design-language.md`, tech-stack → UI design system, and `web/AGENTS.md` first.
 
-- [ ] `@/runs/timeline`: fold `writes_planned` into `GateInfo.plans`, and `write_checked` into the write step (`outcome`, `differences`).
-- [ ] `WritePlans` (`web/src/runs/console/write-plans.tsx`, new):
+- [x] `@/runs/timeline`: fold `writes_planned` into `GateInfo.plans`, and `write_checked` into the write step (`outcome`, `differences`).
+- [x] `WritePlans` (`web/src/runs/console/write-plans.tsx`, new):
   - One card per plan: a lucide icon for its kind (`aria-hidden`), the summary, and the target (`repoLabel` in mono; the issue key in mono, linked only when its address is https).
   - The body through the sanitised Markdown renderer (`AgentMessage`), capped with "Show full".
   - A transition as "from → to" in text, the placeholders as quiet `text-meta` lines.
   - "Would fail" with `StatusBadge` and the error as text.
   - Loading, empty and error states (rule 5) for a caller that loads its own data.
-- [ ] Use it in `inbox/inbox-review.tsx` (in place of "Approving lets the run go on" when there are plans), in `approval-dock.tsx` and `gate-review-sheet.tsx` (details and review sheets), and in the gate step's Output (`step-output.tsx`).
-- [ ] `step-output.tsx` and `step-list.tsx`: a write step shows "As planned at <gate>", or a `StatusBadge` "Not as planned" with the differences as a list of field, planned and actual, as text.
-- [ ] `web/src/audit/actions.ts`: lines for `write.not_as_planned` and `write.plan_stale`.
-- [ ] Tests: `write-plans.test.tsx` (each kind, a plan that would fail, the placeholders, a non-https issue URL left unlinked, Markdown with HTML dropped), the timeline folding, `inbox-view.test.tsx`, the audit formatter, and the e2e and axe specs below.
+- [x] Use it in `inbox/inbox-review.tsx` (in place of "Approving lets the run go on" when there are plans), in `approval-dock.tsx` and `gate-review-sheet.tsx` (details and review sheets), and in the gate step's Output (`step-output.tsx`).
+- [x] `step-output.tsx` and `step-list.tsx`: a write step shows "As planned at <gate>", or a `StatusBadge` "Not as planned" with the differences as a list of field, planned and actual, as text.
+- [x] `web/src/audit/actions.ts`: lines for `write.not_as_planned` and `write.plan_stale`.
+- [x] Tests: `write-plans.test.tsx` (each kind, a plan that would fail, the placeholders, a non-https issue URL left unlinked, Markdown with HTML dropped), the timeline folding, `inbox-view.test.tsx`, the audit formatter, and the e2e and axe specs below.
 
 ## 6. Specs, docs and a real run
 

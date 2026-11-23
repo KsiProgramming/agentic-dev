@@ -1,6 +1,7 @@
 import { parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { parseBreaker, type BreakerTrip } from "./breaker";
 import { parseEvidence, type Evidence } from "./evidence";
+import { parsePlans, type WritePlan } from "./plans";
 import { parseReview, type Review } from "./review";
 import type { RunEvent } from "./types";
 
@@ -160,6 +161,8 @@ export interface PendingGate {
   /** Set when a circuit breaker paused the run (13.7), not a gate: what it saw. The decision is
    * Resume or Cancel run, and nothing else. */
   breaker: BreakerTrip | null;
+  /** What approving does (13.8): the plan of each outward write the gate guards, in run order. */
+  plans: WritePlan[];
 }
 
 /** The title of a pause a circuit breaker caused. */
@@ -269,6 +272,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         wait_for,
         evidence,
         review,
+        plans,
       } = event.payload ?? {};
       const trip =
         typeof event.payload?.breaker === "string"
@@ -303,6 +307,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         review: parseReview(review),
         protectedAttempts: attemptsFromEvents(events.slice(0, i)),
         breaker: trip,
+        plans: parsePlans(plans),
       };
     }
   }

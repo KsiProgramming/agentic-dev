@@ -353,6 +353,8 @@ test("each category has its actions", () => {
     "breaker.resumed",
     "breaker.cancelled",
     "breaker.expired",
+    "write.not_as_planned",
+    "write.plan_stale",
   ]);
   expect(actionsOf("workflows")).toEqual([
     "workflow.created",
@@ -377,6 +379,30 @@ test("each category has its actions", () => {
     "pricing.updated",
     "workspace.settings_changed",
   ]);
+});
+
+test("a write that was not as planned, or whose plan went stale, reads as the platform's doing (13.8)", () => {
+  expect(actionInfo("write.not_as_planned").label).toBe("Write not as planned");
+  expect(
+    describeEvent(
+      auditEvent({
+        action: "write.not_as_planned",
+        node_id: "publish",
+        details: { gate: "approve_pr", tool: "github.openPR", fields: ["base", "title"] },
+      }),
+    ),
+  ).toBe("github.openPR at publish did not do what the gate showed · differs in base, title");
+  expect(
+    describeEvent(
+      auditEvent({
+        action: "write.plan_stale",
+        node_id: "move",
+        details: { gate: "approve_pr", tool: "jira.transition", fields: ["from_status"] },
+      }),
+    ),
+  ).toBe(
+    "jira.transition at move was refused: what the gate showed no longer held, so nothing was written · differs in from_status",
+  );
 });
 
 test("a gate the review sent back reads as the independent review's doing (13.6)", () => {

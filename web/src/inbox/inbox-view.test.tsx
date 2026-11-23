@@ -481,3 +481,52 @@ test("a gate that cannot be loaded shows the error and Retry in the review", asy
   await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("boom"));
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
+
+test("a gate that guards writes shows a plan of each in place of the branches line (13.8)", async () => {
+  wide();
+  const plans = [
+    {
+      node_id: "publish",
+      tool: "github.openPR",
+      action: "open_pr",
+      summary: "Push 1 commit to agent/r/writer and open a pull request into main",
+      target: { kind: "repo", label: "acme/docs", url: "https://github.com/acme/docs" },
+      fields: { head: "agent/r/writer", base: "main", commits: 1 },
+      body: "Adds the notes.",
+      pending: [],
+      expect: {},
+      error: null,
+    },
+    {
+      node_id: "move",
+      tool: "jira.transition",
+      action: "transition",
+      summary: "Move KAN-5 from In Progress to Done",
+      target: { kind: "issue", label: "KAN-5", url: "https://acme.atlassian.net/browse/KAN-5" },
+      fields: { from_status: "In Progress", to_status: "Done", changed: true },
+      body: null,
+      pending: [],
+      expect: {},
+      error: {
+        code: "transition_unavailable",
+        message: "KAN-5 is In Progress; its transitions from there: none",
+      },
+    },
+  ] as unknown as RunGate["plans"];
+  api([older], { [older.id]: gateOf(older.id, { plans }) });
+  show();
+
+  const review = await screen.findByTestId("inbox-review");
+
+  const cards = await within(review).findAllByTestId("write-plan");
+  expect(cards).toHaveLength(2);
+  expect(within(review).getByRole("heading", { name: "What approving does" })).toBeTruthy();
+  expect(within(review).queryByText("Approving lets the run go on")).toBeNull();
+  expect(within(cards[0]!).getByText("Adds the notes.")).toBeTruthy();
+  expect(within(cards[1]!).getByTestId("plan-transition").textContent).toBe("In Progress → Done");
+  // A plan that would fail is shown, and Approve stays on: the run refuses it before writing.
+  expect(within(cards[1]!).getByText("Would fail")).toBeTruthy();
+  expect(
+    (within(review).getByRole("button", { name: /^Approve/ }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+});

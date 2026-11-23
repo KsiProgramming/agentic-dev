@@ -143,6 +143,8 @@ test("filters from the URL narrow the query, and Load more fetches the next page
     "breaker.resumed",
     "breaker.cancelled",
     "breaker.expired",
+    "write.not_as_planned",
+    "write.plan_stale",
   ]);
   expect(first.get("run_id")).toBe(RUN);
 

@@ -2,8 +2,10 @@ import {
   BadgeCheckIcon,
   BanIcon,
   CircleCheckIcon,
+  CircleSlashIcon,
   CircleXIcon,
   CoinsIcon,
+  FileDiffIcon,
   FlagIcon,
   FileSearchIcon,
   FlaskConicalIcon,
@@ -85,6 +87,16 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "breaker.resumed": { label: "Run resumed", icon: PlayIcon, category: "approvals" },
   "breaker.cancelled": { label: "Run cancelled at a pause", icon: BanIcon, category: "approvals" },
   "breaker.expired": { label: "Pause expired", icon: TimerOffIcon, category: "approvals" },
+  "write.not_as_planned": {
+    label: "Write not as planned",
+    icon: FileDiffIcon,
+    category: "approvals",
+  },
+  "write.plan_stale": {
+    label: "Write refused: plan stale",
+    icon: CircleSlashIcon,
+    category: "approvals",
+  },
   "workflow.created": { label: "Workflow created", icon: FilePlusIcon, category: "workflows" },
   "workflow.updated": { label: "Workflow changed", icon: FilePenIcon, category: "workflows" },
   "workflow.restored": { label: "Version restored", icon: HistoryIcon, category: "workflows" },
@@ -353,6 +365,18 @@ export function describe(event: AuditEvent): string {
       return join(
         `${event.node_id ?? "A paused step"} was not resumed in time; the run was cancelled`,
         at && `due ${formatAbsolute(at)}`,
+      );
+    }
+    case "write.not_as_planned":
+    case "write.plan_stale": {
+      const tool = text(d, "tool") ?? "A write";
+      const fields = strings(d, "fields");
+      const where = event.node_id ? ` at ${event.node_id}` : "";
+      return join(
+        event.action === "write.plan_stale"
+          ? `${tool}${where} was refused: what the gate showed no longer held, so nothing was written`
+          : `${tool}${where} did not do what the gate showed`,
+        fields.length > 0 && `differs in ${fields.join(", ")}`,
       );
     }
     case "gate.expired": {

@@ -1,6 +1,7 @@
 import { parseArtifact, parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { parseEvidence, type Evidence } from "./evidence";
 import { parseBreaker, type BreakerTrip } from "./breaker";
+import { parsePlans, parseWriteCheck, type WriteCheck, type WritePlan } from "./plans";
 import { parseReview, type Review } from "./review";
 import { addUsage, usageOfEvent, type TokenUsage } from "./cost";
 import {
@@ -101,6 +102,9 @@ export interface GateInfo {
   review: Review | null;
   /** The fingerprints of the comments the approval dismissed (13.6). */
   dismissed: string[];
+  /** What approving does (13.8): the plan of each outward write the gate guards, as the tools
+   * planned it before the gate paused; empty for a gate that guards none. */
+  plans: WritePlan[];
 }
 
 /** A branch saved outside the sandbox (12.2), as its step's last `branch_saved` or
@@ -193,6 +197,9 @@ export interface Step {
   protectedPaths: ProtectedPaths | null;
   /** What a review agent was given (13.6); `null` for any other step. */
   reviewInput: ReviewInput | null;
+  /** How an outward write went against the plan a gate showed (13.8), from its `write_checked`;
+   * `null` for any other step. */
+  writeCheck: WriteCheck | null;
   /** What a `dedupe` or `vote` reduce merged (4.5): its `node_completed`'s `merged`. */
   merged: MergeCounts | null;
   /** Set for a router node (4.6): its routes, the one it took and why, and that route's steps. */
@@ -495,6 +502,7 @@ function newStep(id: string, at: string): Step {
     model: null,
     writers: null,
     reviewInput: null,
+    writeCheck: null,
     protectedPaths: null,
     gate: null,
     prUrl: null,
@@ -595,6 +603,8 @@ class Builder {
   private evidence = new Map<string, Evidence | null>();
   /** The latest `review_collected` of each gate (13.6), by the same rule. */
   private reviews = new Map<string, Review | null>();
+  /** The latest `writes_planned` of each gate (13.8), for a gate whose own event has none. */
+  private planned = new Map<string, WritePlan[]>();
   /** The `item` and `branch` tags each step's events carry: a router in a map runs once per
    * item, under the same id. */
   private tags = new WeakMap<Step, { item: number | null; branch: number | null }>();
@@ -645,6 +655,15 @@ class Builder {
       case "review_collected":
         this.reviews.set(nodeId, parseReview(payload));
         return;
+      case "writes_planned":
+        this.planned.set(nodeId, parsePlans(payload.plans));
+        return;
+      case "write_checked": {
+        // On the write's step, once it started; one a batch check refused never did.
+        const owner = this.scopeFor(nodeId, item, branch).steps.find((s) => s.id === nodeId);
+        if (owner) owner.writeCheck = parseWriteCheck(payload);
+        return;
+      }
       case "loop_iteration_started": {
         const loop = this.container(nodeId, at, item, branch);
         loop.iterations ??= [];
@@ -937,6 +956,10 @@ class Builder {
           evidence: parseEvidence(payload.evidence) ?? this.evidence.get(nodeId) ?? null,
           review: parseReview(payload.review) ?? this.reviews.get(nodeId) ?? null,
           dismissed: [],
+          plans:
+            payload.plans === undefined
+              ? (this.planned.get(nodeId) ?? [])
+              : parsePlans(payload.plans),
         };
         return;
       case "gate_decided": {
@@ -964,6 +987,7 @@ class Builder {
           evidence: step.gate?.evidence ?? this.evidence.get(nodeId) ?? null,
           review: step.gate?.review ?? this.reviews.get(nodeId) ?? null,
           dismissed: strings(payload.dismissed),
+          plans: step.gate?.plans ?? [],
         };
         return;
       }

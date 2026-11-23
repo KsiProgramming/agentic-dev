@@ -39,6 +39,7 @@ import { StatusMarker } from "./rail";
 import { lastMessage, stepOutline, type StepEntry, type StepRow } from "./step-entries";
 import { ErrorLine } from "./step-view";
 import { WorkBlock } from "./work-block";
+import { WriteChecked } from "./write-plans";
 import { agentTurns, mapTotals, workStart } from "./work-blocks";
 import { writtenFiles, type WrittenFile } from "./written-files";
 
@@ -320,6 +321,8 @@ export function StepOutput({
   if (step.port) parts.push(<PortErrors key="error" stepId={step.id} port={step.port} />);
   else if (step.error) parts.push(<ErrorLine key="error" error={step.error} />);
   if (step.gate) parts.push(<GateDecision key="gate" gate={step.gate} />);
+  // How an outward write went against the plan its gate showed (13.8).
+  if (step.writeCheck) parts.push(<WriteChecked key="write-checked" check={step.writeCheck} />);
   // Why a circuit breaker paused the step (13.7), also once it was resumed.
   if (step.paused) parts.push(<BreakerDetails key="breaker" trip={step.paused} />);
   if (extra) parts.push(<div key="extra">{extra}</div>);

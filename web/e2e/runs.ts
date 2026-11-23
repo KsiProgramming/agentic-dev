@@ -299,3 +299,65 @@ export async function withEvidence(
     return route.fulfill({ response, json: { ...body, evidence } });
   });
 }
+
+/** Three plans as a gate shows them (13.8): a pull request, a Jira comment with a placeholder
+ * for its links, and a move that would fail. The stack's fake tools plan only the pull request,
+ * so the other two come from here. */
+export const WRITE_PLANS = [
+  {
+    node_id: "publish",
+    tool: "github.openPR",
+    action: "open_pr",
+    summary: "Push 1 commit to agent/e2e/writer and open a pull request into main",
+    target: {
+      kind: "repo",
+      label: "e2e-org/docs-demo",
+      url: "https://github.com/e2e-org/docs-demo",
+    },
+    fields: { head: "agent/e2e/writer", base: "main", commits: 1, title: "Add notes" },
+    body: "Written by an agent.\n\n- NOTES.md",
+    pending: [],
+    expect: {},
+    error: null,
+  },
+  {
+    node_id: "jira_update",
+    tool: "jira.comment",
+    action: "comment",
+    summary: "Comment on KAN-5",
+    target: { kind: "issue", label: "KAN-5", url: "https://e2e.atlassian.net/browse/KAN-5" },
+    fields: { key: "KAN-5" },
+    body: "The export is in the pull request.\n\n_Posted by agentic-dev run [12345678](https://app.test/runs/x)_",
+    pending: [{ kind: "links", text: "Links to the pull request are added once it is open." }],
+    expect: {},
+    error: null,
+  },
+  {
+    node_id: "move",
+    tool: "jira.transition",
+    action: "transition",
+    summary: "Move KAN-5 to Done",
+    target: { kind: "issue", label: "KAN-5", url: "https://e2e.atlassian.net/browse/KAN-5" },
+    fields: { from_status: "To Do", to_status: "Done", changed: true },
+    body: null,
+    pending: [],
+    expect: {},
+    error: {
+      code: "transition_unavailable",
+      message: "KAN-5 is To Do; its transitions from there: Start progress",
+    },
+  },
+];
+
+/** Makes the gate of the page's run answer with `plans` as well, like `withEvidence`. */
+export async function withPlans(
+  page: import("@playwright/test").Page,
+  plans: typeof WRITE_PLANS = WRITE_PLANS,
+) {
+  await page.route("**/runs/*/gate", async (route) => {
+    const response = await route.fetch();
+    if (!response.ok()) return route.fulfill({ response });
+    const body = (await response.json()) as Record<string, unknown>;
+    return route.fulfill({ response, json: { ...body, plans } });
+  });
+}

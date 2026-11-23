@@ -40,6 +40,7 @@ import { AgentMessage } from "./agent-message";
 import type { GateFile } from "./gate-files";
 import { EvidenceStrip } from "./evidence-strip";
 import { ProtectedAttempts } from "./protected-attempts";
+import { WritePlans } from "./write-plans";
 import { ReviewComments } from "./review-comments";
 import { GateReviewSheet } from "./gate-review-sheet";
 import { SelectionChecklist } from "./selection-checklist";
@@ -302,9 +303,11 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
               </Alert>
             ) : gate.evidence ||
               gate.review ||
+              gate.plans.length > 0 ||
               gate.runArtifacts.length > 0 ||
               gate.protectedAttempts.length > 0 ? (
               <div className="flex flex-col gap-3">
+                <WritePlans plans={gate.plans} />
                 <EvidenceStrip evidence={gate.evidence} review={gate.review} />
                 <ProtectedAttempts attempts={gate.protectedAttempts} />
                 <GateRunArtifacts runId={decision.runId} gate={gate} baseUrl={decision.baseUrl} />
@@ -342,6 +345,7 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
             </SheetHeader>
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
               {gate.breaker ? <BreakerDetails trip={gate.breaker} /> : null}
+              <WritePlans plans={gate.plans} />
               <EvidenceStrip evidence={gate.evidence} review={gate.review} />
               <ProtectedAttempts attempts={gate.protectedAttempts} />
               <ReviewComments

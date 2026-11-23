@@ -18,6 +18,7 @@ import {
   TYPED_READER,
   TYPED_WRITER,
   withEvidence,
+  withPlans,
   WRITER,
 } from "./runs";
 import { workflowFromTemplate } from "./workflows";
@@ -368,6 +369,19 @@ for (const colorScheme of ["light", "dark"] as const) {
         await request.post(`${apiURL}/runs/${runId}/cancel`);
       });
     }
+
+    test("the inbox, a gate that guards three writes, has no serious a11y issues", async ({
+      page,
+      request,
+    }) => {
+      const runId = await startReviewRun(request, "E2E plans a11y");
+      await withPlans(page);
+      await open(page, `/inbox?run=${runId}`);
+      const review = page.getByTestId("inbox-review").filter({ visible: true });
+      await expect(review.getByTestId("write-plan")).toHaveCount(3, { timeout: 30_000 });
+      await expectNoSeriousIssues(page);
+      await request.post(`${apiURL}/runs/${runId}/cancel`);
+    });
 
     test("the inbox, a gate with coverage and criteria, has no serious a11y issues", async ({
       page,

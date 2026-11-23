@@ -322,3 +322,36 @@ describe("the outline of a gate sent back by checks (13.3)", () => {
     expect(stepOutline(gate(null))).toBe("Asked for changes (1 comment)");
   });
 });
+
+describe("stepOutline of an outward write (13.8)", () => {
+  function write(check: RunEvent["payload"], more: RunEvent[] = []) {
+    const events: RunEvent[] = [
+      on("publish", runEvent(1, "node_started", {})),
+      ...more,
+      on("publish", runEvent(2 + more.length, "node_completed", {})),
+      on("publish", runEvent(3 + more.length, "write_checked", check)),
+    ];
+    return buildTimeline(events).steps[0]!;
+  }
+
+  it("says a pull request was opened as planned", () => {
+    const step = write({ gate: "approve_pr", outcome: "as_planned", differences: [] }, [
+      on("publish", runEvent(2, "pr_opened", { url: "https://github.com/a/b/pull/9" })),
+    ]);
+
+    expect(stepOutline(step)).toBe("Opened pull request #9 · as planned");
+  });
+
+  it("names the fields that were not as planned", () => {
+    const step = write({
+      gate: "approve_pr",
+      outcome: "differs",
+      differences: [
+        { field: "base", planned: "main", actual: "develop" },
+        { field: "title", planned: "a", actual: "b" },
+      ],
+    });
+
+    expect(stepOutline(step)).toBe("Not as planned (base, title)");
+  });
+});
