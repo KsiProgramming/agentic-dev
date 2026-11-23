@@ -188,7 +188,7 @@ def review_flow(
         },
         {
             "type": "reduce",
-            "id": f"{prefix}review",
+            "id": f"{prefix}review_report",
             "from": f"{prefix}review_lenses",
             "strategy": "dedupe",
             "writes": writes,

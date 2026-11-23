@@ -2426,6 +2426,13 @@ class _ArtifactFlow:
     issues: list[ValidationIssue] = field(default_factory=list[ValidationIssue])
 
 
+_NOTES = ReduceNode.model_validate(
+    {"type": "reduce", "id": "review-notes", "from": "review-notes", "strategy": "concat"}
+)
+"""The writer of a gate's review notes (13.6): written when the gate is approved, so a router that
+only some of its routes reach (a gate in a route that can be skipped) still has it visible
+after it: the loop around it only ends on that approval."""
+
 _RUN_INPUT = ReduceNode.model_validate(
     {"type": "reduce", "id": "run-input", "from": "run-input", "strategy": "concat"}
 )
@@ -2529,7 +2536,7 @@ def _walk_artifacts(root: Node, inputs: Collection[str] = ()) -> _ArtifactFlow:
                     )
                 if node.review is not None and node.review.notes is not None:
                     # Approving writes the comments that were not dismissed to `notes`.
-                    seen = {**seen, node.review.notes: _UNTYPED}
+                    seen = {**seen, node.review.notes: _NOTES}
                 if node.select is None:
                     return seen
                 name = node.select.artifact
@@ -2591,6 +2598,8 @@ def _walk_artifacts(root: Node, inputs: Collection[str] = ()) -> _ArtifactFlow:
                         w is not None and output_schema(w) == output_schema(writer) for w in writers
                     )
                     after[name] = writer if alike else _UNTYPED
+                for written in wrote:
+                    after.update({n: w for n, w in written.items() if w is _NOTES})
                 return after
             case SubflowNode():
                 # The called workflow runs in this run: what it writes is the run's.
