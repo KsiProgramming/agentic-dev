@@ -239,6 +239,7 @@ from agentic_runtime import (
     Usage,
 )
 from agentic_runtime.findings import (
+    SEVERITIES,
     Check,
     FindingsReport,
     VoteError,
@@ -1199,6 +1200,38 @@ async def _refuse_spawn(
     return AgentNodeResult(status="failed", text=state["last_text"], usage=None, error=over.reason)
 
 
+@dataclass(frozen=True)
+class _NoChange:
+    """The reviewed writer finished without work (a lead that planned no task, a writer that
+    committed nothing): there is nothing to review, which is not a failure."""
+
+    writer: str
+
+
+def _nothing_to_review(writer: str) -> AgentNodeResult:
+    """A review agent's answer when `writer` made no change: an empty findings report whose one
+    check says it was skipped and why, so the merged report and the gate say so."""
+    report = FindingsReport(
+        scanner="agent",
+        checks=[
+            Check(
+                path=".",
+                kind="review",
+                tool="agent",
+                status="skipped",
+                reason=f"nothing to review: {writer!r} made no change",
+            )
+        ],
+        findings=[],
+        counts={s: 0 for s in SEVERITIES},
+        truncated=False,
+    )
+    data: dict[str, JsonValue] = report.model_dump(mode="json")
+    return AgentNodeResult(
+        status="completed", text=json.dumps(data, indent=2), usage=None, data=data
+    )
+
+
 async def _review_setup(
     node: AgentNode,
     writers: Sequence[ReadableWriter],
@@ -1206,7 +1239,7 @@ async def _review_setup(
     packs: Mapping[str, JsonValue],
     limits: "_Limits",
     tools: ToolExecutor | None,
-) -> tuple[str, str, dict[str, JsonValue]] | str:
+) -> tuple[str, str, dict[str, JsonValue]] | str | _NoChange:
     """What a review agent (13.6) is given, built from the run and never from the previous step's
     output: the writer it reviews (`of`, else the latest writer that completed), its input (the
     spec, the writer's change and its evidence pack) and the `review` of its `node_started`. The
@@ -1214,8 +1247,10 @@ async def _review_setup(
     text when there is no writer to review."""
     assert node.review is not None
     of = node.review.of or (writers[-1].node_id if writers else None)
-    if of is None or of not in {w.node_id for w in writers}:
-        return f"there is no completed writer {of!r} to review" if of else "no writer ran before"
+    if of is None:
+        return "no writer ran before"
+    if of not in {w.node_id for w in writers}:
+        return _NoChange(of)
     spec_text: str | None = None
     spec_version: int | None = None
     if (name := node.review.spec_from) is not None and name in refs:
@@ -1280,6 +1315,11 @@ async def _run_step(
     review_started: dict[str, JsonValue] | None = None
     if isinstance(node, AgentNode) and node.review is not None:
         built = await _review_setup(node, writers, refs, packs or {}, limits, tools)
+        if isinstance(built, _NoChange):
+            skipped: dict[str, JsonValue] = {"review": {"of": built.writer, "no_change": True}}
+            await log.emit(NODE_STARTED, node_id=node.id, payload=skipped, item=item, branch=branch)
+            await log.emit(NODE_COMPLETED, node_id=node.id, item=item, branch=branch)
+            return _nothing_to_review(built.writer)
         if isinstance(built, str):
             await log.emit(NODE_STARTED, node_id=node.id, item=item, branch=branch)
             failed: dict[str, JsonValue] = {"error": built}

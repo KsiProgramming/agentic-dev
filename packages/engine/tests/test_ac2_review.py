@@ -144,3 +144,36 @@ async def test_the_approved_runs_pr_body_has_the_review_notes() -> None:
     assert isinstance(body, str)
     assert "## Review notes" in body and "form.py:3" in body and "Name this." in body
     assert "notes_from" not in call
+
+
+async def test_a_lead_that_plans_no_task_leaves_nothing_to_review_and_the_run_goes_on() -> None:
+    """A real run (13.6): the repo had nothing to build on, the lead planned no task, so
+    `implement` merged nothing. The lenses have nothing to review: an empty, skipped review, not
+    a failed run, and the gate pauses with no comments for a person to read."""
+    run = run_of({})
+    run.team = NoTaskTeam(run.tools)
+
+    paused = await run.start()
+
+    assert paused.status == "waiting" and paused.waiting_at == "approve_pr", {
+        k: r.error for k, r in paused.results.items() if r.error
+    }
+    shown = next(e for e in run.sink.events if e.type == "gate_waiting").payload["review"]
+    assert shown["comments"] == [] and shown["failed_lenses"] == []
+    assert run.team.lens_requests == []  # no agent was run for an empty review
+    started = next(
+        e for e in run.sink.events if e.type == "node_started" and e.node_id == "review_security"
+    )
+    assert started.payload["review"] == {"of": "implement", "no_change": True}
+
+
+class NoTaskTeam(ReviewTeam):
+    def start(self, request: AgentRequest) -> AgentRun:
+        if request.role == "Lead engineer":
+            self.requests.append(request)
+            script = [
+                Message(text=json.dumps({"tasks": [], "reason": "Nothing to build on."})),
+                ECHO_USAGE,
+            ]
+            return FakeRuntime({request.node_id: script}, tools=self.tools).start(request)
+        return super().start(request)
