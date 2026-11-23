@@ -17,6 +17,7 @@ from agentic_engine.spec.models import (
     PLATFORM_TOOLS,
     Node,
     OnReview,
+    ProtectPolicy,
     ToolNode,
     ValidationIssue,
     WorkflowInput,
@@ -27,6 +28,7 @@ from agentic_engine.spec.models import (
     iter_nodes,
     on_review_issues,
     policy_issues,
+    protect_issues,
     structure_issues,
     tool_issues,
     writer_before_issues,
@@ -77,6 +79,7 @@ def validate_workflow(
     )
     issues = document_port_issues(document) + issues + issue_from_issues(document, root)
     issues += document_on_review_issues(document, root)
+    issues += document_protect_issues(document, root)
     issues += structure_issues(root, document_input_artifacts(document))
     issues += tool_issues(root, known_tools)
     issues += writer_before_issues(root)
@@ -132,6 +135,14 @@ def document_on_review_issues(document: Mapping[str, object], root: Node) -> lis
     if raw is None:
         return []
     return on_review_issues(root, OnReview.model_validate(raw))
+
+
+def document_protect_issues(document: Mapping[str, object], root: Node) -> list[ValidationIssue]:
+    """`protect_issues` for the document's `protect` (13.5), checked on the expanded tree."""
+    raw = document.get("protect")
+    if raw is None:
+        return []
+    return protect_issues(root, ProtectPolicy.model_validate(raw))
 
 
 def issue_from_issues(document: Mapping[str, object], root: Node) -> list[ValidationIssue]:

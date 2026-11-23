@@ -110,6 +110,7 @@ def test_agent_parameters() -> None:
         "output_schema",
         "reads",
         "writes",
+        "start_from",
     }
     assert parameters["required"] == ["role", "instructions"]
 

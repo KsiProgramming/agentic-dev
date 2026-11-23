@@ -121,6 +121,12 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
           "type": "string",
           "title": "Writes"
+        },
+        "start_from": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "type": "string",
+          "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.",
+          "title": "Start from"
         }
       },
       "required": [
@@ -157,6 +163,11 @@
       },
       "tools": {
         "ui:widget": "checkboxes"
+      },
+      "start_from": {
+        "ui:options": {
+          "advanced": true
+        }
       },
       "input_schema": {
         "ui:field": "json",
@@ -1320,6 +1331,12 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,58}\\.(json|md|txt)$",
           "type": "string",
           "title": "Writes"
+        },
+        "start_from": {
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "type": "string",
+          "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.",
+          "title": "Start from"
         }
       },
       "required": [
@@ -1453,6 +1470,11 @@
         }
       },
       "replan": {
+        "ui:options": {
+          "advanced": true
+        }
+      },
+      "start_from": {
         "ui:options": {
           "advanced": true
         }

@@ -1,0 +1,62 @@
+{
+  "spec_version": "0",
+  "id": "test-first",
+  "name": "Test first: approved tests, then the code that passes them",
+  "description": "A test writer writes the tests, a person approves them, and the implementer starts from them: they are frozen on its branch, so it can read them but not change them. The final gate shows the evidence; on approval a tool node opens the pull request.",
+  "protect": { "paths": ["**/conftest.py"] },
+  "root": {
+    "type": "sequence",
+    "id": "main",
+    "steps": [
+      {
+        "type": "agent",
+        "id": "test_writer",
+        "role": "Test writer",
+        "instructions": "Write one failing test for each acceptance criterion in the request, named with its id, in test files only, and commit them.",
+        "tools": ["repo.list_files", "repo.read_file", "repo.search", "repo.write_file", "repo.commit"]
+      },
+      {
+        "type": "gate",
+        "id": "approve_tests",
+        "title": "Approve these tests?",
+        "prompt": "Approving freezes the tests: the implementer can read them but not change them."
+      },
+      {
+        "type": "loop",
+        "id": "build_loop",
+        "max_iterations": 3,
+        "until": "results.gate.status == 'approved'",
+        "body": {
+          "type": "sequence",
+          "id": "build_body",
+          "steps": [
+            {
+              "type": "agent",
+              "id": "implementer",
+              "role": "Implementer",
+              "instructions": "Make the approved tests pass without changing them, and commit.",
+              "tools": ["repo.list_files", "repo.read_file", "repo.search", "repo.write_file", "repo.commit"],
+              "start_from": "test_writer"
+            },
+            {
+              "type": "gate",
+              "id": "gate",
+              "title": "Open a pull request?",
+              "prompt": "Approving pushes the implementer's branch, with the approved tests, and opens a pull request."
+            }
+          ]
+        }
+      },
+      {
+        "type": "tool",
+        "id": "publish",
+        "tool": "github.openPR",
+        "args": {
+          "from_node": "implementer",
+          "title": "Implement the feature",
+          "body": "Tests approved first, then the code that passes them."
+        }
+      }
+    ]
+  }
+}
