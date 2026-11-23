@@ -6,6 +6,7 @@ import {
   FileMinusIcon,
   FilePlusIcon,
   RotateCcwIcon,
+  ShieldIcon,
   type LucideIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -18,7 +19,13 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-import { fileKey, type FileChange, type FileChangeStatus, type NotEditableReason } from "../gates";
+import {
+  fileKey,
+  PROTECTED_RULE_LABEL,
+  type FileChange,
+  type FileChangeStatus,
+  type NotEditableReason,
+} from "../gates";
 
 const DiffView = dynamic(() => import("./diff-view"), {
   ssr: false,
@@ -57,6 +64,22 @@ export function StatusLabel({ status }: { status: FileChangeStatus }) {
       <Icon aria-hidden="true" className="size-3.5" />
       {label}
     </span>
+  );
+}
+
+/** The neutral "Protected" mark of a file no writer may change (13.5), with where the
+ * protection comes from. Never a status colour: it says what the file is, not how it went. */
+export function ProtectedMark({ change }: { change: FileChange }) {
+  if (!change.protected) return null;
+  return (
+    <Badge
+      variant="outline"
+      data-testid="protected-mark"
+      title={PROTECTED_RULE_LABEL[change.protected]}
+    >
+      <ShieldIcon aria-hidden="true" data-icon="inline-start" />
+      Protected · {PROTECTED_RULE_LABEL[change.protected]}
+    </Badge>
   );
 }
 
@@ -154,6 +177,7 @@ export function GateFilesView({
                     <span className="flex flex-wrap items-center gap-2">
                       <StatusLabel status={file.change.status} />
                       {file.edited ? <Badge variant="secondary">Edited</Badge> : null}
+                      <ProtectedMark change={file.change} />
                       {!file.change.editable ? (
                         <span className="text-caption text-muted-foreground">Read-only</span>
                       ) : null}
@@ -192,6 +216,7 @@ export function GateFilesView({
             {selected.change.path}
           </span>
           <StatusLabel status={selected.change.status} />
+          <ProtectedMark change={selected.change} />
           {selected.edited ? <Badge variant="secondary">Edited</Badge> : null}
           {selected.edited && onDiscard ? (
             <Button

@@ -401,6 +401,7 @@ function Console({
         runId={runId}
         written={written}
         baseUrl={baseUrl}
+        protectedAttempts={events.filter((e) => e.type === "protected_path_refused").length}
         noModelCalls={
           (timeline.endedAt ?? run?.finished_at ?? null) !== null &&
           run !== undefined &&

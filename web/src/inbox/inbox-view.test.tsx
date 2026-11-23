@@ -219,6 +219,8 @@ test("a gate with changed files lists them, and what approving lets go on", asyn
           reason: null,
           before: null,
           after: "# Notes\n",
+          protected: false,
+          rule: null,
         },
       ],
       branches: [{ node_id: "writer", branch: "agent/r-old/writer" }],

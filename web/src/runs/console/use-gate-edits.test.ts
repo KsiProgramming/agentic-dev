@@ -13,6 +13,7 @@ const PAGE: FileChange = {
   reason: null,
   before: null,
   after: "# A\n",
+  protected: null,
 };
 const LOGO: FileChange = { ...PAGE, path: "logo.png", editable: false, reason: "binary" };
 const CHANGES = [PAGE, LOGO];

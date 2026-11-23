@@ -29,6 +29,7 @@ function editedFiles(gate: GateInfo): GateFile[] {
         status: "modified",
         before: null,
         after: null,
+        protected: null,
       }),
       editable: true,
       reason: null,

@@ -38,6 +38,8 @@ function branch(
       reason: null,
       before: null,
       after: `${path}\n`,
+      protected: false,
+      rule: null,
     })),
     changes_error: null,
     bundle_removed_at: null,

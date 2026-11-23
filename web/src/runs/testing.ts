@@ -107,6 +107,7 @@ export function runSummary(overrides: Partial<RunSummary> = {}): RunSummary {
       estimated_usd: 0.0582,
       cost_complete: true,
     },
+    protected_attempts: 0,
     ...overrides,
   };
 }
