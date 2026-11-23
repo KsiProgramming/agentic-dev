@@ -2050,7 +2050,9 @@ def review_issues(root: Node) -> list[ValidationIssue]:
     read tools, `reads`, an `input_schema` or an `output_schema`, or a place in a map or an
     orchestrator's body (`invalid_review`: the engine builds its input and types its answer); or
     `of` is no writer that completes before it, or none runs before it when `of` is unset
-    (`review_unknown_writer`)."""
+    (`review_unknown_writer`). A workflow with no writer at all passes with `of` unset: it is a
+    composite (6.6) that reviews the writer of its caller, and the caller's expanded workflow is
+    checked."""
     ordered = list(iter_nodes(root))
     tasked = task_node_ids(root)
     mapped = {
@@ -2108,6 +2110,8 @@ def review_issues(root: Node) -> list[ValidationIssue]:
             and _subtree_end(ordered, i) < index
             and within(path, scope_of(_runs_in(ordered[i][0], loops)))
         ]
+        if not candidates and node.review.of is None and not writers:
+            continue  # a composite (6.6): it reviews the writer of whatever calls it
         if not candidates:
             named = node.review.of
             issue(
@@ -2171,10 +2175,14 @@ def writer_before_issues(root: Node) -> list[ValidationIssue]:
             ends.add(list(iter_nodes(node))[-1][1].id)
     issues: list[ValidationIssue] = []
     seen = False
+    any_writer = any(_writes(n) for _, n in iter_nodes(root))
     for path, node in iter_nodes(root):
         if "repo.diff" in node_tools(node) and not seen:
             looped = any(node.id in ids and writes for ids, writes in loop_writers)
-            if not looped:
+            # A review agent with no writer in its whole workflow is a composite (6.6): it
+            # reviews the writer of whatever calls it, which the caller's expansion checks.
+            composite = isinstance(node, AgentNode) and node.review is not None and not any_writer
+            if not looped and not composite:
                 message = (
                     f"{node.type} {node.id!r} at {path}: `repo.diff` reads the work of a writer "
                     "that ran before this node, and none does; put a writer node before it"

@@ -149,7 +149,7 @@ def test_review_of_must_be_a_writer_that_completes_before() -> None:
 
 def test_without_of_a_writer_must_run_before_the_review() -> None:
     raw = raw_spec()
-    steps(raw).pop(1)  # no writer left, and publish names `writer`
+    steps(raw).append(steps(raw).pop(1))  # the writer now runs after the review
 
     issues = [m for c, m in found(raw) if c == "review_unknown_writer"]
 

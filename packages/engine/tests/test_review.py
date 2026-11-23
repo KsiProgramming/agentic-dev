@@ -199,10 +199,68 @@ async def test_a_lens_that_could_not_run_is_a_failed_check_not_a_failed_run() ->
     assert [c["tool"] for c in checks if c["kind"] == "branch"] == ["review_performance"]
 
 
-def test_a_review_with_no_writer_before_it_is_refused_when_the_spec_is_read() -> None:
+def test_a_review_that_runs_before_the_writer_is_refused_when_the_spec_is_read() -> None:
+    writer = {"type": "agent", "id": "w", "role": "W", "instructions": "Go.",
+              "tools": ["repo.write_file", "repo.commit"]}  # fmt: skip
     with pytest.raises(ValidationError, match="no writer runs before this node"):
         parse_spec(
             {"spec_version": "0", "id": "x", "name": "X",
              "root": {"type": "sequence", "id": "main",
-                      "steps": [*review_flow(lenses=("correctness",))]}}
+                      "steps": [*review_flow(lenses=("correctness",)), writer]}}
         )  # fmt: skip
+
+
+def test_a_workflow_with_no_writer_is_a_composite_that_reviews_its_callers() -> None:
+    parse_spec(
+        {"spec_version": "0", "id": "x", "name": "X",
+         "root": {"type": "sequence", "id": "main", "steps": [*review_flow()]}}
+    )  # fmt: skip
+
+
+def _stored(name: str) -> dict[str, Any]:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).parent / "fixtures" / "specs" / "valid" / f"{name}.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _caller(*, with_writer: bool = True) -> dict[str, Any]:
+    writer = {
+        "type": "agent", "id": "writer", "role": "Engineer", "instructions": "Build it.",
+        "tools": ["repo.write_file", "repo.commit"],
+    }  # fmt: skip
+    call = {"type": "subflow", "id": "review", "workflow": {"id": "review-composite", "version": 1}}
+    return {
+        "spec_version": "0", "id": "caller", "name": "Caller",
+        "root": {
+            "type": "sequence", "id": "main", "steps": [*([writer] if with_writer else []), call]
+        },
+    }  # fmt: skip
+
+
+async def test_a_stored_composite_called_by_a_subflow_reviews_the_callers_writer() -> None:
+    from agentic_engine.spec import expand_workflow, resolve_from, subflow_key
+
+    library = {subflow_key("review-composite", 1): _stored("review-composite")}
+    expanded = expand_workflow(parse_spec(_caller()), resolve_from(library))
+    run = Review(expanded.spec)
+
+    result = await run.run()
+
+    assert result.status == "completed"
+    assert run.started("review_correctness").payload["review"]["of"] == "writer"
+    assert run.readable.review_of("review_security") == "writer"
+    assert "## Change\n\nwriter changed 1 file" in run.request("review_security").input
+
+
+async def test_a_caller_with_no_writer_fails_the_lenses_with_a_clear_error() -> None:
+    from agentic_engine.spec import expand_workflow, resolve_from, subflow_key
+
+    library = {subflow_key("review-composite", 1): _stored("review-composite")}
+    expanded = expand_workflow(parse_spec(_caller(with_writer=False)), resolve_from(library))
+
+    result = await Review(expanded.spec).run()
+
+    assert result.status == "failed"
+    assert "no writer ran before" in (result.results["review_correctness"].error or "")
