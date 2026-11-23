@@ -51,7 +51,7 @@ from agentic_tools.scan.report import (
 )
 from agentic_tools.scan.stack import PROBE_SCRIPT, Linter, LintTarget, plan_lint, read_probe
 from agentic_tools.strict import strict_tool
-from agentic_tools.tree import archived_tree
+from agentic_tools.tree import archived_tree, base_config_tree
 
 SERVER_NAME = "scan"
 TOOLS = frozenset({"lint", "secrets", "dependencies"})
@@ -109,6 +109,15 @@ ScanPath = Annotated[
     str, Field(description="A directory (or file) to scan, relative to the repository root.")
 ]
 
+
+ConfigArg = Annotated[
+    Literal["base"] | None,
+    Field(
+        description="With `node`: `base` lints the writer's work by the analyzer and scanner "
+        "config the run started with (`.editorconfig`, `ruff.toml`, a module's `[tool.ruff]`, "
+        "...), so a writer cannot pass by relaxing it. Unset: the writer's own config."
+    ),
+]
 
 NodeArg = Annotated[
     str | None,
@@ -239,12 +248,19 @@ class _ScanTools:
         ] = "auto",
         path: ScanPath = ".",
         node: NodeArg = None,
+        config: ConfigArg = None,
     ) -> FindingsReport:
         """Lint the repository with the linters its own stack uses: ruff for Python, Biome for
         JS/TS, ShellCheck for shell scripts, the .NET analyzers (a build) for C# projects. Each
         module uses its own config; a module with none gets a conservative platform rule set
         (findings marked `platform-default`). The report lists what was checked where, and why
-        anything was skipped. With `node`, lints what that writer committed."""
+        anything was skipped. With `node`, lints what that writer committed; with `config:
+        "base"` too, by the analyzer config the run started with, not the writer's (13.5)."""
+        if config is not None and node is None:
+            raise ToolError("`config` needs `node`: it lays the base's config over a writer's work")
+        if node is not None and config == "base":
+            async with base_config_tree(self._sandbox, self._readable, node) as tree:
+                return await _ScanTools(tree, self._limits).lint(linters, path)
         if node is not None:
             async with archived_tree(self._sandbox, self._readable, node) as tree:
                 return await _ScanTools(tree, self._limits).lint(linters, path)

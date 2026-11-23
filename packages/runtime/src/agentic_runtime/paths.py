@@ -10,6 +10,25 @@ from functools import lru_cache
 from pathlib import PurePosixPath
 
 _DRIVE = re.compile(r"^[A-Za-z]:")
+
+ANALYZER_CONFIG_GLOBS: tuple[str, ...] = (
+    "**/.editorconfig",
+    "**/.globalconfig",
+    "**/*.globalconfig",
+    "**/*.ruleset",
+    "**/Directory.Build.props",
+    "**/Directory.Build.targets",
+    "**/ruff.toml",
+    "**/.ruff.toml",
+    "**/biome.json",
+    "**/biome.jsonc",
+    "**/.shellcheckrc",
+    "**/.gitleaks.toml",
+    "**/.gitleaksignore",
+)
+"""The analyzer and scanner config files no writer may change (13.5), at any depth: the platform's
+protected defaults and what the evidence step reads from the run's base (`scan.lint config:
+"base"`). The engine lists why each is protected (`agentic_engine.protect`)."""
 _UNSUPPORTED = "[]{}!"
 
 

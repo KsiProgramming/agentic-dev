@@ -42,6 +42,7 @@ from agentic_sandbox.refs import (
     grep_tree,
     list_tree,
     show_file,
+    tree_paths,
 )
 from agentic_sandbox.review import BranchNotFoundError
 from agentic_sandbox.snapshot import Snapshot, snapshot_worktrees, wip_branch
@@ -107,5 +108,6 @@ __all__ = [
     "snapshot_worktrees",
     "start_branches",
     "start_writer",
+    "tree_paths",
     "wip_branch",
 ]

@@ -740,7 +740,9 @@ async def collect(
         branch, lint_error = await _call(
             tools,
             "scan.lint",
-            {"path": evidence.path, "node": evidence.node},
+            # By the config the run started with, so a change that relaxes it is still judged
+            # by it (13.5).
+            {"path": evidence.path, "node": evidence.node, "config": "base"},
             node_id,
         )
         if checks.analyzers == "no_new" and branch is not None:

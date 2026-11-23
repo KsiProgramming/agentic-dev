@@ -15,6 +15,7 @@ from uuid import uuid4
 from mcp.server.mcpserver.exceptions import ToolError
 
 from agentic_runtime import ReadableWriters, WorkRefused, no_commits_text
+from agentic_runtime.paths import ANALYZER_CONFIG_GLOBS, matches
 from agentic_sandbox import (
     BranchNotFoundError,
     ExecResult,
@@ -24,6 +25,7 @@ from agentic_sandbox import (
     archive,
     branch_has_commits,
     branch_patch,
+    tree_paths,
 )
 
 # Runs the script `$2` (with `$0` named `$3` and arguments `$4...`) in the directory `$1`.
@@ -128,6 +130,53 @@ async def archived_tree(
     finally:
         with suppress(SandboxError, ValueError):
             await sandbox.exec(["rm", "-rf", "--", directory])
+
+
+@asynccontextmanager
+async def base_config_tree(
+    sandbox: Sandbox, readable: ReadableWriters | None, node: str
+) -> AsyncGenerator[TreeSandbox]:
+    """`node`'s committed tree with the run's base config laid over it, for the length of the
+    block (13.5): the analyzer and scanner config files (`ANALYZER_CONFIG_GLOBS`) are the base's,
+    added, replaced or removed to match it, and a `pyproject.toml` the base has is the base's, so
+    ruff reads the base's `[tool.ruff]`. A change that turns a rule off in config is linted by the
+    config it was written against. A `pyproject.toml` of a module the writer added is left as it
+    is: the base has no config to match. The checkout and the writer's worktree are untouched."""
+    branch = await branch_of(sandbox, readable, node)
+    directory = posixpath.join(sandbox.staging_dir, f"config-{uuid4().hex}")
+    try:
+        try:
+            await archive(sandbox, branch, directory)
+            changed = await tree_paths(sandbox, branch)
+            original = await tree_paths(sandbox, branch, base=True)
+            wanted = [p for p in original if _is_config(p)]
+            for path in changed:
+                if _is_config(path) and path not in set(wanted):
+                    await _remove(sandbox, directory, path)
+            if wanted:
+                for path in wanted:
+                    await _remove(sandbox, directory, path)
+                await archive(sandbox, branch, directory, base=True, paths=wanted)
+        except (BranchNotFoundError, SandboxError):
+            raise ToolError("could not read the writer's work") from None
+        yield TreeSandbox(sandbox, directory)
+    finally:
+        with suppress(SandboxError, ValueError):
+            await sandbox.exec(["rm", "-rf", "--", directory])
+
+
+def _is_config(path: str) -> bool:
+    """Whether the run's base decides this file for the analyzers (13.5)."""
+    return posixpath.basename(path).lower() == "pyproject.toml" or any(
+        matches(glob, path) for glob in ANALYZER_CONFIG_GLOBS
+    )
+
+
+async def _remove(sandbox: Sandbox, directory: str, path: str) -> None:
+    """Remove the file `path` of the extracted tree, if it is there."""
+    if ".." in path.split("/") or path.startswith("/"):
+        raise SandboxError("a path leaves the tree")
+    await sandbox.exec(["rm", "-f", "--", posixpath.join(directory, path)])
 
 
 @asynccontextmanager

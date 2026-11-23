@@ -237,7 +237,7 @@ async def test_the_checks_run_on_the_writers_branch_and_the_base_once() -> None:
         ("build.test", "writer")
     ]
     lints = [a for n, a, _ in tools.jobs if n == "scan.lint"]
-    assert {"node": "writer", "path": "."} in lints
+    assert {"node": "writer", "path": ".", "config": "base"} in lints
     assert {"path": "."} in lints  # the base, no node
     assert {node for _, _, node in tools.jobs} == {"check.evidence"}
 

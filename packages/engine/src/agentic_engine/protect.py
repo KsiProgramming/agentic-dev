@@ -11,7 +11,7 @@ from pydantic import JsonValue
 from agentic_engine.gate import FileChange
 from agentic_engine.spec.models import ProtectPolicy
 from agentic_runtime import ProtectRule
-from agentic_runtime.paths import first_match
+from agentic_runtime.paths import ANALYZER_CONFIG_GLOBS, first_match
 
 MAX_FROZEN_SHOWN = 50
 """How many frozen files a writer is told by name; the rest are counted."""
@@ -37,11 +37,10 @@ PLATFORM_PROTECTED: tuple[tuple[str, str], ...] = (
 
 PLATFORM_GLOBS: tuple[str, ...] = tuple(glob for glob, _ in PLATFORM_PROTECTED)
 
-ANALYZER_CONFIG_GLOBS: tuple[str, ...] = tuple(
-    glob for glob, why in PLATFORM_PROTECTED if not why.startswith("CI")
-)
-"""The analyzer and scanner config among the defaults: what the evidence step reads from the
-base (`scan.lint config: "base"`)."""
+assert (
+    tuple(glob for glob, why in PLATFORM_PROTECTED if not why.startswith("CI"))
+    == ANALYZER_CONFIG_GLOBS
+), "the runtime's analyzer config globs and the platform's protected defaults differ"
 
 
 def platform_rule(path: str) -> str | None:

@@ -191,6 +191,29 @@ g -c core.quotePath=false diff -U0 -M --no-ext-diff --no-color --no-textconv \
 )
 
 
+# `$3` is `branch` or `base`. Prints the tree's files, NUL separated.
+_TREE_PATHS_SCRIPT = (
+    _PRELUDE
+    + """
+tree=$ref
+[ "$1" = base ] && tree=HEAD
+g -c core.quotePath=false ls-tree -r -z --name-only "$tree"
+"""
+)
+
+
+async def tree_paths(sandbox: Sandbox, branch: str, *, base: bool = False) -> list[str]:
+    """Every file path of `branch`'s tree as last committed, or of the clone's `HEAD` (the run's
+    base) with `base` (`branch` must still exist). Raises `BranchNotFoundError` if the branch does
+    not exist and `SandboxError` if git fails."""
+    _check_branch(branch)
+    result = await _run(sandbox, _TREE_PATHS_SCRIPT, branch, "base" if base else "branch")
+    _raise_if_missing(result.exit_code, branch)
+    if result.exit_code != 0 or result.truncated:
+        raise SandboxError(f"could not list the files of branch {branch}")
+    return [p for p in result.stdout.split("\0") if p]
+
+
 async def archive(
     sandbox: Sandbox, branch: str, dest: str, *, base: bool = False, paths: Sequence[str] = ()
 ) -> None:
