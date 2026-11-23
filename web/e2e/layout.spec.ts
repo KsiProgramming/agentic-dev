@@ -18,6 +18,7 @@ import {
   TYPED_READER,
   TYPED_WRITER,
   withEvidence,
+  withPlans,
   WRITER,
 } from "./runs";
 import { workflowFromTemplate } from "./workflows";
@@ -107,6 +108,16 @@ test("inbox, with a gate under review", async ({ page, request }) => {
     timeout: 30_000,
   });
   await checkPage(page, "inbox");
+  await request.post(`${apiURL}/runs/${runId}/cancel`);
+});
+
+test("inbox, a gate that guards three writes", async ({ page, request }) => {
+  const runId = await startReviewRun(request, "E2E plans layout");
+  await withPlans(page);
+  await page.goto(`/inbox?run=${runId}`);
+  const review = page.getByTestId("inbox-review").filter({ visible: true });
+  await expect(review.getByTestId("write-plan")).toHaveCount(3, { timeout: 30_000 });
+  await checkPage(page, "inbox-plans");
   await request.post(`${apiURL}/runs/${runId}/cancel`);
 });
 

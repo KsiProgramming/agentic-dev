@@ -27,6 +27,8 @@ AuditAction = Literal[
     "gate.sent_back_by_checks",
     "gate.sent_back_by_review",
     "gate.expired",
+    "write.not_as_planned",
+    "write.plan_stale",
     "breaker.tripped",
     "breaker.resumed",
     "breaker.cancelled",

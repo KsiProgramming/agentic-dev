@@ -52,13 +52,17 @@ async def checkpoint_before(
     history = [s async for s in graph.aget_state_history(thread_config(run_id))]
     if not history:
         raise StepNotReachedError(f"run {run_id} has no checkpoint")
-    for snapshot in history:  # newest first
-        if node_id in snapshot.next:
-            if not snapshot.values.get("order") and not snapshot.values.get("results"):
-                return None  # nothing ran before it
-            found = await checkpointer.aget_tuple(snapshot.config)
-            assert found is not None, "a listed checkpoint can be read"
-            return found.checkpoint, found.metadata
+    # A gate's own steps come before it (its checks, its review, the plans of its writes: 13.8),
+    # so a rerun from the gate starts at the first of them and makes them again.
+    chain = (f"{node_id}.evidence", f"{node_id}.review", f"{node_id}.plan", node_id)
+    for name in chain:
+        for snapshot in history:  # newest first
+            if name in snapshot.next:
+                if not snapshot.values.get("order") and not snapshot.values.get("results"):
+                    return None  # nothing ran before it
+                found = await checkpointer.aget_tuple(snapshot.config)
+                assert found is not None, "a listed checkpoint can be read"
+                return found.checkpoint, found.metadata
     raise StepNotReachedError(f"run {run_id} never reached step {node_id!r}")
 
 

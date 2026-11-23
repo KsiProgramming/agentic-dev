@@ -27,7 +27,7 @@ from uuid import UUID
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, JsonValue, SecretStr
 
 from agentic_github import (
     GITIGNORE_TEMPLATES,
@@ -45,6 +45,7 @@ from agentic_github import (
     github_remote,
     push_bundle,
 )
+from agentic_runtime.plans import PlanError, PlanTarget, WritePlan
 from agentic_sandbox import (
     GIT_SAFETY,
     BranchBundle,
@@ -54,7 +55,7 @@ from agentic_sandbox import (
     export_branch,
 )
 from agentic_secrets import registered
-from agentic_tools.strict import strict_tool
+from agentic_tools.strict import planned, stale, strict_tool
 
 SERVER_NAME = "github"
 PUBLISH_TOOLS = frozenset({"openPR"})
@@ -92,6 +93,10 @@ class GithubPublisher(GithubReviews, Protocol):
     async def open_pull_request(
         self, installation_id: int, full_name: str, *, head: str, base: str, title: str, body: str
     ) -> PullRequestInfo: ...
+
+    async def find_open_pull_request(
+        self, installation_id: int, full_name: str, head: str
+    ) -> PullRequestInfo | None: ...
 
 
 type PushBranch = Callable[..., Awaitable[str]]
@@ -136,6 +141,9 @@ class PullRequestOut(BaseModel):
     head: str
     base: str
     commit: str = Field(description="The commit the pushed branch points at.")
+    repo: str = Field(default="", description="The repo's full name.")
+    title: str = Field(default="", description="The title the pull request was opened with.")
+    body: str = Field(default="", description="The body the pull request was opened with.")
     updated: bool = Field(
         default=False,
         description="True when a follow-up of a review pushed to an open pull request (7.6) "
@@ -193,6 +201,8 @@ class _GithubTools:
         license: Annotated[
             License | None, Field(description="A license for the first commit.")
         ] = None,
+        plan: bool = False,
+        expect: dict[str, JsonValue] | None = None,
     ) -> CreatedRepoOut:
         """Create the run's repo with one scaffold commit (a README, and the `.gitignore` and
         license asked for). If an earlier attempt of the run created it, it is returned."""
@@ -200,6 +210,8 @@ class _GithubTools:
         org, repo = target.full_name.split("/", 1)
         if name != repo:
             raise ToolError(f"this run creates {target.full_name}, not {org}/{name}")
+        if plan:
+            return await self._plan_repo(private, description, gitignore, license)
         try:
             try:
                 created = await self._github.create_org_repo(
@@ -215,12 +227,61 @@ class _GithubTools:
             except RepoExistsError:
                 existing = await self._github.get_repo(target.installation_id, target.full_name)
                 if existing is None or not self._created_by_run(existing):
+                    if expect is not None:
+                        raise stale(f"{target.full_name} was taken by someone else") from None
                     raise ToolError(f"repo {target.full_name} already exists") from None
                 return _created(existing, created=False)
         except InstallationNotFoundError:
             raise ToolError("the workspace's GitHub App installation is gone") from None
         except (GithubApiError, RepoCreationNotAllowedError) as e:
             raise ToolError(str(e)) from None
+
+    async def _plan_repo(
+        self, private: bool, description: str | None, gitignore: str | None, license: str | None
+    ) -> CreatedRepoOut:
+        """What `createRepo` would do: whether the name is free, or already this run's."""
+        target = self._target
+        try:
+            existing = await self._github.get_repo(target.installation_id, target.full_name)
+        except InstallationNotFoundError:
+            raise ToolError("the workspace's GitHub App installation is gone") from None
+        except GithubApiError as e:
+            raise ToolError(str(e)) from None
+        kind = "private" if private else "public"
+        taken = existing is not None
+        mine = existing is not None and self._created_by_run(existing)
+        extras = [x for x in (gitignore and f".gitignore {gitignore}", license) if x]
+        summary = f"Create the {kind} repo {target.full_name}"
+        if extras:
+            summary += f" with {', '.join(extras)}"
+        if mine:
+            summary = f"{target.full_name} was created by this run already"
+        return planned(
+            WritePlan(
+                tool="github.createRepo",
+                action="create_repo",
+                summary=summary,
+                target=PlanTarget(
+                    kind="repo",
+                    label=target.full_name,
+                    url=existing.html_url if existing else None,
+                ),
+                fields={
+                    "full_name": target.full_name,
+                    "private": existing.private if mine and existing else private,
+                    "description": description,
+                    "gitignore": gitignore,
+                    "license": license,
+                },
+                expect={"name": "created_by_run" if mine else "free"},
+                error=PlanError(
+                    code="repo_exists",
+                    message=f"repo {target.full_name} already exists and is not this run's",
+                )
+                if taken and not mine
+                else None,
+            )
+        )
 
     def _created_by_run(self, repo: RepoInfo) -> bool:
         created_at, since = repo.created_at, self._target.run_created_at
@@ -239,6 +300,8 @@ class _GithubTools:
                 description="The branch to merge into; by default the branch the run cloned.",
             ),
         ] = None,
+        plan: bool = False,
+        expect: dict[str, JsonValue] | None = None,
     ) -> PullRequestOut:
         """Push a writer node's branch (`agent/<run>/<node>`) to GitHub and open a pull request
         from it. If one is already open from that branch, it is returned."""
@@ -251,6 +314,10 @@ class _GithubTools:
         except SandboxError as e:
             raise ToolError(f"node {from_node} has nothing to publish: {e}") from None
         into = base or target.base or await self._clone_branch(self._sandbox)
+        if expect is not None and expect.get("tip") not in (None, bundle.head_sha):
+            raise stale(f"the branch of {from_node} is now at {bundle.head_sha[:7]}")
+        if plan:
+            return await self._plan_pr(bundle, into, title, body)
         if target.review is not None:
             return await self._update(bundle, into, target.review)
         try:
@@ -276,7 +343,112 @@ class _GithubTools:
         except (GithubApiError, PullRequestError, PushError) as e:
             raise ToolError(str(e)) from None
         return PullRequestOut(
-            url=pull.url, number=pull.number, head=pull.head, base=pull.base, commit=commit
+            url=pull.url,
+            number=pull.number,
+            head=pull.head,
+            base=pull.base,
+            commit=commit,
+            repo=target.full_name,
+            title=title,
+            body=body,
+        )
+
+    async def _plan_pr(
+        self, bundle: BranchBundle, into: str, title: str, body: str
+    ) -> PullRequestOut:
+        """What `openPR` would do: push the branch and open a pull request, or (a follow-up, 7.6)
+        push onto the review's pull request and say so on it."""
+        target = self._target
+        commits = f"{bundle.commits} commit{'' if bundle.commits == 1 else 's'}"
+        fields: dict[str, JsonValue] = {
+            "repo": target.full_name,
+            "head": bundle.branch,
+            "base": into,
+            "commit": bundle.head_sha,
+            "commits": bundle.commits,
+        }
+        expect: dict[str, JsonValue] = {"tip": bundle.head_sha}
+        review = target.review
+        try:
+            if review is not None:
+                return await self._plan_push(bundle, commits, fields, expect, review)
+            existing = await self._github.find_open_pull_request(
+                target.installation_id, target.full_name, bundle.branch
+            )
+        except InstallationNotFoundError:
+            raise ToolError("the workspace's GitHub App installation is gone") from None
+        except GithubApiError as e:
+            raise ToolError(str(e)) from None
+        fields |= {
+            "title": title,
+            "body": body,
+            "existing_pr": existing.number if existing else None,
+        }
+        summary = f"Push {commits} to {bundle.branch} and open a pull request into {into}"
+        if existing is not None:
+            summary = f"Push {commits} to {bundle.branch}; pull request #{existing.number} is open"
+        return planned(
+            WritePlan(
+                tool="github.openPR",
+                action="open_pr",
+                summary=summary,
+                target=PlanTarget(
+                    kind="repo",
+                    label=target.full_name,
+                    url=existing.url if existing else f"https://github.com/{target.full_name}",
+                ),
+                fields=fields,
+                body=body,
+                expect=expect,
+            )
+        )
+
+    async def _plan_push(
+        self,
+        bundle: BranchBundle,
+        commits: str,
+        fields: dict[str, JsonValue],
+        expect: dict[str, JsonValue],
+        review: PullRequestTarget,
+    ) -> PullRequestOut:
+        """The follow-up's plan: a fast-forward of the review's branch from `after_sha`."""
+        target = self._target
+        state = await self._github.pull_request(
+            target.installation_id, target.full_name, review.number
+        )
+        problem: PlanError | None = None
+        if state is None or not state.is_open:
+            problem = PlanError(
+                code="pr_not_open", message=f"pull request #{review.number} is not open"
+            )
+        elif state.head_sha and state.head_sha != review.after_sha:
+            problem = PlanError(
+                code="pr_head_moved",
+                message=f"the branch of pull request #{review.number} moved since the review",
+            )
+        fields |= {
+            "head": review.head_branch,
+            "number": review.number,
+            "pr_head": state.head_sha if state else None,
+        }
+        return planned(
+            WritePlan(
+                tool="github.openPR",
+                action="push_to_pr",
+                summary=(
+                    f"Push {commits} onto {review.head_branch} "
+                    f"(pull request #{review.number}) and comment on it"
+                ),
+                target=PlanTarget(
+                    kind="pull_request",
+                    label=f"{target.full_name}#{review.number}",
+                    url=review.url,
+                ),
+                fields=fields,
+                body=review_reply(bundle.head_sha, review.author, self._run_id, review.run_url),
+                expect=expect,
+                error=problem,
+            )
         )
 
     async def _update(
@@ -306,6 +478,7 @@ class _GithubTools:
             head=review.head_branch,
             base=into,
             commit=commit,
+            repo=target.full_name,
             updated=True,
         )
 
@@ -356,6 +529,7 @@ def build_github_server(
             {"name": "docs-demo", "private": True, "gitignore": "Python", "license": "mit"},
             name="createRepo",
             structured=True,
+            plannable=True,
         )
     ]
     if sandbox is not None:
@@ -370,6 +544,7 @@ def build_github_server(
                 },
                 name="openPR",
                 structured=True,
+                plannable=True,
             )
         )
     return MCPServer(

@@ -144,6 +144,8 @@ from agentic_engine.events import (
     ROUTE_CHOSEN,
     TASK_COMPLETED,
     TASK_STARTED,
+    WRITE_CHECKED,
+    WRITES_PLANNED,
     NullEventSink,
     RunEventLog,
 )
@@ -199,6 +201,7 @@ from agentic_engine.spec import (
     DEFAULT_ROUTE,
     FINDINGS_SCHEMA,
     JIRA_WRITE_TOOLS,
+    OUTWARD_WRITE_TOOLS,
     PUBLISH_TOOLS,
     READ_TOOLS,
     WRITE_TOOLS,
@@ -221,6 +224,7 @@ from agentic_engine.spec import (
     iter_nodes,
     node_tools,
     orchestrator_plan_schema,
+    planned_writes,
     port_edges,
     router_routes,
     task_writer_key,
@@ -229,6 +233,7 @@ from agentic_engine.spec import (
 )
 from agentic_engine.spec.subflows import expression_views
 from agentic_engine.tool import run_tool_node
+from agentic_engine.write_plan import failing_plan, is_stale, plan_call
 from agentic_runtime import (
     AgentEvent,
     AgentRuntime,
@@ -246,6 +251,15 @@ from agentic_runtime.findings import (
     VoteError,
     clip_message,
     merge_reports,
+)
+from agentic_runtime.plans import (
+    EXPECT_ARG,
+    Difference,
+    WritePlan,
+    compare,
+    describe,
+    fill_for,
+    same_plan,
 )
 
 _logger = logging.getLogger("agentic_engine")
@@ -344,6 +358,8 @@ class _Limits:
     """The workflow's `protect.allow`: the protected paths each writer may change."""
     start_gates: dict[str, str] = field(default_factory=dict[str, str])
     """Each node with a `start_from` → the gate that approves the work it starts from."""
+    write_nodes: dict[str, ToolNode] = field(default_factory=dict[str, ToolNode])
+    """Every tool node of the spec by id: the outward writes a gate's batch holds (13.8)."""
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -431,6 +447,12 @@ def review_node_id(gate: GateNode) -> str:
     """The LangGraph node that reads the review's findings before `gate` (13.6). Its send-backs are
     counted under the gate's `evidence_node_id`, with the checks'."""
     return f"{gate.id}.review"
+
+
+def plan_node_id(gate: GateNode) -> str:
+    """The LangGraph node that asks the writes `gate` guards for their plans (13.8), the last
+    step before the gate. Its plans are in the state the gate's pause shows."""
+    return f"{gate.id}.plan"
 
 
 def check_node_id(loop: LoopNode) -> str:
@@ -524,6 +546,8 @@ def recursion_limit(spec: WorkflowSpec) -> int:
     spec's own bounds: a run that takes more steps fails (`GraphRecursionError`) instead of going
     on to LangGraph's default."""
 
+    planned = planned_writes(spec.root)
+
     def steps(node: Node) -> int:
         match node:
             case SequenceNode():
@@ -543,7 +567,15 @@ def recursion_limit(spec: WorkflowSpec) -> int:
                 return 2 + (steps(node.call) if node.call is not None else 0)
             case ToolNode() if creates_repo(node):
                 return 2  # and its `<id>.ready` node
-            case AgentNode() | ToolNode() | GateNode() | ReduceNode():
+            case GateNode():
+                # The gate, and the steps before it: its checks, its review and its plan (13.8).
+                return (
+                    1
+                    + (node.evidence is not None)
+                    + (node.review is not None)
+                    + (node.id in planned)
+                )
+            case AgentNode() | ToolNode() | ReduceNode():
                 return 1
 
     return steps(spec.root) + 10
@@ -625,6 +657,7 @@ def compile_workflow(
         protected.set(static_rules(policy_paths), limits.allow)
         protected.on_refused = _refusal_event(log)
     limits.start_gates = _start_gates(spec.root)
+    limits.write_nodes = {n.id: n for _, n in iter_nodes(spec.root) if isinstance(n, ToolNode)}
     limits.writer_ids = frozenset(writer_node_ids(spec.root))
     limits.team_ids = frozenset(task_writer_orchestrators(spec.root))
     limits.roles = {
@@ -633,6 +666,8 @@ def compile_workflow(
         if isinstance(n, AgentNode | OrchestratorNode)
     }
 
+    planned = planned_writes(spec.root)  # gate id → the outward writes it shows plans of
+    writes = {n.id: n for _, n in iter_nodes(spec.root) if isinstance(n, ToolNode)}
     loops: list[LoopNode] = []  # the loops `add` is inside
     top = top_step_of(spec)  # node id → the top-level step it runs in, for saved branches (12.4)
 
@@ -776,13 +811,21 @@ def compile_workflow(
                 builder.add_node(ready, _repo_ready)
                 builder.add_edge(ready, then)
                 return node.id
-            case GateNode() if node.evidence is not None or node.review is not None:
+            case GateNode() if (
+                node.evidence is not None or node.review is not None or node.id in planned
+            ):
                 builder.add_node(
                     node.id,
                     _saving(_step(node, runtime, tools, log, limits), log, limits, top[node.id]),
                 )
                 go_on(node.id, node.id, then)
                 first = node.id
+                if node.id in planned:
+                    planning = plan_node_id(node)
+                    guarded = [writes[w] for w in planned[node.id]]
+                    builder.add_node(planning, _plan_writes(node, guarded, tools, log, limits))
+                    builder.add_edge(planning, first)
+                    first = planning
                 if node.review is not None:
                     reading = review_node_id(node)
                     builder.add_node(reading, _review(node, tools, log, limits))
@@ -872,7 +915,7 @@ def _step(
     limits: _Limits,
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     async def step(state: RunState) -> RunUpdate:
-        def run() -> Awaitable[AgentNodeResult]:
+        def run(expect: Mapping[str, JsonValue] | None = None) -> Awaitable[AgentNodeResult]:
             refs = state.get("artifacts", {})
             reads = _reads_as(node, _integrated_reader(state))
             return _run_step(
@@ -889,8 +932,11 @@ def _step(
                 evidence=_evidence_input(node, state),
                 gate_review=_review_input(node, state),
                 packs=state.get("evidence", {}),
+                expect=expect,
             )
 
+        if isinstance(node, ToolNode) and node.tool in OUTWARD_WRITE_TOOLS:
+            return await _apply_write(node, state, tools, log, limits, run)
         if isinstance(node, AgentNode):
             frozen: dict[str, dict[str, JsonValue]] = {}
             if node.start_from is not None:
@@ -910,9 +956,164 @@ def _step(
             update["rounds"] = {key: state.get("rounds", {}).get(key, 0) + 1}
         if isinstance(node, GateNode) and node.review is not None and node.review.notes:
             await _write_notes(node, result, state, limits, log, update)
+        if isinstance(node, GateNode) and (moved := _moved_tips(node, result, state, limits)):
+            update["write_plans"] = moved
         return update
 
     return step
+
+
+def _moved_tips(
+    gate: GateNode, result: AgentNodeResult, state: RunState, limits: _Limits
+) -> dict[str, dict[str, JsonValue]]:
+    """The plans of the pull requests `gate` guards, with their tip moved to the commit the
+    approver's edits made (13.8): the approval changed the code on purpose, so the write is checked
+    against the edited branch. A gate that took no edits changes nothing."""
+    commits = (result.data or {}).get("commits")
+    if result.status != "completed" or not isinstance(commits, dict):
+        return {}
+    moved: dict[str, dict[str, JsonValue]] = {}
+    for write_id, entry in state.get("write_plans", {}).items():
+        write = limits.write_nodes.get(write_id)
+        if entry.get("gate") != gate.id or write is None or write.tool not in PUBLISH_TOOLS:
+            continue
+        tip = commits.get(str(write.args.get("from_node")))
+        if not isinstance(tip, str):
+            continue
+        plan = WritePlan.model_validate(entry["plan"])
+        plan = plan.model_copy(
+            update={
+                "fields": {**plan.fields, "commit": tip},
+                "expect": {**plan.expect, "tip": tip},
+            }
+        )
+        moved[write_id] = {**entry, "plan": plan.model_dump(mode="json")}
+    return moved
+
+
+async def _apply_write(
+    node: ToolNode,
+    state: RunState,
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
+    call: Callable[[Mapping[str, JsonValue] | None], Awaitable[AgentNodeResult]],
+) -> RunUpdate:
+    """Runs an outward write against the plan a person approved (13.8). Nothing is written
+    unless the plans still hold: before the first write of a gate's batch, every write of the
+    batch is planned again and compared with what was shown (`same_plan`), and a write whose plan
+    would fail now stops the batch too; the step then fails `plan_stale` or `plan_would_fail`. Each
+    write is called with its plan's `expect`, so the tool refuses if the world changed since, and
+    its result is compared with the plan (`write_checked`)."""
+    entries = state.get("write_plans", {})
+    entry = entries.get(node.id)
+    if entry is None or tools is None:
+        error = f"plan_missing: {node.id} has no plan from a gate, so it is not written"
+        return await _refused_write(node, state, log, error)
+    shown = WritePlan.model_validate(entry["plan"])
+    checked: dict[str, dict[str, JsonValue]] = {}
+    if not entry.get("checked"):
+        gate = entry.get("gate")
+        batch = {w: e for w, e in entries.items() if e.get("gate") == gate}
+        problem = await _batch_problem(batch, state, tools, log, limits)
+        if problem is not None:
+            return await _refused_write(node, state, log, problem)
+        checked = {w: {**e, "checked": True} for w, e in batch.items()}
+    result = await call(shown.expect or None)
+    update = _update(node.id, result)
+    if checked:
+        update["write_plans"] = checked
+    await _write_checked(node, shown, entry, result, state, tools, log, limits)
+    return update
+
+
+async def _batch_problem(
+    batch: Mapping[str, Mapping[str, JsonValue]],
+    state: RunState,
+    tools: ToolExecutor,
+    log: RunEventLog,
+    limits: _Limits,
+) -> str | None:
+    """Why a gate's batch of writes must not run, or `None`: the writes are planned again and
+    each plan compared with the one shown, and a plan that would fail now stops the batch."""
+    problems: list[str] = []
+    refs, results = state.get("artifacts", {}), state["results"]
+    for write_id, entry in batch.items():
+        write = limits.write_nodes.get(write_id)
+        if write is None:
+            continue
+        shown = WritePlan.model_validate(entry["plan"])
+        again = await _plan_write(write, refs, results, tools, limits)
+        differences = same_plan(shown, again)
+        if differences:
+            problems.append(f"plan_stale: {write_id}: {describe(differences)}")
+        elif again.error is not None:
+            differences = [Difference(field="error", planned=None, actual=again.error.code)]
+            problems.append(
+                f"plan_would_fail: {write_id}: {again.error.code}: {again.error.message}"
+            )
+        else:
+            continue
+        stale: dict[str, JsonValue] = {
+            "gate": entry.get("gate"),
+            "plan": shown.model_dump(mode="json"),
+            "result": {"now": again.model_dump(mode="json")},
+            "outcome": "stale",
+            "differences": [d.model_dump(mode="json") for d in differences],
+        }
+        await log.emit(WRITE_CHECKED, node_id=write_id, payload=stale)
+    return "; ".join(problems) if problems else None
+
+
+async def _write_checked(
+    node: ToolNode,
+    shown: WritePlan,
+    entry: Mapping[str, JsonValue],
+    result: AgentNodeResult,
+    state: RunState,
+    tools: ToolExecutor,
+    log: RunEventLog,
+    limits: _Limits,
+) -> None:
+    """Logs how an outward write went against its plan (`write_checked`): its result compared with
+    the plan, with the links and review notes the platform filled in, or, when the tool refused
+    because the plan was stale, what is true now. A write that failed otherwise is already a
+    failed step."""
+    gate = entry.get("gate")
+    plan = shown.model_dump(mode="json")
+    if result.status == "completed" and result.data is not None:
+        called = await _resolved_call(node, state.get("artifacts", {}), state["results"], limits)
+        differences = compare(shown, result.data, fill_for(shown, called.args))
+        payload: dict[str, JsonValue] = {
+            "gate": gate,
+            "plan": plan,
+            "result": result.data,
+            "outcome": "differs" if differences else "as_planned",
+            "differences": [d.model_dump(mode="json") for d in differences],
+        }
+    elif result.status == "failed" and result.error is not None and is_stale(result.error):
+        now = await _plan_write(node, state.get("artifacts", {}), state["results"], tools, limits)
+        differences = same_plan(shown, now)
+        payload = {
+            "gate": gate,
+            "plan": plan,
+            "result": {"error": result.error, "now": now.model_dump(mode="json")},
+            "outcome": "stale",
+            "differences": [d.model_dump(mode="json") for d in differences],
+        }
+    else:
+        return
+    await log.emit(WRITE_CHECKED, node_id=node.id, payload=payload)
+
+
+async def _refused_write(
+    node: ToolNode, state: RunState, log: RunEventLog, error: str
+) -> RunUpdate:
+    """The write does not run: its step starts and fails with `error`, and nothing is written."""
+    await log.emit(NODE_STARTED, node_id=node.id)
+    await log.emit(NODE_FAILED, node_id=node.id, payload={"error": error})
+    failed = AgentNodeResult(status="failed", text=state["last_text"], usage=None, error=error)
+    return _update(node.id, failed)
 
 
 async def _start_from(
@@ -1125,6 +1326,78 @@ def _review(
         return {"evidence": {key: found.model_dump(mode="json", by_alias=True)}}
 
     return read
+
+
+def _plan_writes(
+    gate: GateNode,
+    guarded: list[ToolNode],
+    tools: ToolExecutor | None,
+    log: RunEventLog,
+    limits: _Limits,
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Asks the outward writes `gate` guards for their plans (13.8) before it pauses: each tool's
+    plan mode, called by the engine through the run's tools (never by an agent), with the
+    arguments the write's own step will resolve. A step of its own, after the checks and the
+    review, so a restart between it and the gate plans nothing twice, and a pass the checks or the
+    review sent back plans nothing. The plans are kept in the state (`write_plans`), and the
+    runner shows them with the gate (`gate_waiting`)."""
+
+    async def plan(state: RunState) -> RunUpdate:
+        found = _evidence_input(gate, state)
+        reviewed = _review_input(gate, state)
+        if tools is None or (found is not None and found.comments):
+            return {}
+        if reviewed is not None and reviewed.send:
+            return {}
+        made: list[WritePlan] = []
+        for write in guarded:
+            made.append(
+                await _plan_write(
+                    write, state.get("artifacts", {}), state["results"], tools, limits
+                )
+            )
+        shown: list[JsonValue] = [p.model_dump(mode="json") for p in made]
+        await log.emit(WRITES_PLANNED, node_id=gate.id, payload={"gate": gate.id, "plans": shown})
+        return {
+            "write_plans": {
+                p.node_id or "": {"gate": gate.id, "plan": p.model_dump(mode="json")} for p in made
+            }
+        }
+
+    return plan
+
+
+async def _plan_write(
+    write: ToolNode,
+    refs: Mapping[str, ArtifactRef],
+    results: Mapping[str, AgentNodeResult],
+    tools: ToolExecutor,
+    limits: _Limits,
+) -> WritePlan:
+    """The plan of `write` as its tool answers it now, the arguments resolved the way the write's
+    own step will resolve them. What the platform adds after the approval (the review's notes, a
+    comment's links) is left out and named in `pending`."""
+    without_notes = write.model_copy(
+        update={"args": {k: v for k, v in write.args.items() if k != "notes_from"}}
+    )
+    try:
+        called = await _resolved_call(without_notes, refs, results, limits)
+    except (ArtifactError, ToolArgsError) as e:
+        return failing_plan(write, write.args, f"unresolved: {e}")
+    return await plan_call(write, called, tools)
+
+
+async def _resolved_call(
+    node: ToolNode,
+    refs: Mapping[str, ArtifactRef],
+    results: Mapping[str, AgentNodeResult],
+    limits: _Limits,
+) -> ToolNode:
+    """`node` as its tool is called: the artifact text, the links the platform made and the issue
+    key the run was started with put in place. Raises `ArtifactError` or `ToolArgsError`."""
+    called = await _with_body_from(node, limits.artifacts, refs)
+    called = _with_links(called, results)
+    return _with_issue_from(called, limits.request)
 
 
 def _review_input(node: StepNode, state: RunState) -> ReviewInput | None:
@@ -1357,6 +1630,7 @@ async def _run_step(
     evidence: EvidenceInput | None = None,
     packs: Mapping[str, JsonValue] | None = None,
     gate_review: ReviewInput | None = None,
+    expect: Mapping[str, JsonValue] | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
     a map or an orchestrator's task, `branch` inside a parallel). `writers` ran before it: an
@@ -1425,11 +1699,13 @@ async def _run_step(
                 )
             case ToolNode():
                 try:
-                    called = await _with_body_from(node, limits.artifacts, refs)
-                    called = _with_links(called, results or {})
-                    called = _with_issue_from(called, limits.request)
+                    called = await _resolved_call(node, refs, results or {}, limits)
                 except (ArtifactError, ToolArgsError) as e:
                     return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
+                if expect is not None:  # 13.8: what the write was planned against
+                    called = called.model_copy(
+                        update={"args": {**called.args, EXPECT_ARG: dict(expect)}}
+                    )
                 return await run_tool_node(called, tools, on_event, route_as)
             case WaitForNode():
                 asked = (results or {}).get(node.after_from) or None

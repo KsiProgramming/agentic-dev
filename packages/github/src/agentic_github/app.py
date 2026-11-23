@@ -117,6 +117,14 @@ class GithubApp:
             raise PullRequestError(f"GitHub refused the pull request: {e.reason}") from None
         return _pull_request_info(response.json())
 
+    async def find_open_pull_request(
+        self, installation_id: int, full_name: str, head: str
+    ) -> PullRequestInfo | None:
+        """The pull request open from the branch `head`, or `None`."""
+        owner, repo = full_name.split("/", 1)
+        github = self._installation(installation_id)
+        return await self._open_pull_request(github, installation_id, owner, repo, head)
+
     async def get_repo(self, installation_id: int, full_name: str) -> RepoInfo | None:
         """`full_name` as the installation sees it, or `None` if it does not exist or the
         installation cannot reach it."""

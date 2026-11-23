@@ -443,6 +443,14 @@ export function stepOutline(step: Step): string | null {
     const { sources, findingsIn, findingsOut } = step.merged;
     return `Merged ${count(findingsIn, "finding")} into ${findingsOut} from ${count(sources, "source")}`;
   }
+  if (step.writeCheck && step.status === "completed") {
+    const done = writeOutline(step);
+    const how =
+      step.writeCheck.outcome === "as_planned"
+        ? "as planned"
+        : `not as planned (${step.writeCheck.differences.map((d) => d.field).join(", ")})`;
+    return done ? `${done} · ${how}` : how[0]!.toUpperCase() + how.slice(1);
+  }
   if (step.prUrl) return `Opened pull request #${step.prUrl.split("/").at(-1)}`;
   if (step.createdRepo) return `Created ${step.createdRepo.fullName}`;
   const message = lastMessage(step);
@@ -457,6 +465,14 @@ export function stepOutline(step: Step): string | null {
     const d = describeTool(tool.name, tool.arguments);
     return d.target ? `${d.done} ${d.target}` : d.done;
   }
+  return null;
+}
+
+/** What a completed outward write did, for its row: the pull request, the repo, or nothing the
+ * row can name (a Jira comment or move). */
+function writeOutline(step: Step): string | null {
+  if (step.prUrl) return `Opened pull request #${step.prUrl.split("/").at(-1)}`;
+  if (step.createdRepo) return `Created ${step.createdRepo.fullName}`;
   return null;
 }
 

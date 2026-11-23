@@ -10,6 +10,7 @@ import type { GateInfo } from "../timeline";
 import type { GateFile } from "./gate-files";
 import { EvidenceStrip } from "./evidence-strip";
 import { ReviewComments } from "./review-comments";
+import { WritePlans } from "./write-plans";
 import { selectedLine, sentBackBy } from "./step-entries";
 import { GateReviewSheet } from "./gate-review-sheet";
 
@@ -70,6 +71,7 @@ export function GateDecision({ gate }: { gate: GateInfo }) {
           ))}
         </ul>
       ) : null}
+      {gate.plans.length > 0 ? <WritePlans plans={gate.plans} className="basis-full" /> : null}
       {gate.evidence || gate.review ? (
         <EvidenceStrip evidence={gate.evidence} review={gate.review} className="basis-full" />
       ) : null}

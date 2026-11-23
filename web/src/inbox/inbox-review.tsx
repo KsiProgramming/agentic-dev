@@ -38,6 +38,7 @@ import { BreakerDetails } from "@/runs/console/breaker-details";
 import { EvidenceStrip } from "@/runs/console/evidence-strip";
 import { ProtectedAttempts } from "@/runs/console/protected-attempts";
 import { ReviewComments } from "@/runs/console/review-comments";
+import { WritePlans } from "@/runs/console/write-plans";
 import { StatusLabel } from "@/runs/console/gate-files";
 import { SelectionChecklist } from "@/runs/console/selection-checklist";
 import { useGateDecision, type Decision } from "@/runs/console/use-gate-decision";
@@ -154,7 +155,13 @@ function GateReview({
         {gate.prompt ? <p className="text-muted-foreground">{gate.prompt}</p> : null}
       </header>
 
-      {gate.breaker ? <BreakerDetails trip={gate.breaker} /> : <ApprovingDoes gate={gate} />}
+      {gate.breaker ? (
+        <BreakerDetails trip={gate.breaker} />
+      ) : gate.plans.length > 0 ? (
+        <WritePlans plans={gate.plans} />
+      ) : (
+        <ApprovingDoes gate={gate} />
+      )}
 
       <StatStrip columns={2}>
         <StatTile

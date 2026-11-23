@@ -8,6 +8,7 @@ import type { components } from "@/api/schema";
 import { parseBreaker } from "@/runs/breaker";
 import { parseArtifacts } from "@/runs/artifacts/artifacts";
 import { parseEvidence } from "@/runs/evidence";
+import { parsePlans } from "@/runs/plans";
 import { parseReview } from "@/runs/review";
 import {
   parseChanges,
@@ -54,6 +55,7 @@ export function toInboxGate(body: RunGate): InboxGate {
     review: parseReview(body.review),
     protectedAttempts: parseProtectedAttempts(body.protected_attempts),
     breaker,
+    plans: parsePlans(body.plans),
     repoUrl: body.repo?.url ?? null,
     base: body.base ?? null,
     branches: body.branches.map((b) => ({ nodeId: b.node_id, branch: b.branch })),

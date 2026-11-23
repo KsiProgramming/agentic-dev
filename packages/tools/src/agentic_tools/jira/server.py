@@ -27,7 +27,7 @@ from uuid import UUID
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, JsonValue, SecretStr
 
 from agentic_jira import (
     PLATFORM_MARK,
@@ -42,6 +42,7 @@ from agentic_jira import (
     mapped_value,
     to_markdown,
 )
+from agentic_runtime.plans import PlanError, PlanTarget, WritePlan
 from agentic_secrets import SecretDecryptError
 from agentic_store import (
     JiraConnectionInfo,
@@ -49,7 +50,7 @@ from agentic_store import (
     JiraNotConnectedError,
     JiraSiteInfo,
 )
-from agentic_tools.strict import strict_tool
+from agentic_tools.strict import planned, stale, strict_tool
 
 SERVER_NAME = "jira"
 READ_TOOLS = frozenset({"getIssue", "search", "listTransitions"})
@@ -81,6 +82,7 @@ ErrorCode = Literal[
     "issue_not_found",
     "invalid_jql",
     "transition_unavailable",
+    "plan_stale",
     "rate_limited",
     "jira_unavailable",
 ]
@@ -190,6 +192,7 @@ class CommentPostedOut(BaseModel):
     comment_id: str
     url: str
     created: bool = Field(description="False if this run had already posted the same comment.")
+    text: str = Field(default="", description="The comment as posted, footer included.")
 
 
 class TransitionedOut(BaseModel):
@@ -491,22 +494,49 @@ class _JiraTools(_JiraReader):
             str | None,
             Field(description="The Jira site's host or cloud id; only needed with several."),
         ] = None,
+        plan: bool = False,
+        expect: dict[str, JsonValue] | None = None,
     ) -> CommentPostedOut:
         """Post a comment on a Jira issue, ending with a line that links the run. Only a tool
         node after a gate calls it."""
         where = await self._site(site)
         found = await self._issue(where, issue)
-        text = f"{body.rstrip()}\n\n{self._footer()}"
+        if expect is not None and expect.get("project") not in (None, found.project_key):
+            raise stale(f"{found.key} is now in project {found.project_key}")
+        footer = self._footer()
+        text = f"{body.rstrip()}\n\n{footer}"
         # A step that runs again after a crash finds its comment already posted.
         expected = {text.strip(), to_markdown(from_markdown(text))}
-        for existing in found.comments:
-            if existing.body.strip() in expected:
-                return CommentPostedOut(
-                    key=found.key,
-                    comment_id=existing.id,
-                    url=f"{_browse(where, found.key)}?focusedCommentId={existing.id}",
-                    created=False,
+        posted = next((c for c in found.comments if c.body.strip() in expected), None)
+        if plan:
+            summary = f"Comment on {found.key}"
+            if posted is not None:
+                summary += " (this run posted it already)"
+            return planned(
+                WritePlan(
+                    tool="jira.comment",
+                    action="comment",
+                    summary=summary,
+                    target=PlanTarget(kind="issue", label=found.key, url=_browse(where, found.key)),
+                    fields={
+                        "key": found.key,
+                        "site": _host(where.url),
+                        "text": text,
+                        "footer": footer,
+                        "created": posted is None,
+                    },
+                    body=text,
+                    expect={"project": found.project_key},
                 )
+            )
+        if posted is not None:
+            return CommentPostedOut(
+                key=found.key,
+                comment_id=posted.id,
+                url=f"{_browse(where, found.key)}?focusedCommentId={posted.id}",
+                created=False,
+                text=text,
+            )
         platform = self._access.platform
         comment_id = await self._call(
             lambda token: platform.add_comment(token, where.cloud_id, found.key, text),
@@ -517,6 +547,7 @@ class _JiraTools(_JiraReader):
             comment_id=comment_id,
             url=f"{_browse(where, found.key)}?focusedCommentId={comment_id}",
             created=True,
+            text=text,
         )
 
     async def transition(
@@ -534,6 +565,8 @@ class _JiraTools(_JiraReader):
             str | None,
             Field(description="The Jira site's host or cloud id; only needed with several."),
         ] = None,
+        plan: bool = False,
+        expect: dict[str, JsonValue] | None = None,
     ) -> TransitionedOut:
         """Move a Jira issue through one of its workflow's transitions. Only a tool node after a
         gate calls it."""
@@ -550,15 +583,61 @@ class _JiraTools(_JiraReader):
             or next((t for t in offered if t.name.lower() == wanted), None)
             or next((t for t in offered if t.to_status.lower() == wanted), None)
         )
+        if expect is not None:
+            if expect.get("status") not in (None, found.status):
+                raise stale(f"{found.key} is now {found.status}, not {expect['status']}")
+            if expect.get("transition_id") != (chosen.id if chosen else None):
+                raise stale(f"the move of {found.key} to {to!r} is no longer offered as planned")
+        target = PlanTarget(kind="issue", label=found.key, url=_browse(where, found.key))
         if chosen is None:
-            if found.status.lower() == wanted:
+            unchanged = found.status.lower() == wanted
+            names = ", ".join(t.name for t in offered) or "none"
+            message = f"{found.key} is {found.status}; its transitions from there: {names}"
+            if plan:
+                return planned(
+                    WritePlan(
+                        tool="jira.transition",
+                        action="transition",
+                        summary=(
+                            f"{found.key} is already {found.status}: no change"
+                            if unchanged
+                            else f"Move {found.key} to {to.strip()}"
+                        ),
+                        target=target,
+                        fields={
+                            "key": found.key,
+                            "from_status": found.status,
+                            "to_status": found.status if unchanged else to.strip(),
+                            "changed": False,
+                            "offered": [t.name for t in offered],
+                        },
+                        expect={"status": found.status, "transition_id": None},
+                        error=None
+                        if unchanged
+                        else PlanError(code="transition_unavailable", message=message),
+                    )
+                )
+            if unchanged:
                 return TransitionedOut(
                     key=found.key, from_status=found.status, to_status=found.status, changed=False
                 )
-            names = ", ".join(t.name for t in offered) or "none"
-            raise fail(
-                "transition_unavailable",
-                f"{found.key} is {found.status}; its transitions from there: {names}",
+            raise fail("transition_unavailable", message)
+        if plan:
+            return planned(
+                WritePlan(
+                    tool="jira.transition",
+                    action="transition",
+                    summary=f"Move {found.key} from {found.status} to {chosen.to_status}",
+                    target=target,
+                    fields={
+                        "key": found.key,
+                        "from_status": found.status,
+                        "to_status": chosen.to_status,
+                        "changed": True,
+                        "transition": chosen.name,
+                    },
+                    expect={"status": found.status, "transition_id": chosen.id},
+                )
             )
         # Recorded first: Jira's delivery of this move can arrive before the call returns.
         await self._access.moving(where.cloud_id, found.key, chosen.to_status, self._run_id)
@@ -643,12 +722,14 @@ def build_jira_server(access: JiraAccess, *, run_id: UUID, run_url: str | None =
                 {"issue": "PROJ-12", "body": "The fix is in #42."},
                 name="comment",
                 structured=True,
+                plannable=True,
             ),
             strict_tool(
                 tools.transition,
                 {"issue": "PROJ-12", "to": "Done"},
                 name="transition",
                 structured=True,
+                plannable=True,
             ),
         ],
     )

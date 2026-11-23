@@ -36,6 +36,7 @@ test("a gate waits until it is decided", () => {
     review: null,
     protectedAttempts: [],
     breaker: null,
+    plans: [],
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
@@ -91,6 +92,7 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     review: null,
     protectedAttempts: [],
     breaker: null,
+    plans: [],
     ...overrides,
   };
 }

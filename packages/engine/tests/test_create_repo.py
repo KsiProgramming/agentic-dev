@@ -16,6 +16,7 @@ from agentic_engine.graph.compile import recursion_limit
 from agentic_engine.spec import WorkflowSpec, parse_spec
 from agentic_runtime import Message, ToolDefinition, ToolOutput
 from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
+from agentic_runtime.testing import is_plan_call, plan_answer
 
 REPO: dict[str, JsonValue] = {
     "full_name": "acme/docs-new",
@@ -60,6 +61,8 @@ class FakeCreator:
     async def call(
         self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
     ) -> ToolOutput:
+        if is_plan_call(arguments):
+            return plan_answer(name, arguments)
         self.calls.append((name, arguments))
         return ToolOutput(text="created acme/docs-new", data=REPO)
 
@@ -181,5 +184,5 @@ async def test_a_failed_creation_ends_the_run_without_suspending() -> None:
 
 
 def test_the_ready_step_counts_towards_the_recursion_limit() -> None:
-    # gate, create (+ ready), writer, plus the margin.
-    assert recursion_limit(SPEC) == 4 + 10
+    # gate (+ its plan, 13.8), create (+ ready), writer, plus the margin.
+    assert recursion_limit(SPEC) == 5 + 10

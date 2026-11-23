@@ -114,6 +114,19 @@ class FakeGithub(FakeReviews):
             base=base,
         )
 
+    async def find_open_pull_request(
+        self, installation_id: int, full_name: str, head: str
+    ) -> PullRequestInfo | None:
+        for number, pull in enumerate(self.opened, start=1):
+            if pull["repo"] == full_name and pull["head"] == head:
+                return PullRequestInfo(
+                    number=number,
+                    url=f"https://github.com/{full_name}/pull/{number}",
+                    head=head,
+                    base=pull["base"],
+                )
+        return None
+
 
 def bare_remote(origin: Path, dest: Path) -> str:
     """A bare clone of the local repo `origin` at `dest`, standing in for its GitHub remote;

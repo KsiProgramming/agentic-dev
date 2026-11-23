@@ -37,6 +37,7 @@ from agentic_engine.policy import (
 from agentic_engine.ports import schema_problem
 from agentic_runtime.findings import FindingsReport, Severity
 from agentic_runtime.paths import glob_problem
+from agentic_runtime.plans import ENGINE_ONLY_ARGS
 from agentic_runtime.request import Provider
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
@@ -1096,6 +1097,10 @@ JIRA_WRITE_TOOLS = frozenset({"jira.comment", "jira.transition"})
 """Tools that change a Jira issue (7.2). A comment is read by people as soon as it is posted and a
 status change is named in principle 3, so only a tool node may call one, after a gate."""
 
+OUTWARD_WRITE_TOOLS = PUBLISH_TOOLS | CREATE_TOOLS | JIRA_WRITE_TOOLS
+"""Every tool that writes outside the run (13.8): a pull request, a new repo, a Jira comment or
+move. Each has a plan mode, which the engine calls before a gate to show what approving does."""
+
 JIRA_ISSUE_FROM = frozenset({"request"})
 """What a Jira write's `issue_from` may name: the run's request, which holds one issue key."""
 
@@ -1314,6 +1319,24 @@ def _publish_issue(
             "a human approves what is published",
         )
     return None
+
+
+def engine_only_args_issues(root: Node) -> list[ValidationIssue]:
+    """`reference` on each outward write whose `args` set `plan` or `expect` (13.8): only the
+    engine passes them. A spec that set `plan` would have a gate approve a dry run that writes
+    nothing, and one that set `expect` could forge the precondition the write checks."""
+    return [
+        ValidationIssue(
+            code="reference",
+            path=f"{path}.args.{name}",
+            node_id=node.id,
+            message=f"node {node.id!r}: `{name}` is passed by the engine only (the plan of "
+            f"{node.tool}); remove it from `args`",
+        )
+        for path, node in iter_nodes(root)
+        if isinstance(node, ToolNode) and node.tool in OUTWARD_WRITE_TOOLS
+        for name in sorted(ENGINE_ONLY_ARGS & set(node.args))
+    ]
 
 
 def build_tool_issues(root: Node) -> list[ValidationIssue]:
@@ -2852,6 +2875,7 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
     issues += commit_artifacts_issues(root) + build_tool_issues(root)
+    issues += engine_only_args_issues(root)
     issues += port_issues(root) + artifact_issues(root, inputs) + subflow_issues(root)
     issues += gate_issues(root) + start_from_issues(root) + review_issues(root)
     return in_run_order(root, issues)
@@ -3490,3 +3514,62 @@ class WorkflowSpec(_Base):
         ):
             raise ValueError("; ".join(messages(issues)))
         return self
+
+
+def planned_writes(root: Node) -> dict[str, list[str]]:
+    """Each gate under `root` → the outward writes it shows a plan of (13.8), in run order.
+
+    A gate plans every outward write that comes after it, up to the next gate that certainly runs
+    before that write (the publish rules' scope: `_runs_in`, `within`), since from there on
+    that gate is the one a person decides at. A write on a route the gate is not on is not
+    planned by it: the two never run in one pass. A write may be planned by more than one gate,
+    and at apply time the plans of the last gate that ran are used. A `wait_for` plans nothing: it
+    is no decision.
+
+    SDD's `approve_pr` sits in a route of a router in a loop, so it plans the pull request and
+    both Jira writes, while `post_questions` plans only the comment that asks."""
+    nodes = list(iter_nodes(root))
+    loops: set[str] = set()
+    runs_at: list[str] = []
+    for path, node in nodes:
+        if isinstance(node, LoopNode):
+            loops.add(path)
+        runs_at.append(_runs_in(path, loops))
+
+    def decides(node: Node) -> bool:
+        return isinstance(node, GateNode) and not isinstance(node, WaitForNode)
+
+    planned: dict[str, list[str]] = {}
+    for at, (path, node) in enumerate(nodes):
+        if not decides(node):
+            continue
+        for later, (write_path, write) in enumerate(nodes[at + 1 :], start=at + 1):
+            if not (isinstance(write, ToolNode) and write.tool in OUTWARD_WRITE_TOOLS):
+                continue
+            if _exclusive_routes(path, write_path):
+                continue
+            decided_between = any(
+                decides(nodes[i][1])
+                and within(write_path, scope_of(runs_at[i]))
+                and not _exclusive_routes(nodes[i][0], write_path)
+                for i in range(at + 1, later)
+            )
+            if not decided_between:
+                planned.setdefault(node.id, []).append(write.id)
+    return planned
+
+
+_ROUTE = re.compile(r"\.(routes\[\d+\]\.then|default)")
+
+
+def _exclusive_routes(left: str, right: str) -> bool:
+    """Whether the nodes at `left` and `right` are on different routes of one router, so one
+    pass runs at most one of them."""
+    for match in _ROUTE.finditer(left):
+        route = left[: match.end()]
+        router = left[: match.start()]
+        if (right == router or right.startswith((f"{router}.", f"{router}["))) and not within(
+            right, route
+        ):
+            return True
+    return False

@@ -15,6 +15,7 @@ from pydantic import JsonValue
 
 from agentic_runtime.contract import check_events
 from agentic_runtime.events import AgentEvent
+from agentic_runtime.plans import PLAN_ARG, PlanAction, PlanTarget, WritePlan
 from agentic_runtime.protocol import AgentRuntime
 from agentic_runtime.request import AgentRequest
 from agentic_runtime.tools import ToolDefinition, ToolOutput
@@ -87,6 +88,46 @@ async def collect_and_check(runtime: AgentRuntime, request: AgentRequest) -> lis
     return events
 
 
+_PLAN_ACTIONS: dict[str, PlanAction] = {
+    "github.openPR": "open_pr",
+    "github.createRepo": "create_repo",
+    "jira.comment": "comment",
+    "jira.transition": "transition",
+}
+
+
+def is_plan_call(arguments: Mapping[str, JsonValue]) -> bool:
+    """Whether a tool call asks for the plan of a write (13.8, `plan: true`)."""
+    return arguments.get(PLAN_ARG) is True
+
+
+def plan_answer(
+    name: str,
+    arguments: Mapping[str, JsonValue],
+    *,
+    fields: Mapping[str, JsonValue] | None = None,
+    expect: Mapping[str, JsonValue] | None = None,
+) -> ToolOutput:
+    """What a fake outward write tool answers in plan mode: a plan with the call's arguments as
+    its `fields` unless `fields` is given. A fake that returns it for each `plan: true` call gives
+    the engine plans that hold until the fake is told otherwise."""
+    kind = "issue" if name.startswith("jira.") else "repo"
+    label = str(
+        arguments.get("issue") or arguments.get("from_node") or arguments.get("name") or name
+    )
+    body = arguments.get("body")
+    plan = WritePlan(
+        tool=name,
+        action=_PLAN_ACTIONS[name],
+        summary=f"Plan of {name} on {label}",
+        target=PlanTarget(kind=kind, label=label),
+        fields=dict(fields) if fields is not None else {},
+        body=body if isinstance(body, str) else None,
+        expect=dict(expect or {}),
+    )
+    return ToolOutput(text=plan.summary, data=plan.model_dump(mode="json"))
+
+
 class ScriptedToolExecutor:
     """A `ToolExecutor` whose tools return fixed outputs (or raise a fixed exception).
     `examples` gives some tools an example call in their input schema."""
@@ -102,6 +143,8 @@ class ScriptedToolExecutor:
         self.calls: list[tuple[str, dict[str, JsonValue]]] = []
         self.node_ids: list[str | None] = []
         """The `node_id` of each call, in order."""
+        self.plan_calls: list[tuple[str, dict[str, JsonValue]]] = []
+        """Calls that asked for an outward write's plan (13.8): answered, not in `calls`."""
         self.gate: asyncio.Event | None = None
         """If set, each call waits for it first (to test cancelling a call in flight)."""
 
@@ -120,6 +163,9 @@ class ScriptedToolExecutor:
     async def call(
         self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
     ) -> ToolOutput:
+        if is_plan_call(arguments) and name in _PLAN_ACTIONS:
+            self.plan_calls.append((name, arguments))
+            return plan_answer(name, arguments)
         self.calls.append((name, arguments))
         self.node_ids.append(node_id)
         if self.gate is not None:

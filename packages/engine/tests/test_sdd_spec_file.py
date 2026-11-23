@@ -46,6 +46,7 @@ from agentic_engine.templates import SddFileParams, build_sdd_file_spec, get_tem
 from agentic_engine.templates.sdd import MAX_PASSES, MODELS
 from agentic_runtime import AgentRequest, AgentRun, Message, ToolDefinition, ToolOutput
 from agentic_runtime.fake import ECHO_USAGE, FakeRuntime
+from agentic_runtime.testing import is_plan_call, plan_answer
 
 PR_URL = "https://github.com/acme/shop/pull/9"
 ANSWERS: dict[str, str] = {
@@ -89,6 +90,8 @@ class Platform:
     async def call(
         self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
     ) -> ToolOutput:
+        if is_plan_call(arguments):
+            return plan_answer(name, arguments)
         self.calls.append((name, arguments))
         return ToolOutput(text=PR_URL, data={"url": PR_URL, "number": 9})
 

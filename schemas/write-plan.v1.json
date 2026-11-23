@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "JsonValue": {},
+    "PendingKind": {
+      "enum": [
+        "links",
+        "review_notes"
+      ],
+      "type": "string"
+    },
+    "PlanAction": {
+      "enum": [
+        "open_pr",
+        "push_to_pr",
+        "create_repo",
+        "comment",
+        "transition"
+      ],
+      "type": "string"
+    },
+    "PlanError": {
+      "description": "Why the write would fail now: a fixed code and text, never the service's own words.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "PlanError",
+      "type": "object"
+    },
+    "PlanPending": {
+      "description": "A part of the write the platform fills in only after approval, from its own results.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PendingKind"
+        },
+        "text": {
+          "description": "One line saying what is added, e.g. 'Links to the pull request'.",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "PlanPending",
+      "type": "object"
+    },
+    "PlanTarget": {
+      "description": "What the write acts on.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/TargetKind"
+        },
+        "label": {
+          "description": "`org/repo`, an issue key or `org/repo#12`.",
+          "title": "Label",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where a person can see it, if anywhere.",
+          "title": "Url"
+        }
+      },
+      "required": [
+        "kind",
+        "label"
+      ],
+      "title": "PlanTarget",
+      "type": "object"
+    },
+    "TargetKind": {
+      "enum": [
+        "repo",
+        "issue",
+        "pull_request"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://github.com/KsiProgramming/agentic-dev/schemas/write-plan.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/PlanAction"
+    },
+    "body": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Markdown to show (a comment, a pull request's body); data.",
+      "title": "Body"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PlanError"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "expect": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "description": "The preconditions handed back to the tool at apply time.",
+      "title": "Expect",
+      "type": "object"
+    },
+    "fields": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "description": "The values a result is compared with.",
+      "title": "Fields",
+      "type": "object"
+    },
+    "node_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The tool node the plan is for; the engine sets it.",
+      "title": "Node Id"
+    },
+    "pending": {
+      "items": {
+        "$ref": "#/$defs/PlanPending"
+      },
+      "title": "Pending",
+      "type": "array"
+    },
+    "summary": {
+      "description": "One line the platform writes.",
+      "title": "Summary",
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/PlanTarget"
+    },
+    "tool": {
+      "description": "The platform's tool name, e.g. `jira.comment`.",
+      "title": "Tool",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "action",
+    "summary",
+    "target"
+  ],
+  "title": "Write plan v1",
+  "type": "object"
+}

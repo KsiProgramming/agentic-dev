@@ -1,8 +1,9 @@
 """Write the workflow spec's JSON Schema to schemas/workflow-spec.v0.json, and the scan tools'
 findings report (4.4) to schemas/findings.v1.json, the build report (13.2) to
-schemas/build.v1.json, and the graph operations (5.1) to schemas/graph-ops.v1.json; and the node
-manifests (5.3) to schemas/fixtures/node-types.json, which
-the web's palette tests read as `GET /node-types` answers."""
+schemas/build.v1.json, the graph operations (5.1) to schemas/graph-ops.v1.json and the write plan
+(13.8) to schemas/write-plan.v1.json; and the node manifests (5.3) to
+schemas/fixtures/node-types.json, which the web's palette tests read as `GET /node-types`
+answers."""
 
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 from agentic_engine.nodes import NODE_MANIFESTS
 from agentic_engine.spec import GraphOps, WorkflowSpec
 from agentic_runtime.findings import FindingsReport
+from agentic_runtime.plans import WritePlan
 from agentic_tools.build.report import BuildReport
 from agentic_tools.build.tests import TestReport
 
@@ -23,6 +25,7 @@ OUTPUTS: dict[str, tuple[type[BaseModel], str]] = {
     "graph-ops.v1.json": (GraphOps, "Graph operations v1"),
     "build.v1.json": (BuildReport, "Build report v1"),
     "tests.v1.json": (TestReport, "Test report v1"),
+    "write-plan.v1.json": (WritePlan, "Write plan v1"),
 }
 
 

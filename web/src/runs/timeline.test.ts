@@ -138,6 +138,7 @@ describe("buildTimeline on a recorded docs run", () => {
       review: null,
       alsoReview: false,
       dismissed: [],
+      plans: [],
     });
   });
 
@@ -616,5 +617,78 @@ describe("a gate whose checks sent the work back (13.3)", () => {
     const [gate] = buildTimeline(person).steps;
 
     expect(gate?.gate?.source).toBeNull();
+  });
+});
+
+describe("what approving does (13.8)", () => {
+  const plan = {
+    node_id: "move",
+    tool: "jira.transition",
+    action: "transition",
+    summary: "Move KAN-5 from To Do to Done",
+    target: { kind: "issue", label: "KAN-5", url: "https://acme.atlassian.net/browse/KAN-5" },
+    fields: { from_status: "To Do", to_status: "Done", changed: true },
+    body: null,
+    pending: [],
+    expect: {},
+    error: null,
+  };
+  const run = [
+    event(1, "writes_planned", "approve", { gate: "approve", plans: [plan] }),
+    event(2, "node_started", "approve"),
+    event(3, "gate_waiting", "approve", { title: "Move the issue?" }),
+    event(4, "gate_decided", "approve", { decision: "approve" }),
+    event(5, "node_completed", "approve"),
+    event(6, "node_started", "move"),
+    event(7, "node_completed", "move"),
+    event(8, "write_checked", "move", {
+      gate: "approve",
+      plan,
+      result: { to_status: "Done" },
+      outcome: "differs",
+      differences: [{ field: "to_status", planned: "Done", actual: "Closed" }],
+    }),
+  ];
+
+  it("folds the plans a gate made into its step, before and after the decision", () => {
+    const [gate] = buildTimeline(run.slice(0, 3)).steps;
+    expect(gate?.gate?.plans.map((p) => p.summary)).toEqual(["Move KAN-5 from To Do to Done"]);
+
+    const [decided] = buildTimeline(run).steps;
+    expect(decided?.gate?.plans).toHaveLength(1);
+    expect(decided?.gate?.plans[0]?.target.url).toBe("https://acme.atlassian.net/browse/KAN-5");
+  });
+
+  it("prefers the plans the gate paused with over those announced before it", () => {
+    const paused = [
+      run[0]!,
+      run[1]!,
+      event(3, "gate_waiting", "approve", { title: "Go?", plans: [{ ...plan, summary: "Newer" }] }),
+    ];
+
+    const [gate] = buildTimeline(paused).steps;
+
+    expect(gate?.gate?.plans.map((p) => p.summary)).toEqual(["Newer"]);
+  });
+
+  it("puts how a write went against its plan on the write's own step, as text", () => {
+    const steps = buildTimeline(run).steps;
+
+    expect(steps.map((s) => s.id)).toEqual(["approve", "move"]);
+    expect(steps[1]?.writeCheck).toEqual({
+      gate: "approve",
+      outcome: "differs",
+      differences: [{ field: "to_status", planned: "Done", actual: "Closed" }],
+    });
+    expect(steps[0]?.writeCheck).toBeNull();
+  });
+
+  it("makes no step for a write a stale plan stopped before it started", () => {
+    const refused = [
+      ...run.slice(0, 5),
+      event(6, "write_checked", "move", { outcome: "stale", differences: [] }),
+    ];
+
+    expect(buildTimeline(refused).steps.map((s) => s.id)).toEqual(["approve"]);
   });
 });

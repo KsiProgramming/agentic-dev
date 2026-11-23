@@ -119,6 +119,13 @@ class RunState(TypedDict):
     against the run's base, which the node and its tasks may read but not change. Kept in the
     checkpoint so a resume, a restore and a rerun from a step give the same answer. Checkpoints
     saved before phase 13.5 have none.
+
+    `write_plans` holds, by the id of each outward write (13.8), the latest plan a gate made of it
+    (`{gate, plan}`), so the plans a person approved are the ones the engine checks the writes
+    against, and a restart between the plan and the gate plans nothing twice. Not `plans`, which
+    are an orchestrator's tasks. An entry is `checked` once the batch check passed (before the
+    first write of its gate's batch), so a step run again does not repeat it. Checkpoints saved
+    before phase 13.8 have none.
     """
 
     input: str
@@ -137,6 +144,7 @@ class RunState(TypedDict):
     integrated: Annotated[dict[str, dict[str, JsonValue]], merge_integrated]
     evidence: NotRequired[Annotated[dict[str, dict[str, JsonValue]], merge_integrated]]
     frozen: NotRequired[Annotated[dict[str, dict[str, JsonValue]], merge_integrated]]
+    write_plans: NotRequired[Annotated[dict[str, dict[str, JsonValue]], merge_integrated]]
 
 
 class RunUpdate(TypedDict, total=False):
@@ -157,6 +165,7 @@ class RunUpdate(TypedDict, total=False):
     evidence: dict[str, dict[str, JsonValue]]
     integrated: dict[str, dict[str, JsonValue]]
     frozen: dict[str, dict[str, JsonValue]]
+    write_plans: dict[str, dict[str, JsonValue]]
 
 
 class MapItem(TypedDict):

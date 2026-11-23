@@ -1040,6 +1040,7 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
         ],
         evidence=pending.evidence,
         review=pending.review,
+        plans=pending.plans,
         breaker=GateBreaker.model_validate(pending.breaker) if pending.breaker else None,
     )
 
