@@ -29,6 +29,7 @@ from agentic_engine.spec.models import (
     input_artifacts,
     iter_nodes,
     on_review_issues,
+    paths_issues,
     policy_issues,
     protect_issues,
     structure_issues,
@@ -83,6 +84,7 @@ def validate_workflow(
     issues += document_on_review_issues(document, root)
     issues += document_protect_issues(document, root)
     issues += document_breakers_issues(document)
+    issues += paths_issues(root)
     issues += structure_issues(root, document_input_artifacts(document))
     issues += tool_issues(root, known_tools)
     issues += writer_before_issues(root)

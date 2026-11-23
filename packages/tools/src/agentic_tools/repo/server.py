@@ -34,6 +34,7 @@ from agentic_runtime import (
     ProtectedPaths,
     ReadableWriters,
     WorkRefused,
+    declared_refusal_text,
     no_commits_text,
     refusal_text,
 )
@@ -496,6 +497,7 @@ class _RepoTools:
             raise ToolError("path must name a file")
         if any(part.lower() == ".git" for part in relative.split("/")):
             raise ToolError(f"cannot write inside .git: {path}")
+        self._refuse_undeclared([relative])
         await self._refuse_protected("repo.write_file", [relative])
         data = content.encode()
         if len(data) > self._limits.max_write_bytes:
@@ -547,6 +549,15 @@ class _RepoTools:
         more = f" (and {len(paths) - len(shown)} more)" if len(paths) > len(shown) else ""
         return f"{sha} on {branch}: {', '.join(shown)}{more}"
 
+    def _refuse_undeclared(self, paths: list[str]) -> None:
+        """Refuse a change to any of the repo-relative `paths` outside the paths this node
+        declared (13.7): one fixed text, the first offending path's."""
+        if self._protected is None or self._node_id is None:
+            return
+        for path in paths:
+            if (globs := self._protected.declared.outside(self._node_id, path)) is not None:
+                raise ToolError(declared_refusal_text(path, globs))
+
     async def _refuse_protected(self, tool: str, paths: list[str]) -> None:
         """Refuse a change to any of the repo-relative `paths` that is protected for this node:
         one `refused` call per path and one fixed text, the first path's."""
@@ -574,6 +585,7 @@ class _RepoTools:
             raise ToolError("could not commit")
         staged = [p for p in result.stdout.split("\0") if p]
         try:
+            self._refuse_undeclared(staged)
             await self._refuse_protected("repo.commit", staged)
         except ToolError:
             await self._sandbox.exec(["sh", "-c", f"{_GIT} reset -q"])

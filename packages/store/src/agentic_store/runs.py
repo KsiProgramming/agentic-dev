@@ -10,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.policy import PLATFORM_POLICY, Policy
 from agentic_engine.providers import ResolvedProviders
-from agentic_engine.spec import WorkflowSpec
+from agentic_engine.spec import WorkflowSpec, iter_nodes
 from agentic_runtime import Provider
 from agentic_sandbox import RepoSource
 from agentic_store.audit import audit, usd
+from agentic_store.baselines import baselines_in
 from agentic_store.jira_triggers import JiraOrigin, add_trigger_run, lock_trigger_issue
 from agentic_store.models import DEFAULT_WORKSPACE_ID, Run
 from agentic_store.policy import run_policy
@@ -75,6 +76,9 @@ class StoredRun:
     provider: Provider = "claude"
     providers: tuple[Provider, ...] = ("claude",)
     resolved: ResolvedProviders | None = None
+    # What each node usually costs (13.7), `{node_id: {mean_usd, runs}}`, frozen when the run
+    # was created; the cost circuit breaker reads it.
+    cost_baselines: dict[str, JsonValue] | None = None
 
 
 async def create_run(
@@ -131,6 +135,12 @@ async def create_run(
             has_copilot_connection=copilot_connection is not None,
         )
         policy = await run_policy(session, workspace_id, spec, budget_usd, resolved)
+        baselines = await baselines_in(
+            session,
+            workspace_id,
+            template_id or (workflow_version[0] if workflow_version else None),
+            {node.id for _, node in iter_nodes(spec.root)},
+        )
         run = Run(
             id=run_id,
             workspace_id=workspace_id,
@@ -145,6 +155,7 @@ async def create_run(
             workflow_id=workflow_version[0] if workflow_version else None,
             workflow_version=workflow_version[1] if workflow_version else None,
             subflows=subflows or None,
+            cost_baselines=baselines,
             trigger=trigger,
             branch=repo.ref if repo else None,
             jira_issue=jira_issue,
@@ -208,6 +219,7 @@ def stored_run(run: Run) -> StoredRun:
         provider=_provider(run.provider),
         providers=tuple(_provider(p) for p in run.providers),
         resolved=run_resolution(run),
+        cost_baselines=run.cost_baselines,
     )
 
 

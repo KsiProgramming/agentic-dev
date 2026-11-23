@@ -68,18 +68,18 @@ Read `specs/design-language.md`, tech-stack → UI design system, and `web/AGENT
 
 ## 4. The cost, paths and flip-flop breakers (engine, tools, store)
 
-- [ ] **Cost:**
+- [x] **Cost:**
   - `agentic_store` `cost_baselines(sessions, workflow_key, node_ids)` returns the mean per execution from `usage` events of the last 20 completed runs, keeping nodes with 5 or more runs.
   - `create_run` stores the result on the run. The worker passes it to the engine. The watch sums the step's `estimated_usd` and trips at `max(multiple × avg, avg + floor)`.
   - Tests: a store test on seeded runs, and an engine test.
-- [ ] **Paths:**
+- [x] **Paths:**
   - `AgentNode.paths` (glob list), with validation `paths_without_writes` and glob syntax.
   - The watch trips on `tool_call` `repo.write_file` outside `paths`.
   - `DeclaredPaths` in `agentic_runtime.tools`, beside `ProtectedPaths`, set by the engine per step. `repo.write_file` and `repo.commit` refuse a path outside it with one fixed text.
-  - Check whether the Copilot adapter emits `tool_call` before it runs the tool, and record the answer.
+  - Check whether the Copilot adapter emits `tool_call` before it runs the tool, and record the answer. **Answer (checked in `copilot.py`):** its tool handler queues `tool_call` and runs the tool straight away without waiting for the consumer, so the watch may see the event after the tool ran; the tool-layer refusal (`DeclaredPaths`) is what holds the guarantee on Copilot. tech-stack records it in group 6.
   - Tests: an engine test proves the tool is never called; tool tests cover write, commit, rename and a symlinked directory.
-- [ ] **Flip-flop:** the watch keeps each path's content hashes for the step, counts returns to an earlier content, and trips at `flip_flops`. Engine test.
-- [ ] Each breaker's `reason` is a fixed sentence pattern, so the console and the "# Paused before" text say the same thing. Add a test per breaker.
+- [x] **Flip-flop:** the watch keeps each path's content hashes for the step, counts returns to an earlier content, and trips at `flip_flops`. Engine test.
+- [x] Each breaker's `reason` is a fixed sentence pattern, so the console and the "# Paused before" text say the same thing. Add a test per breaker.
 
 ## 5. Thresholds: workspace, workflow, builder (API, web)
 

@@ -1552,6 +1552,7 @@ async def _workflow(
                 providers=run_providers(run),
                 readable=readable,
                 protected=protected,
+                cost_baselines=run.cost_baselines,
             )
         except (StepNotFoundError, StepNotReachedError) as e:
             log.warning("run %s cannot start from its step: %s", run.id, e)
@@ -1580,6 +1581,7 @@ async def _workflow(
             providers=run_providers(run),
             readable=readable,
             protected=protected,
+            cost_baselines=run.cost_baselines,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -1604,6 +1606,7 @@ async def _workflow(
         providers=run_providers(run),
         readable=readable,
         protected=protected,
+        cost_baselines=run.cost_baselines,
         breaker=breaker,
     )
 

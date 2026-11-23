@@ -10,7 +10,13 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import JsonValue
 
-from agentic_engine.breakers import BreakerTripped, BreakerWatch, breaker_reason, error_key
+from agentic_engine.breakers import (
+    BreakerTripped,
+    BreakerWatch,
+    breaker_reason,
+    error_key,
+    paused_before_text,
+)
 from agentic_engine.events import InMemoryEventSink, RunEvent
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import (
@@ -542,3 +548,260 @@ async def test_a_pause_uses_no_loop_pass() -> None:
         3,
     ]
     assert len(resumed.requests) == 3
+
+
+# The cost, paths and flip-flop breakers (group 4)
+
+WRITE = "repo.write_file"
+
+
+def writing(*files: tuple[str, str]) -> list[Step]:
+    return [*(CallTool(WRITE, {"path": p, "content": c}) for p, c in files), USAGE]
+
+
+def writer(id: str = "a", **extra: object) -> dict[str, object]:
+    return {**agent(id, [WRITE, "repo.commit"]), **extra}
+
+
+def writes_ok() -> ScriptedToolExecutor:
+    return ScriptedToolExecutor({WRITE: "wrote it"})
+
+
+def costing(usd: float) -> list[Step]:
+    return [Usage(model="m", input_tokens=1, output_tokens=1, estimated_usd=usd), Message(text="x")]
+
+
+async def run_with(
+    workflow: WorkflowSpec,
+    runtime: FakeRuntime,
+    sink: InMemoryEventSink,
+    baselines: dict[str, JsonValue] | None = None,
+):
+    return await asyncio.wait_for(
+        run_workflow(
+            workflow,
+            runtime,
+            sink=sink,
+            checkpointer=InMemorySaver(serde=checkpoint_serde()),
+            tools=runtime._tools,  # pyright: ignore[reportPrivateUsage]
+            cost_baselines=baselines,
+        ),
+        5,
+    )
+
+
+def usual(node: str, mean_usd: float, runs: int = 6) -> dict[str, JsonValue]:
+    return {node: {"mean_usd": mean_usd, "runs": runs}}
+
+
+async def test_a_step_costing_three_times_its_average_and_the_floor_pauses_mid_step() -> None:
+    sink = InMemoryEventSink()
+    # Average $0.20: the line is max(3 x 0.20, 0.20 + 0.50) = $0.70.
+    spent = [Usage(model="m", input_tokens=1, output_tokens=1, estimated_usd=u) for u in (0.3, 0.5)]
+    runtime = FakeRuntime({"a": [*spent, Message(text="more")]})
+
+    result = await run_with(spec(agent("a", [])), runtime, sink, usual("a", 0.2))
+
+    assert result.status == "waiting"
+    trip = tripped_of(sink.events)
+    assert (trip.payload["breaker"], trip.payload["trigger"]) == ("cost", "cost")
+    assert (trip.payload["threshold"], trip.payload["observed"]) == (0.7, 0.8)
+    assert trip.payload["details"] == {"cost_usd": 0.8, "average_usd": 0.2, "multiple": 3.0}
+    assert trip.payload["reason"] == (
+        "the step has cost $0.80, against a usual $0.20: past its limit of $0.70"
+    )
+    assert types(sink.events)[-3:] == ["node_cancelled", "breaker_tripped", "gate_waiting"]
+    assert "message" not in types(sink.events)  # it did not run to its end
+
+
+async def test_under_the_floor_or_without_a_baseline_a_step_is_not_paused() -> None:
+    # $0.05 is over 3 x $0.01 but under the $0.50 floor.
+    small = await run_with(
+        spec(agent("a", [])),
+        FakeRuntime({"a": costing(0.05)}),
+        InMemoryEventSink(),
+        usual("a", 0.01),
+    )
+    # A huge step on a node with no baseline (fewer than 5 past runs leaves none).
+    sink = InMemoryEventSink()
+    none = await run_with(spec(agent("a", [])), FakeRuntime({"a": costing(50)}), sink, None)
+    other = await run_with(
+        spec(agent("a", [])), FakeRuntime({"a": costing(50)}), InMemoryEventSink(), usual("b", 0.1)
+    )
+
+    assert (small.status, none.status, other.status) == ("completed",) * 3
+
+
+async def test_the_cost_floor_and_multiple_come_from_the_policy() -> None:
+    sink = InMemoryEventSink()
+    policy = PLATFORM_POLICY.model_copy(
+        update={"breakers": BreakerPolicy(cost_multiple=2, cost_floor_usd=0)}
+    )
+    runtime = FakeRuntime({"a": costing(0.25)})
+
+    result = await asyncio.wait_for(
+        run_workflow(
+            spec(agent("a", [])),
+            runtime,
+            sink=sink,
+            checkpointer=InMemorySaver(serde=checkpoint_serde()),
+            policy=policy,
+            cost_baselines=usual("a", 0.1),
+        ),
+        5,
+    )
+
+    assert result.status == "waiting"
+    assert tripped_of(sink.events).payload["threshold"] == 0.2
+
+
+async def test_a_write_outside_the_declared_paths_pauses_and_the_tool_is_never_called() -> None:
+    sink = InMemoryEventSink()
+    tools = writes_ok()
+    runtime = FakeRuntime({"a": writing(("docs/a.md", "x"), ("README.md", "y"))}, tools=tools)
+
+    result = await run_with(spec(writer(paths=["docs/**"])), runtime, sink)
+
+    assert result.status == "waiting"
+    assert [args["path"] for _, args in tools.calls] == ["docs/a.md"]  # README.md never reached it
+    trip = tripped_of(sink.events)
+    assert (trip.payload["breaker"], trip.payload["trigger"]) == ("paths", "write")
+    assert trip.payload["details"] == {"tool": WRITE, "path": "README.md", "paths": ["docs/**"]}
+    assert trip.payload["reason"] == (
+        "repo.write_file tried to write 'README.md', outside the paths this step may write"
+    )
+
+
+async def test_an_escaping_path_is_outside_and_no_paths_means_anywhere() -> None:
+    away = await run_with(
+        spec(writer(paths=["docs/**"])),
+        FakeRuntime({"a": writing(("../x.md", "x"))}, tools=writes_ok()),
+        InMemoryEventSink(),
+    )
+    free = await run_with(
+        spec(writer()),
+        FakeRuntime({"a": writing(("README.md", "x"), ("src/a.py", "y"))}, tools=writes_ok()),
+        InMemoryEventSink(),
+    )
+
+    assert away.status == "waiting"
+    assert free.status == "completed"
+
+
+async def test_a_declared_node_is_told_its_paths() -> None:
+    runtime = FakeRuntime({"a": writing(("docs/a.md", "x"))}, tools=writes_ok())
+
+    await run_with(spec(writer(paths=["docs/**"])), runtime, InMemoryEventSink())
+
+    assert "# Declared paths" in runtime.requests[0].context
+    assert "`docs/**`" in runtime.requests[0].context
+
+
+async def test_a_to_b_to_a_to_b_pauses_at_two_flips_and_distinct_rewrites_do_not() -> None:
+    sink = InMemoryEventSink()
+    flipping = writing(("a.py", "A"), ("a.py", "B"), ("a.py", "A"), ("a.py", "B"), ("a.py", "C"))
+    runtime = FakeRuntime({"a": flipping}, tools=writes_ok())
+
+    result = await run_with(spec(writer()), runtime, sink)
+
+    assert result.status == "waiting"
+    trip = tripped_of(sink.events)
+    assert (trip.payload["breaker"], trip.payload["trigger"]) == ("flip_flop", "rewrites")
+    assert (trip.payload["threshold"], trip.payload["observed"]) == (2, 2)
+    # Paths and a count: never the contents.
+    assert trip.payload["details"] == {"tool": WRITE, "path": "a.py"}
+    assert (
+        trip.payload["reason"]
+        == "'a.py' was rewritten back to an earlier content 2 times in one step"
+    )
+    distinct = await run_with(
+        spec(writer()),
+        FakeRuntime(
+            {"a": writing(*[("a.py", str(i)) for i in range(8)], ("a.py", "7"))},
+            tools=writes_ok(),
+        ),
+        InMemoryEventSink(),
+    )
+    assert distinct.status == "completed"
+
+
+async def test_one_flip_back_is_not_a_trip_and_each_file_has_its_own_history() -> None:
+    result = await run_with(
+        spec(writer()),
+        FakeRuntime(
+            {"a": writing(("a", "1"), ("b", "1"), ("a", "2"), ("b", "2"), ("a", "1"))},
+            tools=writes_ok(),
+        ),
+        InMemoryEventSink(),
+    )
+
+    assert result.status == "completed"  # two files with one flip back in all, one on `a`
+
+
+def test_the_reason_is_one_fixed_sentence_per_breaker() -> None:
+    cost: dict[str, JsonValue] = {"cost_usd": 1.5, "average_usd": 0.25}
+    assert breaker_reason("cost", "cost", 0.75, cost) == (
+        "the step has cost $1.50, against a usual $0.25: past its limit of $0.75"
+    )
+    assert breaker_reason("paths", "write", 1, {"tool": WRITE, "path": "x.md"}) == (
+        "repo.write_file tried to write 'x.md', outside the paths this step may write"
+    )
+    assert breaker_reason("flip_flop", "rewrites", 3, {"path": "x.md"}) == (
+        "'x.md' was rewritten back to an earlier content 3 times in one step"
+    )
+
+
+def test_what_the_resumed_agent_is_told_covers_each_breaker() -> None:
+    for breaker, trigger, details in (
+        ("cost", "cost", {"cost_usd": 1.5, "average_usd": 0.25, "multiple": 3.0}),
+        ("paths", "write", {"tool": WRITE, "path": "x.md", "paths": ["docs/**"]}),
+        ("flip_flop", "rewrites", {"tool": WRITE, "path": "x.md"}),
+    ):
+        trip: dict[str, JsonValue] = {
+            "breaker": breaker,
+            "trigger": trigger,
+            "threshold": 2,
+            "observed": 2,
+            "details": details,
+            "reason": breaker_reason(breaker, trigger, 2, details),  # pyright: ignore[reportArgumentType]
+        }
+        text = paused_before_text(trip)
+        assert f"Breaker: {breaker} ({trigger})" in text
+        assert "<breaker-details>" in text and "</breaker-details>" in text
+        assert str(trip["reason"]) in text
+
+
+def test_paths_without_a_write_tool_and_a_bad_glob_are_validation_issues() -> None:
+    def issues(**node: object) -> list[tuple[str, str]]:
+        found = validate_workflow(
+            {
+                "spec_version": "0",
+                "id": "p",
+                "name": "P",
+                "root": {"type": "agent", "id": "a", "role": "R", "instructions": "Go.", **node},
+            },
+            policy=PLATFORM_POLICY,
+            priced=lambda _: True,
+            default_model="m",
+        )
+        return [(i.code, i.path) for i in found]
+
+    assert issues(paths=["docs/**"], tools=[READ]) == [("paths_without_writes", "root.paths")]
+    assert issues(paths=["docs/**"], tools=[WRITE]) == []
+    assert issues(paths=["/etc/**"], tools=[WRITE]) == [("invalid_paths", "root.paths[0]")]
+    assert issues(tools=[READ]) == []
+    with pytest.raises(ValueError, match="paths"):
+        parse_spec(
+            {
+                "spec_version": "0",
+                "id": "p",
+                "name": "P",
+                "root": {
+                    "type": "agent",
+                    "id": "a",
+                    "role": "R",
+                    "instructions": "Go.",
+                    "paths": ["docs/**"],
+                },
+            }
+        )

@@ -141,6 +141,15 @@ class AgentNode(_Base):
         "the spec and the reviewed writer's change, it has only read tools, and its answer is "
         "findings. Not with `reads`, `input_schema` or `output_schema`.",
     )
+    paths: list[NonEmptyStr] | None = Field(
+        default=None,
+        max_length=64,
+        description="The only repo paths this writer may write (globs on repo-relative paths: "
+        "`**`, `*`, `?`, 13.7). A write outside them pauses the run (circuit breaker) and the "
+        "repo tools refuse it. Needs a write tool; unset, it may write anywhere that is not "
+        "protected.",
+        examples=[["docs/**"]],
+    )
 
     @model_validator(mode="after")
     def _unique_reads(self) -> Self:
@@ -1170,6 +1179,8 @@ type IssueCode = Literal[
     "review_not_in_loop",
     "invalid_gate_review",
     "breakers_out_of_range",
+    "paths_without_writes",
+    "invalid_paths",
 ]
 
 
@@ -3364,6 +3375,36 @@ class BreakersSpec(_Base):
     )
 
 
+def paths_issues(root: Node) -> list[ValidationIssue]:
+    """Why a node's `paths` (13.7) cannot work: a malformed glob (`invalid_paths`), or an agent
+    with no write tool to limit (`paths_without_writes`)."""
+    issues: list[ValidationIssue] = []
+    for path, node in iter_nodes(root):
+        if not isinstance(node, AgentNode) or node.paths is None:
+            continue
+        if not WRITE_TOOLS.intersection(node.tools):
+            issues.append(
+                ValidationIssue(
+                    code="paths_without_writes",
+                    path=f"{path}.paths",
+                    node_id=node.id,
+                    message=f"agent {node.id!r}: `paths` limits where it writes, but it has no "
+                    "write tool (repo.write_file); remove `paths` or give it the tool",
+                )
+            )
+        for i, glob in enumerate(node.paths):
+            if (problem := glob_problem(glob)) is not None:
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_paths",
+                        path=f"{path}.paths[{i}]",
+                        node_id=node.id,
+                        message=f"agent {node.id!r}: the pattern {glob!r} in `paths` {problem}",
+                    )
+                )
+    return issues
+
+
 def breakers_issues(breakers: BreakersSpec | None) -> list[ValidationIssue]:
     """`breakers_out_of_range` for each threshold of `breakers` outside its platform range."""
     if breakers is None:
@@ -3445,6 +3486,7 @@ class WorkflowSpec(_Base):
             + on_review_issues(self.root, self.on_review)
             + protect_issues(self.root, self.protect)
             + breakers_issues(self.breakers)
+            + paths_issues(self.root)
         ):
             raise ValueError("; ".join(messages(issues)))
         return self

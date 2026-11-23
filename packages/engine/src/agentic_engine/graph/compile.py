@@ -254,6 +254,16 @@ type CompiledWorkflow = CompiledStateGraph[RunState]
 type StepNode = AgentNode | ToolNode | GateNode
 
 
+def _baselines(stored: Mapping[str, JsonValue] | None) -> dict[str, float]:
+    """The USD each node usually costs, from a run's stored `cost_baselines`."""
+    found: dict[str, float] = {}
+    for node, entry in (stored or {}).items():
+        mean = entry.get("mean_usd") if isinstance(entry, dict) else None
+        if isinstance(mean, int | float):
+            found[node] = float(mean)
+    return found
+
+
 def _with_pause(context: str, paused: Mapping[str, JsonValue] | None) -> str:
     """`context` with the "# Paused before" section of a node a breaker paused (13.7)."""
     if paused is None:
@@ -262,9 +272,12 @@ def _with_pause(context: str, paused: Mapping[str, JsonValue] | None) -> str:
     return f"{context}\n\n{note}" if context else note
 
 
-def _watch(node_id: str, limits: "_Limits") -> BreakerWatch:
-    """The circuit-breaker watch of one execution of the agent step `node_id` (13.7)."""
-    return BreakerWatch(node_id, limits.policy.breakers)
+def _watch(node_id: str, limits: "_Limits", paths: Sequence[str] | None = None) -> BreakerWatch:
+    """The circuit-breaker watch of one execution of the agent step `node_id` (13.7): with its
+    node's usual cost, if the run has a baseline for it, and the paths it declared."""
+    return BreakerWatch(
+        node_id, limits.policy.breakers, average_usd=limits.baselines.get(node_id), paths=paths
+    )
 
 
 class CompileError(ValueError):
@@ -309,6 +322,9 @@ class _Limits:
     parallel_loops: dict[str, str] = field(default_factory=dict[str, str])
     """Each parallel in a loop's body → the innermost loop around it (13.6): its branches' outcomes
     are kept per pass, so a later pass never joins an earlier one's."""
+    baselines: dict[str, float] = field(default_factory=dict[str, float])
+    """What each node usually costs, in USD per execution (13.7): the cost breaker watches the
+    nodes that have one."""
     pauses: dict[str, Mapping[str, JsonValue]] = field(
         default_factory=dict[str, Mapping[str, JsonValue]]
     )
@@ -355,6 +371,13 @@ class _Limits:
             owner = key.partition(".")[0]
             guard = protected_text(self.protected.rules_for(key), self.allow.get(owner, ()))
             work = f"{work}\n\n{guard}" if work else guard
+        if node.paths:
+            only = ", ".join(f"`{g}`" for g in node.paths)
+            note = (
+                "# Declared paths\n\nYou may write only these paths: a write anywhere else "
+                f"is refused and pauses the run for a person.\n\n- {only}"
+            )
+            work = f"{work}\n\n{note}" if work else note
         if paused is not None:
             note = paused_before_text(paused)
             work = f"{work}\n\n{note}" if work else note
@@ -550,6 +573,7 @@ def compile_workflow(
     readable: ReadableWriters | None = None,
     protected: ProtectedPaths | None = None,
     paused: Mapping[str, Mapping[str, JsonValue]] | None = None,
+    cost_baselines: Mapping[str, JsonValue] | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
     commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
@@ -564,7 +588,8 @@ def compile_workflow(
     `agents_alive` and `agents_spawned`, and their usage to `budget`; the spec itself is checked
     against it before the run (`policy_errors`). `paused` is the `breaker_tripped` payload of each
     node a circuit breaker paused, for a run resumed after it (13.7): the node's next run is told
-    why, in its context."""
+    why, in its context. `cost_baselines` is what each node usually costs
+    (`{node_id: {mean_usd, runs}}`), for the cost breaker."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
     steps = step_nodes(spec.root)
@@ -592,6 +617,7 @@ def compile_workflow(
     limits.providers = providers
     limits.readable = readable
     limits.pauses = dict(paused or {})
+    limits.baselines = _baselines(cost_baselines)
     if protected is not None:
         limits.protected = protected
         policy_paths = spec.protect
@@ -1363,7 +1389,15 @@ async def _run_step(
     # One watch per execution of a step that runs an agent (13.7); a step that a breaker paused
     # last time is told why.
     paused = limits.take_pause(node.id) if isinstance(node, AgentNode) else None
-    watch = None if isinstance(node, ToolNode | GateNode | WaitForNode) else _watch(node.id, limits)
+    declared = node.paths if isinstance(node, AgentNode) else None
+    if declared is not None and limits.protected is not None:
+        # The repo tools refuse a write outside them too, whatever order a provider emits in.
+        limits.protected.declared.set(route_as or node.id, declared)
+    watch = (
+        None
+        if isinstance(node, ToolNode | GateNode | WaitForNode)
+        else _watch(node.id, limits, declared)
+    )
 
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item, branch)

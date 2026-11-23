@@ -15,10 +15,11 @@ from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.graph import steps_before
-from agentic_engine.spec import parse_spec
+from agentic_engine.spec import iter_nodes, parse_spec
 from agentic_engine.spec.ops import SetParam, apply_ops
 from agentic_store.approvals import RunNotFoundError
 from agentic_store.audit import audit, usd
+from agentic_store.baselines import baselines_in
 from agentic_store.branches import (
     RerunBranchesError,
     has_uncommitted,
@@ -112,6 +113,12 @@ async def create_rerun(
             follow_up=follow_up is not None,
         )
         policy = await run_policy(session, original.workspace_id, new_spec, budget_usd, resolved)
+        baselines = await baselines_in(
+            session,
+            original.workspace_id,
+            original.template_id or original.workflow_id,
+            {node.id for _, node in iter_nodes(new_spec.root)},
+        )
         session.add(
             Run(
                 id=new_id,
@@ -127,6 +134,7 @@ async def create_rerun(
                 workflow_id=original.workflow_id,
                 workflow_version=original.workflow_version,
                 subflows=original.subflows,
+                cost_baselines=baselines,
                 rerun_of=original.id,
                 rerun_from=rerun_from,
                 base_sha=original.base_sha if from_step is not None else None,

@@ -303,6 +303,7 @@ NODE_MANIFESTS: tuple[NodeManifest, ...] = (
             "tools": {"ui:widget": "checkboxes"},
             "start_from": _ADVANCED,
             "review": _ADVANCED,
+            "paths": _ADVANCED,
             **_PORTS_AND_ARTIFACTS,
         },
     ),

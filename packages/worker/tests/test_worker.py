@@ -3274,3 +3274,28 @@ async def test_a_worker_restart_leaves_a_paused_run_waiting(
 
     events = await list_run_events(sessions, run_id)
     assert len([e for e in events if e.type == "breaker_tripped"]) == 1
+
+
+async def test_a_run_s_frozen_cost_baselines_reach_its_cost_breaker(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """13.7: the worker hands the engine the baselines stored on the run, so a step that costs
+    far more than its node usually does is paused."""
+    runtime = FakeRuntime(
+        {"a": [Usage(model="m", input_tokens=1, output_tokens=1, estimated_usd=0.9), ECHO_USAGE]}
+    )
+    run_id = await create_run(sessions, breaker_spec(), "go")
+    await set_run(sessions, run_id, cost_baselines={"a": {"mean_usd": 0.1, "runs": 7}})
+
+    async with worker(postgres_url, redis_url, runtime=runtime):
+        redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+        try:
+            await enqueue_run(redis, run_id)
+        finally:
+            await redis.aclose()
+        await wait_for_status(sessions, run_id, "waiting")
+
+    events = await list_run_events(sessions, run_id)
+    [trip] = [e for e in events if e.type == "breaker_tripped"]
+    assert (trip.node_id, trip.payload["breaker"]) == ("a", "cost")
+    assert trip.payload["threshold"] == 0.6

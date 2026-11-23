@@ -83,6 +83,29 @@
           "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.",
           "title": "Output Schema"
         },
+        "paths": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The only repo paths this writer may write (globs on repo-relative paths: `**`, `*`, `?`, 13.7). A write outside them pauses the run (circuit breaker) and the repo tools refuse it. Needs a write tool; unset, it may write anywhere that is not protected.",
+          "examples": [
+            [
+              "docs/**"
+            ]
+          ],
+          "title": "Paths"
+        },
         "provider": {
           "anyOf": [
             {

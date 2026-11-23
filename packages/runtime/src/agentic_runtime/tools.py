@@ -8,7 +8,7 @@ from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from agentic_runtime.paths import matches, normalise
+from agentic_runtime.paths import first_match, matches, normalise
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 
@@ -151,6 +151,41 @@ def refusal_text(path: str, rule: ProtectRule) -> str:
     return f"'{path}' is protected {why}: you can read it but not change it"
 
 
+def declared_refusal_text(path: str, globs: Sequence[str]) -> str:
+    """The fixed text of a write outside a step's declared paths (13.7): the path and the paths
+    the step may write, never file content."""
+    allowed = ", ".join(f"`{g}`" for g in globs)
+    return f"'{path}' is outside the paths this step may write ({allowed}): it was not written"
+
+
+class DeclaredPaths:
+    """The only paths a step may write (13.7), set by the engine before each step that declares
+    `paths`, next to `ProtectedPaths`; the repo tools refuse every `write_file` and `commit` that
+    leaves them, whatever order a provider emits its events in. A node with no entry may write
+    anywhere (protected paths apart). A task of an orchestrator is keyed by its writer key."""
+
+    def __init__(self) -> None:
+        self._globs: dict[str, tuple[str, ...]] = {}
+
+    def set(self, node_id: str, globs: Sequence[str] | None) -> None:
+        """Hold `node_id` to `globs`, or free it (`None` or none)."""
+        if globs:
+            self._globs[node_id] = tuple(globs)
+        else:
+            self._globs.pop(node_id, None)
+
+    def globs_for(self, node_id: str) -> tuple[str, ...]:
+        """The globs `node_id` is held to; empty when it declares none."""
+        return self._globs.get(node_id, ())
+
+    def outside(self, node_id: str, path: str) -> tuple[str, ...] | None:
+        """The globs `path` leaves when `node_id` may not write it, or `None` when it may."""
+        globs = self._globs.get(node_id)
+        if not globs or first_match(globs, path) is not None:
+            return None
+        return globs
+
+
 class ProtectedPaths:
     """The paths the step that is about to run may not change (13.5), shared between the engine,
     which sets it before every step as it sets `ReadableWriters`, and the repo tools, which check
@@ -166,6 +201,8 @@ class ProtectedPaths:
         on_refused: Callable[[str, str, str, ProtectRule], Awaitable[None] | None] | None = None,
     ) -> None:
         self._rules: tuple[ProtectRule, ...] = ()
+        self.declared = DeclaredPaths()
+        """The paths a step may write, if it declares some (13.7)."""
         self._allow: dict[str, tuple[str, ...]] = {}
         self._frozen: dict[str, tuple[ProtectRule, ...]] = {}
         self.on_refused = on_refused
