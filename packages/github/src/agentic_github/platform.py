@@ -72,6 +72,13 @@ class GithubPlatform(GithubReviews, Protocol):
         self, installation_id: int, full_name: str, *, head: str, base: str, title: str, body: str
     ) -> PullRequestInfo: ...
 
+    async def find_open_pull_request(
+        self, installation_id: int, full_name: str, head: str
+    ) -> PullRequestInfo | None:
+        """The pull request open from the branch `head` of `full_name`, if there is one (the
+        plan of `github.openPR`, 13.8)."""
+        ...
+
     def close(self) -> None: ...
 
 

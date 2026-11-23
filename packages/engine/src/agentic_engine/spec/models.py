@@ -37,6 +37,7 @@ from agentic_engine.policy import (
 from agentic_engine.ports import schema_problem
 from agentic_runtime.findings import FindingsReport, Severity
 from agentic_runtime.paths import glob_problem
+from agentic_runtime.plans import ENGINE_ONLY_ARGS
 from agentic_runtime.request import Provider
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
@@ -1096,6 +1097,10 @@ JIRA_WRITE_TOOLS = frozenset({"jira.comment", "jira.transition"})
 """Tools that change a Jira issue (7.2). A comment is read by people as soon as it is posted and a
 status change is named in principle 3, so only a tool node may call one, after a gate."""
 
+OUTWARD_WRITE_TOOLS = PUBLISH_TOOLS | CREATE_TOOLS | JIRA_WRITE_TOOLS
+"""Every tool that writes outside the run (13.8): a pull request, a new repo, a Jira comment or
+move. Each has a plan mode, which the engine calls before a gate to show what approving does."""
+
 JIRA_ISSUE_FROM = frozenset({"request"})
 """What a Jira write's `issue_from` may name: the run's request, which holds one issue key."""
 
@@ -1314,6 +1319,24 @@ def _publish_issue(
             "a human approves what is published",
         )
     return None
+
+
+def engine_only_args_issues(root: Node) -> list[ValidationIssue]:
+    """`reference` on each outward write whose `args` set `plan` or `expect` (13.8): only the
+    engine passes them. A spec that set `plan` would have a gate approve a dry run that writes
+    nothing, and one that set `expect` could forge the precondition the write checks."""
+    return [
+        ValidationIssue(
+            code="reference",
+            path=f"{path}.args.{name}",
+            node_id=node.id,
+            message=f"node {node.id!r}: `{name}` is passed by the engine only (the plan of "
+            f"{node.tool}); remove it from `args`",
+        )
+        for path, node in iter_nodes(root)
+        if isinstance(node, ToolNode) and node.tool in OUTWARD_WRITE_TOOLS
+        for name in sorted(ENGINE_ONLY_ARGS & set(node.args))
+    ]
 
 
 def build_tool_issues(root: Node) -> list[ValidationIssue]:
@@ -2852,6 +2875,7 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     issues += parallel_issues(root) + router_issues(root) + orchestrator_issues(root)
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
     issues += commit_artifacts_issues(root) + build_tool_issues(root)
+    issues += engine_only_args_issues(root)
     issues += port_issues(root) + artifact_issues(root, inputs) + subflow_issues(root)
     issues += gate_issues(root) + start_from_issues(root) + review_issues(root)
     return in_run_order(root, issues)

@@ -15,6 +15,7 @@ from agentic_github import (
     RepoInfo,
 )
 from agentic_runtime import ToolOutput
+from agentic_runtime.plans import WritePlan, compare
 from agentic_tools.github import GithubTarget, open_github_tools
 from agentic_tools.mcp_bridge import McpToolExecutor
 from agentic_tools.strict import INTENT_HELP
@@ -154,3 +155,61 @@ async def test_without_a_sandbox_only_create_repo_is_offered() -> None:
     assert definition.input_schema["additionalProperties"] is False
     # Its own `description` is the repo's, so it takes no intent.
     assert INTENT_HELP not in str(definition.input_schema)
+
+
+# --- plan mode (13.8) ---------------------------------------------------------------------------
+
+
+async def test_the_repo_plan_says_the_name_is_free_and_creates_nothing() -> None:
+    github = FakeGithub()
+    async with no_sandbox(github) as tools:
+        planned = await create(tools, private=True, gitignore="Python", plan=True)
+        assert planned.data is not None
+        plan = WritePlan.model_validate(planned.data)
+        assert github.created == []
+        real = await create(tools, private=True, gitignore="Python", expect=plan.expect)
+
+    assert real.data is not None
+    assert plan.summary == "Create the private repo acme/docs-new with .gitignore Python"
+    assert plan.expect == {"name": "free"}
+    assert plan.error is None
+    assert compare(plan, real.data) == []
+
+
+async def test_the_repo_plan_would_fail_when_someone_else_has_the_name() -> None:
+    github = FakeGithub()
+    github.repos["acme/docs-new"] = existing(RUN_CREATED - timedelta(days=30))
+    async with no_sandbox(github) as tools:
+        planned = await create(tools, plan=True)
+
+    assert planned.data is not None
+    plan = WritePlan.model_validate(planned.data)
+    assert plan.error is not None
+    assert plan.error.code == "repo_exists"
+
+
+async def test_the_repo_plan_knows_the_run_created_it_already() -> None:
+    github = FakeGithub()
+    github.repos["acme/docs-new"] = existing(RUN_CREATED + timedelta(minutes=1))
+    async with no_sandbox(github) as tools:
+        planned = await create(tools, plan=True)
+
+    assert planned.data is not None
+    plan = WritePlan.model_validate(planned.data)
+    assert plan.error is None
+    assert plan.expect == {"name": "created_by_run"}
+
+
+async def test_the_repo_is_refused_when_the_name_was_taken_since_the_plan() -> None:
+    github = FakeGithub()
+    async with no_sandbox(github) as tools:
+        planned = await create(tools, plan=True)
+        assert planned.data is not None
+        plan = WritePlan.model_validate(planned.data)
+        github.repos["acme/docs-new"] = existing(RUN_CREATED - timedelta(days=30))
+
+        output = await create(tools, expect=plan.expect)
+
+    assert output.is_error
+    assert "plan_stale" in output.text
+    assert github.created == []

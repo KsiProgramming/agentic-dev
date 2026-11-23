@@ -13,6 +13,7 @@ from pydantic import JsonValue
 
 from agentic_github import GithubApiError, InstallationNotFoundError, PullRequestError
 from agentic_runtime import ToolOutput
+from agentic_runtime.plans import WritePlan, compare
 from agentic_sandbox import Sandbox
 from agentic_tools.github import GithubTarget, PullRequestTarget, open_github_tools
 from agentic_tools.repo import open_repo_tools
@@ -327,3 +328,127 @@ async def test_a_follow_up_whose_pull_request_moved_pushes_nothing(
     assert output.text.startswith("pr_head_moved:") or "pr_head_moved:" in output.text
     assert git(remote, "rev-parse", f"refs/heads/{branch}") == first.data["commit"]
     assert github.posted == []
+
+
+# --- plan mode (13.8) ---------------------------------------------------------------------------
+
+
+def plan_data(output: ToolOutput) -> WritePlan:
+    assert not output.is_error, output.text
+    assert output.data is not None
+    return WritePlan.model_validate(output.data)
+
+
+async def test_the_pull_request_plan_matches_what_the_real_call_does(
+    open_tools: OpenTools, run_id: UUID, remote: Path, github: FakeGithub
+) -> None:
+    async with open_tools() as tools:
+        await write_and_commit(tools)
+
+        plan = plan_data(await open_pr(tools, body="Please review.", plan=True))
+        assert github.opened == []
+        assert github.tokens_issued == 0
+        assert not (remote / "refs" / "heads" / "agent").exists()
+        real = await open_pr(tools, body="Please review.", expect=plan.expect)
+
+    assert real.data is not None
+    assert plan.action == "open_pr"
+    assert plan.target.label == "acme/hello"
+    assert plan.fields["head"] == f"agent/{run_id}/writer"
+    assert plan.fields["base"] == "main"
+    assert plan.fields["commits"] == 1
+    assert plan.body == "Please review."
+    assert compare(plan, real.data) == []
+
+
+async def test_the_plan_says_when_a_pull_request_is_open_from_the_branch(
+    open_tools: OpenTools,
+) -> None:
+    async with open_tools() as tools:
+        await write_and_commit(tools)
+        await open_pr(tools)
+
+        plan = plan_data(await open_pr(tools, plan=True))
+
+    assert plan.fields["existing_pr"] == 1
+    assert "#1" in plan.summary
+
+
+async def test_a_pull_request_is_refused_when_the_branch_moved_since_the_plan(
+    open_tools: OpenTools, github: FakeGithub
+) -> None:
+    async with open_tools() as tools:
+        await write_and_commit(tools)
+        plan = plan_data(await open_pr(tools, plan=True))
+        await commit_more(tools)
+
+        output = await open_pr(tools, expect=plan.expect)
+
+    assert output.is_error
+    assert "plan_stale" in output.text
+    assert github.opened == []
+    assert github.tokens_issued == 0
+
+
+async def test_a_follow_up_plan_is_a_fast_forward_from_the_commit_the_run_pushed(
+    open_tools: OpenTools,
+    open_follow_up: Callable[[PullRequestTarget], AbstractAsyncContextManager[RunTools]],
+    run_id: UUID,
+    remote: Path,
+    github: FakeGithub,
+) -> None:
+    branch = f"agent/{run_id}/writer"
+    async with open_tools() as tools:
+        await write_and_commit(tools)
+        first = await open_pr(tools)
+    assert first.data is not None
+    review = PullRequestTarget(
+        number=1,
+        url="https://github.com/acme/hello/pull/1",
+        head_branch=branch,
+        after_sha=str(first.data["commit"]),
+        author="alice",
+    )
+    github.head_of = lambda full_name, head: str(first.data["commit"]) if first.data else None
+
+    async with open_follow_up(review) as tools:
+        await commit_more(tools)
+        plan = plan_data(await open_pr(tools, plan=True))
+        assert github.posted == []
+        real = await open_pr(tools, expect=plan.expect)
+
+    assert real.data is not None
+    assert plan.action == "push_to_pr"
+    assert plan.error is None
+    assert plan.fields["pr_head"] == review.after_sha
+    assert plan.body is not None and "for @alice's review" in plan.body
+    assert compare(plan, real.data) == []
+    assert git(remote, "rev-parse", f"refs/heads/{branch}") == real.data["commit"]
+
+
+async def test_a_follow_up_plan_whose_pull_request_moved_would_fail(
+    open_tools: OpenTools,
+    open_follow_up: Callable[[PullRequestTarget], AbstractAsyncContextManager[RunTools]],
+    run_id: UUID,
+    github: FakeGithub,
+) -> None:
+    branch = f"agent/{run_id}/writer"
+    async with open_tools() as tools:
+        await write_and_commit(tools)
+        first = await open_pr(tools)
+    assert first.data is not None
+    review = PullRequestTarget(
+        number=1,
+        url="https://github.com/acme/hello/pull/1",
+        head_branch=branch,
+        after_sha=str(first.data["commit"]),
+        author="alice",
+    )
+    github.head_of = lambda full_name, head: "c" * 40
+
+    async with open_follow_up(review) as tools:
+        await commit_more(tools)
+        plan = plan_data(await open_pr(tools, plan=True))
+
+    assert plan.error is not None
+    assert plan.error.code == "pr_head_moved"

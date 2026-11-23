@@ -13,6 +13,7 @@ from mcp import Client
 from pydantic import SecretStr
 
 from agentic_jira import FAKE_AC_FIELD, FAKE_POINTS_FIELD, FakeAtlassian, JiraUnauthorizedError
+from agentic_runtime.plans import COMPARED, WritePlan, compare
 from agentic_store import (
     JiraConnectionInfo,
     JiraNeedsAttentionError,
@@ -402,3 +403,127 @@ async def test_read_issue_fails_with_the_tools_codes() -> None:
     access.info = None
     with pytest.raises(IssueReadError, match=r"^jira_not_connected: "):
         await read_issue(access, "API-1")
+
+
+# --- plan mode (13.8) --------------------------------------------------------------------
+
+
+def plan_of(answer: object) -> WritePlan:
+    assert isinstance(answer, dict), answer
+    return WritePlan.model_validate(answer)
+
+
+async def test_a_comment_plan_matches_what_the_real_call_posts() -> None:
+    access = Access()
+
+    plan = plan_of(await call(access, "comment", issue="API-1", body="Done **now**.", plan=True))
+    assert access.platform.posted == []
+    posted = await call(access, "comment", issue="API-1", body="Done **now**.")
+
+    assert plan.action == "comment"
+    assert plan.target.label == "API-1"
+    assert plan.target.url == "https://acme.atlassian.net/browse/API-1"
+    assert plan.body == posted["text"]
+    assert plan.body is not None
+    assert plan.body.endswith("_Posted by agentic-dev run [12345678](https://app.test/runs/x)_")
+    assert compare(plan, posted) == []
+
+
+async def test_a_comment_plan_says_when_the_run_posted_it_already() -> None:
+    access = Access()
+    await call(access, "comment", issue="API-1", body="Same.")
+
+    plan = plan_of(await call(access, "comment", issue="API-1", body="Same.", plan=True))
+
+    assert plan.fields["created"] is False
+    assert "already" in plan.summary
+    assert len(access.platform.posted) == 1
+
+
+async def test_a_comment_refuses_when_the_issue_is_in_another_project_now() -> None:
+    access = Access()
+
+    answer = await call(access, "comment", issue="API-1", body="hi", expect={"project": "DOCS"})
+
+    assert "plan_stale: " in answer
+    assert access.platform.posted == []
+
+
+async def test_a_transition_plan_matches_the_move() -> None:
+    access = Access()
+
+    plan = plan_of(await call(access, "transition", issue="API-1", to="Done", plan=True))
+    assert access.platform.moved == []
+    assert access.moves == []
+    moved = await call(access, "transition", issue="API-1", to="Done", expect=plan.expect)
+
+    assert plan.summary == "Move API-1 from To Do to Done"
+    assert plan.fields["from_status"] == "To Do"
+    assert plan.expect == {"status": "To Do", "transition_id": "31"}
+    assert plan.error is None
+    assert compare(plan, moved) == []
+
+
+async def test_a_transition_that_is_not_offered_is_a_plan_with_the_error() -> None:
+    plan = plan_of(await call(Access(), "transition", issue="API-1", to="Reopen", plan=True))
+
+    assert plan.error is not None
+    assert plan.error.code == "transition_unavailable"
+    assert "Start progress, Done" in plan.error.message
+    assert plan.fields["offered"] == ["Start progress", "Done"]
+
+
+async def test_a_transition_to_the_status_it_has_is_a_no_change_plan() -> None:
+    access = Access()
+    await call(access, "transition", issue="API-1", to="Done")
+
+    plan = plan_of(await call(access, "transition", issue="API-1", to="done", plan=True))
+
+    assert plan.error is None
+    assert plan.fields["changed"] is False
+    assert "no change" in plan.summary
+
+
+async def test_a_transition_refuses_when_the_status_changed() -> None:
+    access = Access()
+    plan = plan_of(await call(access, "transition", issue="API-1", to="Done", plan=True))
+    await call(access, "transition", issue="API-1", to="Start progress")
+
+    answer = await call(access, "transition", issue="API-1", to="Done", expect=plan.expect)
+
+    assert "plan_stale: " in answer
+    assert "In Progress" in answer
+    assert [m.transition_id for m in access.platform.moved] == ["11"]
+
+
+async def test_a_transition_refuses_when_the_move_is_no_longer_offered() -> None:
+    access = Access()
+
+    answer = await call(
+        access,
+        "transition",
+        issue="API-1",
+        to="Done",
+        expect={"status": "To Do", "transition_id": "99"},
+    )
+
+    assert "plan_stale: " in answer
+    assert access.platform.moved == []
+
+
+async def test_the_manifests_do_not_show_plan_or_expect() -> None:
+    async with open_jira_tools(Access(), run_id=RUN) as tools:
+        for definition in tools.definitions():
+            schema = definition.input_schema
+            assert "plan" not in schema.get("properties", {}), definition.name
+            assert "expect" not in schema.get("properties", {}), definition.name
+            assert "plan" not in schema.get("required", []), definition.name
+
+
+async def test_a_read_tool_refuses_plan_and_expect() -> None:
+    assert (await call(Access(), "getIssue", issue="API-1", plan=True)).startswith("error: ")
+    assert (await call(Access(), "getIssue", issue="API-1", expect={})).startswith("error: ")
+
+
+def test_every_action_has_compared_fields() -> None:
+    assert set(COMPARED) == {"open_pr", "push_to_pr", "create_repo", "comment", "transition"}

@@ -4,26 +4,26 @@ The plan contract and the tools' plan modes come first, then the engine plans be
 
 ## 1. The plan contract and plan mode in the tools
 
-- [ ] `agentic_runtime.plans` (new):
+- [x] `agentic_runtime.plans` (new):
   - `WritePlan` (`node_id`, `tool`, `action`, `summary`, `target`, `fields`, `body`, `pending`, `expect`, `error`) and `PlanTarget`.
   - `compare(plan, result) -> list[Difference]`, the per-tool compared fields.
   - `same_plan(shown, again) -> list[Difference]`, which compares `fields`, `expect` and the body without its `pending` parts.
   - Export the model as `schemas/write-plan.v1.json`.
-- [ ] `agentic_tools.strict.strict_tool`: accept the engine-only `plan` and `expect` on the tools that declare a plan mode, and refuse them on every other tool.
-- [ ] `agentic_tools.jira.server`:
+- [x] `agentic_tools.strict.strict_tool`: accept the engine-only `plan` and `expect` on the tools that declare a plan mode, and refuse them on every other tool.
+- [x] `agentic_tools.jira.server`:
   - `comment` and `transition` take `plan`. In plan mode they resolve the site and issue exactly as the real call does and return a `WritePlan` (structured), posting and moving nothing.
   - With `expect`, `transition` refuses with `plan_stale: …` when the status or the transition id changed. `comment` refuses when the issue now answers from another project.
   - The `links_from` placeholder comes from the engine (group 2). The tool only puts the footer in place.
-- [ ] `agentic_tools.github.server`:
+- [x] `agentic_tools.github.server`:
   - `open_pr` in plan mode exports the bundle and reads the tip and the commit count without pushing (`export_branch`). It resolves the base as the real call does and reports an open pull request from the head.
   - The 7.6 follow-up variant reads the PR's head and checks the fast-forward from `after_sha`.
   - `create_repo` in plan mode calls `get_repo` to say whether the name is free, or taken by this run.
   - With `expect`, `open_pr` refuses when the tip differs, and `create_repo` refuses when the name was taken by someone else.
-- [ ] `agentic_engine.spec`:
+- [x] `agentic_engine.spec`:
   - `OUTWARD_WRITE_TOOLS = PUBLISH_TOOLS | CREATE_TOOLS | JIRA_WRITE_TOOLS`.
   - A tool node's `args` may not set `plan` or `expect` (`reference`).
   - Regenerate the JSON Schema and check that the manifests do not show either.
-- [ ] Tool tests (`packages/tools/tests`):
+- [x] Tool tests (`packages/tools/tests`):
   - Each plan matches what the real call then does, on `FakeAtlassian` and `FakeGithubApp`.
   - Plan mode writes nothing: `posted`, `moved` and pushes stay empty, and no repo is created.
   - `transition_unavailable` and "no change" plans.

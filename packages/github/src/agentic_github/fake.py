@@ -262,6 +262,20 @@ class FakeGithubApp(FakeReviews):
             number=number, url=f"https://github.com/{full_name}/pull/{number}", head=head, base=base
         )
 
+    async def find_open_pull_request(
+        self, installation_id: int, full_name: str, head: str
+    ) -> PullRequestInfo | None:
+        self._check(installation_id)
+        for (name, number), pull in sorted(self.pulls.items()):
+            if name == full_name and pull.head == head:
+                return PullRequestInfo(
+                    number=number,
+                    url=f"https://github.com/{full_name}/pull/{number}",
+                    head=pull.head,
+                    base=pull.base,
+                )
+        return None
+
     def close(self) -> None:
         pass
 
