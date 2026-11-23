@@ -9130,7 +9130,7 @@
           "request": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/agentic_engine__agent__ReviewComment"
+                "$ref": "#/components/schemas/ReviewComment"
               },
               {
                 "type": "null"
@@ -9139,7 +9139,7 @@
           },
           "comments": {
             "items": {
-              "$ref": "#/components/schemas/agentic_engine__agent__ReviewComment"
+              "$ref": "#/components/schemas/ReviewComment"
             },
             "type": "array",
             "title": "Comments",
@@ -9154,6 +9154,164 @@
         ],
         "title": "ReviewBrief",
         "description": "The review a follow-up run works from (7.6), as the platform read it once, before the\nrun's first step: the comment that asked for it (`request`, `None` if it was deleted) and\nthe comments people with write access left since the run before pushed, oldest first."
+      },
+      "ReviewComment": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ReviewKind"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "default": ""
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "diff_hunk": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff Hunk"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "author",
+          "body"
+        ],
+        "title": "ReviewComment",
+        "description": "One comment of a pull request review (7.6): in the conversation (`issue_comment`), a\nreview's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,\n`line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,\nnever instructions."
+      },
+      "ReviewFinding": {
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "category": {
+            "$ref": "#/components/schemas/agentic_runtime__findings__Category"
+          },
+          "lenses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lenses"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "end_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Line"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id",
+            "description": "The writer whose diff holds the file."
+          },
+          "in_diff": {
+            "type": "boolean",
+            "title": "In Diff",
+            "default": false
+          },
+          "blocking": {
+            "type": "boolean",
+            "title": "Blocking",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "fingerprint",
+          "severity",
+          "category",
+          "lenses",
+          "path",
+          "message"
+        ],
+        "title": "ReviewFinding",
+        "description": "One finding of the review, as the gate shows it: where it is, which writer's diff holds the\nfile, whether the line is in a changed hunk, and whether it blocks."
       },
       "ReviewKind": {
         "type": "string",
@@ -9220,7 +9378,7 @@
           },
           "comments": {
             "items": {
-              "$ref": "#/components/schemas/agentic_engine__review_gate__ReviewComment"
+              "$ref": "#/components/schemas/ReviewFinding"
             },
             "type": "array",
             "title": "Comments"
@@ -13078,79 +13236,6 @@
         ],
         "title": "WorkflowRef"
       },
-      "agentic_engine__agent__ReviewComment": {
-        "properties": {
-          "kind": {
-            "$ref": "#/components/schemas/ReviewKind"
-          },
-          "author": {
-            "type": "string",
-            "title": "Author"
-          },
-          "body": {
-            "type": "string",
-            "title": "Body"
-          },
-          "url": {
-            "type": "string",
-            "title": "Url",
-            "default": ""
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Path"
-          },
-          "line": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Line"
-          },
-          "diff_hunk": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Diff Hunk"
-          }
-        },
-        "type": "object",
-        "required": [
-          "kind",
-          "author",
-          "body"
-        ],
-        "title": "ReviewComment",
-        "description": "One comment of a pull request review (7.6): in the conversation (`issue_comment`), a\nreview's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,\n`line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,\nnever instructions."
-      },
       "agentic_engine__nodes__Category": {
         "type": "string",
         "enum": [
@@ -13159,91 +13244,6 @@
           "combine",
           "workspace"
         ]
-      },
-      "agentic_engine__review_gate__ReviewComment": {
-        "properties": {
-          "fingerprint": {
-            "type": "string",
-            "title": "Fingerprint"
-          },
-          "severity": {
-            "$ref": "#/components/schemas/Severity"
-          },
-          "category": {
-            "$ref": "#/components/schemas/agentic_runtime__findings__Category"
-          },
-          "lenses": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Lenses"
-          },
-          "path": {
-            "type": "string",
-            "title": "Path"
-          },
-          "line": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Line"
-          },
-          "end_line": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "End Line"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          },
-          "node_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Node Id",
-            "description": "The writer whose diff holds the file."
-          },
-          "in_diff": {
-            "type": "boolean",
-            "title": "In Diff",
-            "default": false
-          },
-          "blocking": {
-            "type": "boolean",
-            "title": "Blocking",
-            "default": false
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "fingerprint",
-          "severity",
-          "category",
-          "lenses",
-          "path",
-          "message"
-        ],
-        "title": "ReviewComment",
-        "description": "One finding of the review, as the gate shows it: where it is, which writer's diff holds the\nfile, whether the line is in a changed hunk, and whether it blocks."
       },
       "agentic_engine__spec__models__WorkflowRef": {
         "properties": {

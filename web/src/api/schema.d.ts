@@ -3412,12 +3412,75 @@ export interface components {
             number: number;
             /** Author */
             author: string;
-            request?: components["schemas"]["agentic_engine__agent__ReviewComment"] | null;
+            request?: components["schemas"]["ReviewComment"] | null;
             /**
              * Comments
              * @default []
              */
-            comments: components["schemas"]["agentic_engine__agent__ReviewComment"][];
+            comments: components["schemas"]["ReviewComment"][];
+        };
+        /**
+         * ReviewComment
+         * @description One comment of a pull request review (7.6): in the conversation (`issue_comment`), a
+         *     review's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,
+         *     `line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,
+         *     never instructions.
+         */
+        ReviewComment: {
+            kind: components["schemas"]["ReviewKind"];
+            /** Author */
+            author: string;
+            /** Body */
+            body: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Line */
+            line?: number | null;
+            /** Diff Hunk */
+            diff_hunk?: string | null;
+        };
+        /**
+         * ReviewFinding
+         * @description One finding of the review, as the gate shows it: where it is, which writer's diff holds the
+         *     file, whether the line is in a changed hunk, and whether it blocks.
+         */
+        ReviewFinding: {
+            /** Fingerprint */
+            fingerprint: string;
+            severity: components["schemas"]["Severity"];
+            category: components["schemas"]["agentic_runtime__findings__Category"];
+            /** Lenses */
+            lenses: string[];
+            /** Path */
+            path: string;
+            /** Line */
+            line?: number | null;
+            /** End Line */
+            end_line?: number | null;
+            /** Message */
+            message: string;
+            /**
+             * Node Id
+             * @description The writer whose diff holds the file.
+             */
+            node_id?: string | null;
+            /**
+             * In Diff
+             * @default false
+             */
+            in_diff: boolean;
+            /**
+             * Blocking
+             * @default false
+             */
+            blocking: boolean;
         };
         /** @enum {string} */
         ReviewKind: "issue_comment" | "review" | "review_comment";
@@ -3453,7 +3516,7 @@ export interface components {
             /** Rounds Left */
             rounds_left: number;
             /** Comments */
-            comments: components["schemas"]["agentic_engine__review_gate__ReviewComment"][];
+            comments: components["schemas"]["ReviewFinding"][];
             /** Failed Lenses */
             failed_lenses: string[];
             /** Counts */
@@ -5164,71 +5227,8 @@ export interface components {
              */
             version?: number | null;
         };
-        /**
-         * ReviewComment
-         * @description One comment of a pull request review (7.6): in the conversation (`issue_comment`), a
-         *     review's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,
-         *     `line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,
-         *     never instructions.
-         */
-        agentic_engine__agent__ReviewComment: {
-            kind: components["schemas"]["ReviewKind"];
-            /** Author */
-            author: string;
-            /** Body */
-            body: string;
-            /**
-             * Url
-             * @default
-             */
-            url: string;
-            /** Created At */
-            created_at?: string | null;
-            /** Path */
-            path?: string | null;
-            /** Line */
-            line?: number | null;
-            /** Diff Hunk */
-            diff_hunk?: string | null;
-        };
         /** @enum {string} */
         agentic_engine__nodes__Category: "step" | "flow" | "combine" | "workspace";
-        /**
-         * ReviewComment
-         * @description One finding of the review, as the gate shows it: where it is, which writer's diff holds the
-         *     file, whether the line is in a changed hunk, and whether it blocks.
-         */
-        agentic_engine__review_gate__ReviewComment: {
-            /** Fingerprint */
-            fingerprint: string;
-            severity: components["schemas"]["Severity"];
-            category: components["schemas"]["agentic_runtime__findings__Category"];
-            /** Lenses */
-            lenses: string[];
-            /** Path */
-            path: string;
-            /** Line */
-            line?: number | null;
-            /** End Line */
-            end_line?: number | null;
-            /** Message */
-            message: string;
-            /**
-             * Node Id
-             * @description The writer whose diff holds the file.
-             */
-            node_id?: string | null;
-            /**
-             * In Diff
-             * @default false
-             */
-            in_diff: boolean;
-            /**
-             * Blocking
-             * @default false
-             */
-            blocking: boolean;
-        };
         /**
          * WorkflowRef
          * @description A stored workflow of the run's workspace, by id and version (6.5).

@@ -56,7 +56,7 @@ def changed_lines(diff: str) -> dict[str, list[tuple[int, int]]]:
     return found
 
 
-class ReviewComment(BaseModel):
+class ReviewFinding(BaseModel):
     """One finding of the review, as the gate shows it: where it is, which writer's diff holds the
     file, whether the line is in a changed hunk, and whether it blocks."""
 
@@ -84,7 +84,7 @@ class ReviewShown(BaseModel):
     version: int
     block_at: Severity
     rounds_left: int
-    comments: list[ReviewComment]
+    comments: list[ReviewFinding]
     failed_lenses: list[str]
     counts: dict[Severity, int]
     truncated: bool = False
@@ -117,12 +117,12 @@ def failed_lenses(report: FindingsReport) -> list[str]:
 
 def comments_of(
     report: FindingsReport, block_at: Severity, diffs: Mapping[str, str]
-) -> list[ReviewComment]:
+) -> list[ReviewFinding]:
     """Every finding of `report` as a comment (at most `MAX_REVIEW_COMMENTS`, most severe first).
     `diffs` is each writer's `repo.diff` text, in run order: a file belongs to the latest writer
     whose diff holds it, and its line is `in_diff` when a hunk of that diff covers it."""
     changed = {writer: changed_lines(text) for writer, text in diffs.items()}
-    comments: list[ReviewComment] = []
+    comments: list[ReviewFinding] = []
     for f in report.findings[:MAX_REVIEW_COMMENTS]:
         owner = next((w for w in reversed(list(changed)) if f.path in changed[w]), None)
         in_diff = False
@@ -130,7 +130,7 @@ def comments_of(
             ranges = changed[owner][f.path]
             in_diff = f.line is None or not ranges or any(a <= f.line <= b for a, b in ranges)
         comments.append(
-            ReviewComment(
+            ReviewFinding(
                 fingerprint=f.fingerprint or merge_key(f),
                 severity=f.severity,
                 category=f.category,
@@ -171,7 +171,7 @@ def shown_of(
     )
 
 
-def where(comment: ReviewComment) -> str:
+def where(comment: ReviewFinding) -> str:
     """`path:line` (or `path:line-end_line`, or just the path)."""
     if comment.line is None:
         return comment.path
@@ -218,7 +218,7 @@ def neutralise_notes(text: str) -> str:
     return clean
 
 
-def notes_text(comments: Sequence[ReviewComment]) -> str:
+def notes_text(comments: Sequence[ReviewFinding]) -> str:
     """The comments left after the approval, as the Markdown a pull request body gets: one bullet
     each (severity, `path:line`, lenses, message). The engine neutralises mentions and strips
     HTML where it publishes it."""

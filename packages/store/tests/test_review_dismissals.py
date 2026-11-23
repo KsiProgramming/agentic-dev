@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.gate import GateDecision
 from agentic_engine.graph import checkpoint_serde
-from agentic_engine.review_gate import ReviewComment, ReviewShown
+from agentic_engine.review_gate import ReviewFinding, ReviewShown
 from agentic_store import (
     Approval,
     InvalidDismissalError,
@@ -28,8 +28,8 @@ from .test_approvals import paused_run
 pytestmark = pytest.mark.integration
 
 
-def comment(fingerprint: str, path: str, line: int) -> ReviewComment:
-    return ReviewComment(
+def comment(fingerprint: str, path: str, line: int) -> ReviewFinding:
+    return ReviewFinding(
         fingerprint=fingerprint, severity="medium", category="correctness", lenses=["correctness"],
         path=path, line=line, message="Look.", node_id="writer", in_diff=True,
     )  # fmt: skip
