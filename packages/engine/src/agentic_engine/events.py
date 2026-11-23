@@ -31,6 +31,10 @@ EVIDENCE_COLLECTED: Final = "evidence_collected"
 """A gate's checks ran on a writer's work (13.3), before the gate: the evidence pack
 (`gate`, `node`, `path`, `checks`, `rounds_left`) and `sent_back`, whether a failed
 required check sent the work back to the writer without a pause."""
+REVIEW_COLLECTED: Final = "review_collected"
+"""A gate read the independent review's findings (13.6), before the gate: the report it read
+(`from`, `version`), `counts` by severity, how many findings `blocking`, the `failed_lenses`, the
+`rounds_left` and `sent_back`, whether blocking findings sent the work back without a pause."""
 LOOP_ITERATION_STARTED: Final = "loop_iteration_started"
 """A loop starts an iteration: `iteration` (from 1)."""
 LOOP_CONDITION_EVALUATED: Final = "loop_condition_evaluated"

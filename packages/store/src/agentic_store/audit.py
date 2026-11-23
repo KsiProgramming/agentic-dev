@@ -25,6 +25,7 @@ AuditAction = Literal[
     "gate.rejected",
     "gate.changes_requested",
     "gate.sent_back_by_checks",
+    "gate.sent_back_by_review",
     "gate.expired",
     "sandbox.remove_requested",
     "sandbox.removed",
