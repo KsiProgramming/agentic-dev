@@ -1979,7 +1979,7 @@
     },
     "SetParam": {
       "additionalProperties": false,
-      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `provider`, `input`, `input_schema`, `output_schema`, `on_review`,\n`breakers`). `null` unsets it. Ids, types and the slots that hold nodes change through the other ops.",
+      "description": "Set one parameter of a node, or of the document without `node_id` (`name`,\n`description`, `budget_usd`, `provider`, `input`, `input_schema`, `output_schema`, `on_review`,\n`breakers`). `null` unsets it. Ids, types and the slots that hold nodes change through the\nother ops.",
       "properties": {
         "node_id": {
           "anyOf": [
