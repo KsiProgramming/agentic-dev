@@ -158,7 +158,10 @@ class PlanBuildReviewParams(BaseModel):
         max_length=len(LENSES),
         description="With `review`: the lenses, a non-empty subset of "
         f"{', '.join(LENSES)}. Each runs every pass, so each costs one agent turn per pass.",
-        json_schema_extra={"items": {"enum": list(LENSES)}},
+        json_schema_extra={
+            "items": {"type": "string", "enum": list(LENSES)},
+            "default": list(DEFAULT_LENSES),
+        },
     )
     review_block_at: BlockAt = Field(
         default="high",

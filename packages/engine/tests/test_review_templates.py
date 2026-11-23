@@ -188,3 +188,17 @@ def test_review_needs_two_passes_a_lens_subset_and_a_priced_model() -> None:
             build(review=True, review_lenses=[])
         with pytest.raises(ValidationError, match="platform prices"):
             build(review=True, review_model="not-a-model")
+
+
+@pytest.mark.parametrize("name", BUILDERS)
+def test_the_lens_option_is_a_list_of_text_choices_the_form_can_show(name: str) -> None:
+    """The New run form needs `items.type`, `items.enum` and the default (an `enum-list`)."""
+    from agentic_engine.templates import get_template
+
+    template = get_template({"sdd-jira": "sdd", "sdd-file": "sdd-spec-file"}.get(name, name))
+    assert template is not None
+    lenses = template.parameters_schema()["properties"]["review_lenses"]
+
+    assert lenses["type"] == "array" and lenses["items"]["type"] == "string"
+    assert lenses["items"]["enum"] == list(LENSES)
+    assert lenses["default"] == ["correctness", "security", "performance"]
