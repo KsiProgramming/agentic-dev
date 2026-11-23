@@ -1864,3 +1864,28 @@ async def test_the_jira_template_lists_jira_in_what_it_requires(
 
     found = {t["id"]: t["requires"] for t in response.json()}
     assert found["jira-issue-answer"] == ["claude", "github", "jira"]
+
+
+async def test_dismissals_are_refused_where_there_is_no_review_to_dismiss(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    """Phase 13.6: `dismissed` is for an approval at a gate with a review; a reject, or a gate
+    without one, is refused with `dismiss_not_allowed` and the run stays paused."""
+    async with worker(postgres_url, redis_url), api(postgres_url, redis_url) as client:
+        run_id = await post_selecting_run(client)
+        await until_waiting(client, run_id)
+        reject = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={"node_id": "pick", "decision": "reject", "dismissed": ["a"]},
+        )
+        approve = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={"node_id": "pick", "decision": "approve", "selection": ["a"], "dismissed": ["a"]},
+        )
+        gate = await client.get(f"/runs/{run_id}/gate")
+
+    assert reject.status_code == 422, reject.text
+    assert reject.json()["detail"]["code"] == "dismiss_not_allowed"
+    assert approve.status_code == 422, approve.text
+    assert approve.json()["detail"]["code"] == "dismiss_not_allowed"
+    assert gate.status_code == 200 and gate.json()["review"] is None

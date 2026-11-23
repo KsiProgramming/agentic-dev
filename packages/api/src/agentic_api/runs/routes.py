@@ -88,6 +88,7 @@ from agentic_store import (
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
     InvalidCursorError,
+    InvalidDismissalError,
     InvalidEditsError,
     InvalidSelectionError,
     JiraOrigin,
@@ -1033,6 +1034,7 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
             for a in pending.protected_attempts
         ],
         evidence=pending.evidence,
+        review=pending.review,
     )
 
 
@@ -1160,8 +1162,8 @@ async def check_answers(run_id: UUID, request: Request) -> AnswerCheckResponse:
             "or its approval expired"
         },
         422: {
-            "description": "The edits do not fit the files the gate showed, or the selection "
-            "the items it showed",
+            "description": "The edits do not fit the files the gate showed, the selection "
+            "the items it showed, or the dismissals the review comments it showed",
             "model": EditErrorDetail,
         },
     },
@@ -1173,6 +1175,12 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
     stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision. A
     selection gate's approval names the items chosen (`selection`, 6.7); with `on_reject: end`
     a rejection completes the run instead of cancelling it."""
+    if body.dismissed and body.decision != "approve":
+        refused = EditErrorDetail(
+            code="dismiss_not_allowed",
+            message=f"a {body.decision} decision cannot dismiss comments",
+        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, refused.model_dump())
     try:
         decision = GateDecision(
             decision=body.decision,
@@ -1180,6 +1188,7 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
             comments=body.comments,
             edits=body.edits,
             selection=body.selection,
+            dismissed=body.dismissed,
         )
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
@@ -1190,7 +1199,7 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
     except InvalidEditsError as e:
         detail = EditErrorDetail(code=e.code, message=str(e), path=e.path)
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
-    except InvalidSelectionError as e:
+    except (InvalidSelectionError, InvalidDismissalError) as e:
         detail = EditErrorDetail(code=e.code, message=str(e))
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
     except ApprovalError as e:

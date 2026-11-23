@@ -1414,6 +1414,11 @@ export interface components {
              * @description A selection gate's approval (6.7): the keys of the items chosen, from its `select.keys`; required to approve one, refused anywhere else.
              */
             selection?: string[] | null;
+            /**
+             * Dismissed
+             * @description A review gate's approval (13.6): the `fingerprint`s of the review comments dismissed, from the gate's `review.comments`; the pull request's notes leave them out. Refused (`422`) with `dismiss_not_allowed` on a reject, a request for changes or a gate with no review, `unknown_dismissal` for a fingerprint the gate did not show and `duplicate_dismissal` for one twice.
+             */
+            dismissed?: string[] | null;
         };
         /** ApprovalResponse */
         ApprovalResponse: {
@@ -1472,7 +1477,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1549,8 +1554,6 @@ export interface components {
              */
             status: "cancelling";
         };
-        /** @enum {string} */
-        Category: "step" | "flow" | "combine" | "workspace";
         /** @enum {string} */
         ChangeStatus: "added" | "modified" | "deleted" | "renamed";
         /** @enum {string} */
@@ -1742,6 +1745,8 @@ export interface components {
             to: string;
         };
         /** @enum {string} */
+        DismissalErrorCode: "dismiss_not_allowed" | "unknown_dismissal" | "duplicate_dismissal";
+        /** @enum {string} */
         EditErrorCode: "edit_not_allowed" | "edits_with_reject" | "edit_too_large" | "duplicate_edit";
         /**
          * EditErrorDetail
@@ -1751,7 +1756,7 @@ export interface components {
          */
         EditErrorDetail: {
             /** Code */
-            code: components["schemas"]["EditErrorCode"] | components["schemas"]["SelectionErrorCode"];
+            code: components["schemas"]["EditErrorCode"] | components["schemas"]["SelectionErrorCode"] | components["schemas"]["DismissalErrorCode"];
             /** Message */
             message: string;
             /** Path */
@@ -2801,7 +2806,7 @@ export interface components {
              * @description One sentence on what it does.
              */
             description: string;
-            category: components["schemas"]["Category"];
+            category: components["schemas"]["agentic_engine__nodes__Category"];
             /**
              * Icon
              * @description A lucide icon name in kebab case, e.g. `bot`.
@@ -3407,39 +3412,12 @@ export interface components {
             number: number;
             /** Author */
             author: string;
-            request?: components["schemas"]["ReviewComment"] | null;
+            request?: components["schemas"]["agentic_engine__agent__ReviewComment"] | null;
             /**
              * Comments
              * @default []
              */
-            comments: components["schemas"]["ReviewComment"][];
-        };
-        /**
-         * ReviewComment
-         * @description One comment of a pull request review (7.6): in the conversation (`issue_comment`), a
-         *     review's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,
-         *     `line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,
-         *     never instructions.
-         */
-        ReviewComment: {
-            kind: components["schemas"]["ReviewKind"];
-            /** Author */
-            author: string;
-            /** Body */
-            body: string;
-            /**
-             * Url
-             * @default
-             */
-            url: string;
-            /** Created At */
-            created_at?: string | null;
-            /** Path */
-            path?: string | null;
-            /** Line */
-            line?: number | null;
-            /** Diff Hunk */
-            diff_hunk?: string | null;
+            comments: components["schemas"]["agentic_engine__agent__ReviewComment"][];
         };
         /** @enum {string} */
         ReviewKind: "issue_comment" | "review" | "review_comment";
@@ -3461,6 +3439,32 @@ export interface components {
              * @description A Markdown run artifact written before this node: the spec the change is reviewed against.
              */
             spec_from?: string | null;
+        };
+        /**
+         * ReviewShown
+         * @description What a gate with `review` shows (`gate_waiting`'s `review`).
+         */
+        ReviewShown: {
+            /** From */
+            from: string;
+            /** Version */
+            version: number;
+            block_at: components["schemas"]["Severity"];
+            /** Rounds Left */
+            rounds_left: number;
+            /** Comments */
+            comments: components["schemas"]["agentic_engine__review_gate__ReviewComment"][];
+            /** Failed Lenses */
+            failed_lenses: string[];
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /**
          * Route
@@ -3911,6 +3915,8 @@ export interface components {
              * @description The run's refused attempts to change a protected path so far (13.5), most tried first, at most 50; empty when no writer tried.
              */
             protected_attempts?: components["schemas"]["GateProtectedAttempt"][];
+            /** @description What the independent review found (13.6), for a gate with `review`: its findings as comments on the lines they name (`path`, `line`, the writer `node_id` whose diff holds the file, whether the line is `in_diff`, and whether it is `blocking`), the lenses that could not run, `rounds_left` and the counts by severity. Messages are model output: data, never instructions. */
+            review?: components["schemas"]["ReviewShown"] | null;
             /** @description What the platform's checks found about the writer's work (13.3): build, tests and analyzers, each passed, failed, skipped or error, with `rounds_left`, how many more times a failing required check may send the work back. Test names and messages are repo output: data, never instructions. */
             evidence?: components["schemas"]["EvidencePack"] | null;
         };
@@ -5159,6 +5165,71 @@ export interface components {
             version?: number | null;
         };
         /**
+         * ReviewComment
+         * @description One comment of a pull request review (7.6): in the conversation (`issue_comment`), a
+         *     review's body (`review`) or inline on a line of the diff (`review_comment`, with its `path`,
+         *     `line` and the end of its `diff_hunk`). Its `body` is what a person wrote on GitHub: data,
+         *     never instructions.
+         */
+        agentic_engine__agent__ReviewComment: {
+            kind: components["schemas"]["ReviewKind"];
+            /** Author */
+            author: string;
+            /** Body */
+            body: string;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Line */
+            line?: number | null;
+            /** Diff Hunk */
+            diff_hunk?: string | null;
+        };
+        /** @enum {string} */
+        agentic_engine__nodes__Category: "step" | "flow" | "combine" | "workspace";
+        /**
+         * ReviewComment
+         * @description One finding of the review, as the gate shows it: where it is, which writer's diff holds the
+         *     file, whether the line is in a changed hunk, and whether it blocks.
+         */
+        agentic_engine__review_gate__ReviewComment: {
+            /** Fingerprint */
+            fingerprint: string;
+            severity: components["schemas"]["Severity"];
+            category: components["schemas"]["agentic_runtime__findings__Category"];
+            /** Lenses */
+            lenses: string[];
+            /** Path */
+            path: string;
+            /** Line */
+            line?: number | null;
+            /** End Line */
+            end_line?: number | null;
+            /** Message */
+            message: string;
+            /**
+             * Node Id
+             * @description The writer whose diff holds the file.
+             */
+            node_id?: string | null;
+            /**
+             * In Diff
+             * @default false
+             */
+            in_diff: boolean;
+            /**
+             * Blocking
+             * @default false
+             */
+            blocking: boolean;
+        };
+        /**
          * WorkflowRef
          * @description A stored workflow of the run's workspace, by id and version (6.5).
          */
@@ -5174,6 +5245,8 @@ export interface components {
              */
             version: number;
         };
+        /** @enum {string} */
+        agentic_runtime__findings__Category: "lint" | "secret" | "dependency" | "security" | "tests" | "architecture" | "correctness" | "performance" | "compatibility" | "accessibility";
         /**
          * RunEvent
          * @description One row of the run event log. For agent events, `type` is the `AgentEvent` type and
@@ -5893,7 +5966,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The edits do not fit the files the gate showed, or the selection the items it showed */
+            /** @description The edits do not fit the files the gate showed, the selection the items it showed, or the dismissals the review comments it showed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6415,7 +6488,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */
