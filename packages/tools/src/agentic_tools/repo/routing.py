@@ -51,6 +51,9 @@ class _Writer:
 _TASK_WRITER = re.compile(r"^([a-z][a-z0-9_-]{0,62})\.(?!lock$)[a-z][a-z0-9_-]{0,39}$")
 """A task's writer (6.1): `<orchestrator>.<task>`."""
 
+_NODE_READS = frozenset({"list_files", "read_file", "search"})
+"""The reads that take a `node` (13.1) and that a review agent's calls default to its writer."""
+
 type _Open = Callable[[Sandbox, str | None], Awaitable[McpToolExecutor]]
 type _Connect = Callable[[contextlib.AsyncExitStack, bool], _Open]
 
@@ -100,7 +103,9 @@ class RepoTools:
         write_definitions: Sequence[ToolDefinition] = (),
         task_writers: Collection[str] = (),
         opener: _Opener | None = None,
+        readable: ReadableWriters | None = None,
     ) -> None:
+        self._readable = readable
         self._sandbox = sandbox
         self._run_id = run_id
         self._base = base
@@ -118,6 +123,16 @@ class RepoTools:
     async def call(
         self, name: str, arguments: dict[str, JsonValue], *, node_id: str | None = None
     ) -> ToolOutput:
+        if (
+            node_id is not None
+            and self._readable is not None
+            and name.removeprefix("repo.") in _NODE_READS
+            and "node" not in arguments
+            and (of := self._readable.review_of(node_id)) is not None
+        ):
+            # A review agent (13.6) reads the reviewed writer's committed work, never the run's
+            # checkout or a worktree.
+            arguments = {**arguments, "node": of}
         writer = self._writers.get(node_id) if node_id is not None else None
         if writer is None and node_id is not None and self._is_task_writer(node_id):
             try:
@@ -231,7 +246,7 @@ async def open_repo_tools(
         if not task_writers:
             first = next(iter(routed.values()), None)
             definitions = first.tools.definitions() if first else ()
-            yield RepoTools(sandbox, run_id, base, routed, definitions)
+            yield RepoTools(sandbox, run_id, base, routed, definitions, readable=readable)
             return
         # The write tools' definitions, from a writable server that is never called (its
         # worktree is never created).
@@ -241,7 +256,9 @@ async def open_repo_tools(
         opener = _Opener(connector)
         serving = asyncio.create_task(opener.serve())
         try:
-            yield RepoTools(sandbox, run_id, base, routed, definitions, task_writers, opener)
+            yield RepoTools(
+                sandbox, run_id, base, routed, definitions, task_writers, opener, readable
+            )
         finally:
             opener.stop()
             try:

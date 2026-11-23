@@ -75,7 +75,6 @@ INVALID: dict[str, tuple[str, str, str | None]] = {
     "missing-instructions": ("schema", "root.instructions", "writer"),
     "nested-loop": ("not_allowed_in_loop", "root.body", "inner"),
     "nested-map": ("not_allowed_in_map", "root.body", "inner"),
-    "parallel-in-loop": ("not_allowed_in_loop", "root.body", "review"),
     "parallel-in-map": ("not_allowed_in_map", "root.body", "review"),
     "parallel-one-branch": ("schema", "root.branches", "review"),
     "parallel-quorum-too-high": ("schema", "root", "review"),

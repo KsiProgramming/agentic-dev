@@ -67,6 +67,9 @@ function json(body: unknown, status = 200) {
 /** Decisions posted, by run id. */
 const decisions = new Map<string, unknown>();
 
+/** When set, the next approvals are refused with this 422 body. */
+let refusal: { code: string; message: string } | null = null;
+
 /** Answers `GET /runs` with `runs`, `GET /runs/{id}/gate` with `gates[id]` (else 409) and
  * records approvals in `decisions`. */
 function api(runs: RunSummary[], gates: Record<string, RunGate> = {}) {
@@ -81,6 +84,7 @@ function api(runs: RunSummary[], gates: Record<string, RunGate> = {}) {
     const approval = /^\/runs\/([^/]+)\/approvals$/.exec(url.pathname);
     if (approval && request.method === "POST") {
       const body = (await request.json()) as { node_id: string; decision: string };
+      if (refusal) return json({ detail: refusal }, 422);
       decisions.set(approval[1]!, body);
       return json({ run_id: approval[1], ...body, edited_files: 0 }, 202);
     }
@@ -118,6 +122,7 @@ beforeEach(() => {
   nav.search = "";
   nav.replace.mockReset();
   decisions.clear();
+  refusal = null;
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
 });
@@ -274,6 +279,99 @@ test("Approve decides the gate and moves on to the next one", async () => {
   expect(decisions.get(older.id)).toEqual({ node_id: "gate", decision: "approve" });
   // Out of the list at once, before the stream says the run moved on.
   await waitFor(() => expect(listedTitles()).toEqual(["Approve the docs"]));
+});
+
+const REVIEW = {
+  from: "review.json",
+  version: 1,
+  block_at: "high",
+  rounds_left: 1,
+  comments: [
+    {
+      fingerprint: "fp-form",
+      severity: "medium",
+      category: "correctness",
+      lenses: ["security"],
+      path: "form.py",
+      line: 3,
+      message: "Name this.",
+      node_id: "writer",
+      in_diff: true,
+      blocking: false,
+    },
+    {
+      fingerprint: "fp-readme",
+      severity: "low",
+      category: "correctness",
+      lenses: ["security"],
+      path: "README.md",
+      line: 1,
+      message: "Mention the validation.",
+      node_id: null,
+      in_diff: false,
+      blocking: false,
+    },
+  ],
+  failed_lenses: [],
+  counts: { medium: 1, low: 1 },
+  truncated: false,
+} satisfies NonNullable<RunGate["review"]>;
+
+test("a gate with a review lists its comments, and approving sends the dismissed ones", async () => {
+  wide();
+  api([older], { [older.id]: gateOf(older.id, { review: REVIEW }) });
+  show();
+
+  const review = await screen.findByTestId("inbox-review");
+  expect(await within(review).findByText("Name this.")).toBeTruthy();
+  expect(within(review).getByTestId("review-tile")).toBeTruthy();
+  const apart = within(review).getByRole("region", { name: "Files the change did not touch" });
+  expect(within(apart).getByText("Mention the validation.")).toBeTruthy();
+
+  fireEvent.click(
+    within(review).getByRole("button", { name: "Dismiss the comment on README.md:1" }),
+  );
+  fireEvent.click(within(review).getByRole("button", { name: /^Approve, 1 dismissed/ }));
+
+  await waitFor(() =>
+    expect(decisions.get(older.id)).toEqual({
+      node_id: "gate",
+      decision: "approve",
+      dismissed: ["fp-readme"],
+    }),
+  );
+});
+
+test("a gate with a review but no dismissals approves without a dismissed field", async () => {
+  wide();
+  api([older], { [older.id]: gateOf(older.id, { review: REVIEW }) });
+  show();
+
+  const review = await screen.findByTestId("inbox-review");
+  await within(review).findByText("Name this.");
+  fireEvent.click(within(review).getByRole("button", { name: /^Approve/ }));
+
+  await waitFor(() =>
+    expect(decisions.get(older.id)).toEqual({ node_id: "gate", decision: "approve" }),
+  );
+});
+
+test("a refused dismissal says why in words, not the code", async () => {
+  wide();
+  refusal = { code: "unknown_dismissal", message: "x is not a comment this gate showed" };
+  api([older], { [older.id]: gateOf(older.id, { review: REVIEW }) });
+  show();
+
+  const review = await screen.findByTestId("inbox-review");
+  await within(review).findByText("Name this.");
+  fireEvent.click(
+    within(review).getByRole("button", { name: "Dismiss the comment on README.md:1" }),
+  );
+  fireEvent.click(within(review).getByRole("button", { name: /^Approve/ }));
+
+  const alert = await within(review).findByRole("alert");
+  expect(alert.textContent).toContain("Reload the review");
+  expect(decisions.size).toBe(0);
 });
 
 test("A approves the reviewed gate; not while typing in a field", async () => {

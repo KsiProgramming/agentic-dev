@@ -698,6 +698,8 @@ class Approval(Base):
     selection: Mapped[list[str] | None] = mapped_column(JSONB)
     # A request for changes' comments (7.8, `GateComment`s as JSON); NULL for other decisions.
     comments: Mapped[list[JsonValue] | None] = mapped_column(JSONB)
+    # A review gate's approval: the fingerprints of the review comments dismissed (13.6).
+    dismissed: Mapped[list[str] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

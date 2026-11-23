@@ -176,10 +176,13 @@ class ParallelBranch(TypedDict):
     """What a parallel sends the worker that runs one of its branches: the branch's index, the
     parallel's input (`input` would clash with `RunState.input`) and the run's artifacts when the
     parallel started (sends from before 4.3 have none) and the orchestrator whose integration
-    branch its readers read (`branch_reads`, 6.9)."""
+    branch its readers read (`branch_reads`, 6.9). Inside a loop (13.6), also where the pass's
+    outcomes are kept (`outcomes_key`, `<parallel>#<iteration>`)."""
 
     index: int
     branch_input: str
+    outcomes_key: NotRequired[str]
+    branch_evidence: NotRequired[dict[str, JsonValue]]
     branch_artifacts: NotRequired[dict[str, ArtifactRef]]
     branch_reads: NotRequired[str | None]
     branch_writers: NotRequired[list[dict[str, str]]]

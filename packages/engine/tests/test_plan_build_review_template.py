@@ -61,7 +61,8 @@ def test_the_template_is_registered() -> None:
     assert template.requires == ("claude", "github")
     schema = template.parameters_schema()
     assert list(schema["properties"]) == [
-        "max_passes", "checks", "check_rounds", "analyst_model", "engineer_model", "reviewer_model",
+        "max_passes", "checks", "check_rounds", "review", "review_lenses", "review_block_at",
+        "review_provider", "review_model", "analyst_model", "engineer_model", "reviewer_model",
     ]  # fmt: skip
     assert "$defs" not in schema
     assert "pull request after you approve" in template.description

@@ -241,7 +241,7 @@ class PostgresEventSink:
                 await _audit_end(session, event)
             elif event.type == REPO_CREATED:
                 await _audit_repo_created(session, event)
-            elif event.type == GATE_DECIDED and event.payload.get("source") == "checks":
+            elif event.type == GATE_DECIDED and event.payload.get("source") in ("checks", "review"):
                 await _audit_sent_back(session, event)
             # Delivered on commit, so a listener that wakes up can already read the row.
             await session.execute(
@@ -285,16 +285,37 @@ async def _audit_sent_back(session: AsyncSession, event: RunEvent) -> None:
         if isinstance(comments, list)
         else []
     )
-    audit(
-        session,
-        run.workspace_id,
-        "gate.sent_back_by_checks",
-        actor_type="system",
-        run_id=run.id,
-        node_id=event.node_id,
-        at=event.created_at,
-        details={"checks": [i for i in items if isinstance(i, str)]},
-    )
+    headings = [i for i in items if isinstance(i, str)]
+    if event.payload.get("source") == "checks":
+        audit(
+            session,
+            run.workspace_id,
+            "gate.sent_back_by_checks",
+            actor_type="system",
+            run_id=run.id,
+            node_id=event.node_id,
+            at=event.created_at,
+            details={"checks": [i for i in headings if i != "Review"]},
+        )
+    if event.payload.get("source") == "review" or event.payload.get("review"):
+        # 13.6: the independent review sent it back (also when the checks did in the same pass).
+        found = len(
+            [
+                c
+                for c in (comments if isinstance(comments, list) else [])
+                if isinstance(c, dict) and c.get("item") == "Review"
+            ]
+        )
+        audit(
+            session,
+            run.workspace_id,
+            "gate.sent_back_by_review",
+            actor_type="system",
+            run_id=run.id,
+            node_id=event.node_id,
+            at=event.created_at,
+            details={"findings": found},
+        )
 
 
 async def _audit_repo_created(session: AsyncSession, event: RunEvent) -> None:

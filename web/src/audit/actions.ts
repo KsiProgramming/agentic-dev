@@ -5,6 +5,7 @@ import {
   CircleXIcon,
   CoinsIcon,
   FlagIcon,
+  FileSearchIcon,
   FlaskConicalIcon,
   FilePenIcon,
   FilePlusIcon,
@@ -71,6 +72,11 @@ const ACTIONS: Record<AuditAction, ActionInfo> = {
   "gate.sent_back_by_checks": {
     label: "Sent back by checks",
     icon: FlaskConicalIcon,
+    category: "approvals",
+  },
+  "gate.sent_back_by_review": {
+    label: "Sent back by review",
+    icon: FileSearchIcon,
     category: "approvals",
   },
   "gate.expired": { label: "Gate expired", icon: TimerOffIcon, category: "approvals" },
@@ -297,6 +303,13 @@ export function describe(event: AuditEvent): string {
       return join(
         `The checks sent the writer back at ${event.node_id ?? "a gate"}`,
         failed.length > 0 && `${failed.join(" and ")} failed`,
+      );
+    }
+    case "gate.sent_back_by_review": {
+      const findings = count(d, "findings");
+      return join(
+        `The independent review sent the writer back at ${event.node_id ?? "a gate"}`,
+        findings > 0 && `${plural(findings, "blocking finding")}`,
       );
     }
     case "gate.approved":

@@ -111,6 +111,7 @@ def test_agent_parameters() -> None:
         "reads",
         "writes",
         "start_from",
+        "review",
     }
     assert parameters["required"] == ["role", "instructions"]
 

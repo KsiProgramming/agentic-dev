@@ -189,3 +189,13 @@ An agent that is told to make a check pass can change what the check reads. The 
 - **Where it is enforced.** `repo.write_file` refuses before it writes; `repo.commit` refuses the whole commit if a staged path (both sides of a rename, a write through a symlinked directory) is protected. The refusal is the same on both providers and for orchestrator tasks. A person's edits at a gate and the engine's own commits are not checked.
 - **What is shown.** Every refusal is a `protected_path_refused` event (path and rule, never content), counted on the run and listed at the gate with the protected files marked in the diff.
 - **What is not covered.** Analyzer settings inside a `.csproj` and suppressions written in code (`# noqa`, `#pragma warning disable`) are not protected paths; the evidence step lints by the run's base analyzer config files, which covers a relaxed `ruff.toml`, `.editorconfig` or `[tool.ruff]`, and the reviewers of 13.6 are meant to catch the rest. Sealed tests outside the sandbox are 17.3.
+
+## Independent review (13.6)
+
+A reviewer that shares the writer's framing agrees with it. The platform runs reviewers that start fresh, and enforces that on the node, in the engine, not in instructions:
+
+- **Review agents are read-only and independent.** An agent with `review` has only the repo read tools, no artifact tools, no `reads`, and a typed findings answer (`invalid_review` refuses anything else). Its input is built by the engine from the spec, the writer's diff and the evidence pack, never from the writer's or the synthesizer's narrative, and its reads come from the writer's committed work in git refs, never a worktree or a server the writer controls.
+- **Findings are model output.** They are shown as text (never HTML), sent to a writer as data under `## Review`, and never approve anything: the platform's rules and a person at the gate decide.
+- **Pull request notes neutralise mentions.** What is left of the review after an approval goes into the pull request body as `## Review notes`; the engine removes HTML tags, puts a zero-width joiner after every `@` so a finding cannot notify a user or team, and caps the text. The notes are written by the engine, not by an agent, and no review text reaches the body any other way.
+- **A lens that fails never passes work.** A lens that could not run is shown as a failed check and pauses the gate for a person; it does not count as a clean review.
+- **What is not covered.** Findings are a model's opinion: a review reduces what reaches a person, it does not prove the change correct. Posting findings on the pull request as line comments is not done (14.2, 18.6).

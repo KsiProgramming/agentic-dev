@@ -139,6 +139,7 @@ from agentic_engine.events import (
     PROTECTED_PATH_REFUSED,
     REPLAN_STARTED,
     REPO_CREATED,
+    REVIEW_COLLECTED,
     ROUTE_CHOSEN,
     TASK_COMPLETED,
     TASK_STARTED,
@@ -180,6 +181,16 @@ from agentic_engine.protect import (
     static_rules,
 )
 from agentic_engine.providers import ResolvedNode, ResolvedProviders
+from agentic_engine.review import NONE, diff_stats, evidence_summary, review_input
+from agentic_engine.review_gate import (
+    ReviewInput,
+    neutralise_notes,
+    notes_text,
+    shown_of,
+)
+from agentic_engine.review_gate import (
+    send_back_comments as review_send_back,
+)
 from agentic_engine.spec import (
     BODY_FROM_TOOLS,
     COMMIT_TOOLS,
@@ -228,6 +239,7 @@ from agentic_runtime import (
     Usage,
 )
 from agentic_runtime.findings import (
+    SEVERITIES,
     Check,
     FindingsReport,
     VoteError,
@@ -280,6 +292,9 @@ class _Limits:
     """The orchestrators whose tasks write (each has an integration branch once it merged)."""
     roles: dict[str, str] = field(default_factory=dict[str, str])
     """Each agent's and orchestrator's role, for what a later step is told about its work."""
+    parallel_loops: dict[str, str] = field(default_factory=dict[str, str])
+    """Each parallel in a loop's body → the innermost loop around it (13.6): its branches' outcomes
+    are kept per pass, so a later pass never joins an earlier one's."""
     evidence_loops: dict[str, tuple[str, int]] = field(default_factory=dict[str, tuple[str, int]])
     """Each gate with evidence (13.3) → its loop's id and `max_iterations`: the checks never send
     the work back on the loop's last pass, which would end the loop with the work unapproved."""
@@ -306,10 +321,14 @@ class _Limits:
         return {} if found is None else {"provider": found.provider, "model": found.model}
 
     def work_text(
-        self, node: AgentNode, writers: Sequence[ReadableWriter], reads_as: str | None
+        self,
+        node: AgentNode,
+        writers: Sequence[ReadableWriter],
+        reads_as: str | None,
+        reviewing: str | None = None,
     ) -> str:
         """The context `node` is told: the run's, then the work before it (13.1)."""
-        work = work_before_text(node, writers, self.roles, reads_as)
+        work = work_before_text(node, writers, self.roles, reads_as, reviewing)
         if self.protected is not None and WRITE_TOOLS.intersection(node.tools):
             key = reads_as or node.id
             owner = key.partition(".")[0]
@@ -355,6 +374,12 @@ def evidence_node_id(gate: GateNode) -> str:
     """The LangGraph node that checks a writer's work before `gate` (13.3). `NodeId` has no
     `.`, so no spec node can take this name; the gate's send-backs are counted under it too."""
     return f"{gate.id}.evidence"
+
+
+def review_node_id(gate: GateNode) -> str:
+    """The LangGraph node that reads the review's findings before `gate` (13.6). Its send-backs are
+    counted under the gate's `evidence_node_id`, with the checks'."""
+    return f"{gate.id}.review"
 
 
 def check_node_id(loop: LoopNode) -> str:
@@ -532,6 +557,7 @@ def compile_workflow(
     )
     limits.loops = _enclosing_loops(spec.root)
     limits.evidence_loops = _evidence_loops(spec.root)
+    limits.parallel_loops = _parallel_loops(spec.root)
     limits.providers = providers
     limits.readable = readable
     if protected is not None:
@@ -611,7 +637,7 @@ def compile_workflow(
                     input_schema=ParallelBranch,
                 )
                 builder.add_edge(worker, join)
-                builder.add_node(join, _parallel_join(node, log))
+                builder.add_node(join, _parallel_join(node, log, limits))
                 go_on(join, node.id, then)
                 return node.id
             case OrchestratorNode():
@@ -692,16 +718,24 @@ def compile_workflow(
                 builder.add_node(ready, _repo_ready)
                 builder.add_edge(ready, then)
                 return node.id
-            case GateNode() if node.evidence is not None:
-                checks = evidence_node_id(node)
-                builder.add_node(checks, _evidence(node, tools, log, limits))
+            case GateNode() if node.evidence is not None or node.review is not None:
                 builder.add_node(
                     node.id,
                     _saving(_step(node, runtime, tools, log, limits), log, limits, top[node.id]),
                 )
-                builder.add_edge(checks, node.id)
                 go_on(node.id, node.id, then)
-                return checks
+                first = node.id
+                if node.review is not None:
+                    reading = review_node_id(node)
+                    builder.add_node(reading, _review(node, tools, log, limits))
+                    builder.add_edge(reading, first)
+                    first = reading
+                if node.evidence is not None:
+                    checks = evidence_node_id(node)
+                    builder.add_node(checks, _evidence(node, tools, log, limits))
+                    builder.add_edge(checks, first)
+                    first = checks
+                return first
             case AgentNode() | ToolNode() | GateNode():
                 builder.add_node(
                     node.id,
@@ -795,6 +829,8 @@ def _step(
                 results=state["results"],
                 writers=writers_before(state, limits.writer_ids, limits.team_ids),
                 evidence=_evidence_input(node, state),
+                gate_review=_review_input(node, state),
+                packs=state.get("evidence", {}),
             )
 
         if isinstance(node, AgentNode):
@@ -810,10 +846,12 @@ def _step(
             return update
         result = await run()
         update = _update(node.id, result)
-        sent_back = (result.data or {}).get("source") == "checks"
-        if isinstance(node, GateNode) and node.evidence is not None and sent_back:
+        sent_back = (result.data or {}).get("source") in ("checks", "review")
+        if isinstance(node, GateNode) and sent_back:
             key = evidence_node_id(node)
             update["rounds"] = {key: state.get("rounds", {}).get(key, 0) + 1}
+        if isinstance(node, GateNode) and node.review is not None and node.review.notes:
+            await _write_notes(node, result, state, limits, log, update)
         return update
 
     return step
@@ -952,6 +990,118 @@ def _evidence(
     return check
 
 
+def _review(
+    gate: GateNode, tools: ToolExecutor | None, log: RunEventLog, limits: _Limits
+) -> Callable[[RunState], Awaitable[RunUpdate]]:
+    """Reads the review's findings before `gate` (13.6): the latest version of `review.from`, each
+    finding mapped to the writer whose diff holds its file, and the comments that send the work
+    back when a finding is at or above `block_at` and a round is left. A step of its own, so a
+    restart between it and the gate decides the same. It stores what it found in the state the
+    gate reads (under `<gate>.review`). Rounds are counted with the gate's checks: one counter
+    under `evidence_node_id`, never using the loop's last pass (lessons 13). A lens that could not
+    run, or a report that cannot be read, never sends the work back: it is not the writer's fault,
+    so a person decides."""
+    spec = gate.review
+    assert spec is not None
+    key = review_node_id(gate)
+
+    async def read(state: RunState) -> RunUpdate:
+        used = state.get("rounds", {}).get(evidence_node_id(gate), 0)
+        loop_id, passes = limits.evidence_loops.get(gate.id, ("", 0))
+        passes_left = passes - state["iterations"].get(loop_id, passes)
+        rounds_left = max(min(spec.max_rounds - used, passes_left), 0)
+        refs = state.get("artifacts", {})
+        ref = refs.get(spec.from_)
+        stored = await limits.artifacts.get(ref.name, ref.version) if ref is not None else None
+        problem: str | None = None
+        report: FindingsReport | None = None
+        if stored is None:
+            problem = f"the review wrote no {spec.from_!r}"
+        else:
+            try:
+                report = FindingsReport.model_validate_json(stored.content)
+            except ValueError:
+                problem = f"{spec.from_!r} is not a findings report"
+        writers = writers_before(state, limits.writer_ids, limits.team_ids)
+        diffs: dict[str, str] = {}
+        if tools is not None and report is not None:
+            limits.announce(writers)
+            for w in writers:
+                shown = await tools.call("repo.diff", {"node": w.node_id})
+                if not shown.is_error:
+                    diffs[w.node_id] = shown.text
+        if report is None or ref is None:
+            report = FindingsReport(
+                scanner="merged",
+                checks=[
+                    Check(
+                        path=".",
+                        kind="branch",
+                        tool="review",
+                        status="failed",
+                        reason=clip_message(problem or "no review"),
+                    )
+                ],
+                findings=[],
+                counts={},
+                truncated=False,
+            )
+        version = ref.version if ref is not None else 0
+        shown_review = shown_of(spec.from_, version, report, spec.block_at, rounds_left, diffs)
+        sends = bool(shown_review.failed_lenses) is False and rounds_left > 0
+        comments = review_send_back(shown_review) if sends else []
+        await log.emit(
+            REVIEW_COLLECTED,
+            node_id=gate.id,
+            payload={
+                "from": spec.from_,
+                "version": version,
+                "counts": dict(shown_review.counts),
+                "blocking": sum(1 for c in shown_review.comments if c.blocking),
+                "failed_lenses": list[JsonValue](shown_review.failed_lenses),
+                "rounds_left": rounds_left,
+                "sent_back": bool(comments),
+            },
+        )
+        found = ReviewInput(shown=shown_review, send=comments)
+        return {"evidence": {key: found.model_dump(mode="json", by_alias=True)}}
+
+    return read
+
+
+def _review_input(node: StepNode, state: RunState) -> ReviewInput | None:
+    """What the review before the gate `node` found (13.6), as the checkpoint holds it."""
+    if not isinstance(node, GateNode) or node.review is None:
+        return None
+    found = state.get("evidence", {}).get(review_node_id(node))
+    return ReviewInput.model_validate(found) if found is not None else None
+
+
+async def _write_notes(
+    gate: GateNode,
+    result: AgentNodeResult,
+    state: RunState,
+    limits: _Limits,
+    log: RunEventLog,
+    update: RunUpdate,
+) -> None:
+    """With `review.notes`, an approval writes the comments that were not dismissed as Markdown, a
+    new version of the artifact, for `github.openPR`'s `notes_from` (13.6)."""
+    spec = gate.review
+    found = _review_input(gate, state)
+    if spec is None or spec.notes is None or found is None:
+        return
+    if result.status != "completed" or (result.data or {}).get("decision") != "approve":
+        return
+    dismissed = set(cast(list[str], (result.data or {}).get("dismissed") or []))
+    left = [c for c in found.shown.comments if c.fingerprint not in dismissed]
+    text = notes_text(left, len(found.shown.comments) - len(left))
+    stored = AgentNodeResult(status="completed", text=text, usage=None)
+    written = await _write(gate.id, spec.notes, None, stored, limits, log)
+    if written.artifact is not None:
+        update["artifacts"] = {**update.get("artifacts", {}), spec.notes: written.artifact}
+
+
 def _evidence_input(node: StepNode, state: RunState) -> EvidenceInput | None:
     """What the checks before the gate `node` found (13.3), as the checkpoint holds it."""
     if not isinstance(node, GateNode) or node.evidence is None:
@@ -1008,6 +1158,8 @@ def _reads_as(node: Node, reads: str | None) -> str | None:
     `repo.*` reads go to that orchestrator's integration branch, the work merged so far (6.9); a
     node that writes, publishes or reads nothing calls as itself (`None`)."""
     tools = set(node_tools(node))
+    if isinstance(node, AgentNode) and node.review is not None:
+        return None  # a review agent reads the reviewed writer's refs, as itself (13.6)
     if reads is None or not tools & READ_TOOLS or tools & (WRITE_TOOLS | PUBLISH_TOOLS):
         return None
     return reads
@@ -1048,6 +1200,89 @@ async def _refuse_spawn(
     return AgentNodeResult(status="failed", text=state["last_text"], usage=None, error=over.reason)
 
 
+@dataclass(frozen=True)
+class _NoChange:
+    """The reviewed writer finished without work (a lead that planned no task, a writer that
+    committed nothing): there is nothing to review, which is not a failure."""
+
+    writer: str
+
+
+def _nothing_to_review(writer: str) -> AgentNodeResult:
+    """A review agent's answer when `writer` made no change: an empty findings report whose one
+    check says it was skipped and why, so the merged report and the gate say so."""
+    report = FindingsReport(
+        scanner="agent",
+        checks=[
+            Check(
+                path=".",
+                kind="review",
+                tool="agent",
+                status="skipped",
+                reason=f"nothing to review: {writer!r} made no change",
+            )
+        ],
+        findings=[],
+        counts={s: 0 for s in SEVERITIES},
+        truncated=False,
+    )
+    data: dict[str, JsonValue] = report.model_dump(mode="json")
+    return AgentNodeResult(
+        status="completed", text=json.dumps(data, indent=2), usage=None, data=data
+    )
+
+
+async def _review_setup(
+    node: AgentNode,
+    writers: Sequence[ReadableWriter],
+    refs: Mapping[str, ArtifactRef],
+    packs: Mapping[str, JsonValue],
+    limits: "_Limits",
+    tools: ToolExecutor | None,
+) -> tuple[str, str, dict[str, JsonValue]] | str | _NoChange:
+    """What a review agent (13.6) is given, built from the run and never from the previous step's
+    output: the writer it reviews (`of`, else the latest writer that completed), its input (the
+    spec, the writer's change and its evidence pack) and the `review` of its `node_started`. The
+    writer's work is read from git refs: the repo tools default the agent's reads to it. An error
+    text when there is no writer to review."""
+    assert node.review is not None
+    of = node.review.of or (writers[-1].node_id if writers else None)
+    if of is None:
+        return "no writer ran before"
+    if of not in {w.node_id for w in writers}:
+        return _NoChange(of)
+    spec_text: str | None = None
+    spec_version: int | None = None
+    if (name := node.review.spec_from) is not None and name in refs:
+        try:
+            spec_text = await reader_input(limits.artifacts, [name], refs)
+            spec_version = refs[name].version
+        except ArtifactError:
+            spec_text = None
+    change: str | None = None
+    if tools is not None:
+        limits.announce(writers)
+        shown = await tools.call("repo.diff", {"node": of})
+        change = None if shown.is_error else shown.text
+    mine: list[dict[str, JsonValue]] = []
+    for value in packs.values():
+        pack = value.get("pack") if isinstance(value, dict) else None
+        if isinstance(pack, dict) and pack.get("node") == of:
+            mine.append(pack)
+    evidence = evidence_summary(mine)
+    if limits.readable is not None:
+        limits.readable.set_review(node.id, of)
+    started: dict[str, JsonValue] = {
+        "of": of,
+        "spec": node.review.spec_from,
+        "spec_version": spec_version,
+        "diff": diff_stats(change or ""),
+        "evidence": evidence != NONE,
+    }
+    text = review_input(spec=spec_text, change=change, evidence=evidence, writer=of)
+    return of, text, started
+
+
 async def _run_step(
     node: StepNode,
     runtime: AgentRuntime,
@@ -1062,6 +1297,8 @@ async def _run_step(
     results: Mapping[str, AgentNodeResult] | None = None,
     writers: Sequence[ReadableWriter] = (),
     evidence: EvidenceInput | None = None,
+    packs: Mapping[str, JsonValue] | None = None,
+    gate_review: ReviewInput | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
     a map or an orchestrator's task, `branch` inside a parallel). `writers` ran before it: an
@@ -1071,7 +1308,25 @@ async def _run_step(
     reads run artifacts runs on the versions in `refs` instead, and one that writes one stores its
     output once it completes. An agent waits for one of the run's `agents_alive` slots before it
     starts, and its usage is counted on the run's budget: once that is spent, the node ends
-    `node_cancelled` and `PolicyLimitExceeded` is raised."""
+    `node_cancelled` and `PolicyLimitExceeded` is raised. A review agent (13.6) is not given
+    `input`: the engine builds its own from the spec, the reviewed writer's change and the
+    evidence in `packs`, and types its answer as findings."""
+    reviewing: str | None = None
+    review_started: dict[str, JsonValue] | None = None
+    if isinstance(node, AgentNode) and node.review is not None:
+        built = await _review_setup(node, writers, refs, packs or {}, limits, tools)
+        if isinstance(built, _NoChange):
+            skipped: dict[str, JsonValue] = {"review": {"of": built.writer, "no_change": True}}
+            await log.emit(NODE_STARTED, node_id=node.id, payload=skipped, item=item, branch=branch)
+            await log.emit(NODE_COMPLETED, node_id=node.id, item=item, branch=branch)
+            return _nothing_to_review(built.writer)
+        if isinstance(built, str):
+            await log.emit(NODE_STARTED, node_id=node.id, item=item, branch=branch)
+            failed: dict[str, JsonValue] = {"error": built}
+            await log.emit(NODE_FAILED, node_id=node.id, payload=failed, item=item, branch=branch)
+            return AgentNodeResult(status="failed", text=input, usage=None, error=built)
+        node = node.model_copy(update={"output_schema": FINDINGS_SCHEMA})
+        reviewing, input, review_started = built
 
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item, branch)
@@ -1125,6 +1380,7 @@ async def _run_step(
                     limits.artifacts,
                     refs,
                     evidence,
+                    gate_review,
                 )
             case AgentNode():
                 async with limits.alive:
@@ -1135,7 +1391,7 @@ async def _run_step(
                         input,
                         on_event,
                         route_as,
-                        limits.work_text(node, writers, route_as),
+                        limits.work_text(node, writers, route_as, reviewing),
                         limits.resolved(node.id),
                     )
 
@@ -1164,6 +1420,8 @@ async def _run_step(
                     limits.protected.rules_for(key), limits.allow.get(key.partition(".")[0], ())
                 ),
             }
+        if review_started is not None:
+            started = {**(started or {}), "review": review_started}
         await log.emit(NODE_STARTED, node_id=node.id, payload=started, item=item, branch=branch)
     if reads:
         try:
@@ -1277,18 +1535,31 @@ async def _with_body_from(
     cut at `MAX_BODY_FROM_CHARS` (`MAX_JIRA_BODY_FROM_CHARS` for a comment). The tool never sees
     `body_from`. Raises `ArtifactError` when the run has not written the artifact."""
     name = node.args.get("body_from")
-    if node.tool not in BODY_FROM_TOOLS or not isinstance(name, str):
+    notes_name = node.args.get("notes_from") if node.tool in PUBLISH_TOOLS else None
+    if node.tool not in BODY_FROM_TOOLS or not (
+        isinstance(name, str) or isinstance(notes_name, str)
+    ):
         return node
-    ref = refs.get(name)
-    stored = await artifacts.get(name, ref.version) if ref is not None else None
-    if stored is None:
-        raise ArtifactError(f"artifact {name!r} was not written")
-    cap = MAX_JIRA_BODY_FROM_CHARS if node.tool in JIRA_WRITE_TOOLS else MAX_BODY_FROM_CHARS
-    text = stored.content[:cap]
     static = node.args.get("body")
-    body = f"{static}\n\n{text}" if isinstance(static, str) and static else text
-    args = {k: v for k, v in node.args.items() if k != "body_from"} | {"body": body}
-    return node.model_copy(update={"args": args})
+    body = static if isinstance(static, str) else ""
+    if isinstance(name, str):
+        ref = refs.get(name)
+        stored = await artifacts.get(name, ref.version) if ref is not None else None
+        if stored is None:
+            raise ArtifactError(f"artifact {name!r} was not written")
+        cap = MAX_JIRA_BODY_FROM_CHARS if node.tool in JIRA_WRITE_TOOLS else MAX_BODY_FROM_CHARS
+        text = stored.content[:cap]
+        body = f"{body}\n\n{text}" if body else text
+    if isinstance(notes_name, str):
+        # 13.6: the approved review's comments, as model output: no mention, no HTML.
+        ref = refs.get(notes_name)
+        stored = await artifacts.get(notes_name, ref.version) if ref is not None else None
+        if stored is None:
+            raise ArtifactError(f"artifact {notes_name!r} was not written")
+        notes = f"## Review notes\n\n{neutralise_notes(stored.content)}"
+        body = f"{body}\n\n{notes}" if body else notes
+    args = {k: v for k, v in node.args.items() if k not in ("body_from", "notes_from")}
+    return node.model_copy(update={"args": args | {"body": body}})
 
 
 def _check_output(
@@ -1685,16 +1956,22 @@ def _fan_out_branches(
     parallel could not start."""
 
     def route(state: RunState) -> Sequence[Send] | str:
-        if parallel.id in state["results"]:
+        # A result here is the entry's refusal (failed); a finished earlier pass's is not.
+        if (
+            refused := state["results"].get(parallel.id)
+        ) is not None and refused.status == "failed":
             return END
         worker = branch_node_id(parallel)
         refs = state.get("artifacts", {})
+        key = _outcomes_key(parallel, state, limits)
         return [
             Send(
                 worker,
                 ParallelBranch(
                     index=i,
                     branch_input=state["last_text"],
+                    outcomes_key=key,
+                    branch_evidence=dict(state.get("evidence", {})),
                     branch_artifacts=dict(refs),
                     branch_reads=_integrated_reader(state),
                     branch_writers=_encode_writers(
@@ -1720,9 +1997,10 @@ def _parallel_branch(
     results go into `results` (not `order`, the run's path, which a branch that fails under a join
     that is met does not stop), its outcome into `parallel_results`, and the run artifacts it
     wrote into `artifacts`; its later steps read what its earlier ones wrote."""
-    join = _BranchJoin(parallel)
+    joins: dict[str, _BranchJoin] = {}  # one per pass: a loop's later pass starts undecided
 
     async def work(task: ParallelBranch) -> RunUpdate:
+        join = joins.setdefault(task.get("outcomes_key", parallel.id), _BranchJoin(parallel))
         index, text = task["index"], task["branch_input"]
         branch_id = parallel.branches[index].id
         marker: dict[str, JsonValue] = {"index": index, "branch_id": branch_id}
@@ -1738,6 +2016,7 @@ def _parallel_branch(
             refs=refs,
             reads=reads,
             writers=_decode_writers(task.get("branch_writers")),
+            packs=task.get("branch_evidence", {}),
         )
         result, error = await _run_branch(join, index, parallel.branches[index], text, scope)
         end: dict[str, JsonValue] = {**marker, "status": result.status}
@@ -1755,7 +2034,7 @@ def _parallel_branch(
         return {
             "results": scope.ran,
             "usage": usage,
-            "parallel_results": {parallel.id: {branch_id: outcome}},
+            "parallel_results": {task.get("outcomes_key", parallel.id): {branch_id: outcome}},
             "artifacts": scope.wrote,
         }
 
@@ -1793,15 +2072,35 @@ async def _run_branch(
     return result, error
 
 
+def _outcomes_key(parallel: ParallelNode, state: RunState, limits: _Limits) -> str:
+    """Where `parallel`'s branches' outcomes are kept this pass: its id, or inside a loop (13.6)
+    `<id>#<iteration>`."""
+    loop = limits.parallel_loops.get(parallel.id)
+    if loop is None:
+        return parallel.id
+    return f"{parallel.id}#{state['iterations'].get(loop, 0)}"
+
+
+def _parallel_loops(root: Node) -> dict[str, str]:
+    """Each parallel in a loop's body → the id of the innermost loop around it."""
+    loops: dict[str, str] = {}
+    for _, node in iter_nodes(root):
+        if isinstance(node, LoopNode):
+            for _, inner in iter_nodes(node.body):
+                if isinstance(inner, ParallelNode):
+                    loops[inner.id] = node.id
+    return loops
+
+
 def _parallel_join(
-    parallel: ParallelNode, log: RunEventLog
+    parallel: ParallelNode, log: RunEventLog, limits: _Limits
 ) -> Callable[[RunState], Awaitable[RunUpdate]]:
     """Ends the parallel by its join, from its branches' checkpointed outcomes. Its output is the
     completed branches' outputs in branch order (`data`: `outputs` by branch id, and the ids of
     the branches that `completed`, `failed` and were `cancelled`)."""
 
     async def join(state: RunState) -> RunUpdate:
-        by_id = state.get("parallel_results", {}).get(parallel.id, {})
+        by_id = state.get("parallel_results", {}).get(_outcomes_key(parallel, state, limits), {})
         outcomes = [(b.id, by_id[b.id]) for b in parallel.branches if b.id in by_id]
         result, payload = _joined(parallel, outcomes)
         await log.emit(NODE_END[result.status], node_id=parallel.id, payload=payload)
@@ -2008,6 +2307,8 @@ class _Scope:
     task: tuple[str, str] | None = None
     reads: str | None = None
     writers: tuple[ReadableWriter, ...] = ()
+    packs: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+    """The run's evidence packs when the scope started (13.6: what a review agent is given)."""
 
     def route_as(self, node: Node) -> str | None:
         """What `node` is known by to the tools: inside an orchestrator's task, a writer works as
@@ -2053,6 +2354,7 @@ async def _run_inline(node: Node, input: str, scope: _Scope) -> tuple[str, Agent
                 scope.branch,
                 scope.route_as(node),
                 writers=scope.writers,
+                packs=scope.packs,
             )
             scope.ran[node.id] = result
             if result.artifact is not None:
@@ -2204,7 +2506,9 @@ def _evidence_loops(root: Node) -> dict[str, tuple[str, int]]:
     for _, node in iter_nodes(root):
         if isinstance(node, LoopNode):
             for _, inner in iter_nodes(node.body):
-                if isinstance(inner, GateNode) and inner.evidence is not None:
+                if isinstance(inner, GateNode) and (
+                    inner.evidence is not None or inner.review is not None
+                ):
                     found[inner.id] = (node.id, node.max_iterations)
     return found
 

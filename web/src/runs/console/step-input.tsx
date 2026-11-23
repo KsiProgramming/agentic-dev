@@ -13,6 +13,7 @@ import { useRunArtifact } from "../artifacts/use-run-artifacts";
 import type { SpecNode, WorkflowSpec } from "../graph/spec-graph";
 import { allSpecNodes } from "../graph/spec-graph";
 import { repoLabel } from "../summaries";
+import type { ReviewInput } from "../timeline";
 import { AgentMessage } from "./agent-message";
 import type { StepRow } from "./step-entries";
 import { ProtectedPathsList } from "./protected-attempts";
@@ -451,6 +452,12 @@ export function StepInput({
             </ul>
           </Field>
         ) : null}
+        {row.step.reviewInput ? (
+          <Field label="Review">
+            {/* What the engine gave this reviewer instead of the previous step's output (13.6). */}
+            <ReviewInputList input={row.step.reviewInput} />
+          </Field>
+        ) : null}
         {row.step.protectedPaths ? (
           <Field label="Protected paths">
             {/* What this writer was told it can read but not change (13.5). */}
@@ -469,6 +476,37 @@ export function StepInput({
           sameAsInput={first && runInput !== null && runInput === runContext.request}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** "Reviewing <writer>" and what the reviewer was given: the spec with its version, the size of
+ * the diff and whether it had the checks' evidence. Names are workflow content: shown as text. */
+function ReviewInputList({ input }: { input: ReviewInput }) {
+  const { files, added, removed } = input;
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-testid="review-input">
+      <p className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+        <span>Reviewing</span>
+        <Mono>{input.of}</Mono>
+      </p>
+      <ul className="flex flex-col gap-0.5 text-meta text-foreground-secondary">
+        <li>
+          Spec:{" "}
+          {input.spec ? (
+            <>
+              <Mono>{input.spec}</Mono>
+              {input.specVersion !== null ? ` v${input.specVersion}` : ""}
+            </>
+          ) : (
+            "none"
+          )}
+        </li>
+        <li>
+          Diff: {files} {files === 1 ? "file" : "files"} +{added} -{removed}
+        </li>
+        <li>Evidence from the checks: {input.evidence ? "yes" : "no"}</li>
+      </ul>
     </div>
   );
 }

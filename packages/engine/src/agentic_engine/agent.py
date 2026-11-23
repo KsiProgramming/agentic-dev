@@ -368,6 +368,7 @@ def work_before_text(
     writers: Sequence[ReadableWriter],
     roles: Mapping[str, str],
     reads_as: str | None = None,
+    reviewing: str | None = None,
 ) -> str:
     """The "# Work before you" section (13.1) that follows the run's context for an agent that has
     repo read tools and whose step has writers before it: each writer's id and role, how to read
@@ -389,7 +390,9 @@ def work_before_text(
     ways = ["`repo.read_file`, `repo.list_files` and `repo.search` with `node` read its files"]
     if "repo.diff" in tools:
         ways.insert(0, "`repo.diff` with `node` lists the files it changed and their diff")
-    if tools & WRITE_TOOLS:
+    if reviewing is not None:
+        plain = f"`{reviewing}`'s committed work, the code you are reviewing"
+    elif tools & WRITE_TOOLS:
         plain = "your own branch, where you write"
     elif reads_as is not None:
         plain = f"the work merged by `{reads_as}`"

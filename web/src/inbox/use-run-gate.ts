@@ -7,6 +7,7 @@ import { ApiError } from "@/api/errors";
 import type { components } from "@/api/schema";
 import { parseArtifacts } from "@/runs/artifacts/artifacts";
 import { parseEvidence } from "@/runs/evidence";
+import { parseReview } from "@/runs/review";
 import {
   parseChanges,
   parseProtectedAttempts,
@@ -47,6 +48,7 @@ export function toInboxGate(body: RunGate): InboxGate {
     iteration: body.iteration ?? 1,
     waitFor: null, // a wait is not reviewed in the Inbox (7.9)
     evidence: parseEvidence(body.evidence),
+    review: parseReview(body.review),
     protectedAttempts: parseProtectedAttempts(body.protected_attempts),
     repoUrl: body.repo?.url ?? null,
     base: body.base ?? null,

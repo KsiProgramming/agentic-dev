@@ -321,6 +321,7 @@ test("each category has its actions", () => {
     "gate.rejected",
     "gate.changes_requested",
     "gate.sent_back_by_checks",
+    "gate.sent_back_by_review",
     "gate.expired",
   ]);
   expect(actionsOf("workflows")).toEqual([
@@ -346,4 +347,16 @@ test("each category has its actions", () => {
     "pricing.updated",
     "workspace.settings_changed",
   ]);
+});
+
+test("a gate the review sent back reads as the independent review's doing (13.6)", () => {
+  const sentBack = auditEvent({
+    action: "gate.sent_back_by_review",
+    node_id: "approve_pr",
+    details: { findings: 2 },
+  });
+  expect(actionInfo("gate.sent_back_by_review").label).toBe("Sent back by review");
+  expect(describeEvent(sentBack)).toBe(
+    "The independent review sent the writer back at approve_pr · 2 blocking findings",
+  );
 });

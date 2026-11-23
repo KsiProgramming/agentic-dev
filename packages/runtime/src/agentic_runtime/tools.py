@@ -81,6 +81,16 @@ class ReadableWriters:
         self._branch_of = branch_of
         self._ready: dict[str, ReadableWriter] = {}
         self._known: frozenset[str] = frozenset()
+        self._reviews: dict[str, str] = {}
+
+    def set_review(self, reviewer: str, of: str) -> None:
+        """Make `reviewer` (a review agent, 13.6) read the committed work of the writer `of` when
+        a read names no `node`, so it never reads the run's checkout or a worktree."""
+        self._reviews[reviewer] = of
+
+    def review_of(self, reviewer: str) -> str | None:
+        """The writer `reviewer` reads without `node`, if it is a review agent."""
+        return self._reviews.get(reviewer)
 
     def set(
         self, completed: Sequence[ReadableWriter], known: Collection[str] | None = None

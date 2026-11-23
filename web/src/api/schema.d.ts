@@ -1361,6 +1361,8 @@ export interface components {
              * @description Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.
              */
             start_from?: string | null;
+            /** @description Make this an independent reviewer (13.6): the engine builds its input from the spec and the reviewed writer's change, it has only read tools, and its answer is findings. Not with `reads`, `input_schema` or `output_schema`. */
+            review?: components["schemas"]["ReviewOf"] | null;
         };
         /** @enum {string} */
         AnalyzerMode: "no_new" | "shown" | "off";
@@ -1412,6 +1414,11 @@ export interface components {
              * @description A selection gate's approval (6.7): the keys of the items chosen, from its `select.keys`; required to approve one, refused anywhere else.
              */
             selection?: string[] | null;
+            /**
+             * Dismissed
+             * @description A review gate's approval (13.6): the `fingerprint`s of the review comments dismissed, from the gate's `review.comments`; the pull request's notes leave them out. Refused (`422`) with `dismiss_not_allowed` on a reject, a request for changes or a gate with no review, `unknown_dismissal` for a fingerprint the gate did not show and `duplicate_dismissal` for one twice.
+             */
+            dismissed?: string[] | null;
         };
         /** ApprovalResponse */
         ApprovalResponse: {
@@ -1470,7 +1477,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
+            action: "run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published";
             actor: components["schemas"]["AuditActor"];
             /** Run Id */
             run_id?: string | null;
@@ -1547,8 +1554,6 @@ export interface components {
              */
             status: "cancelling";
         };
-        /** @enum {string} */
-        Category: "step" | "flow" | "combine" | "workspace";
         /** @enum {string} */
         ChangeStatus: "added" | "modified" | "deleted" | "renamed";
         /** @enum {string} */
@@ -1740,6 +1745,8 @@ export interface components {
             to: string;
         };
         /** @enum {string} */
+        DismissalErrorCode: "dismiss_not_allowed" | "unknown_dismissal" | "duplicate_dismissal";
+        /** @enum {string} */
         EditErrorCode: "edit_not_allowed" | "edits_with_reject" | "edit_too_large" | "duplicate_edit";
         /**
          * EditErrorDetail
@@ -1749,7 +1756,7 @@ export interface components {
          */
         EditErrorDetail: {
             /** Code */
-            code: components["schemas"]["EditErrorCode"] | components["schemas"]["SelectionErrorCode"];
+            code: components["schemas"]["EditErrorCode"] | components["schemas"]["SelectionErrorCode"] | components["schemas"]["DismissalErrorCode"];
             /** Message */
             message: string;
             /** Path */
@@ -2072,6 +2079,8 @@ export interface components {
             on_changes?: number | null;
             /** @description Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects. */
             evidence?: components["schemas"]["GateEvidence"] | null;
+            /** @description Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`. */
+            review?: components["schemas"]["GateReview"] | null;
             /**
              * Writes
              * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
@@ -2102,6 +2111,37 @@ export interface components {
              * @description How many times it tried.
              */
             count: number;
+        };
+        /**
+         * GateReview
+         * @description What a gate does with an independent review's findings (13.6). Findings at or above
+         *     `block_at` send the work back to the writer without a person (at most `max_rounds` times, never
+         *     on the loop's last pass, and counted with the gate's `evidence`); the rest reach the approver
+         *     as comments on the lines they name.
+         */
+        GateReview: {
+            /**
+             * From
+             * @description The findings (`.json`) artifact written before the gate in the loop's body: the merged report of the review.
+             * @example findings.json
+             */
+            from: string;
+            /**
+             * @description The least severe finding that sends the work back: `high` also sends back `critical`.
+             * @default high
+             */
+            block_at: components["schemas"]["Severity"];
+            /**
+             * Max Rounds
+             * @description How many times the review may send the work back, together with the gate's `evidence`. Never on the loop's last pass, whatever this says.
+             * @default 3
+             */
+            max_rounds: number;
+            /**
+             * Notes
+             * @description A Markdown run artifact the approval writes the comments that were not dismissed to, as a new version, for `github.openPR`'s `notes_from`.
+             */
+            notes?: string | null;
         };
         /**
          * GateSelect
@@ -2302,7 +2342,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed" | "invalid_review" | "review_unknown_writer" | "review_not_in_loop" | "invalid_gate_review";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -2766,7 +2806,7 @@ export interface components {
              * @description One sentence on what it does.
              */
             description: string;
-            category: components["schemas"]["Category"];
+            category: components["schemas"]["agentic_engine__nodes__Category"];
             /**
              * Icon
              * @description A lucide icon name in kebab case, e.g. `bot`.
@@ -3406,8 +3446,89 @@ export interface components {
             /** Diff Hunk */
             diff_hunk?: string | null;
         };
+        /**
+         * ReviewFinding
+         * @description One finding of the review, as the gate shows it: where it is, which writer's diff holds the
+         *     file, whether the line is in a changed hunk, and whether it blocks.
+         */
+        ReviewFinding: {
+            /** Fingerprint */
+            fingerprint: string;
+            severity: components["schemas"]["Severity"];
+            category: components["schemas"]["agentic_runtime__findings__Category"];
+            /** Lenses */
+            lenses: string[];
+            /** Path */
+            path: string;
+            /** Line */
+            line?: number | null;
+            /** End Line */
+            end_line?: number | null;
+            /** Message */
+            message: string;
+            /**
+             * Node Id
+             * @description The writer whose diff holds the file.
+             */
+            node_id?: string | null;
+            /**
+             * In Diff
+             * @default false
+             */
+            in_diff: boolean;
+            /**
+             * Blocking
+             * @default false
+             */
+            blocking: boolean;
+        };
         /** @enum {string} */
         ReviewKind: "issue_comment" | "review" | "review_comment";
+        /**
+         * ReviewOf
+         * @description Makes an agent an independent reviewer (13.6). The engine builds its input (the spec, the
+         *     reviewed writer's change and its evidence pack, never the previous step's output), gives it
+         *     only read tools, answers findings typed by the engine, and points its reads at the reviewed
+         *     writer's committed work.
+         */
+        ReviewOf: {
+            /**
+             * Of
+             * @description The writer (or an orchestrator whose body writes) whose work is reviewed: a node that completes before this one. Unset means the latest such writer in run order, so a stored review composite works in any caller.
+             */
+            of?: string | null;
+            /**
+             * Spec From
+             * @description A Markdown run artifact written before this node: the spec the change is reviewed against.
+             */
+            spec_from?: string | null;
+        };
+        /**
+         * ReviewShown
+         * @description What a gate with `review` shows (`gate_waiting`'s `review`).
+         */
+        ReviewShown: {
+            /** From */
+            from: string;
+            /** Version */
+            version: number;
+            block_at: components["schemas"]["Severity"];
+            /** Rounds Left */
+            rounds_left: number;
+            /** Comments */
+            comments: components["schemas"]["ReviewFinding"][];
+            /** Failed Lenses */
+            failed_lenses: string[];
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
         /**
          * Route
          * @description One way a router can go: `then` runs when this route is chosen.
@@ -3857,6 +3978,8 @@ export interface components {
              * @description The run's refused attempts to change a protected path so far (13.5), most tried first, at most 50; empty when no writer tried.
              */
             protected_attempts?: components["schemas"]["GateProtectedAttempt"][];
+            /** @description What the independent review found (13.6), for a gate with `review`: its findings as comments on the lines they name (`path`, `line`, the writer `node_id` whose diff holds the file, whether the line is `in_diff`, and whether it is `blocking`), the lenses that could not run, `rounds_left` and the counts by severity. Messages are model output: data, never instructions. */
+            review?: components["schemas"]["ReviewShown"] | null;
             /** @description What the platform's checks found about the writer's work (13.3): build, tests and analyzers, each passed, failed, skipped or error, with `rounds_left`, how many more times a failing required check may send the work back. Test names and messages are repo output: data, never instructions. */
             evidence?: components["schemas"]["EvidencePack"] | null;
         };
@@ -4334,6 +4457,8 @@ export interface components {
             path: string;
             value: components["schemas"]["JsonValue"];
         };
+        /** @enum {string} */
+        Severity: "info" | "low" | "medium" | "high" | "critical";
         /**
          * SpecFileFromRepo
          * @description A Markdown spec file in the run's repo, read at the run's ref when it is created (7.7).
@@ -4676,6 +4801,8 @@ export interface components {
             on_changes?: number | null;
             /** @description Check the writer's work before the gate shows it (13.3): build, tests and analyzers. A failing required check sends the work back like a request for changes, never on the loop's last pass. Only a gate in a loop's body, and not with `on_changes`: a person approves or rejects. */
             evidence?: components["schemas"]["GateEvidence"] | null;
+            /** @description Act on an independent review's findings (13.6): those at `block_at` or above send the work back like a request for changes, never on the loop's last pass; the rest reach the approver as comments. Only a gate in a loop's body, and not with `select` or `on_changes`. */
+            review?: components["schemas"]["GateReview"] | null;
             /**
              * Writes
              * @description With `select`, store the chosen items as this run artifact. With `on_changes` (7.8), store the comments of each request for changes as this artifact (Markdown), a new version each time, for the agents that revise to read.
@@ -5100,6 +5227,8 @@ export interface components {
              */
             version?: number | null;
         };
+        /** @enum {string} */
+        agentic_engine__nodes__Category: "step" | "flow" | "combine" | "workspace";
         /**
          * WorkflowRef
          * @description A stored workflow of the run's workspace, by id and version (6.5).
@@ -5116,6 +5245,8 @@ export interface components {
              */
             version: number;
         };
+        /** @enum {string} */
+        agentic_runtime__findings__Category: "lint" | "secret" | "dependency" | "security" | "tests" | "architecture" | "correctness" | "performance" | "compatibility" | "accessibility";
         /**
          * RunEvent
          * @description One row of the run event log. For agent events, `type` is the `AgentEvent` type and
@@ -5835,7 +5966,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The edits do not fit the files the gate showed, or the selection the items it showed */
+            /** @description The edits do not fit the files the gate showed, the selection the items it showed, or the dismissals the review comments it showed */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6357,7 +6488,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description Only these actions; may be given several times. */
-                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
+                action?: ("run.created" | "run.rerun" | "run.cancel_requested" | "run.ended" | "repo.created" | "gate.approved" | "gate.rejected" | "gate.changes_requested" | "gate.sent_back_by_checks" | "gate.sent_back_by_review" | "gate.expired" | "sandbox.remove_requested" | "sandbox.removed" | "connection.added" | "connection.removed" | "connection.needs_attention" | "github.review_received" | "github.review_ignored" | "jira.site_updated" | "jira.projects_changed" | "jira.fields_mapped" | "jira.trigger_created" | "jira.trigger_updated" | "jira.trigger_deleted" | "jira.trigger_fired" | "jira.trigger_failed" | "jira.webhook_registered" | "jira.webhook_deleted" | "jira.webhook_failed" | "policy.updated" | "pricing.updated" | "workspace.settings_changed" | "workflow.created" | "workflow.updated" | "workflow.restored" | "workflow.published")[] | null;
                 /** @description Only entries about this run. */
                 run_id?: string | null;
                 /** @description Entries at or after this time. */

@@ -17,7 +17,7 @@ those items. A gate with `on_reject: end` ends the run as completed when it is r
 import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import Literal, Protocol, Self, cast
+from typing import TYPE_CHECKING, Literal, Protocol, Self, cast
 
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -29,6 +29,9 @@ from agentic_engine.expr import ExpressionError, compile_item_condition
 from agentic_engine.policy import APPROVAL_TTL_S
 from agentic_engine.spec import ANSWER_TTL_S, MAX_SELECT_ITEMS, GateNode, GateSelect, WaitForNode
 from agentic_runtime.findings import SEVERITIES, FindingsReport
+
+if TYPE_CHECKING:
+    from agentic_engine.review_gate import ReviewInput
 
 MAX_REVIEW_FILES = 50
 """Changed files shown at a gate with their contents; later ones are listed as `over_limit`."""
@@ -43,6 +46,7 @@ type NotEditable = Literal["binary", "too_large", "deleted", "renamed", "over_li
 type EditErrorCode = Literal[
     "edit_not_allowed", "edits_with_reject", "edit_too_large", "duplicate_edit"
 ]
+type DismissalErrorCode = Literal["dismiss_not_allowed", "unknown_dismissal", "duplicate_dismissal"]
 type SelectionErrorCode = Literal[
     "selection_required",
     "selection_not_allowed",
@@ -97,6 +101,9 @@ class GateComment(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+MAX_DISMISSED = 100
+"""The most review comments one approval dismisses (a gate shows at most 100)."""
+
 MAX_CHANGE_COMMENTS = 20
 """The most comments one request for changes carries."""
 
@@ -120,9 +127,17 @@ class GateDecision(BaseModel):
         max_length=MAX_SELECT_ITEMS,
         description="A selection gate's approval: the keys of the items chosen (6.7).",
     )
+    dismissed: list[str] | None = Field(
+        default=None,
+        max_length=MAX_DISMISSED,
+        description="A review gate's approval (13.6): the fingerprints of the review comments "
+        "the approver dismissed, which the pull request's notes leave out.",
+    )
 
     @model_validator(mode="after")
     def _comments_with_changes(self) -> Self:
+        if self.dismissed is not None and self.decision != "approve":
+            raise ValueError("only an approval dismisses review comments")
         if self.decision == "changes" and not self.comments:
             raise ValueError("a request for changes needs at least one comment")
         if self.decision != "changes" and self.comments:
@@ -376,12 +391,48 @@ async def _selection(
     return selection_shown(select, ref, document), document
 
 
+class DismissalError(ValueError):
+    """An approval's dismissals do not fit what the gate showed (13.6)."""
+
+    def __init__(self, code: DismissalErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code: DismissalErrorCode = code
+
+
+def check_dismissals(
+    shown: Sequence[str] | None,
+    decision: Literal["approve", "reject", "changes"],
+    dismissed: Sequence[str] | None,
+) -> list[str]:
+    """The dismissals of a decision at a gate whose review comments have the fingerprints `shown`
+    (`None` for a gate with no review). Raises `DismissalError` for dismissals on a gate with no
+    review or with a decision other than approve, a fingerprint the gate did not show, or one
+    twice."""
+    if not dismissed:
+        return []
+    if shown is None or decision != "approve":
+        why = "a gate with no review" if shown is None else f"a {decision} decision"
+        raise DismissalError("dismiss_not_allowed", f"{why} cannot dismiss comments")
+    known = set(shown)
+    seen: set[str] = set()
+    for fingerprint in dismissed:
+        if fingerprint in seen:
+            raise DismissalError("duplicate_dismissal", f"{fingerprint!r} is dismissed twice")
+        seen.add(fingerprint)
+        if fingerprint not in known:
+            raise DismissalError(
+                "unknown_dismissal", f"{fingerprint!r} is not a comment this gate showed"
+            )
+    return list(dismissed)
+
+
 def gate_request(
     node: GateNode,
     input: str,
     ttl_s: int,
     shown: SelectionShown | None = None,
     evidence: EvidenceInput | None = None,
+    review: "ReviewInput | None" = None,
 ) -> dict[str, JsonValue]:
     """What the approver is shown: the `gate_waiting` payload, before the runner adds the
     `changes` and `expires_at`. `artifact` is the gate's input, the previous node's output (data,
@@ -398,6 +449,8 @@ def gate_request(
         request["select"] = shown.model_dump(mode="json")
     if evidence is not None:
         request["evidence"] = evidence.pack
+    if review is not None:
+        request["review"] = review.shown.model_dump(mode="json", by_alias=True)
     if node.on_reject == "end":
         request["on_reject"] = "end"
     if node.on_changes is not None:
@@ -421,12 +474,14 @@ def decided_payload(decision: GateDecision, commits: dict[str, str]) -> dict[str
     """The `gate_decided` payload: the decision, plus its selection if it has one, and its edits
     and the commits they made if it has edits."""
     payload: dict[str, JsonValue] = decision.model_dump(
-        mode="json", exclude={"edits", "selection", "comments"}
+        mode="json", exclude={"edits", "selection", "comments", "dismissed"}
     )
     if decision.comments:
         payload["comments"] = [c.model_dump(mode="json") for c in decision.comments]
     if decision.selection is not None:
         payload["selection"] = list[JsonValue](decision.selection)
+    if decision.dismissed:
+        payload["dismissed"] = list[JsonValue](decision.dismissed)
     if decision.edits:
         payload["edits"] = [e.model_dump(mode="json") for e in decision.edits]
         payload["commits"] = dict(commits)
@@ -442,6 +497,7 @@ async def run_gate_node(
     artifacts: ArtifactStore | None = None,
     refs: Mapping[str, ArtifactRef] | None = None,
     evidence: EvidenceInput | None = None,
+    reviewing: "ReviewInput | None" = None,
 ) -> AgentNodeResult:
     """Pause until the run is continued with a `GateDecision`, then log it. Approve completes the
     node and passes `input` on unchanged, once its edits are committed through `review`; edits
@@ -460,10 +516,18 @@ async def run_gate_node(
     A gate with `evidence` (13.3) is given the checks' pack. When a required check failed and a
     round is left (`evidence.comments`), it does not pause: it completes at once as a request for
     changes with `source` `checks`, the failures as its comments, for the loop to hand the writer.
-    Otherwise it pauses and shows the pack."""
-    if evidence is not None and evidence.comments:
-        return await _sent_back(node, evidence, log)
-    if evidence is not None and evidence.proceed:
+    Otherwise it pauses and shows the pack.
+
+    A gate with `review` (13.6) is given the review's findings the same way: blocking ones with a
+    round left complete it as a request for changes with `source` `review` (both sections, and
+    `source` `checks`, when the checks failed too); otherwise it pauses and shows every finding as
+    a comment, and an approval may dismiss some (`dismissed`)."""
+    sent = [*(evidence.comments if evidence else []), *(reviewing.send if reviewing else [])]
+    if sent:
+        source = "checks" if evidence is not None and evidence.comments else "review"
+        reviewed = bool(reviewing and reviewing.send)
+        return await _sent_back(node, sent, log, source, reviewed=reviewed)
+    if evidence is not None and evidence.proceed and reviewing is None:
         return await _passed(node, input, log)
     shown: SelectionShown | None = None
     document: JsonValue = None
@@ -474,8 +538,17 @@ async def run_gate_node(
             # It fails before it pauses, so the runner never announced its start.
             await log.emit(NODE_STARTED, node_id=node.id)
             return AgentNodeResult(status="failed", text=input, usage=None, error=str(e))
-    request = gate_request(node, input, ttl_s, shown, evidence)
+    request = gate_request(node, input, ttl_s, shown, evidence, reviewing)
     decision = GateDecision.model_validate(interrupt(request))
+    try:
+        dismissed = check_dismissals(
+            [c.fingerprint for c in reviewing.shown.comments] if reviewing else None,
+            decision.decision,
+            decision.dismissed,
+        )
+    except DismissalError as e:
+        error = f"the gate's dismissals do not fit what it showed: {e}"
+        return AgentNodeResult(status="failed", text=input, usage=None, error=error)
     try:
         chosen = check_selection(shown, decision.decision, decision.selection)
     except SelectionError as e:
@@ -507,9 +580,13 @@ async def run_gate_node(
             # A gate that can send the work back says which way it went (`until` reads it).
             went: dict[str, JsonValue] | None = (
                 {"decision": "approve"}
-                if node.on_changes is not None or node.evidence is not None
+                if node.on_changes is not None
+                or node.evidence is not None
+                or node.review is not None
                 else None
             )
+            if went is not None and dismissed:
+                went["dismissed"] = list[JsonValue](dismissed)
             return AgentNodeResult(status="completed", text=input, usage=None, data=went)
         data = selected_document(node.select, document, chosen)
         text = json.dumps(data, indent=2, ensure_ascii=False)
@@ -520,19 +597,24 @@ async def run_gate_node(
     return AgentNodeResult(status="cancelled", text=input, usage=None, error=reason)
 
 
-async def _sent_back(node: GateNode, evidence: EvidenceInput, log: RunEventLog) -> AgentNodeResult:
-    """The gate's checks sent the work back (13.3): the same completion as a person's request for
-    changes (7.8), with no one named as having decided it and no pause."""
-    comments = evidence.comments
+async def _sent_back(
+    node: GateNode,
+    comments: Sequence[GateComment],
+    log: RunEventLog,
+    source: Literal["checks", "review"] = "checks",
+    reviewed: bool = False,
+) -> AgentNodeResult:
+    """The gate's checks or review sent the work back (13.3, 13.6): the same completion as a
+    person's request for changes (7.8), with no one named as having decided it and no pause.
+    `reviewed` says the review's findings are among the comments."""
     items: list[JsonValue] = [c.model_dump(mode="json") for c in comments]
     # The gate never paused, so the runner did not announce its start.
     await log.emit(NODE_STARTED, node_id=node.id)
-    await log.emit(
-        GATE_DECIDED,
-        node_id=node.id,
-        payload={"decision": "changes", "source": "checks", "comments": items},
-    )
-    data: dict[str, JsonValue] = {"decision": "changes", "source": "checks", "comments": items}
+    payload: dict[str, JsonValue] = {"decision": "changes", "source": source, "comments": items}
+    if reviewed:
+        payload["review"] = True
+    await log.emit(GATE_DECIDED, node_id=node.id, payload=payload)
+    data: dict[str, JsonValue] = dict(payload)
     return AgentNodeResult(status="completed", text=changes_text(comments), usage=None, data=data)
 
 

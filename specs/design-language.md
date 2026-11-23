@@ -170,6 +170,14 @@ Weight 500 on names, labels, buttons and tabs is what makes a screen look solid.
 | Links | `foreground`, underlined on hover; external links get a 12 px external icon |
 | Code inline | Mono 12 px on `muted`, radius 4 px |
 
+## Comments in a diff
+
+A review comment (13.6) sits in the diff under the line it names, on the changed (modified) side only, as a Monaco view zone:
+
+- **What it holds:** the severity word, "Blocking" when it blocks, the lenses in mono and the message, as text nodes (`textContent`), never markup (rule 11). The zone has a 4 px left edge in the severity's own hue (`border-severity-*`), a `surface-subtle` fill and `text-meta` text, so it follows the light and dark themes through the tokens, not through Monaco's theme.
+- **It is a convenience, not the path:** the comments are listed above the files (`ReviewComments`), each with its severity badge, `path:line`, lenses and message. The list is the keyboard and screen-reader path; selecting a row's location opens that file at that line. A zone is a `note` and never takes focus.
+- **Only what the diff holds:** comments on a line of a changed file, on the writer's own diff. Comments on files the change did not touch appear only in the list, under "Files the change did not touch".
+
 ## Content rules (from the review of the run console)
 
 - **Tables become cards by container width, not screen width.** A table inside a pane narrower than about 720 px renders as stacked cards (as the mobile findings list does). Use a container query on the pane.

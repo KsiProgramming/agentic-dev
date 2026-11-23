@@ -22,6 +22,8 @@ from agentic_engine.artifacts import GateArtifact
 from agentic_engine.events import GATE_WAITING, PROTECTED_PATH_REFUSED
 from agentic_engine.evidence import EvidencePack
 from agentic_engine.gate import (
+    DismissalError,
+    DismissalErrorCode,
     EditError,
     EditErrorCode,
     FileChange,
@@ -29,9 +31,11 @@ from agentic_engine.gate import (
     SelectionError,
     SelectionErrorCode,
     SelectionShown,
+    check_dismissals,
     check_edits,
     check_selection,
 )
+from agentic_engine.review_gate import ReviewShown
 from agentic_store.audit import AuditAction, audit
 from agentic_store.models import Approval, Run, RunEventRow
 
@@ -87,6 +91,14 @@ class InvalidSelectionError(ApprovalError):
         self.code: SelectionErrorCode = code
 
 
+class InvalidDismissalError(ApprovalError):
+    """The decision's dismissals do not fit the review comments the gate showed (13.6)."""
+
+    def __init__(self, code: DismissalErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code: DismissalErrorCode = code
+
+
 _CHANGES = TypeAdapter(list[FileChange])
 
 
@@ -138,6 +150,15 @@ async def record_approval(
                 check_selection(_shown_selection(payload), decision.decision, decision.selection)
             except SelectionError as e:
                 raise InvalidSelectionError(e.code, str(e)) from e
+            try:
+                shown_review = _shown_review(payload)
+                check_dismissals(
+                    [c.fingerprint for c in shown_review.comments] if shown_review else None,
+                    decision.decision,
+                    decision.dismissed,
+                )
+            except DismissalError as e:
+                raise InvalidDismissalError(e.code, str(e)) from e
             decision = decision.model_copy(update={"edits": edits})
             workspace_id = run.workspace_id
             session.add(
@@ -151,6 +172,7 @@ async def record_approval(
                     edits=[e.model_dump(mode="json") for e in edits] or None,
                     selection=decision.selection,
                     comments=[c.model_dump(mode="json") for c in decision.comments] or None,
+                    dismissed=decision.dismissed or None,
                 )
             )
             await session.execute(
@@ -197,6 +219,8 @@ def _audit_details(decision: GateDecision, edited: list[str]) -> dict[str, JsonV
         details["selected"] = len(decision.selection)
     if decision.comments:
         details["comments"] = len(decision.comments)
+    if decision.dismissed:
+        details["dismissed"] = len(decision.dismissed)  # a count: the comments are model output
     return details
 
 
@@ -240,6 +264,9 @@ class PendingGate:
     evidence: EvidencePack | None = None
     # The run's refused attempts to change a protected path so far (13.5), most tried first.
     protected_attempts: list[ProtectedAttempt] = field(default_factory=list[ProtectedAttempt])
+    # What the independent review found (13.6), if the gate has a review: comments on the lines
+    # they name, the lenses that could not run and the send-backs left.
+    review: ReviewShown | None = None
 
 
 async def protected_attempts(
@@ -295,6 +322,7 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         iteration=passes,
         evidence=_shown_evidence(payload),
         protected_attempts=attempts,
+        review=_shown_review(payload),
     )
 
 
@@ -302,6 +330,14 @@ def _shown_evidence(payload: dict[str, JsonValue]) -> EvidencePack | None:
     shown = payload.get("evidence")
     try:
         return EvidencePack.model_validate(shown) if shown is not None else None
+    except ValidationError:
+        return None
+
+
+def _shown_review(payload: dict[str, JsonValue]) -> ReviewShown | None:
+    shown = payload.get("review")
+    try:
+        return ReviewShown.model_validate(shown) if shown is not None else None
     except ValidationError:
         return None
 
@@ -341,6 +377,7 @@ async def pending_decision(
             "edits": approval.edits or [],
             "selection": approval.selection,
             "comments": approval.comments or [],
+            "dismissed": approval.dismissed,
         }
     )
 

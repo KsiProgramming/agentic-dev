@@ -7,7 +7,11 @@
         "dependency",
         "security",
         "tests",
-        "architecture"
+        "architecture",
+        "correctness",
+        "performance",
+        "compatibility",
+        "accessibility"
       ],
       "type": "string"
     },

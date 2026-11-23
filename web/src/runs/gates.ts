@@ -1,5 +1,6 @@
 import { parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
 import { parseEvidence, type Evidence } from "./evidence";
+import { parseReview, type Review } from "./review";
 import type { RunEvent } from "./types";
 
 export type FileChangeStatus = "added" | "modified" | "deleted" | "renamed";
@@ -150,6 +151,9 @@ export interface PendingGate {
   /** What the platform's checks found about the writer's work before this gate (13.3); null
    * for a gate that does not check. */
   evidence: Evidence | null;
+  /** What the independent review found (13.6): the comments to dismiss or keep, and the lenses
+   * that could not run; null for a gate with no review. */
+  review: Review | null;
   /** The run's refused tries to change a protected path so far (13.5), most tried first. */
   protectedAttempts: ProtectedAttempt[];
 }
@@ -255,6 +259,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         on_changes,
         wait_for,
         evidence,
+        review,
       } = event.payload ?? {};
       const iteration = events
         .slice(0, i + 1)
@@ -277,6 +282,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         iteration,
         waitFor: parseWaitFor(wait_for),
         evidence: parseEvidence(evidence),
+        review: parseReview(review),
         protectedAttempts: attemptsFromEvents(events.slice(0, i)),
       };
     }
