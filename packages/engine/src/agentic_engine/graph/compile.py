@@ -184,6 +184,7 @@ from agentic_engine.providers import ResolvedNode, ResolvedProviders
 from agentic_engine.review import NONE, diff_stats, evidence_summary, review_input
 from agentic_engine.review_gate import (
     ReviewInput,
+    neutralise_notes,
     notes_text,
     shown_of,
 )
@@ -1492,18 +1493,31 @@ async def _with_body_from(
     cut at `MAX_BODY_FROM_CHARS` (`MAX_JIRA_BODY_FROM_CHARS` for a comment). The tool never sees
     `body_from`. Raises `ArtifactError` when the run has not written the artifact."""
     name = node.args.get("body_from")
-    if node.tool not in BODY_FROM_TOOLS or not isinstance(name, str):
+    notes_name = node.args.get("notes_from") if node.tool in PUBLISH_TOOLS else None
+    if node.tool not in BODY_FROM_TOOLS or not (
+        isinstance(name, str) or isinstance(notes_name, str)
+    ):
         return node
-    ref = refs.get(name)
-    stored = await artifacts.get(name, ref.version) if ref is not None else None
-    if stored is None:
-        raise ArtifactError(f"artifact {name!r} was not written")
-    cap = MAX_JIRA_BODY_FROM_CHARS if node.tool in JIRA_WRITE_TOOLS else MAX_BODY_FROM_CHARS
-    text = stored.content[:cap]
     static = node.args.get("body")
-    body = f"{static}\n\n{text}" if isinstance(static, str) and static else text
-    args = {k: v for k, v in node.args.items() if k != "body_from"} | {"body": body}
-    return node.model_copy(update={"args": args})
+    body = static if isinstance(static, str) else ""
+    if isinstance(name, str):
+        ref = refs.get(name)
+        stored = await artifacts.get(name, ref.version) if ref is not None else None
+        if stored is None:
+            raise ArtifactError(f"artifact {name!r} was not written")
+        cap = MAX_JIRA_BODY_FROM_CHARS if node.tool in JIRA_WRITE_TOOLS else MAX_BODY_FROM_CHARS
+        text = stored.content[:cap]
+        body = f"{body}\n\n{text}" if body else text
+    if isinstance(notes_name, str):
+        # 13.6: the approved review's comments, as model output: no mention, no HTML.
+        ref = refs.get(notes_name)
+        stored = await artifacts.get(notes_name, ref.version) if ref is not None else None
+        if stored is None:
+            raise ArtifactError(f"artifact {notes_name!r} was not written")
+        notes = f"## Review notes\n\n{neutralise_notes(stored.content)}"
+        body = f"{body}\n\n{notes}" if body else notes
+    args = {k: v for k, v in node.args.items() if k not in ("body_from", "notes_from")}
+    return node.model_copy(update={"args": args | {"body": body}})
 
 
 def _check_output(

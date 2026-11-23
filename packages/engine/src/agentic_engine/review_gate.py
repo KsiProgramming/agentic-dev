@@ -201,6 +201,23 @@ def send_back_comments(shown: ReviewShown) -> list[GateComment]:
     return comments
 
 
+MAX_NOTES_CHARS = 8_000
+"""The most characters of review notes a pull request body gets."""
+
+_TAG = re.compile(r"<[^>]*>")
+_MENTION = re.compile(r"@(?=[A-Za-z0-9_])")
+
+
+def neutralise_notes(text: str) -> str:
+    """Review notes as they go into a pull request body (13.6): HTML tags removed, every `@name`
+    mention given a zero-width joiner after the `@` so it notifies nobody, and the whole capped at
+    `MAX_NOTES_CHARS` with a note. The notes are model output: never trusted."""
+    clean = _MENTION.sub("@\u200d", _TAG.sub("", text))
+    if len(clean) > MAX_NOTES_CHARS:
+        clean = clean[:MAX_NOTES_CHARS].rstrip() + "\n\n(cut here: the run's review has the rest)"
+    return clean
+
+
 def notes_text(comments: Sequence[ReviewComment]) -> str:
     """The comments left after the approval, as the Markdown a pull request body gets: one bullet
     each (severity, `path:line`, lenses, message). The engine neutralises mentions and strips

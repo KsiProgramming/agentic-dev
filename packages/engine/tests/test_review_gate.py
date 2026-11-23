@@ -53,7 +53,9 @@ def report(*findings: Finding) -> str:
     return json.dumps(build_report("agent", [], findings).model_dump(mode="json"))
 
 
-def workflow(*, max_iterations: int = 4, max_rounds: int = 3, notes: bool = True) -> WorkflowSpec:
+def workflow(
+    *, max_iterations: int = 4, max_rounds: int = 3, notes: bool = True, publish: bool = False
+) -> WorkflowSpec:
     review: dict[str, Any] = {"from": "review.json", "block_at": "high", "max_rounds": max_rounds}
     if notes:
         review["notes"] = "review-notes.md"
@@ -75,6 +77,12 @@ def workflow(*, max_iterations: int = 4, max_rounds: int = 3, notes: bool = True
                     "until": 'results.approve.data.decision != "changes"',
                     "body": {"type": "sequence", "id": "round", "steps": steps},
                 },
+                *(
+                    [{"type": "tool", "id": "publish", "tool": "github.openPR",
+                      "args": {"from_node": "writer", "title": "Add sum", "body": "Adds sum.",
+                               "notes_from": "review-notes.md"}}]
+                    if publish else []
+                ),
             ]},
         }
     )  # fmt: skip
@@ -278,3 +286,49 @@ async def test_a_resume_at_the_gate_decides_the_same_and_runs_no_lens_again() ->
     assert done.status == "completed"
     assert len([r for r in run.runtime.requests if r.node_id.startswith("review_")]) == lens_runs
     assert len(run.events("review_collected")) == 1
+
+
+class PublishTools(Tools):
+    def __init__(self) -> None:
+        super().__init__()
+        self._tools["github.openPR"] = "opened"  # type: ignore[attr-defined]
+
+
+async def published(findings: list[Finding]) -> dict[str, Any]:
+    run = Run(workflow(publish=True), {"correctness": [report(*findings)]})
+    run.tools = PublishTools()
+    run.runtime = PassRuntime(run.runtime._scripts, run.tools)  # pyright: ignore
+    await run.start()
+    done = await run.resume(APPROVE)
+    assert done.status == "completed"
+    return next(args for name, args in run.tools.calls if name == "github.openPR")
+
+
+async def test_the_pr_body_gets_the_review_notes_and_the_tool_never_sees_notes_from() -> None:
+    args = await published([NITPICK])
+
+    assert "notes_from" not in args
+    assert args["body"].startswith("Adds sum.\n\n## Review notes\n\n")
+    assert "`src/sum.py:3` (correctness): Name the variable." in args["body"]
+
+
+async def test_a_mention_and_html_in_a_finding_never_reach_the_pr_body_live() -> None:
+    sneaky = finding("medium", "correctness", "src/sum.py", 3, "ping @octocat <b>now</b>")
+
+    args = await published([sneaky])
+
+    assert "@octocat" not in args["body"]  # a zero-width joiner follows the @
+    zwj = chr(0x200D)
+    assert f"@{zwj}octocat" in args["body"]
+    assert "<b>" not in args["body"]
+    assert f"ping @{zwj}octocat now" in args["body"]
+
+
+async def test_the_notes_are_capped() -> None:
+    many = [finding("low", "correctness", f"src/f{i}.py", 1, "x" * 400) for i in range(40)]
+
+    args = await published(many)
+
+    notes = args["body"].split("## Review notes\n\n", 1)[1]
+    assert len(notes) < 8_100
+    assert notes.endswith("(cut here: the run's review has the rest)")
