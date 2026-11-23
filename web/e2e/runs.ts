@@ -134,6 +134,20 @@ export const REPO_READER = {
   tools: ["repo.list_files", "repo.read_file", "repo.search"],
 };
 
+/** A reader that, on the stack's fake runtime, reads a file that does not exist again and again
+ * until a circuit breaker pauses it (13.7), and answers once it was resumed and told why. The
+ * marker is test-only (`agentic_worker.fake_scripts`). */
+export const REPEATER = {
+  type: "agent",
+  id: "repeater",
+  role: "Reader",
+  instructions: "[fake:repeat-failing-call] Read docs/does-not-exist.md until it succeeds.",
+  tools: ["repo.read_file"],
+};
+
+/** The reason the repeat breaker gives for `REPEATER`: three identical errors. */
+export const REPEAT_REASON = "repo.read_file failed 3 times with the same error in one step";
+
 /** A gate after `REPO_WRITER`: it shows the files the writer changed. */
 export const REVIEW_GATE = {
   type: "gate",

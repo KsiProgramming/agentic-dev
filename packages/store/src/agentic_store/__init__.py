@@ -4,8 +4,10 @@ from agentic_store.answers import ANSWER_DECIDER, WaitingRun, answer_arrived, wa
 from agentic_store.approvals import (
     AlreadyDecidedError,
     ApprovalError,
+    BreakerPauseRecord,
     ChangesNotAllowedError,
     GateExpiredError,
+    InvalidBreakerDecisionError,
     InvalidDismissalError,
     InvalidEditsError,
     InvalidSelectionError,
@@ -14,6 +16,7 @@ from agentic_store.approvals import (
     RunNotFoundError,
     RunNotWaitingError,
     WrongGateError,
+    pending_breaker_pause,
     pending_decision,
     pending_gate,
     record_approval,
@@ -27,6 +30,7 @@ from agentic_store.artifacts import (
 )
 from agentic_store.audit import AUDIT_ACTIONS, AuditAction
 from agentic_store.audit_log import AuditEventRow, AuditRunRef, list_audit_events
+from agentic_store.baselines import BASELINE_RUNS, MIN_RUNS, cost_baselines
 from agentic_store.branches import (
     BranchKind,
     BundleTooLargeError,
@@ -66,7 +70,12 @@ from agentic_store.connections import (
     put_connection,
     put_github_connection,
 )
-from agentic_store.expiry import ANSWERS_EXPIRED_REASON, APPROVAL_EXPIRED_REASON, expire_gates
+from agentic_store.expiry import (
+    ANSWERS_EXPIRED_REASON,
+    APPROVAL_EXPIRED_REASON,
+    BREAKER_PAUSE_EXPIRED_REASON,
+    expire_gates,
+)
 from agentic_store.github_user import (
     GITHUB_USER,
     GithubUserInfo,
@@ -268,12 +277,15 @@ __all__ = [
     "ANSWER_DECIDER",
     "APPROVAL_EXPIRED_REASON",
     "AUDIT_ACTIONS",
+    "BASELINE_RUNS",
+    "BREAKER_PAUSE_EXPIRED_REASON",
     "CONNECTION_COLUMNS_CHECK",
     "DEFAULT_WORKSPACE_ID",
     "DELIVERY_RETENTION",
     "GITHUB",
     "GITHUB_USER",
     "JIRA",
+    "MIN_RUNS",
     "OWN_MOVE_WINDOW",
     "RUN_EVENTS_CHANNEL",
     "RUN_QUEUE",
@@ -289,6 +301,7 @@ __all__ = [
     "AuditRunRef",
     "Base",
     "BranchKind",
+    "BreakerPauseRecord",
     "BundleTooLargeError",
     "ChangesNotAllowedError",
     "ClaimedRun",
@@ -302,6 +315,7 @@ __all__ = [
     "GithubUserNeedsAttentionError",
     "GithubUserNotConnectedError",
     "IgnoreReason",
+    "InvalidBreakerDecisionError",
     "InvalidCursorError",
     "InvalidDismissalError",
     "InvalidEditsError",
@@ -387,6 +401,7 @@ __all__ = [
     "check_workflow",
     "claim_run",
     "copy_run_artifacts",
+    "cost_baselines",
     "count_runs",
     "create_jira_trigger",
     "create_rerun",
@@ -454,6 +469,7 @@ __all__ = [
     "max_event_seq",
     "metadata",
     "open_checkpointer",
+    "pending_breaker_pause",
     "pending_decision",
     "pending_gate",
     "pr_busy",

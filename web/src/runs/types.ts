@@ -43,6 +43,7 @@ export const EVENT_TYPES = [
   "repo_created",
   "artifact_written",
   "policy_limit_exceeded",
+  "breaker_tripped",
   "route_chosen",
   "plan_made",
   "replan_started",

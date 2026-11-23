@@ -120,6 +120,7 @@ from agentic_engine.events import (
 )
 from agentic_engine.gate import GateDecision, GateReview
 from agentic_engine.graph import (
+    BreakerPause,
     Checkpointer,
     StepNotFoundError,
     StepNotReachedError,
@@ -209,6 +210,7 @@ from agentic_secrets import (
 from agentic_store import (
     ANSWERS_EXPIRED_REASON,
     APPROVAL_EXPIRED_REASON,
+    BREAKER_PAUSE_EXPIRED_REASON,
     PostgresArtifactStore,
     PostgresEventSink,
     ProviderSettings,
@@ -234,6 +236,7 @@ from agentic_store import (
     mark_github_user_needs_attention,
     max_event_seq,
     open_checkpointer,
+    pending_breaker_pause,
     pending_decision,
     prune_github_deliveries,
     prune_jira_deliveries,
@@ -269,6 +272,7 @@ from agentic_worker.artifacts import MirroredArtifactStore
 from agentic_worker.branches import SandboxBranchSaver
 from agentic_worker.copilot import copilot_runtimes, token_loader
 from agentic_worker.errors import RunSetupError
+from agentic_worker.fake_scripts import RepeatingFakeRuntime
 from agentic_worker.integrate import SandboxIntegrator
 from agentic_worker.providers import ProviderRouter, RoutedRuntimes, run_providers
 from agentic_worker.review import SandboxGateReview
@@ -406,17 +410,21 @@ def build_keys(settings: WorkerSettings) -> KeyProvider | None:
 
 def fake_runtime_factory(settings: WorkerSettings) -> RuntimeFactory:
     """The stack's fake agents: they echo their input, fitted to a typed node's schema (6.8), so
-    a hub plans and a typed reviewer answers on a stack with no provider."""
+    a hub plans and a typed reviewer answers on a stack with no provider. An agent whose
+    instructions start with `[fake:repeat-failing-call]` repeats a failing call (13.7, e2e)."""
     if settings.fake_step_delay_s > 0:
         delay = settings.fake_step_delay_s
         # Tool calls wait twice as long as a chunk: a live work block stays on screen a while.
-        return lambda tools: FakeRuntime(
-            default=lambda text: slow_echo_script(text, delay),
-            tools=tools,
-            call_delay_s=2 * delay,
-            fit_schemas=True,
+        return lambda tools: RepeatingFakeRuntime(
+            FakeRuntime(
+                default=lambda text: slow_echo_script(text, delay),
+                tools=tools,
+                call_delay_s=2 * delay,
+                fit_schemas=True,
+            ),
+            tools,
         )
-    return lambda tools: FakeRuntime(tools=tools, fit_schemas=True)
+    return lambda tools: RepeatingFakeRuntime(FakeRuntime(tools=tools, fit_schemas=True), tools)
 
 
 def fixed_runtimes(make_runtime: RuntimeFactory) -> RunRuntimes:
@@ -858,7 +866,11 @@ async def _end_cancelled(worker: Worker, run: StoredRun, sink: EventSink) -> Non
             )
         else:
             payload: dict[str, JsonValue] = {"reason": reason}
-            if reason in (APPROVAL_EXPIRED_REASON, ANSWERS_EXPIRED_REASON):
+            if reason in (
+                APPROVAL_EXPIRED_REASON,
+                ANSWERS_EXPIRED_REASON,
+                BREAKER_PAUSE_EXPIRED_REASON,
+            ):
                 payload["expired"] = True
             await RunEventLog(run.id, sink, next_seq=last_seq + 1).emit(
                 RUN_CANCELLED, payload=payload
@@ -1029,6 +1041,9 @@ async def _attempt(
     last_seq = await max_event_seq(worker.sessions, run.id)
     first = last_seq == 0  # no event yet: the run starts (a restore below writes one)
     decision = await pending_decision(worker.sessions, run.id) if last_seq else None
+    # A run a circuit breaker paused goes on (or ends) with its person's decision (13.7).
+    pause = await pending_breaker_pause(worker.sessions, run.id) if last_seq else None
+    breaker = BreakerPause(pause.node_id, pause.trip, pause.decision) if pause is not None else None
     tries = run.attempt - 1
     if tries >= worker.settings.max_attempts:
         log.warning("run %s: gave up after %d attempts", run.id, tries)
@@ -1171,6 +1186,7 @@ async def _attempt(
             first=first,
             readable=readable,
             protected=protected,
+            breaker=breaker,
         )
         if result.status == "waiting" and review is not None:  # it has a sandbox
             worker.sandboxes.keep(run.id)
@@ -1497,13 +1513,15 @@ async def _workflow(
     first: bool | None = None,
     readable: ReadableWriters | None = None,
     protected: ProtectedPaths | None = None,
+    breaker: BreakerPause | None = None,
 ) -> WorkflowRunResult:
     """Start or resume the run's graph: start it when it has no event before this attempt
     (`first`, else `last_seq == 0`), from a step of another run if it is a rerun from a step
     (12.4). Tool nodes call `tools`, the executor agents use too. A
     run paused at a gate continues with `decision`, and its gates show and edit the writers'
     branches through `review`, and its orchestrators merge their tasks' branches through
-    `integrator` (6.3). Its branches are saved through `saver` (12.2). Its artifacts go to
+    `integrator` (6.3). A run a circuit breaker paused continues with `breaker`, its person's
+    decision (13.7). Its branches are saved through `saver` (12.2). Its artifacts go to
     `artifacts`. A run with a budget counts what
     its earlier attempts spent (`runs.estimated_usd` when it was claimed)."""
     if first is None:
@@ -1539,6 +1557,7 @@ async def _workflow(
                 providers=run_providers(run),
                 readable=readable,
                 protected=protected,
+                cost_baselines=run.cost_baselines,
             )
         except (StepNotFoundError, StepNotReachedError) as e:
             log.warning("run %s cannot start from its step: %s", run.id, e)
@@ -1567,6 +1586,7 @@ async def _workflow(
             providers=run_providers(run),
             readable=readable,
             protected=protected,
+            cost_baselines=run.cost_baselines,
         )
     log.info("run %s resumed (attempt %d)", run.id, run.attempt)
     return await resume_workflow(
@@ -1591,6 +1611,8 @@ async def _workflow(
         providers=run_providers(run),
         readable=readable,
         protected=protected,
+        cost_baselines=run.cost_baselines,
+        breaker=breaker,
     )
 
 

@@ -8,12 +8,14 @@ import {
   gateExpired,
   formatRelative,
   isLive,
+  isPaused,
   repoLabel,
   runStatusLabel,
   runTimes,
   wallClockLine,
   statusLabel,
 } from "./summaries";
+import { displayStatus } from "./status";
 import { runSummary } from "./testing";
 
 test.each([
@@ -127,4 +129,21 @@ test("a gate past its expiry no longer waits", () => {
   expect(gateExpired(gate("2026-10-27T12:00:01Z"), now)).toBe(false);
   expect(gateExpired(gate(null), now)).toBe(false);
   expect(gateExpired(runSummary(), now)).toBe(false);
+});
+
+test("a waiting run a circuit breaker paused reads Paused, in the waiting colour", () => {
+  const paused = {
+    status: "waiting" as const,
+    expired: false,
+    waiting_gate: { node_id: "b", title: null, breaker: "repeat" as const, reason: "x" },
+  };
+
+  expect(statusLabel("waiting", true)).toBe("Paused");
+  expect(statusLabel("waiting")).toBe("Needs approval");
+  expect(badgeStatus("waiting")).toBe("waiting");
+  expect(runStatusLabel(paused)).toBe("Paused");
+  expect(expiredLabel(paused)).toBe("Paused");
+  expect(isPaused({ status: "running", waiting_gate: paused.waiting_gate })).toBe(false);
+  expect(displayStatus("live", true, true)).toEqual({ status: "waiting", label: "Paused" });
+  expect(displayStatus("live", true)).toEqual({ status: "waiting", label: "Needs approval" });
 });

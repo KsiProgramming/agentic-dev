@@ -34,13 +34,25 @@ export function badgeStatus(status: ApiRunStatus): RunStatus {
 
 /** How a run's status is worded: its `statusLabel`, or "Expired" for a run cancelled because
  * its gate waited past its time to live (shown in Cancelled's grey). */
-export function runStatusLabel(run: Pick<RunSummary, "status" | "expired">): string {
-  return run.expired ? "Expired" : statusLabel(run.status);
+export function runStatusLabel(
+  run: Pick<RunSummary, "status" | "expired"> & Partial<Pick<RunSummary, "waiting_gate">>,
+): string {
+  return run.expired ? "Expired" : statusLabel(run.status, isPaused(run));
+}
+
+/** Whether the run waits because a circuit breaker paused it (13.7), not at a gate. */
+export function isPaused(
+  run: Pick<RunSummary, "status"> & Partial<Pick<RunSummary, "waiting_gate">>,
+): boolean {
+  return run.status === "waiting" && Boolean(run.waiting_gate?.breaker);
 }
 
 /** The badge wording of a run whose gate expired ("Expired"); undefined keeps the status's. */
-export function expiredLabel(run: Pick<RunSummary, "expired">): string | undefined {
-  return run.expired ? "Expired" : undefined;
+export function expiredLabel(
+  run: Pick<RunSummary, "expired" | "status"> & Partial<Pick<RunSummary, "waiting_gate">>,
+): string | undefined {
+  if (run.expired) return "Expired";
+  return isPaused(run) ? "Paused" : undefined;
 }
 
 /** Whether the run waits at a gate whose time to live has passed. The worker cancels it within
@@ -51,8 +63,8 @@ export function gateExpired(run: Pick<RunSummary, "waiting_gate">, now: number):
 }
 
 /** How the runs list words a status: a waiting run needs the user. */
-export function statusLabel(status: ApiRunStatus): string {
-  return STATUS_LABEL[status];
+export function statusLabel(status: ApiRunStatus, paused = false): string {
+  return paused && status === "waiting" ? "Paused" : STATUS_LABEL[status];
 }
 
 const STATUS_LABEL: Record<ApiRunStatus, string> = {

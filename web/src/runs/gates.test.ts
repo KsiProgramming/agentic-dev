@@ -35,6 +35,7 @@ test("a gate waits until it is decided", () => {
     evidence: null,
     review: null,
     protectedAttempts: [],
+    breaker: null,
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
@@ -89,6 +90,7 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     evidence: null,
     review: null,
     protectedAttempts: [],
+    breaker: null,
     ...overrides,
   };
 }
@@ -248,4 +250,23 @@ test("a wait for answers is over once it is decided, and the banner goes with it
 
   expect(pendingGate([waiting])?.waitFor?.issueKey).toBe("KAN-7");
   expect(pendingGate([waiting, decided])).toBeNull();
+});
+
+test("a pause a circuit breaker caused is a pending gate with what tripped", () => {
+  const trip = runEvent(2, "breaker_tripped", {
+    breaker: "repeat",
+    trigger: "errors",
+    threshold: 3,
+    observed: 3,
+    details: { tool: "repo.read_file" },
+    reason: "repo.read_file failed 3 times with the same error in one step",
+  });
+  const waiting = runEvent(3, "gate_waiting", { breaker: "repeat", reason: "x" });
+
+  const gate = pendingGate([runEvent(1, "run_started"), trip, waiting]);
+
+  expect(gate?.breaker?.breaker).toBe("repeat");
+  expect(gate?.title).toBe("Paused: repo.read_file failed 3 times with the same error in one step");
+  const decided = runEvent(4, "gate_decided", { source: "breaker" });
+  expect(pendingGate([trip, waiting, decided])).toBeNull();
 });

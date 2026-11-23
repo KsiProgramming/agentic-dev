@@ -30,6 +30,7 @@ from agentic_api.runs.models import (
     CreateRunResponse,
     EditErrorDetail,
     GateBranch,
+    GateBreaker,
     GateProtectedAttempt,
     JiraIssueRef,
     PolicyErrorDetail,
@@ -85,8 +86,10 @@ from agentic_sandbox import ARTIFACT_NAME, RepoSource, branch_name
 from agentic_store import (
     ANSWERS_EXPIRED_REASON,
     APPROVAL_EXPIRED_REASON,
+    BREAKER_PAUSE_EXPIRED_REASON,
     DEFAULT_WORKSPACE_ID,
     ApprovalError,
+    InvalidBreakerDecisionError,
     InvalidCursorError,
     InvalidDismissalError,
     InvalidEditsError,
@@ -220,7 +223,8 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "queue_stalled_at": row.queued_at + timedelta(seconds=stale_s) if unclaimed else None,
         "waiting_gate": WaitingGate.model_validate(row.waiting_gate) if row.waiting_gate else None,
         "cancel_reason": cancel_reason,
-        "expired": cancel_reason in (APPROVAL_EXPIRED_REASON, ANSWERS_EXPIRED_REASON),
+        "expired": cancel_reason
+        in (APPROVAL_EXPIRED_REASON, ANSWERS_EXPIRED_REASON, BREAKER_PAUSE_EXPIRED_REASON),
         "rerun_of": row.rerun_of,
         "rerun_from": (
             RerunFromRef(run_id=row.rerun_of, **row.rerun_from)
@@ -236,6 +240,7 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "pr_review": PrReviewRef.model_validate(row.pr_review) if row.pr_review else None,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
         "protected_attempts": row.protected_attempts,
+        "breaker_trips": row.breaker_trips,
         "active_ms": active_ms,
         "waiting_ms": waiting_ms,
         "measured_at": now,
@@ -1035,6 +1040,7 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
         ],
         evidence=pending.evidence,
         review=pending.review,
+        breaker=GateBreaker.model_validate(pending.breaker) if pending.breaker else None,
     )
 
 
@@ -1163,7 +1169,8 @@ async def check_answers(run_id: UUID, request: Request) -> AnswerCheckResponse:
         },
         422: {
             "description": "The edits do not fit the files the gate showed, the selection "
-            "the items it showed, or the dismissals the review comments it showed",
+            "the items it showed, the dismissals the review comments it showed, or the decision "
+            "is not Resume or Cancel run for a circuit-breaker pause (`breaker_decision_invalid`)",
             "model": EditErrorDetail,
         },
     },
@@ -1174,7 +1181,10 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
     the edits on the writers' branches before the run goes on. The run is queued again; its
     stream carries on with `gate_decided`. A gate past its `expires_at` takes no decision. A
     selection gate's approval names the items chosen (`selection`, 6.7); with `on_reject: end`
-    a rejection completes the run instead of cancelling it."""
+    a rejection completes the run instead of cancelling it. A run a circuit breaker paused
+    (13.7: `waiting_gate.breaker`) takes `approve` (Resume: the paused step runs again from its
+    start, told why) or `reject` (Cancel run) and nothing else (`422 breaker_decision_invalid`);
+    its `node_id` is the paused step's."""
     if body.dismissed and body.decision != "approve":
         refused = EditErrorDetail(
             code="dismiss_not_allowed",
@@ -1202,6 +1212,9 @@ async def approve(run_id: UUID, body: ApprovalRequest, request: Request) -> Appr
     except (InvalidSelectionError, InvalidDismissalError) as e:
         detail = EditErrorDetail(code=e.code, message=str(e))
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail.model_dump()) from e
+    except InvalidBreakerDecisionError as e:
+        refused = EditErrorDetail(code="breaker_decision_invalid", message=str(e))
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, refused.model_dump()) from e
     except ApprovalError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     await enqueue_run(request.app.state.redis, run_id)

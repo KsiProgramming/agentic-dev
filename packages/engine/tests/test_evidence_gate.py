@@ -141,13 +141,19 @@ class Run:
         self.spec = workflow
         self.tools = tools
         self.readable = ReadableWriters(lambda node: f"agent/run/{node}")
+        # Each repetition differs, as a writer's work does: the same call five times in one step
+        # is what the repeat breaker (13.7) pauses.
         script = [
-            CallTool("repo.write_file", {"path": "a.js", "content": "x"}),
-            CallTool("repo.commit", {"message": "work"}),
-            Message(text="Done."),
-            ECHO_USAGE,
+            step
+            for i in range(writes)
+            for step in (
+                CallTool("repo.write_file", {"path": "a.js", "content": f"x{i}"}),
+                CallTool("repo.commit", {"message": f"work {i}"}),
+                Message(text="Done."),
+                ECHO_USAGE,
+            )
         ]
-        self.runtime = FakeRuntime({"writer": script * writes}, tools=tools)
+        self.runtime = FakeRuntime({"writer": script}, tools=tools)
         self.run_id: UUID = uuid4()
         self.sink = InMemoryEventSink()
         self.checkpointer = InMemorySaver(serde=checkpoint_serde())

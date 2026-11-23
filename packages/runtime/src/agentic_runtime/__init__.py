@@ -30,6 +30,7 @@ from agentic_runtime.pricing import (
 from agentic_runtime.protocol import AgentRun, AgentRuntime
 from agentic_runtime.request import AgentRequest, Provider
 from agentic_runtime.tools import (
+    DeclaredPaths,
     ProtectedPaths,
     ProtectRule,
     ReadableWriter,
@@ -38,6 +39,7 @@ from agentic_runtime.tools import (
     ToolExecutor,
     ToolOutput,
     WorkRefused,
+    declared_refusal_text,
     no_commits_text,
     refusal_text,
 )
@@ -56,6 +58,7 @@ __all__ = [
     "Completed",
     "ContractViolation",
     "CopilotRuntime",
+    "DeclaredPaths",
     "Failed",
     "Message",
     "ModelPrice",
@@ -78,6 +81,7 @@ __all__ = [
     "WorkRefused",
     "agent_event_adapter",
     "check_events",
+    "declared_refusal_text",
     "is_terminal",
     "no_commits_text",
     "refusal_text",

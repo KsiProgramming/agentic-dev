@@ -1,4 +1,5 @@
 import { parseArtifacts, type ArtifactVersion } from "./artifacts/artifacts";
+import { parseBreaker, type BreakerTrip } from "./breaker";
 import { parseEvidence, type Evidence } from "./evidence";
 import { parseReview, type Review } from "./review";
 import type { RunEvent } from "./types";
@@ -156,6 +157,14 @@ export interface PendingGate {
   review: Review | null;
   /** The run's refused tries to change a protected path so far (13.5), most tried first. */
   protectedAttempts: ProtectedAttempt[];
+  /** Set when a circuit breaker paused the run (13.7), not a gate: what it saw. The decision is
+   * Resume or Cancel run, and nothing else. */
+  breaker: BreakerTrip | null;
+}
+
+/** The title of a pause a circuit breaker caused. */
+export function pausedTitle(trip: BreakerTrip): string {
+  return `Paused: ${trip.reason}`;
 }
 
 /** What a `wait_for` waits for: a comment on the issue after the one the platform posted. */
@@ -261,12 +270,21 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         evidence,
         review,
       } = event.payload ?? {};
+      const trip =
+        typeof event.payload?.breaker === "string"
+          ? parseBreaker(
+              events
+                .slice(0, i)
+                .findLast((e) => e.type === "breaker_tripped" && e.node_id === event.node_id)
+                ?.payload,
+            )
+          : null;
       const iteration = events
         .slice(0, i + 1)
         .filter((e) => e.type === "gate_waiting" && e.node_id === event.node_id).length;
       return {
         nodeId: event.node_id,
-        title: typeof title === "string" ? title : "Approve?",
+        title: trip ? pausedTitle(trip) : typeof title === "string" ? title : "Approve?",
         prompt: typeof prompt === "string" ? prompt : null,
         artifact: typeof artifact === "string" ? artifact : "",
         changes: parseChanges(changes),
@@ -284,6 +302,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         evidence: parseEvidence(evidence),
         review: parseReview(review),
         protectedAttempts: attemptsFromEvents(events.slice(0, i)),
+        breaker: trip,
       };
     }
   }

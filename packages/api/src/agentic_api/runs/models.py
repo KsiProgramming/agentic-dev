@@ -388,7 +388,12 @@ class EditErrorDetail(BaseModel):
     showed, or its selection the items it showed (6.7): `code` says how, `path` names the file at
     fault, if one is."""
 
-    code: EditErrorCode | SelectionErrorCode | DismissalErrorCode
+    code: (
+        EditErrorCode
+        | SelectionErrorCode
+        | DismissalErrorCode
+        | Literal["breaker_decision_invalid"]
+    )
     message: str
     path: str | None = None
 
@@ -473,10 +478,35 @@ class WaitingGate(BaseModel):
         'console shows "Waiting for answers" and Check now, and the Inbox no Approve.',
     )
     title: str | None = None
+    breaker: Literal["repeat", "cost", "paths", "flip_flop"] | None = Field(
+        default=None,
+        description="Set when a circuit breaker paused the run (13.7), not a gate: which one. "
+        'The console shows "Paused", Resume and Cancel run.',
+    )
+    reason: str | None = Field(
+        default=None, description="Why the breaker paused the run: one fixed sentence."
+    )
     expires_at: datetime | None = Field(
         default=None,
-        description='When the gate expires: the run is then cancelled ("Approval expired").',
+        description='When the gate expires: the run is then cancelled ("Approval expired", or '
+        '"Breaker pause expired" for a circuit-breaker pause).',
     )
+
+
+class GateBreaker(BaseModel):
+    """The circuit breaker that paused a run (13.7), as the engine recorded it
+    (`breaker_tripped`). `details` is what was seen (the tool, its arguments cut short, its
+    error, the path or the cost): model and repo output, so data, never instructions."""
+
+    breaker: Literal["repeat", "cost", "paths", "flip_flop"]
+    trigger: str = Field(description="What counted, e.g. `calls` or `errors` for `repeat`.")
+    threshold: float = Field(description="The limit the step crossed.")
+    observed: float = Field(description="What the step had reached.")
+    details: dict[str, JsonValue] = Field(
+        description="What was seen: for `repeat` the `tool`, its `arguments` and, for `errors`, "
+        "the `error`."
+    )
+    reason: str = Field(description="One fixed sentence per breaker, shown as the reason.")
 
 
 class GateBranch(BaseModel):
@@ -546,6 +576,12 @@ class RunGate(BaseModel):
         default_factory=list[GateProtectedAttempt],
         description="The run's refused attempts to change a protected path so far (13.5), most "
         "tried first, at most 50; empty when no writer tried.",
+    )
+    breaker: GateBreaker | None = Field(
+        default=None,
+        description="Set when a circuit breaker paused the run (13.7) and not a gate: which "
+        "breaker and what it saw. The decision is `approve` (Resume) or `reject` (Cancel run); "
+        "nothing else is accepted.",
     )
     review: ReviewShown | None = Field(
         default=None,
@@ -655,6 +691,11 @@ class RunSummary(BaseModel):
         default=0,
         description="How many times a writer tried to change a protected path (13.5): each "
         "refused write or commit, counted once. 0 for most runs.",
+    )
+    breaker_trips: int = Field(
+        default=0,
+        description="How many times a circuit breaker paused the run (13.7), counted once per "
+        "pause. 0 for most runs.",
     )
     active_ms: int | None = Field(
         description="Time spent executing: the run's duration. Time paused at a gate is not "

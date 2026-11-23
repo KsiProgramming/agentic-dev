@@ -8,6 +8,7 @@ import {
   evidencePack,
   judgedEvidencePack,
   FAILING,
+  REPEATER,
   REPO_READER,
   startReviewRun,
   startRun,
@@ -390,6 +391,34 @@ test("runs, with a run's menu open", async ({ page, request }) => {
   await expect(page.getByRole("menuitem", { name: "Rerun" })).toBeVisible();
   await expectNoHorizontalScroll(page);
   await screenshot(page, "runs-row-menu");
+});
+
+test("a run paused by a circuit breaker", async ({ page, request }) => {
+  const runId = await startRun(request, [REPEATER], "E2E paused layout", DOCS_DEMO_URL);
+  await page.goto(`/runs/${runId}`);
+  const dock = page.getByTestId("approval-dock").filter({ visible: true });
+  await expect(dock).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("run-banner")).toHaveAttribute("data-kind", "paused");
+  await checkPage(page, "run-paused");
+
+  // As at a gate, the whole dock is in the viewport with its buttons, and fits its width.
+  const viewport = page.viewportSize()!;
+  const box = (await dock.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  for (const name of [/Resume/, /Cancel run/, "Review details"]) {
+    await expect(dock.getByRole("button", { name })).toBeInViewport({ ratio: 1 });
+  }
+  await request.post(`${apiURL}/runs/${runId}/cancel`);
+});
+
+test("inbox, with a paused run under review", async ({ page, request }) => {
+  const runId = await startRun(request, [REPEATER], "E2E paused inbox layout", DOCS_DEMO_URL);
+  await page.goto(`/inbox?run=${runId}`);
+  const review = page.getByTestId("inbox-review").filter({ visible: true });
+  await expect(review.getByTestId("breaker-details")).toBeVisible({ timeout: 60_000 });
+  await checkPage(page, "inbox-paused");
+  await request.post(`${apiURL}/runs/${runId}/cancel`);
 });
 
 test("a run waiting at a gate", async ({ page, request }) => {

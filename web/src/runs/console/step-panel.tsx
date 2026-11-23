@@ -74,7 +74,7 @@ export function StepPanel({
   const { step } = row;
   const usage = stepUsage(step);
   const ms = elapsedMs(step.startedAt, step.endedAt, now);
-  const badge = stepBadge(step.status);
+  const badge = stepBadge(step.status, step.pausedNow);
   const children = childRows(entries, row);
   return (
     <section

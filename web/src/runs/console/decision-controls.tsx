@@ -6,6 +6,7 @@ import {
   ListChecksIcon,
   LoaderCircleIcon,
   MessageSquareIcon,
+  PlayIcon,
   XIcon,
 } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
@@ -33,6 +34,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { MD_UP, useMediaQuery } from "@/lib/use-media-query";
 
 import { ArtifactCards } from "../artifacts/artifact-cards";
+import { BreakerDetails } from "./breaker-details";
 import type { PendingGate } from "../gates";
 import { AgentMessage } from "./agent-message";
 import type { GateFile } from "./gate-files";
@@ -85,6 +87,29 @@ export function ApproveButton({
       >
         <ListChecksIcon aria-hidden="true" data-icon="inline-start" />
         {choice.select.items === "findings" ? "Choose findings" : "Choose items"}
+        {shortcut ? <Kbd onPrimary>A</Kbd> : null}
+      </Button>
+    );
+  }
+  if (decision.gate.breaker) {
+    // A circuit-breaker pause takes Resume and Cancel run, and nothing else (13.7).
+    return (
+      <Button
+        type="button"
+        onClick={() => void decision.decide("approve")}
+        disabled={decision.busy}
+        aria-keyshortcuts={shortcut ? "A" : undefined}
+      >
+        {decision.pending === "approve" ? (
+          <LoaderCircleIcon
+            aria-hidden="true"
+            data-icon="inline-start"
+            className="motion-safe:animate-spin"
+          />
+        ) : (
+          <PlayIcon aria-hidden="true" data-icon="inline-start" />
+        )}
+        Resume
         {shortcut ? <Kbd onPrimary>A</Kbd> : null}
       </Button>
     );
@@ -145,12 +170,16 @@ export function RejectButton({
       disabled={decision.busy}
       aria-keyshortcuts={shortcut ? "R" : undefined}
     >
-      {decision.gate.onReject === "end" ? (
+      {decision.gate.onReject === "end" || decision.gate.breaker ? (
         <CircleStopIcon aria-hidden="true" data-icon="inline-start" />
       ) : (
         <XIcon aria-hidden="true" data-icon="inline-start" />
       )}
-      {decision.gate.onReject === "end" ? "End run here" : "Reject"}
+      {decision.gate.breaker
+        ? "Cancel run"
+        : decision.gate.onReject === "end"
+          ? "End run here"
+          : "Reject"}
       {shortcut ? <Kbd>R</Kbd> : null}
     </Button>
   );
@@ -306,10 +335,13 @@ export function GateDecisionDialogs({ decision }: { decision: GateDecision }) {
             <SheetHeader>
               <SheetTitle>{gate.title}</SheetTitle>
               <SheetDescription>
-                {gate.prompt ?? "Review what the run produced before it goes on."}
+                {gate.breaker
+                  ? "Resume runs the paused step again from its start, told why it was paused."
+                  : (gate.prompt ?? "Review what the run produced before it goes on.")}
               </SheetDescription>
             </SheetHeader>
             <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+              {gate.breaker ? <BreakerDetails trip={gate.breaker} /> : null}
               <EvidenceStrip evidence={gate.evidence} review={gate.review} />
               <ProtectedAttempts attempts={gate.protectedAttempts} />
               <ReviewComments
@@ -469,14 +501,18 @@ function RejectDialog({ decision }: { decision: GateDecision }) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {gate.onReject === "end"
-              ? `End the run at “${gate.title}”?`
-              : `Reject “${gate.title}”?`}
+            {gate.breaker
+              ? "Cancel this run?"
+              : gate.onReject === "end"
+                ? `End the run at “${gate.title}”?`
+                : `Reject “${gate.title}”?`}
           </DialogTitle>
           <DialogDescription>
-            {gate.onReject === "end"
-              ? "The run completes here, without the steps after the gate."
-              : "The run stops here and nothing after the gate happens."}
+            {gate.breaker
+              ? "The run stops here and the steps after the paused one do not run. Its sandbox is kept."
+              : gate.onReject === "end"
+                ? "The run completes here, without the steps after the gate."
+                : "The run stops here and nothing after the gate happens."}
             {edits.count > 0 ? ` Your edits to ${plural(edits.count, "file")} are dropped.` : ""}
           </DialogDescription>
         </DialogHeader>
@@ -524,7 +560,7 @@ function RejectDialog({ decision }: { decision: GateDecision }) {
                 className="motion-safe:animate-spin"
               />
             ) : null}
-            {gate.onReject === "end" ? "End run here" : "Reject"}
+            {gate.breaker ? "Cancel run" : gate.onReject === "end" ? "End run here" : "Reject"}
           </Button>
         </DialogFooter>
       </DialogContent>

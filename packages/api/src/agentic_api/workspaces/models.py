@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, field_validator
 
 from agentic_engine.policy import (
+    BREAKER_RANGES,
     BUDGET_MAX_USD,
     BUDGET_MIN_USD,
     CEILINGS,
@@ -292,6 +293,67 @@ def _limit(most: int, what: str) -> Any:
     )
 
 
+class BreakerThresholds(BaseModel):
+    """The thresholds of the four circuit breakers (13.7)."""
+
+    repeat_calls: int = Field(description="Calls of one tool with the same arguments in a step.")
+    repeat_errors: int = Field(description="Errors with the same text from one tool in a step.")
+    cost_multiple: float = Field(description="A step's cost as a multiple of its node's average.")
+    cost_floor_usd: float = Field(
+        description="USD a step must also cost above its node's average to trip."
+    )
+    flip_flops: int = Field(description="Times a step rewrites a file back to an earlier content.")
+
+
+class BreakerRange(BaseModel):
+    min: float
+    max: float
+
+
+def _breaker_field(name: str, what: str) -> Any:
+    low, high = BREAKER_RANGES[name]
+    return Field(
+        default=None,
+        ge=low,
+        le=high,
+        description=f"{what} From {low:g} to {high:g}; unset keeps the platform's.",
+    )
+
+
+class BreakerOverridesIn(BaseModel):
+    """The workspace's own breaker thresholds, each within its platform range; unset keeps the
+    platform's. No value turns a breaker off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repeat_calls: int | None = _breaker_field(
+        "repeat_calls", "Calls of one tool with the same arguments in a step."
+    )
+    repeat_errors: int | None = _breaker_field(
+        "repeat_errors", "Errors with the same text from one tool in a step."
+    )
+    cost_multiple: float | None = _breaker_field(
+        "cost_multiple", "A step's cost as a multiple of its node's average."
+    )
+    cost_floor_usd: float | None = _breaker_field(
+        "cost_floor_usd", "USD a step must also cost above its node's average to trip."
+    )
+    flip_flops: int | None = _breaker_field(
+        "flip_flops", "Times a step rewrites a file back to an earlier content."
+    )
+
+
+class BreakerSettings(BaseModel):
+    """The circuit-breaker thresholds the workspace's new runs get (13.7): each of its
+    `overrides`, else the platform's `defaults`, within `ranges`. A workflow may set its own
+    within the same ranges; a run keeps the thresholds it was created with."""
+
+    defaults: BreakerThresholds
+    ranges: dict[str, BreakerRange]
+    overrides: BreakerOverridesIn
+    effective: BreakerThresholds
+
+
 class RunLimitOverrides(BaseModel):
     """The workspace's own limits, each at or below the platform's; unset keeps the platform's."""
 
@@ -331,6 +393,12 @@ class RunLimitOverrides(BaseModel):
         "platform ceiling."
     )
 
+    breakers: BreakerOverridesIn | None = Field(
+        default=None,
+        description="The workspace's circuit-breaker thresholds (13.7); unset keeps the "
+        "platform's.",
+    )
+
     @classmethod
     def of(cls, overrides: PolicyOverrides) -> "RunLimitOverrides":
         return cls.model_validate(overrides.model_dump())
@@ -353,6 +421,10 @@ class WorkspacePolicyOut(BaseModel):
     )
     overrides: RunLimitOverrides
     effective: RunLimits
+    breakers: BreakerSettings = Field(
+        description="The circuit-breaker thresholds (13.7): defaults, ranges, the workspace's "
+        "own and the effective ones."
+    )
 
 
 class AuditActor(BaseModel):

@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from agentic_engine.policy import (
     BUDGET_MAX_USD,
     BUDGET_MIN_USD,
+    BreakerOverrides,
     Policy,
     PolicyOverrides,
     effective_policy,
+    with_breakers,
     with_budget,
 )
 from agentic_engine.providers import ResolvedProviders
@@ -83,6 +85,8 @@ async def replace_policy_overrides(
             session.add(row)
         for name, value in overrides.model_dump().items():
             setattr(row, name, value)
+        if overrides.breakers is not None:
+            row.breakers = overrides.breakers.model_dump(exclude_none=True) or None
         row.updated_at = datetime.now(UTC)
 
 
@@ -100,6 +104,9 @@ async def run_policy(
     spec that calls other workflows is checked expanded, each issue inside one on its call."""
     overrides = await _overrides(session, workspace_id)
     policy = with_budget(effective_policy(overrides), budget_usd, spec.budget_usd)
+    policy = with_breakers(
+        policy, spec.breakers.model_dump(exclude_none=True) if spec.breakers else None
+    )
     issues = policy_issues(spec.root, policy)
     if policy.budget_usd is not None:
         prices = await price_table(session, workspace_id)
@@ -202,4 +209,5 @@ async def _overrides(session: AsyncSession, workspace_id: UUID) -> PolicyOverrid
         sandbox_ttl_s=row.sandbox_ttl_s,
         branch_retention_days=row.branch_retention_days,
         review_rounds=row.review_rounds,
+        breakers=BreakerOverrides.model_validate(row.breakers) if row.breakers else None,
     )

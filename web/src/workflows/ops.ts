@@ -44,6 +44,7 @@ const DOCUMENT_PARAMS = new Set([
   "input",
   "input_schema",
   "output_schema",
+  "breakers",
 ]);
 const DEFAULT_ROUTE = "default";
 

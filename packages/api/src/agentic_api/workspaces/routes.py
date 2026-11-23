@@ -11,6 +11,10 @@ from agentic_api.workspaces.claude_keys import ClaudeKeyVerifier
 from agentic_api.workspaces.models import (
     AuditEventOut,
     AuditPage,
+    BreakerOverridesIn,
+    BreakerRange,
+    BreakerSettings,
+    BreakerThresholds,
     ConnectionErrorDetail,
     ConnectionOut,
     LongContextPrice,
@@ -27,7 +31,7 @@ from agentic_api.workspaces.models import (
     WorkspacePolicyOut,
     WorkspacePricing,
 )
-from agentic_engine.policy import PLATFORM_POLICY, effective_policy
+from agentic_engine.policy import BREAKER_RANGES, PLATFORM_POLICY, effective_policy
 from agentic_runtime import DEFAULT_PRICES, PRICES_AS_OF
 from agentic_runtime.pricing import DEFAULT_CREDIT_USD
 from agentic_secrets import KeyProvider
@@ -297,6 +301,16 @@ async def _policy(
         ceilings=RunLimits.ceilings(),
         overrides=RunLimitOverrides.of(overrides),
         effective=RunLimits.of(effective_policy(overrides)),
+        breakers=BreakerSettings(
+            defaults=BreakerThresholds.model_validate(PLATFORM_POLICY.breakers.model_dump()),
+            ranges={n: BreakerRange(min=lo, max=hi) for n, (lo, hi) in BREAKER_RANGES.items()},
+            overrides=BreakerOverridesIn.model_validate(
+                overrides.breakers.model_dump() if overrides.breakers else {}
+            ),
+            effective=BreakerThresholds.model_validate(
+                effective_policy(overrides).breakers.model_dump()
+            ),
+        ),
     )
 
 

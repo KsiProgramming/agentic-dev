@@ -115,6 +115,7 @@ from agentic_engine.artifacts import (
     write_artifact,
 )
 from agentic_engine.branches import BranchSaver, owner_node
+from agentic_engine.breakers import BreakerTripped, BreakerWatch, paused_before_text
 from agentic_engine.budget import BudgetMeter
 from agentic_engine.commit import run_commit_node
 from agentic_engine.events import (
@@ -253,6 +254,32 @@ type CompiledWorkflow = CompiledStateGraph[RunState]
 type StepNode = AgentNode | ToolNode | GateNode
 
 
+def _baselines(stored: Mapping[str, JsonValue] | None) -> dict[str, float]:
+    """The USD each node usually costs, from a run's stored `cost_baselines`."""
+    found: dict[str, float] = {}
+    for node, entry in (stored or {}).items():
+        mean = entry.get("mean_usd") if isinstance(entry, dict) else None
+        if isinstance(mean, int | float):
+            found[node] = float(mean)
+    return found
+
+
+def _with_pause(context: str, paused: Mapping[str, JsonValue] | None) -> str:
+    """`context` with the "# Paused before" section of a node a breaker paused (13.7)."""
+    if paused is None:
+        return context
+    note = paused_before_text(paused)
+    return f"{context}\n\n{note}" if context else note
+
+
+def _watch(node_id: str, limits: "_Limits", paths: Sequence[str] | None = None) -> BreakerWatch:
+    """The circuit-breaker watch of one execution of the agent step `node_id` (13.7): with its
+    node's usual cost, if the run has a baseline for it, and the paths it declared."""
+    return BreakerWatch(
+        node_id, limits.policy.breakers, average_usd=limits.baselines.get(node_id), paths=paths
+    )
+
+
 class CompileError(ValueError):
     """The spec uses something this compiler does not support yet."""
 
@@ -295,6 +322,14 @@ class _Limits:
     parallel_loops: dict[str, str] = field(default_factory=dict[str, str])
     """Each parallel in a loop's body → the innermost loop around it (13.6): its branches' outcomes
     are kept per pass, so a later pass never joins an earlier one's."""
+    baselines: dict[str, float] = field(default_factory=dict[str, float])
+    """What each node usually costs, in USD per execution (13.7): the cost breaker watches the
+    nodes that have one."""
+    pauses: dict[str, Mapping[str, JsonValue]] = field(
+        default_factory=dict[str, Mapping[str, JsonValue]]
+    )
+    """The `breaker_tripped` payload of each node a circuit breaker paused (13.7), until the node's
+    next run takes it (`take_pause`): that run is told why it was paused."""
     evidence_loops: dict[str, tuple[str, int]] = field(default_factory=dict[str, tuple[str, int]])
     """Each gate with evidence (13.3) → its loop's id and `max_iterations`: the checks never send
     the work back on the loop's last pass, which would end the loop with the work unapproved."""
@@ -326,15 +361,31 @@ class _Limits:
         writers: Sequence[ReadableWriter],
         reads_as: str | None,
         reviewing: str | None = None,
+        paused: Mapping[str, JsonValue] | None = None,
     ) -> str:
-        """The context `node` is told: the run's, then the work before it (13.1)."""
+        """The context `node` is told: the run's, then the work before it (13.1), the paths it
+        may not change (13.5) and, if a circuit breaker paused its last attempt, why (13.7)."""
         work = work_before_text(node, writers, self.roles, reads_as, reviewing)
         if self.protected is not None and WRITE_TOOLS.intersection(node.tools):
             key = reads_as or node.id
             owner = key.partition(".")[0]
             guard = protected_text(self.protected.rules_for(key), self.allow.get(owner, ()))
             work = f"{work}\n\n{guard}" if work else guard
+        if node.paths:
+            only = ", ".join(f"`{g}`" for g in node.paths)
+            note = (
+                "# Declared paths\n\nYou may write only these paths: a write anywhere else "
+                f"is refused and pauses the run for a person.\n\n- {only}"
+            )
+            work = f"{work}\n\n{note}" if work else note
+        if paused is not None:
+            note = paused_before_text(paused)
+            work = f"{work}\n\n{note}" if work else note
         return f"{self.context}\n\n{work}" if work and self.context else work or self.context
+
+    def take_pause(self, node_id: str) -> Mapping[str, JsonValue] | None:
+        """The trip that paused `node_id`, once: only the node's next run is told about it."""
+        return self.pauses.pop(node_id, None)
 
     def announce(self, writers: Sequence[ReadableWriter]) -> None:
         """Tell the repo tools which writers the step that is about to run may read."""
@@ -521,6 +572,8 @@ def compile_workflow(
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
     protected: ProtectedPaths | None = None,
+    paused: Mapping[str, Mapping[str, JsonValue]] | None = None,
+    cost_baselines: Mapping[str, JsonValue] | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
     commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
@@ -533,7 +586,10 @@ def compile_workflow(
     `checkpointer`, the state is saved after each node, in the run's thread; a spec with a gate
     needs one, since a paused run continues from it. The run's agents are held to `policy`'s
     `agents_alive` and `agents_spawned`, and their usage to `budget`; the spec itself is checked
-    against it before the run (`policy_errors`)."""
+    against it before the run (`policy_errors`). `paused` is the `breaker_tripped` payload of each
+    node a circuit breaker paused, for a run resumed after it (13.7): the node's next run is told
+    why, in its context. `cost_baselines` is what each node usually costs
+    (`{node_id: {mean_usd, runs}}`), for the cost breaker."""
     if log is None:
         log = RunEventLog(uuid4(), NullEventSink())
     steps = step_nodes(spec.root)
@@ -560,6 +616,8 @@ def compile_workflow(
     limits.parallel_loops = _parallel_loops(spec.root)
     limits.providers = providers
     limits.readable = readable
+    limits.pauses = dict(paused or {})
+    limits.baselines = _baselines(cost_baselines)
     if protected is not None:
         limits.protected = protected
         policy_paths = spec.protect
@@ -1328,10 +1386,25 @@ async def _run_step(
         node = node.model_copy(update={"output_schema": FINDINGS_SCHEMA})
         reviewing, input, review_started = built
 
+    # One watch per execution of a step that runs an agent (13.7); a step that a breaker paused
+    # last time is told why.
+    paused = limits.take_pause(node.id) if isinstance(node, AgentNode) else None
+    declared = node.paths if isinstance(node, AgentNode) else None
+    if declared is not None and limits.protected is not None:
+        # The repo tools refuse a write outside them too, whatever order a provider emits in.
+        limits.protected.declared.set(route_as or node.id, declared)
+    watch = (
+        None
+        if isinstance(node, ToolNode | GateNode | WaitForNode)
+        else _watch(node.id, limits, declared)
+    )
+
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item, branch)
         if isinstance(event, Usage) and limits.budget is not None:
             limits.budget.add(event, node.id)
+        if watch is not None:
+            watch.see(event)
 
     # Streamed text is merged so the log gets at most one `text_delta` per 250 ms.
     buffer = DeltaBuffer(write)
@@ -1391,7 +1464,7 @@ async def _run_step(
                         input,
                         on_event,
                         route_as,
-                        limits.work_text(node, writers, route_as, reviewing),
+                        limits.work_text(node, writers, route_as, reviewing, paused),
                         limits.resolved(node.id),
                     )
 
@@ -1422,6 +1495,12 @@ async def _run_step(
             }
         if review_started is not None:
             started = {**(started or {}), "review": review_started}
+        if paused is not None:
+            after: dict[str, JsonValue] = {
+                "breaker": paused.get("breaker"),
+                "reason": paused.get("reason"),
+            }
+            started = {**(started or {}), "resumed_after": after}
         await log.emit(NODE_STARTED, node_id=node.id, payload=started, item=item, branch=branch)
     if reads:
         try:
@@ -1442,7 +1521,7 @@ async def _run_step(
             result = await run()
         finally:
             await buffer.close()
-    except (asyncio.CancelledError, PolicyLimitExceeded):
+    except (asyncio.CancelledError, PolicyLimitExceeded, BreakerTripped):
         await log.emit(NODE_CANCELLED, node_id=node.id, item=item, branch=branch)
         raise
     port: PortFailure | None = None
@@ -2872,10 +2951,13 @@ async def _classify(
     )
     log, limits = scope.log, scope.limits
 
+    watch = _watch(router.id, limits)
+
     async def write(event: AgentEvent) -> None:
         await log.agent_event(router.id, event, scope.item, scope.branch)
         if isinstance(event, Usage) and limits.budget is not None:
             limits.budget.add(event, router.id)
+        watch.see(event)
 
     buffer = DeltaBuffer(write)
     try:
@@ -2886,12 +2968,12 @@ async def _classify(
                     scope.runtime,
                     input,
                     buffer.emit,
-                    context=limits.context,
+                    context=_with_pause(limits.context, limits.take_pause(router.id)),
                     resolved=limits.resolved(router.id),
                 )
         finally:
             await buffer.close()
-    except (asyncio.CancelledError, PolicyLimitExceeded):
+    except (asyncio.CancelledError, PolicyLimitExceeded, BreakerTripped):
         await log.emit(NODE_CANCELLED, node_id=router.id, **scope.tag())
         raise
     return _check_output(agent, result)
@@ -2966,10 +3048,13 @@ async def _plan(
     )
     log, limits = scope.log, scope.limits
 
+    watch = _watch(orchestrator.id, limits)
+
     async def write(event: AgentEvent) -> None:
         await log.agent_event(orchestrator.id, event)
         if isinstance(event, Usage) and limits.budget is not None:
             limits.budget.add(event, orchestrator.id)
+        watch.see(event)
 
     buffer = DeltaBuffer(write)
     try:
@@ -2981,12 +3066,17 @@ async def _plan(
                     scope.runtime,
                     input,
                     buffer.emit,
-                    context=limits.work_text(agent, scope.writers, orchestrator.id),
+                    context=limits.work_text(
+                        agent,
+                        scope.writers,
+                        orchestrator.id,
+                        paused=limits.take_pause(orchestrator.id),
+                    ),
                     resolved=limits.resolved(orchestrator.id),
                 )
         finally:
             await buffer.close()
-    except (asyncio.CancelledError, PolicyLimitExceeded):
+    except (asyncio.CancelledError, PolicyLimitExceeded, BreakerTripped):
         await log.emit(NODE_CANCELLED, node_id=orchestrator.id)
         raise
     return _check_output(agent, result)

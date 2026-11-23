@@ -36,8 +36,17 @@ from agentic_engine.events import RunEventLog
 from agentic_engine.graph import checkpoint_serde
 from agentic_engine.policy import PolicyOverrides, effective_policy
 from agentic_engine.spec import AgentNode, SequenceNode, WorkflowSpec, parse_spec
-from agentic_runtime import AgentRuntime, Failed
-from agentic_runtime.fake import FakeRuntime
+from agentic_runtime import (
+    AgentRequest,
+    AgentRun,
+    AgentRuntime,
+    Failed,
+    Message,
+    ToolOutput,
+    Usage,
+)
+from agentic_runtime.fake import CallTool, FakeRuntime, Step
+from agentic_runtime.testing import ScriptedToolExecutor
 from agentic_secrets import KEY_BYTES, LocalKeyProvider
 from agentic_store import (
     DEFAULT_WORKSPACE_ID,
@@ -48,6 +57,7 @@ from agentic_store import (
     Workspace,
     create_run,
     delete_connection,
+    enqueue_run,
     get_run,
     get_run_summary,
     mark_jira_needs_attention,
@@ -1889,3 +1899,136 @@ async def test_dismissals_are_refused_where_there_is_no_review_to_dismiss(
     assert approve.status_code == 422, approve.text
     assert approve.json()["detail"]["code"] == "dismiss_not_allowed"
     assert gate.status_code == 200 and gate.json()["review"] is None
+
+
+# Circuit breakers (13.7)
+
+
+class RepeatsThenFinishes:
+    """An agent runtime whose `b` repeats a failing call the first time it runs and answers the
+    next time."""
+
+    def __init__(self) -> None:
+        missing = ScriptedToolExecutor(
+            {"repo.read_file": ToolOutput(text="no such file", is_error=True)}
+        )
+        usage = Usage(model="m", input_tokens=1, output_tokens=1, estimated_usd=0.0)
+        calls: list[Step] = [CallTool("repo.read_file", {"path": "gone.md"}) for _ in range(6)]
+        self._trips = FakeRuntime({"b": [*calls, usage]}, tools=missing)
+        self._fine = FakeRuntime({"b": [Message(text="it is gone"), usage]}, tools=missing)
+        self.asked = 0
+
+    def start(self, request: AgentRequest) -> AgentRun:
+        if request.node_id != "b":
+            return self._fine.start(request)
+        self.asked += 1
+        return (self._trips if self.asked == 1 else self._fine).start(request)
+
+
+def breaker_spec() -> WorkflowSpec:
+    return parse_spec(
+        {
+            "spec_version": "0",
+            "id": "breakers",
+            "name": "Breakers",
+            "root": {
+                "type": "sequence",
+                "id": "main",
+                "steps": [
+                    {"type": "agent", "id": "a", "role": "A", "instructions": "Go."},
+                    {
+                        "type": "agent",
+                        "id": "b",
+                        "role": "B",
+                        "instructions": "Read the file.",
+                        "tools": ["repo.read_file"],
+                    },
+                ],
+            },
+        }
+    )
+
+
+async def paused_by_a_breaker(sessions: async_sessionmaker[AsyncSession], redis_url: str) -> UUID:
+    run_id = await create_run(sessions, breaker_spec(), "go")
+    redis = Redis.from_url(redis_url)  # pyright: ignore[reportUnknownMemberType]
+    try:
+        await enqueue_run(redis, run_id)
+    finally:
+        await redis.aclose()
+    async with asyncio.timeout(15):
+        while True:
+            run = await get_run(sessions, run_id)
+            if run is not None and run.status == "waiting":
+                return run_id
+            await asyncio.sleep(0.05)
+
+
+async def test_a_breaker_pause_is_read_through_the_api_and_resumed_with_approve(
+    sessions: async_sessionmaker[AsyncSession], postgres_url: str, redis_url: str
+) -> None:
+    runtime = RepeatsThenFinishes()
+    async with (
+        worker(postgres_url, redis_url, runtime=runtime),
+        api(postgres_url, redis_url) as client,
+    ):
+        run_id = await paused_by_a_breaker(sessions, redis_url)
+
+        detail = await client.get(f"/runs/{run_id}")
+        listed = await client.get("/runs")
+        gate = await client.get(f"/runs/{run_id}/gate")
+        refused = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={
+                "node_id": "b",
+                "decision": "changes",
+                "comments": [{"item": "x", "text": "no"}],
+            },
+        )
+        edited = await client.post(
+            f"/runs/{run_id}/approvals",
+            json={
+                "node_id": "b",
+                "decision": "approve",
+                "edits": [{"node_id": "b", "path": "a.md", "content": "x"}],
+            },
+        )
+        still = await client.get(f"/runs/{run_id}")
+        resumed = await client.post(
+            f"/runs/{run_id}/approvals", json={"node_id": "b", "decision": "approve"}
+        )
+        async with asyncio.timeout(15):
+            while True:
+                if (await client.get(f"/runs/{run_id}")).json()["status"] == "completed":
+                    break
+                await asyncio.sleep(0.05)
+
+    body = detail.json()
+    assert body["status"] == "waiting"
+    assert body["breaker_trips"] == 1
+    assert body["waiting_gate"]["node_id"] == "b"
+    assert body["waiting_gate"]["breaker"] == "repeat"
+    assert body["waiting_gate"]["reason"] == (
+        "repo.read_file failed 3 times with the same error in one step"
+    )
+    assert body["waiting_gate"]["expires_at"] is not None
+    row = next(r for r in listed.json()["items"] if r["id"] == str(run_id))
+    assert row["waiting_gate"]["breaker"] == "repeat"
+    assert gate.status_code == 200, gate.text
+    shown = gate.json()
+    assert shown["node_id"] == "b"
+    assert shown["breaker"]["breaker"] == "repeat"
+    assert shown["breaker"]["trigger"] == "errors"
+    assert (shown["breaker"]["threshold"], shown["breaker"]["observed"]) == (3, 3)
+    assert shown["breaker"]["details"] == {
+        "tool": "repo.read_file",
+        "arguments": {"path": "gone.md"},
+        "error": "no such file",
+    }
+    for response in (refused, edited):
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "breaker_decision_invalid"
+    assert still.json()["status"] == "waiting"
+    assert resumed.status_code == 202, resumed.text
+    assert resumed.json()["decision"] == "approve"
+    assert runtime.asked == 2

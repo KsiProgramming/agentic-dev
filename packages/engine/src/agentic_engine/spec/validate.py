@@ -15,6 +15,7 @@ from agentic_engine.ports import schema_problem
 from agentic_engine.spec.models import (
     JIRA_WRITE_TOOLS,
     PLATFORM_TOOLS,
+    BreakersSpec,
     Node,
     OnReview,
     ProtectPolicy,
@@ -22,11 +23,13 @@ from agentic_engine.spec.models import (
     ValidationIssue,
     WorkflowInput,
     WorkflowSpec,
+    breakers_issues,
     budget_issues,
     in_run_order,
     input_artifacts,
     iter_nodes,
     on_review_issues,
+    paths_issues,
     policy_issues,
     protect_issues,
     structure_issues,
@@ -80,6 +83,8 @@ def validate_workflow(
     issues = document_port_issues(document) + issues + issue_from_issues(document, root)
     issues += document_on_review_issues(document, root)
     issues += document_protect_issues(document, root)
+    issues += document_breakers_issues(document)
+    issues += paths_issues(root)
     issues += structure_issues(root, document_input_artifacts(document))
     issues += tool_issues(root, known_tools)
     issues += writer_before_issues(root)
@@ -143,6 +148,14 @@ def document_protect_issues(document: Mapping[str, object], root: Node) -> list[
     if raw is None:
         return []
     return protect_issues(root, ProtectPolicy.model_validate(raw))
+
+
+def document_breakers_issues(document: Mapping[str, object]) -> list[ValidationIssue]:
+    """`breakers_issues` for the document's `breakers` (13.7), on no node."""
+    raw = document.get("breakers")
+    if raw is None:
+        return []
+    return breakers_issues(BreakersSpec.model_validate(raw))
 
 
 def issue_from_issues(document: Mapping[str, object], root: Node) -> list[ValidationIssue]:

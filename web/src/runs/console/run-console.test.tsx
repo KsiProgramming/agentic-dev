@@ -1389,3 +1389,166 @@ test("Check now says when Jira could not be read", async () => {
 
   await waitFor(() => expect(screen.getByRole("button", { name: "Check now" })).toBeTruthy());
 });
+
+// Circuit breakers (13.7)
+
+const REASON = "repo.read_file failed 3 times with the same error in one step";
+
+function pauseAtStep(source: FakeEventSource) {
+  const at = (seq: number, type: string, payload: RunEvent["payload"] = {}) => ({
+    ...runEvent(seq, type, payload),
+    node_id: "gate",
+  });
+  act(() => {
+    source.emit(runEvent(1, "run_started"));
+    source.emit(at(2, "node_started"));
+    source.emit(at(3, "node_cancelled"));
+    source.emit(
+      at(4, "breaker_tripped", {
+        breaker: "repeat",
+        trigger: "errors",
+        threshold: 3,
+        observed: 3,
+        details: {
+          tool: "repo.read_file",
+          arguments: { path: "docs/gone.md" },
+          error: "no such file: <img src=x onerror=alert(1)>",
+        },
+        reason: REASON,
+      }),
+    );
+    source.emit(
+      at(5, "gate_waiting", {
+        breaker: "repeat",
+        reason: REASON,
+        ttl_s: 600,
+        expires_at: new Date(Date.now() + 600_000).toISOString(),
+      }),
+    );
+  });
+}
+
+test("a paused run reads Paused, with a banner, a dock and the details of what tripped", async () => {
+  api(detail({ status: "waiting" }));
+  const source = show();
+  pauseAtStep(source);
+
+  expectStatus("waiting", "Paused");
+  const banner = screen.getByTestId("run-banner");
+  expect(banner.dataset.kind).toBe("paused");
+  expect(banner.textContent).toContain(`Paused by a circuit breaker: ${REASON}`);
+  expect(within(banner).getByRole("button", { name: "Go to step" })).toBeDefined();
+  expect(within(banner).getByRole("button", { name: /Resume/ })).toBeDefined();
+  expect(within(banner).getByRole("button", { name: /Cancel run/ })).toBeDefined();
+
+  const dock = screen.getByRole("region", { name: "Paused by a circuit breaker" });
+  expect(within(dock).getByRole("button", { name: /Resume/ })).toBeDefined();
+  expect(within(dock).getByRole("button", { name: /Cancel run/ })).toBeDefined();
+  expect(within(dock).queryByRole("button", { name: /Approve|Reject/ })).toBeNull();
+
+  const step = screen.getByTestId("step-panel");
+  expect(within(step).getByText("Paused")).toBeDefined();
+  const details = within(step).getByTestId("breaker-details");
+  expect(details.textContent).toContain("3 errors, reached 3");
+  expect(details.textContent).toContain("repo.read_file");
+  // Model output is text, never markup.
+  expect(details.textContent).toContain("<img src=x onerror=alert(1)>");
+  expect(details.querySelector("img")).toBeNull();
+  // The Breakers tile counts above zero only.
+  expect(screen.getByTestId("run-breakers").textContent).toBe("1");
+});
+
+test("a run with no pause has no Breakers tile", async () => {
+  api(detail({ status: "running" }));
+  const source = show();
+  act(() => source.emit(runEvent(1, "run_started")));
+
+  expect(screen.queryByTestId("run-breakers")).toBeNull();
+});
+
+test("Resume sends an approval for the paused step", async () => {
+  const fetch = api(detail({ status: "waiting" }), async () => APPROVED.clone());
+  const source = show();
+  pauseAtStep(source);
+
+  const dock = screen.getByRole("region", { name: "Paused by a circuit breaker" });
+  fireEvent.click(within(dock).getByRole("button", { name: /Resume/ }));
+
+  await within(dock).findByText(/Resumed\. The run carries on/);
+  expect(await approvals(fetch)[0]!.json()).toEqual({ node_id: "gate", decision: "approve" });
+});
+
+test("Cancel run asks first, then rejects the pause", async () => {
+  const fetch = api(detail({ status: "waiting" }), async () =>
+    json({ run_id: RUN_ID, node_id: "gate", decision: "reject", status: "queued" }, 202),
+  );
+  const source = show();
+  pauseAtStep(source);
+
+  const dock = screen.getByRole("region", { name: "Paused by a circuit breaker" });
+  fireEvent.click(within(dock).getByRole("button", { name: /Cancel run/ }));
+  const dialog = await screen.findByRole("dialog", { name: "Cancel this run?" });
+  expect(approvals(fetch)).toHaveLength(0);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
+
+  await waitFor(() => expect(approvals(fetch)).toHaveLength(1));
+  expect(await approvals(fetch)[0]!.json()).toEqual({ node_id: "gate", decision: "reject" });
+});
+
+test("a resumed step shows what it was paused for on its Input tab", async () => {
+  nav.search = "tab=input&step=gate";
+  api(detail({ status: "running" }));
+  const source = show();
+  pauseAtStep(source);
+  act(() => {
+    source.emit({ ...runEvent(6, "run_resumed", { attempt: 2 }) });
+    source.emit({
+      ...runEvent(7, "gate_decided", { decision: "approve", source: "breaker" }),
+      node_id: "gate",
+    });
+    source.emit({
+      ...runEvent(8, "node_started", {
+        resumed_after: { breaker: "repeat", reason: REASON },
+      }),
+      node_id: "gate",
+    });
+  });
+
+  expect(screen.queryByTestId("approval-dock")).toBeNull();
+  expect(screen.queryByText(/Paused by a circuit breaker:/)).toBeNull();
+  expect((await screen.findByTestId("paused-before")).textContent).toContain(REASON);
+});
+
+test("the timeline folds a pause into its step and a resume ends it", () => {
+  const events: RunEvent[] = [
+    runEvent(1, "run_started"),
+    { ...runEvent(2, "node_started"), node_id: "a" },
+    { ...runEvent(3, "node_cancelled"), node_id: "a" },
+    {
+      ...runEvent(4, "breaker_tripped", {
+        breaker: "repeat",
+        trigger: "calls",
+        threshold: 5,
+        observed: 5,
+        details: { tool: "repo.read_file" },
+        reason: "x",
+      }),
+      node_id: "a",
+    },
+    { ...runEvent(5, "gate_waiting", { breaker: "repeat", reason: "x" }), node_id: "a" },
+  ];
+
+  const paused = buildTimeline(events).steps[0]!;
+  expect(paused.status).toBe("waiting");
+  expect(paused.pausedNow).toBe(true);
+  expect(paused.paused?.breaker).toBe("repeat");
+  expect(paused.gate).toBeNull();
+
+  const resumed = buildTimeline([
+    ...events,
+    { ...runEvent(6, "gate_decided", { decision: "approve", source: "breaker" }), node_id: "a" },
+  ]).steps[0]!;
+  expect(resumed.status).toBe("running");
+  expect(resumed.pausedNow).toBe(false);
+  expect(resumed.paused?.breaker).toBe("repeat");
+});

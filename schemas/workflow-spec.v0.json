@@ -83,6 +83,29 @@
           "description": "It is asked to answer with JSON that matches this, and fails if it does not; the parsed object is its `data`.",
           "title": "Output Schema"
         },
+        "paths": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The only repo paths this writer may write (globs on repo-relative paths: `**`, `*`, `?`, 13.7). A write outside them pauses the run (circuit breaker) and the repo tools refuse it. Needs a write tool; unset, it may write anywhere that is not protected.",
+          "examples": [
+            [
+              "docs/**"
+            ]
+          ],
+          "title": "Paths"
+        },
         "provider": {
           "anyOf": [
             {
@@ -192,6 +215,79 @@
         "off"
       ],
       "type": "string"
+    },
+    "BreakersSpec": {
+      "additionalProperties": false,
+      "description": "A workflow's own circuit-breaker thresholds (13.7), over its workspace's. Each field a\nworkflow does not set keeps the workspace's. A value outside the platform range\n(`BREAKER_RANGES`) is a `breakers_out_of_range` issue; no field turns a breaker off.",
+      "properties": {
+        "cost_floor_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "USD a step must also cost above the average to trip (0-1000).",
+          "title": "Cost Floor Usd"
+        },
+        "cost_multiple": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A step's cost as a multiple of its node's average (1.5-20).",
+          "title": "Cost Multiple"
+        },
+        "flip_flops": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Times a step rewrites a file back to an earlier content (1-10).",
+          "title": "Flip Flops"
+        },
+        "repeat_calls": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Calls of one tool with the same arguments in one step (2-50).",
+          "title": "Repeat Calls"
+        },
+        "repeat_errors": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Errors with the same text from one tool in one step (2-50).",
+          "title": "Repeat Errors"
+        }
+      },
+      "title": "BreakersSpec",
+      "type": "object"
     },
     "EvidenceChecks": {
       "additionalProperties": false,
@@ -2115,6 +2211,18 @@
   "additionalProperties": false,
   "description": "A versioned workflow document with a single root node.",
   "properties": {
+    "breakers": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BreakersSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Circuit-breaker thresholds of this workflow, over the workspace's, within the platform's ranges (13.7)."
+    },
     "budget_usd": {
       "anyOf": [
         {

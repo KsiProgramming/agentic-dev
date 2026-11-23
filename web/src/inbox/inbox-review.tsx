@@ -34,6 +34,7 @@ import {
   RejectButton,
   RequestChangesButton,
 } from "@/runs/console/decision-controls";
+import { BreakerDetails } from "@/runs/console/breaker-details";
 import { EvidenceStrip } from "@/runs/console/evidence-strip";
 import { ProtectedAttempts } from "@/runs/console/protected-attempts";
 import { ReviewComments } from "@/runs/console/review-comments";
@@ -153,7 +154,7 @@ function GateReview({
         {gate.prompt ? <p className="text-muted-foreground">{gate.prompt}</p> : null}
       </header>
 
-      <ApprovingDoes gate={gate} />
+      {gate.breaker ? <BreakerDetails trip={gate.breaker} /> : <ApprovingDoes gate={gate} />}
 
       <StatStrip columns={2}>
         <StatTile
@@ -176,7 +177,7 @@ function GateReview({
       />
       <ProtectedAttempts attempts={gate.protectedAttempts} />
 
-      {decision.choice ? (
+      {gate.breaker ? null : decision.choice ? (
         <SelectionChecklist runId={run.id} choice={decision.choice} baseUrl={baseUrl} />
       ) : gate.changes.length > 0 ? (
         <ChangedFiles gate={gate} onReview={() => decision.setDetails(true)} />
@@ -196,13 +197,17 @@ function GateReview({
 
       {decision.sent ? (
         <p role="status" className="font-medium">
-          {decision.sent === "approve"
-            ? "Approved. The run carries on shortly."
-            : decision.sent === "changes"
-              ? "Changes requested. The run carries on shortly."
-              : gate.onReject === "end"
-                ? "Ended. The run completes here."
-                : "Rejected. The run carries on shortly."}
+          {gate.breaker
+            ? decision.sent === "approve"
+              ? "Resumed. The run carries on shortly."
+              : "Cancelled. The run ends shortly."
+            : decision.sent === "approve"
+              ? "Approved. The run carries on shortly."
+              : decision.sent === "changes"
+                ? "Changes requested. The run carries on shortly."
+                : gate.onReject === "end"
+                  ? "Ended. The run completes here."
+                  : "Rejected. The run carries on shortly."}
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">

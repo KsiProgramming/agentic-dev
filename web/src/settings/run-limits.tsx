@@ -36,6 +36,65 @@ import { ConnectionCard } from "./connection-card";
 const PURPOSE =
   "What one run may use, and how long what it leaves is kept. A run that goes over a limit stops with the reason. Lower a limit to tighten it; a run keeps the limits it started with.";
 
+type BreakerKey = keyof NonNullable<RunLimitOverrides["breakers"]>;
+
+/** The circuit-breaker thresholds (13.7), in the order the card shows them. */
+const BREAKER_FIELDS = [
+  {
+    key: "repeat_calls",
+    label: "Same call repeated",
+    unit: "calls",
+    help: "Calls of one tool with the same arguments in one step before the run pauses.",
+    whole: true,
+  },
+  {
+    key: "repeat_errors",
+    label: "Same error repeated",
+    unit: "errors",
+    help: "Errors with the same text from one tool in one step before the run pauses.",
+    whole: true,
+  },
+  {
+    key: "cost_multiple",
+    label: "Step cost",
+    unit: "× average",
+    help: "A step pauses when it costs this many times its node's average.",
+    whole: false,
+  },
+  {
+    key: "cost_floor_usd",
+    label: "Step cost floor",
+    unit: "$",
+    help: "The step must also cost this much above the average, so cents never trip it.",
+    whole: false,
+  },
+  {
+    key: "flip_flops",
+    label: "File rewritten back",
+    unit: "times",
+    help: "Times one step rewrites a file back to an earlier content before the run pauses.",
+    whole: true,
+  },
+] as const satisfies readonly {
+  key: BreakerKey;
+  label: string;
+  unit: string;
+  help: string;
+  whole: boolean;
+}[];
+
+/** "" keeps the platform's threshold; otherwise a number from `min` to `max`. */
+function threshold(min: number, max: number, whole: boolean) {
+  return z
+    .string()
+    .trim()
+    .refine(
+      (v) => v === "" || (whole ? /^\d+$/.test(v) : /^\d+(\.\d+)?$/.test(v)),
+      whole ? "A whole number, like 5." : "A number, like 3.5.",
+    )
+    .refine((v) => v === "" || (Number(v) >= min && Number(v) <= max), `From ${min} to ${max}.`);
+}
+
 type CountKey = Exclude<
   keyof RunLimits,
   | "wall_time_s"
@@ -94,7 +153,11 @@ function hours(max: number) {
     );
 }
 
-function schemaFor(defaults: RunLimits, ceilings: RunLimits) {
+function schemaFor(
+  defaults: RunLimits,
+  ceilings: RunLimits,
+  ranges: WorkspacePolicy["breakers"]["ranges"],
+) {
   const minutes = z
     .string()
     .trim()
@@ -112,6 +175,11 @@ function schemaFor(defaults: RunLimits, ceilings: RunLimits) {
       branch_retention_days: count(ceilings.branch_retention_days),
       review_rounds: count(ceilings.review_rounds),
       budget_usd: budgetSchema(),
+      repeat_calls: threshold(ranges.repeat_calls!.min, ranges.repeat_calls!.max, true),
+      repeat_errors: threshold(ranges.repeat_errors!.min, ranges.repeat_errors!.max, true),
+      cost_multiple: threshold(ranges.cost_multiple!.min, ranges.cost_multiple!.max, false),
+      cost_floor_usd: threshold(ranges.cost_floor_usd!.min, ranges.cost_floor_usd!.max, false),
+      flip_flops: threshold(ranges.flip_flops!.min, ranges.flip_flops!.max, true),
     })
     .superRefine((v, ctx) => {
       const seconds = wallTimeSeconds(v.wall_time_hours, v.wall_time_minutes);
@@ -168,6 +236,11 @@ function valuesOf(overrides: RunLimitOverrides): Values {
     branch_retention_days: overrides.branch_retention_days?.toString() ?? "",
     review_rounds: overrides.review_rounds?.toString() ?? "",
     budget_usd: overrides.budget_usd?.toString() ?? "",
+    repeat_calls: overrides.breakers?.repeat_calls?.toString() ?? "",
+    repeat_errors: overrides.breakers?.repeat_errors?.toString() ?? "",
+    cost_multiple: overrides.breakers?.cost_multiple?.toString() ?? "",
+    cost_floor_usd: overrides.breakers?.cost_floor_usd?.toString() ?? "",
+    flip_flops: overrides.breakers?.flip_flops?.toString() ?? "",
   };
 }
 
@@ -184,6 +257,15 @@ function overridesOf(values: Values): RunLimitOverrides {
     sandbox_ttl_s: ttlSeconds(values.sandbox_ttl_hours),
     branch_retention_days: number(values.branch_retention_days),
     review_rounds: number(values.review_rounds),
+    breakers: BREAKER_FIELDS.every((f) => values[f.key].trim() === "")
+      ? null
+      : {
+          repeat_calls: number(values.repeat_calls),
+          repeat_errors: number(values.repeat_errors),
+          cost_multiple: number(values.cost_multiple),
+          cost_floor_usd: number(values.cost_floor_usd),
+          flip_flops: number(values.flip_flops),
+        },
   };
 }
 
@@ -232,14 +314,17 @@ function LimitsForm({
 }) {
   const save = useSavePolicy({ workspaceId, baseUrl });
   const { defaults, ceilings, overrides } = policy;
+  const { breakers } = policy;
   const form = useForm<Values>({
-    resolver: zodResolver(schemaFor(defaults, ceilings)),
+    resolver: zodResolver(schemaFor(defaults, ceilings, breakers.ranges)),
     defaultValues: valuesOf(overrides),
   });
   const errors = form.formState.errors;
   const pending = form.formState.isSubmitting || save.isPending;
   const dirty = form.formState.isDirty;
-  const lowered = Object.values(overrides).some((v) => v != null);
+  const lowered =
+    Object.entries(overrides).some(([k, v]) => k !== "breakers" && v != null) ||
+    Object.values(overrides.breakers ?? {}).some((v) => v != null);
 
   async function onSubmit(values: Values) {
     try {
@@ -264,6 +349,8 @@ function LimitsForm({
         if (field === "review_rounds") form.setError("review_rounds", { message: issue.msg });
         const known = COUNT_FIELDS.find((f) => f.key === field);
         if (known) form.setError(known.key, { message: issue.msg });
+        const breaker = BREAKER_FIELDS.find((f) => f.key === field);
+        if (breaker) form.setError(breaker.key, { message: issue.msg });
       }
     }
   }
@@ -352,6 +439,33 @@ function LimitsForm({
         registration={form.register("budget_usd")}
         disabled={pending}
       />
+      <fieldset className="flex flex-col gap-4" aria-label="Circuit breakers">
+        <legend className="text-section font-medium">Circuit breakers</legend>
+        <p className="text-meta text-foreground-secondary">
+          The engine pauses a step that crosses one of these, so a person reads why and resumes or
+          cancels the run. A workflow may set its own within the same ranges; none can be turned
+          off.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {BREAKER_FIELDS.map((f) => {
+            const range = breakers.ranges[f.key]!;
+            return (
+              <LimitInput
+                key={f.key}
+                label={f.label}
+                unit={f.unit}
+                unitFirst={f.key === "cost_floor_usd"}
+                inputMode={f.whole ? "numeric" : "decimal"}
+                help={`${f.help} From ${range.min} to ${range.max}; platform default ${breakers.defaults[f.key]}.`}
+                placeholder={String(breakers.defaults[f.key])}
+                error={errors[f.key]?.message}
+                registration={form.register(f.key)}
+                disabled={pending}
+              />
+            );
+          })}
+        </div>
+      </fieldset>
       {formError ? (
         <Alert variant="destructive">
           <AlertDescription>{formError}</AlertDescription>

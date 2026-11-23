@@ -3,6 +3,7 @@ paused at a gate."""
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, cast
@@ -22,9 +23,12 @@ from agentic_engine.artifacts import (
     write_artifact,
 )
 from agentic_engine.branches import BranchSaver
+from agentic_engine.breakers import BreakerTripped
 from agentic_engine.budget import BudgetMeter, budget_meter
 from agentic_engine.events import (
     ARTIFACT_WRITTEN,
+    BREAKER_TRIPPED,
+    GATE_DECIDED,
     GATE_WAITING,
     NODE_STARTED,
     POLICY_LIMIT_EXCEEDED,
@@ -38,7 +42,13 @@ from agentic_engine.events import (
     NullEventSink,
     RunEventLog,
 )
-from agentic_engine.gate import FileChange, GateDecision, GateReview, GateReviewError
+from agentic_engine.gate import (
+    FileChange,
+    GateDecision,
+    GateReview,
+    GateReviewError,
+    decided_payload,
+)
 from agentic_engine.graph.checkpoint import Checkpointer, thread_config
 from agentic_engine.graph.compile import (
     CompiledWorkflow,
@@ -54,7 +64,7 @@ from agentic_engine.graph.state import (
     initial_state,
 )
 from agentic_engine.integrate import BranchIntegrator
-from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
+from agentic_engine.policy import APPROVAL_TTL_S, PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.protect import folded_writers, mark_protected
 from agentic_engine.providers import ResolvedProviders
 from agentic_engine.spec import INPUT_WRITER, WorkflowSpec
@@ -62,6 +72,20 @@ from agentic_engine.spec.models import ProtectPolicy
 from agentic_runtime import AgentRuntime, ProtectedPaths, ReadableWriters, ToolExecutor
 
 RUN_END = {"completed": RUN_COMPLETED, "failed": RUN_FAILED, "cancelled": RUN_CANCELLED}
+
+BREAKER_CANCELLED_REASON = "Cancelled after a circuit breaker"
+"""The `reason` of the `run_cancelled` event of a run whose person chose Cancel run at a pause."""
+
+
+@dataclass(frozen=True)
+class BreakerPause:
+    """A run paused by a circuit breaker (13.7), and what its person decided: `trip` is the
+    `breaker_tripped` event's payload and `node_id` the step it paused. `decision` is `approve`
+    (Resume) or `reject` (Cancel run)."""
+
+    node_id: str
+    trip: Mapping[str, JsonValue]
+    decision: GateDecision
 
 
 async def run_workflow(
@@ -84,6 +108,7 @@ async def run_workflow(
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
     protected: ProtectedPaths | None = None,
+    cost_baselines: Mapping[str, JsonValue] | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -149,11 +174,13 @@ async def run_workflow(
             providers=providers,
             readable=readable,
             protected=protected,
+            cost_baselines=cost_baselines,
         ),
         start,
         _config(spec, log.run_id),
         budget,
         review,
+        ttl_s=policy.approval_ttl_s,
     )
 
 
@@ -180,6 +207,8 @@ async def resume_workflow(
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
     protected: ProtectedPaths | None = None,
+    cost_baselines: Mapping[str, JsonValue] | None = None,
+    breaker: BreakerPause | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -193,6 +222,11 @@ async def resume_workflow(
     pauses at the gate again, and the pause is announced again. A `suspended` run (it created its
     repo) just goes on.
 
+    A run a circuit breaker paused (13.7) continues with `breaker`: `gate_decided`
+    (`source: "breaker"`) follows `run_resumed`. Resume (approve) goes on from the checkpoint, so
+    the paused step runs again from its start, told why it was paused; Cancel run (reject) ends
+    the run `cancelled` with `BREAKER_CANCELLED_REASON` and runs nothing.
+
     `spent` is what the run's earlier attempts spent: a run that has already spent its budget
     stops before it runs another node.
     """
@@ -200,6 +234,7 @@ async def resume_workflow(
     budget = budget_meter(policy, spent)
     if inputs and artifacts is None:
         artifacts = InMemoryArtifactStore()
+    resuming = breaker is not None and breaker.decision.decision == "approve"
     graph = compile_workflow(
         spec,
         runtime,
@@ -216,6 +251,8 @@ async def resume_workflow(
         providers=providers,
         readable=readable,
         protected=protected,
+        cost_baselines=cost_baselines,
+        paused={breaker.node_id: breaker.trip} if breaker is not None and resuming else None,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
@@ -224,9 +261,17 @@ async def resume_workflow(
     ran = dict.fromkeys(saved.get("order", []))  # a node in a loop runs once per iteration
     completed = [n for n in ran if results[n].status == "completed"]
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
+    if breaker is not None:
+        decided = {**decided_payload(breaker.decision, {}), "source": "breaker"}
+        await log.emit(GATE_DECIDED, node_id=breaker.node_id, payload=decided)
+        if not resuming:
+            await log.emit(RUN_CANCELLED, payload={"reason": BREAKER_CANCELLED_REASON})
+            return _result(log, RunState(**saved) if saved else initial_state(""), "cancelled")
     if not saved:
         first = await _initial(log, input, artifacts, inputs)
-        return await _finish(log, lambda: graph, first, config, budget, review, spec.protect)
+        return await _finish(
+            log, lambda: graph, first, config, budget, review, spec.protect, policy.approval_ttl_s
+        )
     # A step cut off once its tasks had all saved their results has no `next`, but its tasks are
     # still in the checkpoint: the graph has not applied them, so it goes on. Only a graph that
     # ended has neither.
@@ -239,7 +284,9 @@ async def resume_workflow(
     elif asks and decision:
         resume = decision.model_dump(mode="json")
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
-    return await _finish(log, lambda: graph, start, config, budget, review, spec.protect)
+    return await _finish(
+        log, lambda: graph, start, config, budget, review, spec.protect, policy.approval_ttl_s
+    )
 
 
 async def rerun_workflow(
@@ -266,6 +313,7 @@ async def rerun_workflow(
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
     protected: ProtectedPaths | None = None,
+    cost_baselines: Mapping[str, JsonValue] | None = None,
 ) -> WorkflowRunResult:
     """Start `run_id`, a rerun of `source_run` from its top-level step `from_node` (12.4), as
     `run_workflow` would, but from `source_run`'s checkpoint taken before that step
@@ -300,6 +348,7 @@ async def rerun_workflow(
         providers=providers,
         readable=readable,
         protected=protected,
+        cost_baselines=cost_baselines,
     )
     config = _config(spec, run_id)
     carried = await seed_rerun(
@@ -320,7 +369,9 @@ async def rerun_workflow(
     )
     await _emit_fallback(log, providers)
     start = None if seeded else await _initial(log, input, artifacts, inputs)
-    return await _finish(log, lambda: graph, start, config, budget, review, spec.protect)
+    return await _finish(
+        log, lambda: graph, start, config, budget, review, spec.protect, policy.approval_ttl_s
+    )
 
 
 async def seed_inputs(
@@ -382,11 +433,13 @@ async def _finish(
     budget: BudgetMeter | None = None,
     review: GateReview | None = None,
     protect: ProtectPolicy | None = None,
+    ttl_s: int = APPROVAL_TTL_S,
 ) -> WorkflowRunResult:
     """Build the graph and invoke it from `start` (`None` continues from the checkpoint, a
     `Command` continues a paused gate), then report the end, or the pause at a gate. A failure
     to build is logged like one from the graph. A run that has spent its `budget`, before it
-    starts or as it goes, ends `failed` (`_stopped`)."""
+    starts or as it goes, ends `failed` (`_stopped`). A circuit breaker that trips (13.7) pauses
+    the run (`_paused_by_breaker`), waiting `ttl_s`."""
     graph: CompiledWorkflow | None = None
     try:
         graph = build()
@@ -397,10 +450,16 @@ async def _finish(
     except PolicyLimitExceeded as over:
         assert graph is not None, "only the graph and the budget check raise it"
         return await _stopped(log, graph, config, over)
+    except BreakerTripped as tripped:
+        assert graph is not None, "only the graph raises it"
+        return await _paused_by_breaker(log, graph, config, tripped, ttl_s)
     except asyncio.CancelledError as e:
         if over := next((a for a in e.args if isinstance(a, PolicyLimitExceeded)), None):
             await log_policy_stop(log, over)
             raise
+        if tripped := next((a for a in e.args if isinstance(a, BreakerTripped)), None):
+            assert graph is not None
+            return await _paused_by_breaker(log, graph, config, tripped, ttl_s)
         # `task.cancel("cancelled by user")` names why; a bare cancel is the caller's.
         reason = next((a for a in e.args if isinstance(a, str) and a), "caller cancelled")
         await log.emit(RUN_CANCELLED, payload={"reason": reason})
@@ -433,6 +492,31 @@ async def _stopped(
     if graph.checkpointer is not None and (saved := (await graph.aget_state(config)).values):
         state = RunState(**saved)
     return _result(log, state, "failed", stopped_at=over.node_id)
+
+
+async def _paused_by_breaker(
+    log: RunEventLog,
+    graph: CompiledWorkflow,
+    config: RunnableConfig,
+    tripped: BreakerTripped,
+    ttl_s: int,
+) -> WorkflowRunResult:
+    """Pause a run whose step tripped a circuit breaker (13.7): the running steps already ended
+    `node_cancelled`. Writes `breaker_tripped`, then `gate_waiting` on the same node (payload
+    `breaker`, `ttl_s`, `expires_at`), and ends the attempt `waiting`. The run goes on from its
+    last checkpoint when a person resumes it: the tripped step runs again from its start."""
+    state = initial_state("")
+    if graph.checkpointer is not None and (saved := (await graph.aget_state(config)).values):
+        state = RunState(**saved)
+    await log.emit(BREAKER_TRIPPED, node_id=tripped.node_id, payload=tripped.payload())
+    waiting: dict[str, JsonValue] = {
+        "breaker": tripped.breaker,
+        "reason": tripped.reason,
+        "ttl_s": ttl_s,
+        "expires_at": (datetime.now(UTC) + timedelta(seconds=ttl_s)).isoformat(),
+    }
+    await log.emit(GATE_WAITING, node_id=tripped.node_id, payload=waiting)
+    return _result(log, state, "waiting", waiting_at=tripped.node_id)
 
 
 async def _paused_gate(

@@ -4,6 +4,8 @@ from agentic_engine.graph.checkpoint import Checkpointer, checkpoint_serde, thre
 from agentic_engine.graph.compile import CompiledWorkflow, CompileError, compile_workflow
 from agentic_engine.graph.fork import StepNotFoundError, StepNotReachedError
 from agentic_engine.graph.run import (
+    BREAKER_CANCELLED_REASON,
+    BreakerPause,
     artifact_versions,
     log_policy_stop,
     record_unloadable_run,
@@ -16,6 +18,8 @@ from agentic_engine.graph.state import RunState, WorkflowRunResult, WorkflowRunS
 from agentic_engine.graph.steps import steps_before, top_level_steps, top_step_of
 
 __all__ = [
+    "BREAKER_CANCELLED_REASON",
+    "BreakerPause",
     "Checkpointer",
     "CompileError",
     "CompiledWorkflow",

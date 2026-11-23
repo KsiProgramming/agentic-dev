@@ -12,7 +12,7 @@ interface Attention {
   /** Runs of the workspace waiting at a gate (capped at `WAITING_LIMIT`). */
   waiting: number;
   /** The run console shows a run waiting at a gate. */
-  setConsoleWaiting: (waiting: boolean) => void;
+  setConsoleWaiting: (waiting: boolean, paused?: boolean) => void;
 }
 
 const AttentionContext = createContext<Attention>({ waiting: 0, setConsoleWaiting: () => {} });
@@ -22,22 +22,27 @@ export function countLabel(count: number): string {
   return count >= WAITING_LIMIT ? `${WAITING_LIMIT - 1}+` : String(count);
 }
 
-const TITLE_PREFIX = /^(?:\(\d+\+?\) )?● Needs approval · /;
+const TITLE_PREFIX = /^(?:\(\d+\+?\) )?● (?:Needs approval|Paused) · /;
 
 /** The page title with what needs the user in front: "● Needs approval · " on the console of a
  * waiting run, "(N) ● Needs approval · " on every other page while N runs wait. Next.js sets
  * the title on each navigation, so it is put back whenever the `<title>` changes. */
-export function attentionTitle(title: string, waiting: number, consoleWaiting: boolean): string {
+export function attentionTitle(
+  title: string,
+  waiting: number,
+  consoleWaiting: boolean,
+  consolePaused = false,
+): string {
   const base = title.replace(TITLE_PREFIX, "");
-  if (consoleWaiting) return `● Needs approval · ${base}`;
+  if (consoleWaiting) return `● ${consolePaused ? "Paused" : "Needs approval"} · ${base}`;
   if (waiting > 0) return `(${countLabel(waiting)}) ● Needs approval · ${base}`;
   return base;
 }
 
-function useAttentionTitle(waiting: number, consoleWaiting: boolean) {
+function useAttentionTitle(waiting: number, consoleWaiting: boolean, consolePaused: boolean) {
   useEffect(() => {
     const apply = () => {
-      const next = attentionTitle(document.title, waiting, consoleWaiting);
+      const next = attentionTitle(document.title, waiting, consoleWaiting, consolePaused);
       if (document.title !== next) document.title = next;
     };
     apply();
@@ -47,7 +52,7 @@ function useAttentionTitle(waiting: number, consoleWaiting: boolean) {
       observer.disconnect();
       document.title = document.title.replace(TITLE_PREFIX, "");
     };
-  }, [waiting, consoleWaiting]);
+  }, [waiting, consoleWaiting, consolePaused]);
 }
 
 /** Keeps the workspace's waiting runs counted, live from `GET /runs/stream`, and the page title
@@ -69,9 +74,16 @@ export function AttentionProvider({
   const now = useClientNow(30_000);
   const loaded = waitingRuns.data?.pages[0]?.items ?? [];
   const waiting = now === null ? loaded.length : inboxRuns(loaded, now).length;
-  const [consoleWaiting, setConsoleWaiting] = useState(false);
-  useAttentionTitle(waiting, consoleWaiting);
-  const value = useMemo(() => ({ waiting, setConsoleWaiting }), [waiting]);
+  const [consoleState, setConsole] = useState({ waiting: false, paused: false });
+  useAttentionTitle(waiting, consoleState.waiting, consoleState.paused);
+  const value = useMemo(
+    () => ({
+      waiting,
+      setConsoleWaiting: (waitingNow: boolean, paused = false) =>
+        setConsole({ waiting: waitingNow, paused }),
+    }),
+    [waiting],
+  );
   return <AttentionContext.Provider value={value}>{children}</AttentionContext.Provider>;
 }
 
@@ -97,10 +109,10 @@ export function useWaitingCount(): number {
 }
 
 /** Tells the shell the console shows a run waiting at a gate, for the page title. */
-export function useConsoleWaiting(waiting: boolean) {
+export function useConsoleWaiting(waiting: boolean, paused = false) {
   const { setConsoleWaiting } = useContext(AttentionContext);
   useEffect(() => {
-    setConsoleWaiting(waiting);
+    setConsoleWaiting(waiting, paused);
     return () => setConsoleWaiting(false);
-  }, [waiting, setConsoleWaiting]);
+  }, [waiting, paused, setConsoleWaiting]);
 }

@@ -38,6 +38,21 @@ const UNSET: RunLimitOverrides = {
   sandbox_ttl_s: null,
   branch_retention_days: null,
   review_rounds: null,
+  breakers: null,
+};
+const BREAKER_DEFAULTS = {
+  repeat_calls: 5,
+  repeat_errors: 3,
+  cost_multiple: 3,
+  cost_floor_usd: 0.5,
+  flip_flops: 2,
+};
+const BREAKER_RANGES = {
+  repeat_calls: { min: 2, max: 50 },
+  repeat_errors: { min: 2, max: 50 },
+  cost_multiple: { min: 1.5, max: 20 },
+  cost_floor_usd: { min: 0, max: 1000 },
+  flip_flops: { min: 1, max: 10 },
 };
 
 afterEach(() => {
@@ -47,9 +62,25 @@ afterEach(() => {
 function policyOf(overrides: RunLimitOverrides): WorkspacePolicy {
   const effective = { ...DEFAULTS };
   for (const [key, value] of Object.entries(overrides)) {
-    if (value != null) effective[key as keyof typeof DEFAULTS] = value;
+    if (value != null && key !== "breakers") {
+      effective[key as keyof typeof DEFAULTS] = value as number;
+    }
   }
-  return { defaults: DEFAULTS, ceilings: CEILINGS, overrides, effective };
+  const own = Object.fromEntries(
+    Object.entries(overrides.breakers ?? {}).filter(([, v]) => v != null),
+  );
+  return {
+    defaults: DEFAULTS,
+    ceilings: CEILINGS,
+    overrides,
+    effective,
+    breakers: {
+      defaults: BREAKER_DEFAULTS,
+      ranges: BREAKER_RANGES,
+      overrides: { repeat_calls: null, ...overrides.breakers },
+      effective: { ...BREAKER_DEFAULTS, ...own },
+    },
+  } as WorkspacePolicy;
 }
 
 /** An API whose stored limits follow PUT. */
@@ -282,4 +313,51 @@ test("an approval time to live above the platform's is caught before calling the
 
   expect(await card().findByText("From 1 minute to 72 h.")).toBeDefined();
   expect(fetch.mock.calls.some(([r]) => r.method === "PUT")).toBe(false);
+});
+
+test("the circuit breakers show their defaults and ranges, and save what was tuned", async () => {
+  const fetch = storingApi();
+  show();
+
+  const calls = await card().findByLabelText("Same call repeated");
+  expect(calls.getAttribute("placeholder")).toBe("5");
+  expect(card().getByText(/From 2 to 50; platform default 5\./)).toBeDefined();
+
+  type("Same call repeated", "10");
+  type("Step cost", "4.5");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await putBody(fetch)).toEqual({
+    ...UNSET,
+    breakers: {
+      repeat_calls: 10,
+      repeat_errors: null,
+      cost_multiple: 4.5,
+      cost_floor_usd: null,
+      flip_flops: null,
+    },
+  });
+});
+
+test("a breaker threshold outside its range is caught before calling the API", async () => {
+  const fetch = storingApi();
+  show();
+  await card().findByLabelText("Same call repeated");
+
+  type("Same call repeated", "1");
+  type("Step cost", "25");
+  fireEvent.click(card().getByRole("button", { name: "Save limits" }));
+
+  expect(await card().findAllByText("From 2 to 50.")).toHaveLength(1);
+  expect(card().getByText("From 1.5 to 20.")).toBeDefined();
+  expect(fetch.mock.calls.some(([r]) => r.method === "PUT")).toBe(false);
+});
+
+test("stored breaker thresholds fill their fields, and reset clears them", async () => {
+  storingApi({ ...UNSET, breakers: { repeat_calls: 12 } });
+  show();
+
+  const calls = await card().findByLabelText("Same call repeated");
+  expect((calls as HTMLInputElement).value).toBe("12");
+  expect(card().getByRole("button", { name: "Reset to defaults" })).toBeDefined();
 });
