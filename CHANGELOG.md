@@ -9,7 +9,7 @@ Use these headings: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Secur
 ## [Unreleased]
 
 ### Added
-- Phase 13.8 Dry run for every write:
+- Phase 13.8 Dry run for every write ([#260](https://github.com/KsiProgramming/agentic-dev/pull/260)):
   - **Every outward write has a plan mode.** `github.openPR` (with the 7.6 follow-up push), `github.createRepo`, `jira.comment` and `jira.transition` take the engine-only arguments `plan` and `expect`: with `plan: true` the tool returns a `WritePlan` (`agentic_runtime.plans`, `schemas/write-plan.v1.json`) and writes nothing; a spec's `args` may not set either (`reference`) and the manifests do not list them. A transition that is not offered is a plan with the error `transition_unavailable`; a pull request or repo already there is said so.
   - **The engine plans before a gate.** A hidden `<gate>.plan` step (after the checks and the review, skipped on a send-back) asks the writes the gate guards (`planned_writes`: SDD's `approve_pr` plans the pull request and both Jira writes, `post_questions` the comment that asks, `approve_repo` the new repo) and logs `writes_planned`; `gate_waiting` and `GET /runs/{id}/gate` carry `plans`.
   - **Approving applies against the plan.** Before the first write of a gate's batch every plan is made again and compared with the one shown; a change fails the step `plan_stale` (a plan that would fail now, `plan_would_fail`) and writes nothing. Each write carries its `expect`, and a tool refuses a stale one. A gate's edits move the expected tip. A write with no plan fails `plan_missing`. After each write, `write_checked` holds the plan and the result side by side with `as_planned`, `differs` (flagged, the run goes on) or `stale`.
