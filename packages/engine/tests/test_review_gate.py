@@ -332,3 +332,15 @@ async def test_the_notes_are_capped() -> None:
     notes = args["body"].split("## Review notes\n\n", 1)[1]
     assert len(notes) < 8_100
     assert notes.endswith("(cut here: the run's review has the rest)")
+
+
+async def test_the_notes_start_with_a_summary_of_what_is_left_and_what_was_dismissed() -> None:
+    run = Run(workflow(), {"correctness": [report(NITPICK, FAR)]})
+    await run.start()
+    gone = run.events("gate_waiting")[0].payload["review"]["comments"][0]["fingerprint"]
+
+    await run.resume(GateDecision(decision="approve", dismissed=[gone]))
+
+    notes = await run.artifacts.get("review-notes.md", 1)
+    assert notes is not None
+    assert notes.content.startswith("1 low, from 1 lens; 1 dismissed by the approver.\n\n- ")

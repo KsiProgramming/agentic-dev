@@ -218,12 +218,23 @@ def neutralise_notes(text: str) -> str:
     return clean
 
 
-def notes_text(comments: Sequence[ReviewFinding]) -> str:
+def notes_text(comments: Sequence[ReviewFinding], dismissed: int = 0) -> str:
     """The comments left after the approval, as the Markdown a pull request body gets: one bullet
     each (severity, `path:line`, lenses, message). The engine neutralises mentions and strips
     HTML where it publishes it."""
+    left = f"{dismissed} dismissed by the approver" if dismissed else ""
     if not comments:
-        return "No review comments."
-    return "\n".join(
-        f"- **{c.severity}** `{where(c)}` ({', '.join(c.lenses)}): {c.message}" for c in comments
+        return "No review comments." + (f" ({left}.)" if left else "")
+    counts = Counter(c.severity for c in comments)
+    lenses = {lens for c in comments for lens in c.lenses}
+    summary = ", ".join(f"{counts[s]} {s}" for s in SEVERITIES if counts[s])
+    head = f"{summary}, from {len(lenses)} {'lens' if len(lenses) == 1 else 'lenses'}"
+    head += f"; {left}." if left else "."
+    return (
+        head
+        + "\n\n"
+        + "\n".join(
+            f"- **{c.severity}** `{where(c)}` ({', '.join(c.lenses)}): {c.message}"
+            for c in comments
+        )
     )

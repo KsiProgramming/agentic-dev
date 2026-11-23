@@ -1095,7 +1095,7 @@ async def _write_notes(
         return
     dismissed = set(cast(list[str], (result.data or {}).get("dismissed") or []))
     left = [c for c in found.shown.comments if c.fingerprint not in dismissed]
-    text = notes_text(left)
+    text = notes_text(left, len(found.shown.comments) - len(left))
     stored = AgentNodeResult(status="completed", text=text, usage=None)
     written = await _write(gate.id, spec.notes, None, stored, limits, log)
     if written.artifact is not None:
