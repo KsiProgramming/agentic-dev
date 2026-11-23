@@ -29,7 +29,6 @@ from agentic_engine.gate import (
     SelectionShown,
 )
 from agentic_engine.review_gate import ReviewShown
-from agentic_runtime.plans import WritePlan
 from agentic_engine.spec import (
     MAX_SELECT_ITEMS,
     REPO_TOOL_PREFIXES,
@@ -43,6 +42,7 @@ from agentic_engine.spec import (
 from agentic_engine.templates import NewRepo, get_template
 from agentic_github import repo_full_name
 from agentic_runtime import Provider
+from agentic_runtime.plans import WritePlan
 from agentic_sandbox import RepoSource
 
 MAX_SPEC_FILE_BYTES = 256 * 1024
