@@ -1712,10 +1712,45 @@
     {
       "run_id": "00000000-0000-4000-8000-000000000067",
       "seq": 72,
+      "type": "write_checked",
+      "node_id": "publish",
+      "payload": {
+        "gate": "approve_pr",
+        "plan": {
+          "node_id": "publish",
+          "tool": "github.openPR",
+          "action": "open_pr",
+          "summary": "Plan of github.openPR on fix",
+          "target": {
+            "kind": "repo",
+            "label": "fix",
+            "url": null
+          },
+          "fields": {},
+          "body": "Fixes for findings a person selected after a code audit. Agents made these changes; the run was approved at a gate before this pull request was opened.\n\nReview it as you would any change: agents can be wrong.\n\n### fix.db\n- fixed\n\n### fix.util\n- fixed",
+          "pending": [],
+          "expect": {},
+          "error": null
+        },
+        "result": {
+          "url": "https://github.com/acme/hello/pull/9",
+          "number": 9,
+          "head": "agent/run/fix",
+          "base": "main",
+          "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "outcome": "as_planned",
+        "differences": []
+      },
+      "created_at": "2026-11-10T12:01:12Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000067",
+      "seq": 73,
       "type": "run_completed",
       "node_id": null,
       "payload": {},
-      "created_at": "2026-11-10T12:01:12Z"
+      "created_at": "2026-11-10T12:01:13Z"
     }
   ]
 }

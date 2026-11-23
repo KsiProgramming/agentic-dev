@@ -587,6 +587,12 @@ async def run_gate_node(
             )
             if went is not None and dismissed:
                 went["dismissed"] = list[JsonValue](dismissed)
+            if commits:
+                # What the writes after the gate are checked against (13.8): the edit's commit.
+                went = {
+                    **(went or {"decision": "approve"}),
+                    "commits": dict[str, JsonValue](commits),
+                }
             return AgentNodeResult(status="completed", text=input, usage=None, data=went)
         data = selected_document(node.select, document, chosen)
         text = json.dumps(data, indent=2, ensure_ascii=False)

@@ -114,12 +114,18 @@ COMPARED: dict[PlanAction, tuple[str, ...]] = {
 are those of both the plan's `fields` and the tool's structured result."""
 
 
+SHOWN_ONLY = frozenset({"commits", "offered", "created", "number"})
+"""Fields a plan shows but that are no precondition, so a change in them is not a stale plan: how
+many commits a push has (a gate edit adds one), the moves a workflow offers, whether this run
+posted a comment already (a step run again after a crash has), and a pull request's number."""
+
+
 def same_plan(shown: WritePlan, again: WritePlan) -> list[Difference]:
     """How a plan made again differs from the one a person was shown: its `fields`, its `expect`,
     its body (which has none of its `pending` parts) and whether it would fail. Anything else
     (`summary`, `target`) follows from these."""
     differences: list[Difference] = []
-    for name in sorted(set(shown.fields) | set(again.fields)):
+    for name in sorted((set(shown.fields) | set(again.fields)) - SHOWN_ONLY):
         before, after = shown.fields.get(name), again.fields.get(name)
         if before != after:
             differences.append(Difference(field=name, planned=before, actual=after))
@@ -134,6 +140,24 @@ def same_plan(shown: WritePlan, again: WritePlan) -> list[Difference]:
     if before_error != after_error:
         differences.append(Difference(field="error", planned=before_error, actual=after_error))
     return differences
+
+
+def fill_for(plan: WritePlan, args: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """The planned values that are known only after approval, from the call as it went out
+    (`args`, with the review's notes and the links the platform made put in place): a comment's
+    text and a pull request's title and description. Never from a model's answer."""
+    filled: dict[str, JsonValue] = {}
+    body = args.get("body")
+    if plan.action == "comment" and isinstance(body, str):
+        footer = plan.fields.get("footer")
+        text = body.rstrip() + "\n\n" + footer if isinstance(footer, str) else body
+        filled["text"] = text
+    if plan.action == "open_pr":
+        if isinstance(body, str):
+            filled["body"] = body
+        if isinstance(title := args.get("title"), str):
+            filled["title"] = title
+    return filled
 
 
 def describe(differences: list[Difference]) -> str:

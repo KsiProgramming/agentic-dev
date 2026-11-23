@@ -47,13 +47,13 @@ The plan contract and the tools' plan modes come first, then the engine plans be
 
 ## 3. The engine applies against the plan
 
-- [ ] `graph/compile.py`, the tool-node path:
+- [x] `graph/compile.py`, the tool-node path:
   - Before the first write of a gate's batch, call plan mode again for every write in the batch and run `same_plan` against `RunState.plans`. The expected tip is moved first to the gate's edit commit (`gate_decided.commits`), and the review notes become concrete.
   - On a difference, the step fails `plan_stale: <what changed>` and nothing is written. The batch check runs once per batch: the state records that it passed, so a resumed step does not repeat it.
   - Each write is called with its `expect`.
-- [ ] After each write, `compare(plan, result)` with the links and review notes filled in from the platform's results. It writes `write_checked` (`gate`, `plan`, `result`, `outcome`, `differences`). A stale refusal writes `outcome: stale` with what is true now. `events.py`: `WRITE_CHECKED`, documented.
-- [ ] A write with no plan in the state (a spec validation should have refused) fails `plan_missing` instead of writing unshown.
-- [ ] Engine tests:
+- [x] After each write, `compare(plan, result)` with the links and review notes filled in from the platform's results. It writes `write_checked` (`gate`, `plan`, `result`, `outcome`, `differences`). A stale refusal writes `outcome: stale` with what is true now. `events.py`: `WRITE_CHECKED`, documented.
+- [x] A write with no plan in the state (a spec validation should have refused) fails `plan_missing` instead of writing unshown.
+- [x] Engine tests:
   - Approve as planned gives `as_planned` for all three SDD writes, and the comment's links are filled in.
   - A fake issue moved while the gate waits gives `plan_stale`, no pull request is opened and Jira is untouched.
   - A gate edit gives `as_planned`, with the edit commit pushed.

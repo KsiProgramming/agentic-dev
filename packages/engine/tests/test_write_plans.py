@@ -213,7 +213,8 @@ async def test_a_restart_after_the_plan_plans_nothing_twice() -> None:
     assert await run.decide() == "completed"
 
     assert len(run.events("writes_planned")) == 1
-    assert len(run.tools.plan_calls) == 2
+    # The two plans of the gate, and the batch check's two before the first write: once.
+    assert len(run.tools.plan_calls) == 4
 
 
 async def test_the_plans_of_a_gate_in_a_loop_are_made_again_on_each_pass() -> None:

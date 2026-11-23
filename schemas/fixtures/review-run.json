@@ -2524,10 +2524,50 @@
     {
       "run_id": "00000000-0000-4000-8000-000000000136",
       "seq": 162,
+      "type": "write_checked",
+      "node_id": "publish",
+      "payload": {
+        "gate": "approve_pr",
+        "plan": {
+          "node_id": "publish",
+          "tool": "github.openPR",
+          "action": "open_pr",
+          "summary": "Plan of github.openPR on implement",
+          "target": {
+            "kind": "repo",
+            "label": "implement",
+            "url": null
+          },
+          "fields": {},
+          "body": "Agents planned, built and reviewed this change; the run was approved at a gate before this pull request was opened. Review it as you would any change: agents can be wrong.\n\n## Signup validation (pass 2)",
+          "pending": [
+            {
+              "kind": "review_notes",
+              "text": "The review's comments that are not dismissed are added to the description."
+            }
+          ],
+          "expect": {},
+          "error": null
+        },
+        "result": {
+          "url": "https://github.com/acme/shop/pull/12",
+          "number": 12,
+          "head": "agent/run/implement",
+          "base": "main",
+          "commit": "cccccccccccccccccccccccccccccccccccccccc"
+        },
+        "outcome": "as_planned",
+        "differences": []
+      },
+      "created_at": "2026-11-23T12:02:42Z"
+    },
+    {
+      "run_id": "00000000-0000-4000-8000-000000000136",
+      "seq": 163,
       "type": "run_completed",
       "node_id": null,
       "payload": {},
-      "created_at": "2026-11-23T12:02:42Z"
+      "created_at": "2026-11-23T12:02:43Z"
     }
   ]
 }

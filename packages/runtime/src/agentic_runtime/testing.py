@@ -144,7 +144,7 @@ class ScriptedToolExecutor:
         self.node_ids: list[str | None] = []
         """The `node_id` of each call, in order."""
         self.plan_calls: list[tuple[str, dict[str, JsonValue]]] = []
-        """The calls that asked for the plan of an outward write (13.8): answered, not in `calls`."""
+        """Calls that asked for an outward write's plan (13.8): answered, not in `calls`."""
         self.gate: asyncio.Event | None = None
         """If set, each call waits for it first (to test cancelling a call in flight)."""
 

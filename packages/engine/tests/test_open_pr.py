@@ -134,6 +134,7 @@ async def test_the_pull_request_is_opened_only_after_approval() -> None:
         ("tool_result", "publish"),
         ("pr_opened", "publish"),
         ("node_completed", "publish"),
+        ("write_checked", "publish"),
         ("run_completed", None),
     ]
     (opened,) = [e for e in run.sink.events if e.type == "pr_opened"]
