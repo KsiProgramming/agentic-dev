@@ -26,7 +26,15 @@ DEFAULTS = {
     "branch_retention_days": 30,
     "review_rounds": 3,
 }
-UNSET = dict.fromkeys(DEFAULTS)
+UNSET = {**dict.fromkeys(DEFAULTS), "breakers": None}
+BREAKER_DEFAULTS = {
+    "repeat_calls": 5,
+    "repeat_errors": 3,
+    "cost_multiple": 3.0,
+    "cost_floor_usd": 0.5,
+    "flip_flops": 2,
+}
+BREAKER_UNSET = dict.fromkeys(BREAKER_DEFAULTS)
 CEILINGS = {**DEFAULTS, "sandbox_ttl_s": 259_200, "branch_retention_days": 90, "review_rounds": 10}
 
 
@@ -58,12 +66,18 @@ async def test_a_new_workspace_has_the_platform_limits(
     response = await client.get(f"/workspaces/{workspace}/policy")
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert {k: v for k, v in body.items() if k != "breakers"} == {
         "defaults": DEFAULTS,
         "ceilings": CEILINGS,
         "overrides": UNSET,
         "effective": DEFAULTS,
     }
+    assert body["breakers"]["defaults"] == BREAKER_DEFAULTS
+    assert body["breakers"]["effective"] == BREAKER_DEFAULTS
+    assert body["breakers"]["overrides"] == BREAKER_UNSET
+    assert body["breakers"]["ranges"]["repeat_calls"] == {"min": 2, "max": 50}
+    assert body["breakers"]["ranges"]["cost_floor_usd"] == {"min": 0, "max": 1000}
 
 
 async def test_the_retention_limits_may_go_above_their_default(
@@ -141,3 +155,71 @@ async def test_an_unknown_workspace_is_not_found(client: AsyncClient) -> None:
 
     assert (await client.get(f"/workspaces/{missing}/policy")).status_code == 404
     assert (await client.put(f"/workspaces/{missing}/policy", json={})).status_code == 404
+
+
+async def test_breaker_thresholds_round_trip_reset_and_stay_in_their_range(
+    client: AsyncClient, workspace: UUID
+) -> None:
+    """13.7: a workspace tunes the circuit breakers within the platform's ranges."""
+    tuned = {"repeat_calls": 10, "cost_multiple": 5.5}
+    put = await client.put(f"/workspaces/{workspace}/policy", json={"breakers": tuned})
+    got = await client.get(f"/workspaces/{workspace}/policy")
+    reset = await client.put(f"/workspaces/{workspace}/policy", json={})
+
+    assert put.status_code == 200, put.text
+    assert put.json() == got.json()
+    breakers = got.json()["breakers"]
+    assert breakers["overrides"] == {**BREAKER_UNSET, **tuned}
+    assert breakers["effective"] == {**BREAKER_DEFAULTS, **tuned}
+    assert reset.json()["breakers"]["effective"] == BREAKER_DEFAULTS
+    assert reset.json()["breakers"]["overrides"] == BREAKER_UNSET
+
+
+@pytest.mark.parametrize(
+    "breakers",
+    [
+        {"repeat_calls": 1},
+        {"repeat_errors": 51},
+        {"cost_multiple": 1.4},
+        {"cost_multiple": 21},
+        {"cost_floor_usd": -1},
+        {"flip_flops": 0},
+        {"flip_flops": 11},
+        {"off": True},
+    ],
+)
+async def test_breaker_thresholds_outside_their_range_are_refused(
+    client: AsyncClient, workspace: UUID, breakers: dict[str, float]
+) -> None:
+    response = await client.put(f"/workspaces/{workspace}/policy", json={"breakers": breakers})
+
+    assert response.status_code == 422
+    got = await client.get(f"/workspaces/{workspace}/policy")
+    assert got.json()["overrides"]["breakers"] is None
+
+
+async def test_a_run_keeps_the_breaker_thresholds_it_was_created_with(
+    sessions: async_sessionmaker[AsyncSession], client: AsyncClient, workspace: UUID
+) -> None:
+    """The workspace's thresholds, then the workflow's own over them, are frozen on the run."""
+    from agentic_engine.spec import parse_spec
+    from agentic_store import create_run, get_run
+
+    await client.put(
+        f"/workspaces/{workspace}/policy", json={"breakers": {"repeat_calls": 10, "flip_flops": 4}}
+    )
+    workflow = parse_spec(
+        {
+            "spec_version": "0",
+            "id": "w",
+            "name": "W",
+            "breakers": {"flip_flops": 6},
+            "root": {"type": "agent", "id": "a", "role": "R", "instructions": "Go."},
+        }
+    )
+    run_id = await create_run(sessions, workflow, "go", workspace_id=workspace)
+    await client.put(f"/workspaces/{workspace}/policy", json={"breakers": {"repeat_calls": 20}})
+
+    run = await get_run(sessions, run_id)
+    assert run is not None
+    assert (run.policy.breakers.repeat_calls, run.policy.breakers.flip_flops) == (10, 6)

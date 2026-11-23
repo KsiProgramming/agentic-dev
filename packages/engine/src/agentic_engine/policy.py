@@ -86,6 +86,19 @@ class BreakerPolicy(BaseModel):
     )
 
 
+class BreakerOverrides(BaseModel):
+    """A workspace's own breaker thresholds (13.7); `None` keeps the platform's. Held to
+    `BREAKER_RANGES` when the policy is resolved (`effective_policy`)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    repeat_calls: int | None = None
+    repeat_errors: int | None = None
+    cost_multiple: float | None = None
+    cost_floor_usd: float | None = None
+    flip_flops: int | None = None
+
+
 def clamp_breakers(values: Mapping[str, float]) -> dict[str, float]:
     """`values` (threshold name → value) with each value held to its `BREAKER_RANGES`."""
     return {
@@ -182,6 +195,7 @@ class PolicyOverrides(BaseModel):
     sandbox_ttl_s: Limit | None = None
     branch_retention_days: Limit | None = None
     review_rounds: Limit | None = None
+    breakers: BreakerOverrides | None = None
 
 
 def effective_policy(overrides: PolicyOverrides | None = None) -> Policy:
@@ -190,8 +204,13 @@ def effective_policy(overrides: PolicyOverrides | None = None) -> Policy:
     base = PLATFORM_POLICY.model_dump()
     if overrides is not None:
         for name, value in overrides.model_dump(exclude_none=True).items():
+            if name == "breakers":
+                continue
             base[name] = value if name == "budget_usd" else min(ceiling(name), value)
-    return Policy.model_validate(base)
+    policy = Policy.model_validate(base)
+    if overrides is not None and overrides.breakers is not None:
+        policy = with_breakers(policy, overrides.breakers.model_dump(exclude_none=True))
+    return policy
 
 
 def with_breakers(policy: Policy, spec_breakers: Mapping[str, float] | None) -> Policy:

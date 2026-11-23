@@ -4556,6 +4556,28 @@
               }
             ],
             "description": "Make this an independent reviewer (13.6): the engine builds its input from the spec and the reviewed writer's change, it has only read tools, and its answer is findings. Not with `reads`, `input_schema` or `output_schema`."
+          },
+          "paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": "array",
+                "maxItems": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paths",
+            "description": "The only repo paths this writer may write (globs on repo-relative paths: `**`, `*`, `?`, 13.7). A write outside them pauses the run (circuit breaker) and the repo tools refuse it. Needs a write tool; unset, it may write anywhere that is not protected.",
+            "examples": [
+              [
+                "docs/**"
+              ]
+            ]
           }
         },
         "additionalProperties": false,
@@ -5005,6 +5027,170 @@
         ],
         "title": "BlankWorkflow",
         "description": "A new workflow with one starter agent, for the builder to grow (5.8)."
+      },
+      "BreakerOverridesIn": {
+        "properties": {
+          "repeat_calls": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeat Calls",
+            "description": "Calls of one tool with the same arguments in a step. From 2 to 50; unset keeps the platform's."
+          },
+          "repeat_errors": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 2.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeat Errors",
+            "description": "Errors with the same text from one tool in a step. From 2 to 50; unset keeps the platform's."
+          },
+          "cost_multiple": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 20.0,
+                "minimum": 1.5
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Multiple",
+            "description": "A step's cost as a multiple of its node's average. From 1.5 to 20; unset keeps the platform's."
+          },
+          "cost_floor_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Floor Usd",
+            "description": "USD a step must also cost above its node's average to trip. From 0 to 1000; unset keeps the platform's."
+          },
+          "flip_flops": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flip Flops",
+            "description": "Times a step rewrites a file back to an earlier content. From 1 to 10; unset keeps the platform's."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BreakerOverridesIn",
+        "description": "The workspace's own breaker thresholds, each within its platform range; unset keeps the\nplatform's. No value turns a breaker off."
+      },
+      "BreakerRange": {
+        "properties": {
+          "min": {
+            "type": "number",
+            "title": "Min"
+          },
+          "max": {
+            "type": "number",
+            "title": "Max"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "BreakerRange"
+      },
+      "BreakerSettings": {
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/BreakerThresholds"
+          },
+          "ranges": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BreakerRange"
+            },
+            "type": "object",
+            "title": "Ranges"
+          },
+          "overrides": {
+            "$ref": "#/components/schemas/BreakerOverridesIn"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/BreakerThresholds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "defaults",
+          "ranges",
+          "overrides",
+          "effective"
+        ],
+        "title": "BreakerSettings",
+        "description": "The circuit-breaker thresholds the workspace's new runs get (13.7): each of its\n`overrides`, else the platform's `defaults`, within `ranges`. A workflow may set its own\nwithin the same ranges; a run keeps the thresholds it was created with."
+      },
+      "BreakerThresholds": {
+        "properties": {
+          "repeat_calls": {
+            "type": "integer",
+            "title": "Repeat Calls",
+            "description": "Calls of one tool with the same arguments in a step."
+          },
+          "repeat_errors": {
+            "type": "integer",
+            "title": "Repeat Errors",
+            "description": "Errors with the same text from one tool in a step."
+          },
+          "cost_multiple": {
+            "type": "number",
+            "title": "Cost Multiple",
+            "description": "A step's cost as a multiple of its node's average."
+          },
+          "cost_floor_usd": {
+            "type": "number",
+            "title": "Cost Floor Usd",
+            "description": "USD a step must also cost above its node's average to trip."
+          },
+          "flip_flops": {
+            "type": "integer",
+            "title": "Flip Flops",
+            "description": "Times a step rewrites a file back to an earlier content."
+          }
+        },
+        "type": "object",
+        "required": [
+          "repeat_calls",
+          "repeat_errors",
+          "cost_multiple",
+          "cost_floor_usd",
+          "flip_flops"
+        ],
+        "title": "BreakerThresholds",
+        "description": "The thresholds of the four circuit breakers (13.7)."
       },
       "BreakersSpec": {
         "properties": {
@@ -6730,7 +6916,9 @@
           "review_unknown_writer",
           "review_not_in_loop",
           "invalid_gate_review",
-          "breakers_out_of_range"
+          "breakers_out_of_range",
+          "paths_without_writes",
+          "invalid_paths"
         ]
       },
       "JiraConnectionOut": {
@@ -10747,6 +10935,17 @@
             ],
             "title": "Budget Usd",
             "description": "The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget."
+          },
+          "breakers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BreakerOverridesIn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace's circuit-breaker thresholds (13.7); unset keeps the platform's."
           }
         },
         "additionalProperties": false,
@@ -13319,6 +13518,10 @@
           },
           "effective": {
             "$ref": "#/components/schemas/RunLimits"
+          },
+          "breakers": {
+            "$ref": "#/components/schemas/BreakerSettings",
+            "description": "The circuit-breaker thresholds (13.7): defaults, ranges, the workspace's own and the effective ones."
           }
         },
         "type": "object",
@@ -13326,7 +13529,8 @@
           "defaults",
           "ceilings",
           "overrides",
-          "effective"
+          "effective",
+          "breakers"
         ],
         "title": "WorkspacePolicyOut",
         "description": "The limits the workspace's new runs get: each of its `overrides`, else the platform's\n`defaults`. A run keeps the limits it was created with."

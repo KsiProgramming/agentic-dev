@@ -1366,6 +1366,14 @@ export interface components {
             start_from?: string | null;
             /** @description Make this an independent reviewer (13.6): the engine builds its input from the spec and the reviewed writer's change, it has only read tools, and its answer is findings. Not with `reads`, `input_schema` or `output_schema`. */
             review?: components["schemas"]["ReviewOf"] | null;
+            /**
+             * Paths
+             * @description The only repo paths this writer may write (globs on repo-relative paths: `**`, `*`, `?`, 13.7). A write outside them pauses the run (circuit breaker) and the repo tools refuse it. Needs a write tool; unset, it may write anywhere that is not protected.
+             * @example [
+             *       "docs/**"
+             *     ]
+             */
+            paths?: string[] | null;
         };
         /** @enum {string} */
         AnalyzerMode: "no_new" | "shown" | "off";
@@ -1541,6 +1549,91 @@ export interface components {
              * @description The workflow's own `provider` (8.3): every agent that names none runs on it, the starter agent and those added later. Unset means the workspace default.
              */
             provider?: ("claude" | "copilot") | null;
+        };
+        /**
+         * BreakerOverridesIn
+         * @description The workspace's own breaker thresholds, each within its platform range; unset keeps the
+         *     platform's. No value turns a breaker off.
+         */
+        BreakerOverridesIn: {
+            /**
+             * Repeat Calls
+             * @description Calls of one tool with the same arguments in a step. From 2 to 50; unset keeps the platform's.
+             */
+            repeat_calls?: number | null;
+            /**
+             * Repeat Errors
+             * @description Errors with the same text from one tool in a step. From 2 to 50; unset keeps the platform's.
+             */
+            repeat_errors?: number | null;
+            /**
+             * Cost Multiple
+             * @description A step's cost as a multiple of its node's average. From 1.5 to 20; unset keeps the platform's.
+             */
+            cost_multiple?: number | null;
+            /**
+             * Cost Floor Usd
+             * @description USD a step must also cost above its node's average to trip. From 0 to 1000; unset keeps the platform's.
+             */
+            cost_floor_usd?: number | null;
+            /**
+             * Flip Flops
+             * @description Times a step rewrites a file back to an earlier content. From 1 to 10; unset keeps the platform's.
+             */
+            flip_flops?: number | null;
+        };
+        /** BreakerRange */
+        BreakerRange: {
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+        };
+        /**
+         * BreakerSettings
+         * @description The circuit-breaker thresholds the workspace's new runs get (13.7): each of its
+         *     `overrides`, else the platform's `defaults`, within `ranges`. A workflow may set its own
+         *     within the same ranges; a run keeps the thresholds it was created with.
+         */
+        BreakerSettings: {
+            defaults: components["schemas"]["BreakerThresholds"];
+            /** Ranges */
+            ranges: {
+                [key: string]: components["schemas"]["BreakerRange"];
+            };
+            overrides: components["schemas"]["BreakerOverridesIn"];
+            effective: components["schemas"]["BreakerThresholds"];
+        };
+        /**
+         * BreakerThresholds
+         * @description The thresholds of the four circuit breakers (13.7).
+         */
+        BreakerThresholds: {
+            /**
+             * Repeat Calls
+             * @description Calls of one tool with the same arguments in a step.
+             */
+            repeat_calls: number;
+            /**
+             * Repeat Errors
+             * @description Errors with the same text from one tool in a step.
+             */
+            repeat_errors: number;
+            /**
+             * Cost Multiple
+             * @description A step's cost as a multiple of its node's average.
+             */
+            cost_multiple: number;
+            /**
+             * Cost Floor Usd
+             * @description USD a step must also cost above its node's average to trip.
+             */
+            cost_floor_usd: number;
+            /**
+             * Flip Flops
+             * @description Times a step rewrites a file back to an earlier content.
+             */
+            flip_flops: number;
         };
         /**
          * BreakersSpec
@@ -2418,7 +2511,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed" | "invalid_review" | "review_unknown_writer" | "review_not_in_loop" | "invalid_gate_review" | "breakers_out_of_range";
+        IssueCode: "schema" | "id_mismatch" | "duplicate_node_id" | "invalid_expression" | "not_allowed_in_loop" | "not_allowed_in_map" | "not_allowed_in_parallel" | "reference" | "publish_not_tool_node" | "publish_without_gate" | "create_not_tool_node" | "create_without_gate" | "create_not_first" | "unknown_tool" | "policy_limit" | "budget_unpriced_model" | "invalid_schema" | "port_mismatch" | "artifact_unknown" | "artifact_conflict" | "invalid_vote" | "invalid_router" | "not_allowed_in_orchestrator" | "subflow_unknown" | "subflow_cycle" | "subflow_unpublished" | "invalid_gate" | "jira_write_not_tool_node" | "jira_write_without_gate" | "jira_write_not_shown" | "on_review_invalid" | "copilot_connection_required" | "no_writer_before" | "tool_node_only" | "evidence_not_in_loop" | "evidence_unknown_writer" | "invalid_evidence" | "invalid_protect" | "allow_unknown_writer" | "protected_change_without_gate" | "start_from_unknown_writer" | "start_from_without_gate" | "start_from_not_allowed" | "invalid_review" | "review_unknown_writer" | "review_not_in_loop" | "invalid_gate_review" | "breakers_out_of_range" | "paths_without_writes" | "invalid_paths";
         /**
          * JiraConnectionOut
          * @description The workspace's Jira connection. Its tokens are never returned.
@@ -4122,6 +4215,8 @@ export interface components {
              * @description The default budget of the workspace's runs, which a run may replace. It has no platform ceiling. From $0.01 to $1,000,000; unset is no budget.
              */
             budget_usd?: number | null;
+            /** @description The workspace's circuit-breaker thresholds (13.7); unset keeps the platform's. */
+            breakers?: components["schemas"]["BreakerOverridesIn"] | null;
         };
         /**
          * RunLimits
@@ -5272,6 +5367,8 @@ export interface components {
             ceilings: components["schemas"]["RunLimits"];
             overrides: components["schemas"]["RunLimitOverrides"];
             effective: components["schemas"]["RunLimits"];
+            /** @description The circuit-breaker thresholds (13.7): defaults, ranges, the workspace's own and the effective ones. */
+            breakers: components["schemas"]["BreakerSettings"];
         };
         /**
          * WorkspacePricing

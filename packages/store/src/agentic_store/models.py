@@ -348,6 +348,8 @@ class WorkspacePolicy(Base):
     sandbox_ttl_s: Mapped[int | None] = mapped_column(Integer)
     branch_retention_days: Mapped[int | None] = mapped_column(Integer)
     review_rounds: Mapped[int | None] = mapped_column(Integer)
+    # The workspace's circuit-breaker thresholds (13.7), by name; `NULL` keeps the platform's.
+    breakers: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
