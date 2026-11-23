@@ -30,7 +30,13 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.mcpserver.tools import Tool
 from pydantic import Field
 
-from agentic_runtime import ReadableWriters, WorkRefused, no_commits_text
+from agentic_runtime import (
+    ProtectedPaths,
+    ReadableWriters,
+    WorkRefused,
+    no_commits_text,
+    refusal_text,
+)
 from agentic_sandbox import (
     AGENT_IDENTITY,
     GIT_SAFETY,
@@ -146,6 +152,13 @@ git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD &&
 """
 
 
+# Stages every change, then lists the staged paths, NUL separated, with a rename as a deletion
+# and an addition so both sides are named.
+_STAGED_SCRIPT = f"""
+{_GIT} add -A || exit 1
+{_GIT} diff --cached --name-only -z --no-renames
+"""
+
 _HIT = re.compile(r"^\./(.+?):(\d+):(.*)$")
 _ERE_SPECIAL = re.compile(r"([\\.\[\]()*+?{}|^$])")
 
@@ -178,10 +191,14 @@ class _RepoTools:
         limits: RepoLimits,
         readable: ReadableWriters | None = None,
         refs: Sandbox | None = None,
+        protected: ProtectedPaths | None = None,
+        node_id: str | None = None,
     ) -> None:
         self._sandbox = sandbox
         self._limits = limits
         self._readable = readable
+        self._protected = protected
+        self._node_id = node_id
         # Git refs are read in the run's checkout, whose `HEAD` is the run's base; a writer's
         # worktree has its own `HEAD`.
         self._refs = refs or sandbox
@@ -479,6 +496,7 @@ class _RepoTools:
             raise ToolError("path must name a file")
         if any(part.lower() == ".git" for part in relative.split("/")):
             raise ToolError(f"cannot write inside .git: {path}")
+        self._refuse_protected("repo.write_file", [relative])
         data = content.encode()
         if len(data) > self._limits.max_write_bytes:
             raise ToolError(
@@ -515,6 +533,8 @@ class _RepoTools:
         if not message.strip():
             raise ToolError("the commit message must not be blank")
         name, email = COMMIT_AUTHOR
+        if self._protected is not None and self._node_id is not None:
+            await self._refuse_staged_protected()
         result = await self._sandbox.exec(
             ["sh", "-c", _COMMIT_SCRIPT, "commit", message, name, email]
         )
@@ -526,6 +546,38 @@ class _RepoTools:
         shown = paths[: self._limits.max_commit_paths]
         more = f" (and {len(paths) - len(shown)} more)" if len(paths) > len(shown) else ""
         return f"{sha} on {branch}: {', '.join(shown)}{more}"
+
+    def _refuse_protected(self, tool: str, paths: list[str]) -> None:
+        """Refuse a change to any of the repo-relative `paths` that is protected for this node:
+        one `refused` call per path and one fixed text, the first path's."""
+        if self._protected is None or self._node_id is None:
+            return
+        hits = [
+            (p, rule)
+            for p in paths
+            if (rule := self._protected.rule_for(self._node_id, p)) is not None
+        ]
+        for path, rule in hits:
+            self._protected.refused(self._node_id, tool, path, rule)
+        if hits:
+            text = refusal_text(*hits[0])
+            if len(hits) > 1:
+                text += f" (and {len(hits) - 1} more protected paths)"
+            raise ToolError(text)
+
+    async def _refuse_staged_protected(self) -> None:
+        """Stage everything, and refuse the commit if one staged path (both sides of a rename)
+        is protected: what a write through a symlinked directory or a move would slip past a
+        path check on `write_file`. Nothing is committed and the index is left as it was."""
+        result = await self._sandbox.exec(["sh", "-c", _STAGED_SCRIPT, "staged"])
+        if result.exit_code != 0:
+            raise ToolError("could not commit")
+        staged = [p for p in result.stdout.split("\0") if p]
+        try:
+            self._refuse_protected("repo.commit", staged)
+        except ToolError:
+            await self._sandbox.exec(["sh", "-c", f"{_GIT} reset -q"])
+            raise
 
 
 def _ref_path_error(kind: str, path: str) -> str:
@@ -582,12 +634,16 @@ def build_repo_server(
     limits: RepoLimits | None = None,
     readable: ReadableWriters | None = None,
     refs: Sandbox | None = None,
+    protected: ProtectedPaths | None = None,
+    node_id: str | None = None,
 ) -> MCPServer:
     """The `repo` server over `sandbox`. With `writable`, `sandbox` must be a writer's worktree,
     and the server also has `write_file` and `commit`. `readable` is the run's writers whose work
     `node` may name; `refs` is the run's checkout, where their branches are read (default:
-    `sandbox`, right for a read-only server)."""
-    tools = _RepoTools(sandbox, limits or RepoLimits(), readable, refs)
+    `sandbox`, right for a read-only server). With `protected` (13.5) and the writer's `node_id`
+    (a task's key for an orchestrator's worker), `write_file` and `commit` refuse the paths it
+    protects."""
+    tools = _RepoTools(sandbox, limits or RepoLimits(), readable, refs, protected, node_id)
     reads = [
         _tool(tools.list_files, {"path": ".", "description": "See how the repo is laid out"}),
         _tool(
