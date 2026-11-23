@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agentic_engine.artifacts import GateArtifact
-from agentic_engine.events import GATE_WAITING
+from agentic_engine.events import GATE_WAITING, PROTECTED_PATH_REFUSED
 from agentic_engine.evidence import EvidencePack
 from agentic_engine.gate import (
     EditError,
@@ -200,6 +200,21 @@ def _audit_details(decision: GateDecision, edited: list[str]) -> dict[str, JsonV
     return details
 
 
+MAX_PROTECTED_ATTEMPTS = 50
+"""The most distinct (writer, path, rule) attempts a gate lists."""
+
+
+@dataclass(frozen=True)
+class ProtectedAttempt:
+    """A writer's refused tries to change one protected path (13.5), counted: `rule` is `default`,
+    `workflow` or `frozen`. The path is a name, never content."""
+
+    node_id: str
+    path: str
+    rule: str
+    count: int
+
+
 @dataclass(frozen=True)
 class PendingGate:
     """The gate a run waits at, as its last `gate_waiting` showed it to the approver."""
@@ -223,6 +238,27 @@ class PendingGate:
     iteration: int = 1
     # What the platform's checks found about the writer's work (13.3), if the gate has any.
     evidence: EvidencePack | None = None
+    # The run's refused attempts to change a protected path so far (13.5), most tried first.
+    protected_attempts: list[ProtectedAttempt] = field(default_factory=list[ProtectedAttempt])
+
+
+async def protected_attempts(
+    session: AsyncSession, run_id: UUID, limit: int = MAX_PROTECTED_ATTEMPTS
+) -> list[ProtectedAttempt]:
+    """The refused attempts of the run (`protected_path_refused`), grouped by writer, path and
+    rule, the most tried first and then by path."""
+    path = RunEventRow.payload["path"].astext
+    rule = RunEventRow.payload["rule"]["kind"].astext
+    rows = (
+        await session.execute(
+            select(RunEventRow.node_id, path, rule, func.count())
+            .where(RunEventRow.run_id == run_id, RunEventRow.type == PROTECTED_PATH_REFUSED)
+            .group_by(RunEventRow.node_id, path, rule)
+            .order_by(func.count().desc(), path)
+            .limit(limit)
+        )
+    ).all()
+    return [ProtectedAttempt(r[0] or "", r[1] or "", r[2] or "", r[3]) for r in rows]
 
 
 async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID) -> PendingGate:
@@ -239,6 +275,7 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
             raise GateExpiredError(f"the approval of run {run_id} expired")
         row = await _last_gate_waiting(session, run_id)
         passes = 1 if row is None else await _pass(session, run_id, row[0])
+        attempts = await protected_attempts(session, run_id)
     if row is None:
         raise RunNotWaitingError(f"run {run_id} has not paused at a gate")
     node_id, payload = row
@@ -257,6 +294,7 @@ async def pending_gate(sessions: async_sessionmaker[AsyncSession], run_id: UUID)
         changes_left=max(allowed - passes + 1, 0) if isinstance(allowed, int) else 0,
         iteration=passes,
         evidence=_shown_evidence(payload),
+        protected_attempts=attempts,
     )
 
 

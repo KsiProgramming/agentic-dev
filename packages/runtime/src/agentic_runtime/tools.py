@@ -2,11 +2,13 @@
 them. The real executors are MCP servers bridged by `agentic_tools`; adapters only route calls
 here."""
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+from agentic_runtime.paths import matches, normalise
 
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 
@@ -105,3 +107,97 @@ class ReadableWriters:
         if node_id in self._known:
             raise WorkRefused(f"writer '{node_id}' has not run before this step")
         raise WorkRefused(f"'{node_id}' is not a writer of this run")
+
+
+@dataclass(frozen=True)
+class ProtectRule:
+    """One reason a path is protected (13.5). `default` is the platform's own list and `workflow`
+    a pattern of the spec's `protect.paths`; both are globs. `frozen` is one file an earlier writer
+    changed, which a writer that started from it can read but not change: `glob` is that exact path,
+    `writer` the writer it came from and `gate` the gate that approved it."""
+
+    glob: str
+    kind: Literal["default", "workflow", "frozen"]
+    writer: str | None = None
+    gate: str | None = None
+
+    def covers(self, path: str) -> bool:
+        if self.kind == "frozen":
+            return (
+                normalise(self.glob) is not None
+                and (normalise(path) or "").lower() == (normalise(self.glob) or "").lower()
+            )
+        return matches(self.glob, path)
+
+
+def refusal_text(path: str, rule: ProtectRule) -> str:
+    """The fixed text of a refused write: the path and the rule it came from, never file content."""
+    if rule.kind == "default":
+        why = "by the platform (CI and analyzer config)"
+    elif rule.kind == "workflow":
+        why = f"by this workflow ({rule.glob})"
+    else:
+        why = f"(approved at '{rule.gate}' from '{rule.writer}')"
+    return f"'{path}' is protected {why}: you can read it but not change it"
+
+
+class ProtectedPaths:
+    """The paths the step that is about to run may not change (13.5), shared between the engine,
+    which sets it before every step as it sets `ReadableWriters`, and the repo tools, which check
+    every `write_file` and `commit` against it.
+
+    `rules` apply to every writer; `allow` exempts a node from the `default` and `workflow` rules
+    its globs match (a person approves what it changes at a gate); `frozen` holds the rules of
+    a writer that started from another. A task of an orchestrator (`fix.t1`) takes its
+    orchestrator's rules. `refused` is called back for each refusal."""
+
+    def __init__(
+        self,
+        on_refused: Callable[[str, str, str, ProtectRule], Awaitable[None] | None] | None = None,
+    ) -> None:
+        self._rules: tuple[ProtectRule, ...] = ()
+        self._allow: dict[str, tuple[str, ...]] = {}
+        self._frozen: dict[str, tuple[ProtectRule, ...]] = {}
+        self.on_refused = on_refused
+
+    def set(
+        self,
+        rules: Sequence[ProtectRule],
+        allow: Mapping[str, Sequence[str]] | None = None,
+        frozen: Mapping[str, Sequence[ProtectRule]] | None = None,
+    ) -> None:
+        """Replace the rules for every node, the per-node exemptions and the frozen files."""
+        self._rules = tuple(rules)
+        self._allow = {node: tuple(globs) for node, globs in (allow or {}).items()}
+        self._frozen = {node: tuple(r) for node, r in (frozen or {}).items()}
+
+    def rules_for(self, node_id: str) -> list[ProtectRule]:
+        """Every rule `node_id` is held to, to show an agent: a path its `allow` globs match is
+        still listed, since `rule_for` decides."""
+        return [*self._rules, *self._frozen.get(node_id.partition(".")[0], ())]
+
+    def rule_for(self, node_id: str, path: str) -> ProtectRule | None:
+        """The rule that refuses `node_id` a change to `path`, or None."""
+        owner = node_id.partition(".")[0]
+        allowed = self._allow.get(owner, ())
+        if frozen := next((r for r in self._frozen.get(owner, ()) if r.covers(path)), None):
+            return frozen  # the most specific reason: a person approved this very file
+        return next(
+            (
+                r
+                for r in self._rules
+                if r.covers(path) and not any(matches(g, path) for g in allowed)
+            ),
+            None,
+        )
+
+    def freeze(self, node_id: str, rules: Sequence[ProtectRule]) -> None:
+        """Hold `node_id` (and its tasks) to `rules` as frozen files, replacing its earlier ones."""
+        self._frozen[node_id] = tuple(rules)
+
+    async def refused(self, node_id: str, tool: str, path: str, rule: ProtectRule) -> None:
+        """Tell the engine about one refusal."""
+        if self.on_refused is not None:
+            done = self.on_refused(node_id, tool, path, rule)
+            if done is not None:
+                await done

@@ -31,7 +31,7 @@ from uuid import UUID
 from mcp import Client
 from pydantic import JsonValue
 
-from agentic_runtime.tools import ReadableWriters, ToolDefinition, ToolOutput
+from agentic_runtime.tools import ProtectedPaths, ReadableWriters, ToolDefinition, ToolOutput
 from agentic_sandbox import Sandbox, SandboxError, Worktree, add_worktree
 from agentic_tools.mcp_bridge import McpToolExecutor
 from agentic_tools.repo.server import SERVER_NAME, RepoLimits, build_repo_server
@@ -51,7 +51,7 @@ class _Writer:
 _TASK_WRITER = re.compile(r"^([a-z][a-z0-9_-]{0,62})\.(?!lock$)[a-z][a-z0-9_-]{0,39}$")
 """A task's writer (6.1): `<orchestrator>.<task>`."""
 
-type _Open = Callable[[Sandbox], Awaitable[McpToolExecutor]]
+type _Open = Callable[[Sandbox, str | None], Awaitable[McpToolExecutor]]
 type _Connect = Callable[[contextlib.AsyncExitStack, bool], _Open]
 
 
@@ -63,12 +63,14 @@ class _Opener:
     def __init__(self, connect: _Connect) -> None:
         self._connect = connect
         self._queue: asyncio.Queue[
-            tuple[Worktree, bool, asyncio.Future[McpToolExecutor]] | None
+            tuple[Worktree, bool, str | None, asyncio.Future[McpToolExecutor]] | None
         ] = asyncio.Queue()
 
-    async def open(self, worktree: Worktree, writable: bool = True) -> McpToolExecutor:
+    async def open(
+        self, worktree: Worktree, writable: bool = True, node_id: str | None = None
+    ) -> McpToolExecutor:
         done: asyncio.Future[McpToolExecutor] = asyncio.get_running_loop().create_future()
-        await self._queue.put((worktree, writable, done))
+        await self._queue.put((worktree, writable, node_id, done))
         return await done
 
     def stop(self) -> None:
@@ -77,9 +79,9 @@ class _Opener:
     async def serve(self) -> None:
         async with contextlib.AsyncExitStack() as stack:
             while (asked := await self._queue.get()) is not None:
-                worktree, writable, done = asked
+                worktree, writable, node_id, done = asked
                 try:
-                    tools = await self._connect(stack, writable)(worktree)
+                    tools = await self._connect(stack, writable)(worktree, node_id)
                 except Exception as e:  # reported to the caller
                     done.set_exception(e)
                 else:
@@ -145,7 +147,7 @@ class RepoTools:
             if (writer := self._writers.get(key)) is None:
                 assert self._run_id is not None and self._opener is not None
                 worktree = Worktree.of(self._sandbox, self._run_id, key)
-                writer = _Writer(key, worktree, await self._opener.open(worktree))
+                writer = _Writer(key, worktree, await self._opener.open(worktree, True, key))
                 self._writers[key] = writer
             return writer
 
@@ -184,6 +186,7 @@ async def open_repo_tools(
     task_writers: Collection[str] = (),
     limits: RepoLimits | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> AsyncGenerator[RepoTools]:
     """The `repo.*` tools for one run, connected in memory: a read-only `repo` server bound to
     `sandbox`, and for each node in `writers` (which needs `run_id`) a writable one bound to its
@@ -193,14 +196,23 @@ async def open_repo_tools(
 
     With `readable` (13.1), every server takes a `node` on its reads and resolves it through it, the
     same way for the read-only server and each writer's: a writer's branch is read from git refs
-    in `sandbox`, the run's checkout."""
+    in `sandbox`, the run's checkout.
+
+    With `protected` (13.5), every writer's `write_file` and `commit` refuse the paths it protects
+    for that writer (a task's key for an orchestrator's worker)."""
     if (writers or task_writers) and run_id is None:
         raise ValueError("writers need the run id, which names their branches")
 
     def connector(stack: contextlib.AsyncExitStack, writable: bool) -> _Open:
-        async def connect(box: Sandbox) -> McpToolExecutor:
+        async def connect(box: Sandbox, node_id: str | None = None) -> McpToolExecutor:
             server = build_repo_server(
-                box, writable=writable, limits=limits, readable=readable, refs=sandbox
+                box,
+                writable=writable,
+                limits=limits,
+                readable=readable,
+                refs=sandbox,
+                protected=protected,
+                node_id=node_id,
             )
             client = await stack.enter_async_context(Client(server))
             return await McpToolExecutor.connect(client, SERVER_NAME)
@@ -208,12 +220,14 @@ async def open_repo_tools(
         return connect
 
     async with contextlib.AsyncExitStack() as stack:
-        base = await connector(stack, False)(sandbox)
+        base = await connector(stack, False)(sandbox, None)
         routed: dict[str, _Writer] = {}
         for node_id in sorted(writers):
             assert run_id is not None
             worktree = Worktree.of(sandbox, run_id, node_id)
-            routed[node_id] = _Writer(node_id, worktree, await connector(stack, True)(worktree))
+            routed[node_id] = _Writer(
+                node_id, worktree, await connector(stack, True)(worktree, node_id)
+            )
         if not task_writers:
             first = next(iter(routed.values()), None)
             definitions = first.tools.definitions() if first else ()
@@ -223,7 +237,7 @@ async def open_repo_tools(
         # worktree is never created).
         assert run_id is not None
         unused = Worktree.of(sandbox, run_id, "definitions")
-        definitions = (await connector(stack, True)(unused)).definitions()
+        definitions = (await connector(stack, True)(unused, None)).definitions()
         opener = _Opener(connector)
         serving = asyncio.create_task(opener.serve())
         try:

@@ -35,6 +35,7 @@ import {
   RequestChangesButton,
 } from "@/runs/console/decision-controls";
 import { EvidenceStrip } from "@/runs/console/evidence-strip";
+import { ProtectedAttempts } from "@/runs/console/protected-attempts";
 import { StatusLabel } from "@/runs/console/gate-files";
 import { SelectionChecklist } from "@/runs/console/selection-checklist";
 import { useGateDecision, type Decision } from "@/runs/console/use-gate-decision";
@@ -166,6 +167,7 @@ function GateReview({
       </StatStrip>
 
       <EvidenceStrip evidence={gate.evidence} />
+      <ProtectedAttempts attempts={gate.protectedAttempts} />
 
       {decision.choice ? (
         <SelectionChecklist runId={run.id} choice={decision.choice} baseUrl={baseUrl} />

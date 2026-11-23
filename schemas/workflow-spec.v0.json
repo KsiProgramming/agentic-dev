@@ -119,6 +119,20 @@
           "title": "Role",
           "type": "string"
         },
+        "start_from": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.",
+          "title": "Start From"
+        },
         "tools": {
           "items": {
             "type": "string"
@@ -830,6 +844,20 @@
           "default": null,
           "description": "Unset: a failed task fails the orchestrator."
         },
+        "start_from": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.",
+          "title": "Start From"
+        },
         "type": {
           "const": "orchestrator",
           "title": "Type",
@@ -998,6 +1026,44 @@
         "join"
       ],
       "title": "ParallelNode",
+      "type": "object"
+    },
+    "ProtectPolicy": {
+      "additionalProperties": false,
+      "description": "Files no writer may change (13.5), on top of the platform's own list\n(`agentic_engine.protect.PLATFORM_PROTECTED`). `paths` are globs on repo-relative paths (`**`,\n`*`, `?`; case does not matter). `allow` names the writers that may change protected paths\nthat match its globs; a gate must follow such a node, so a person approves the change.",
+      "properties": {
+        "allow": {
+          "description": "Per writer node: the protected paths it may change (globs), with a gate after it.",
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]{0,62}$": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "title": "Allow",
+          "type": "object"
+        },
+        "paths": {
+          "description": "Globs on repo-relative paths that no writer may change.",
+          "examples": [
+            [
+              "tests/**",
+              "**/conftest.py"
+            ]
+          ],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "title": "ProtectPolicy",
       "type": "object"
     },
     "ReduceAgent": {
@@ -2028,6 +2094,18 @@
       "default": null,
       "description": "The workflow's typed output (6.6): a subflow that calls it checks the called workflow's output against this, and the step after it reads it as typed.",
       "title": "Output Schema"
+    },
+    "protect": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProtectPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Files no writer may change, besides the platform's own list (CI and analyzer config, always protected), and the writers allowed to change them (13.5)."
     },
     "provider": {
       "anyOf": [

@@ -114,8 +114,8 @@ async def test_the_pause_shows_what_the_writers_changed() -> None:
     assert waiting.type == "gate_waiting"
     assert waiting.payload is not None
     assert waiting.payload["changes"] == [
-        PAGE.model_dump(mode="json"),
-        LOGO.model_dump(mode="json"),
+        PAGE.model_dump(mode="json", exclude={"protected", "rule"}),
+        LOGO.model_dump(mode="json", exclude={"protected", "rule"}),
     ]
     assert "changes_error" not in waiting.payload
 

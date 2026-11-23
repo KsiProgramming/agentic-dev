@@ -33,6 +33,7 @@ test("a gate waits until it is decided", () => {
     iteration: 1,
     waitFor: null,
     evidence: null,
+    protectedAttempts: [],
   });
   expect(pendingGate([WAITING, runEvent(3, "gate_decided", { decision: "approve" })])).toBeNull();
   expect(pendingGate([runEvent(1, "run_started")])).toBeNull();
@@ -85,6 +86,7 @@ function gate(overrides: Partial<PendingGate>): PendingGate {
     iteration: 1,
     waitFor: null,
     evidence: null,
+    protectedAttempts: [],
     ...overrides,
   };
 }
@@ -136,6 +138,7 @@ test("a gate shows the files its writers changed", () => {
       reason: null,
       before: null,
       after: "# A\n",
+      protected: null,
     },
     {
       nodeId: "writer",
@@ -146,6 +149,7 @@ test("a gate shows the files its writers changed", () => {
       reason: "binary",
       before: null,
       after: null,
+      protected: null,
     },
   ]);
   const unreadable = runEvent(2, "gate_waiting", { changes: [], changes_error: "git failed" });

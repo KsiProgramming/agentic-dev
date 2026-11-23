@@ -30,6 +30,8 @@ from agentic_runtime.pricing import (
 from agentic_runtime.protocol import AgentRun, AgentRuntime
 from agentic_runtime.request import AgentRequest, Provider
 from agentic_runtime.tools import (
+    ProtectedPaths,
+    ProtectRule,
     ReadableWriter,
     ReadableWriters,
     ToolDefinition,
@@ -37,6 +39,7 @@ from agentic_runtime.tools import (
     ToolOutput,
     WorkRefused,
     no_commits_text,
+    refusal_text,
 )
 
 __all__ = [
@@ -58,6 +61,8 @@ __all__ = [
     "ModelPrice",
     "ModelPricing",
     "PriceTable",
+    "ProtectRule",
+    "ProtectedPaths",
     "Provider",
     "ReadableWriter",
     "ReadableWriters",
@@ -75,4 +80,5 @@ __all__ = [
     "check_events",
     "is_terminal",
     "no_commits_text",
+    "refusal_text",
 ]

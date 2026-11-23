@@ -35,6 +35,7 @@ from agentic_engine.policy import (
 )
 from agentic_engine.ports import schema_problem
 from agentic_runtime.findings import FindingsReport
+from agentic_runtime.paths import glob_problem
 from agentic_runtime.request import Provider
 
 NodeId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,62}$")]
@@ -102,6 +103,12 @@ class AgentNode(_Base):
         default_factory=list[str], max_length=8, description=_READS_DESCRIPTION
     )
     writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
+    start_from: NodeId | None = Field(
+        default=None,
+        description="Start this writer's branch on top of the earlier writer's (13.5): its "
+        "files are frozen for this node, which can read but not change them. A gate must come "
+        "between them.",
+    )
 
     @model_validator(mode="after")
     def _unique_reads(self) -> Self:
@@ -697,6 +704,12 @@ class OrchestratorNode(_Base):
         default=None, description="Unset: a failed task fails the orchestrator."
     )
     writes: ArtifactName | None = Field(default=None, description=_WRITES_DESCRIPTION)
+    start_from: NodeId | None = Field(
+        default=None,
+        description="Start this writer's branch on top of the earlier writer's (13.5): its "
+        "files are frozen for this node, which can read but not change them. A gate must come "
+        "between them.",
+    )
 
 
 class WorkflowRef(_Base):
@@ -1045,6 +1058,12 @@ type IssueCode = Literal[
     "evidence_not_in_loop",
     "evidence_unknown_writer",
     "invalid_evidence",
+    "invalid_protect",
+    "allow_unknown_writer",
+    "protected_change_without_gate",
+    "start_from_unknown_writer",
+    "start_from_without_gate",
+    "start_from_not_allowed",
 ]
 
 
@@ -1830,6 +1849,98 @@ def _writes(node: Node) -> bool:
     return bool(WRITE_TOOLS.intersection(node_tools(node)))
 
 
+def _subtree_end(ordered: list[tuple[str, Node]], index: int) -> int:
+    """The index of the last node under the node at `ordered[index]` (itself if it has none)."""
+    path = ordered[index][0]
+    end = index
+    for i in range(index + 1, len(ordered)):
+        if ordered[i][0].startswith((f"{path}.", f"{path}[")):
+            end = i
+        else:
+            break
+    return end
+
+
+def _in_map_or_parallel(root: Node) -> set[str]:
+    """The ids of the nodes inside a map or a parallel, at any depth."""
+    ids: set[str] = set()
+    for _, node in iter_nodes(root):
+        if isinstance(node, MapNode | ParallelNode):
+            ids.update(n.id for _, n in iter_nodes(node) if n is not node)
+    return ids
+
+
+def start_from_issues(root: Node) -> list[ValidationIssue]:
+    """Why the `start_from` of a node under `root` cannot work (13.5), in run order: the node is
+    no writer, or is in a map, a parallel or an orchestrator's body (`start_from_not_allowed`);
+    the source is not a writer that completes before it (`start_from_unknown_writer`); or no
+    gate comes between them (`start_from_without_gate`), so a person has not approved what the
+    node would start from."""
+    ordered = list(iter_nodes(root))
+    tasked = task_node_ids(root)
+    apart = _in_map_or_parallel(root)
+    loops = {p for p, n in ordered if isinstance(n, LoopNode)}
+    issues: list[ValidationIssue] = []
+    for index, (path, node) in enumerate(ordered):
+        if not isinstance(node, AgentNode | OrchestratorNode) or node.start_from is None:
+            continue
+        source = node.start_from
+        where = f"{node.type} {node.id!r} at {path}"
+
+        def issue(code: IssueCode, message: str, path: str = path, node: Node = node) -> None:
+            issues.append(
+                ValidationIssue(
+                    code=code, path=f"{path}.start_from", node_id=node.id, message=message
+                )
+            )
+
+        if not _writes(node):
+            issue(
+                "start_from_not_allowed",
+                f"{where}: `start_from` is for a writer; this node has no write tool",
+            )
+            continue
+        if node.id in apart or (node.id in tasked and not isinstance(node, OrchestratorNode)):
+            issue(
+                "start_from_not_allowed",
+                f"{where}: `start_from` cannot be used in a map, a parallel or an orchestrator's "
+                "body; start the orchestrator itself from the writer",
+            )
+            continue
+        if source == node.id:
+            issue("start_from_unknown_writer", f"{where}: `start_from` cannot name the node itself")
+            continue
+        found = [i for i, (_, n) in enumerate(ordered) if n.id == source]
+        origin = ordered[found[0]][1] if found else None
+        if (
+            origin is None
+            or not _writes(origin)
+            or (origin.id in tasked and not isinstance(origin, OrchestratorNode))
+        ):
+            issue(
+                "start_from_unknown_writer",
+                f"{where}: `start_from` {source!r} is not a writer of this workflow",
+            )
+            continue
+        end = _subtree_end(ordered, found[0])
+        # A loop's body runs at least once and ends before what follows the loop.
+        ran_at = _runs_in(ordered[found[0]][0], loops)
+        if end >= index or not within(path, scope_of(ran_at)):
+            issue(
+                "start_from_unknown_writer",
+                f"{where}: `start_from` {source!r} does not complete before this node; "
+                "it must run earlier, outside a branch or route this node is not in",
+            )
+            continue
+        if not any(isinstance(n, GateNode) for _, n in ordered[end + 1 : index]):
+            issue(
+                "start_from_without_gate",
+                f"{where}: a gate must come between {source!r} and this node, so a person "
+                "approves the work it starts from",
+            )
+    return issues
+
+
 def task_node_ids(root: Node) -> set[str]:
     """The ids of the orchestrators under `root` and of every node in their bodies: nodes that
     run once per planned task."""
@@ -2515,7 +2626,7 @@ def structure_issues(root: Node, inputs: Collection[str] = ()) -> list[Validatio
     issues += publish_gate_issues(root) + create_repo_issues(root) + jira_write_issues(root)
     issues += commit_artifacts_issues(root) + build_tool_issues(root)
     issues += port_issues(root) + artifact_issues(root, inputs) + subflow_issues(root)
-    issues += gate_issues(root)
+    issues += gate_issues(root) + start_from_issues(root)
     return in_run_order(root, issues)
 
 
@@ -2881,6 +2992,85 @@ def on_review_issues(root: Node, on_review: OnReview | None) -> list[ValidationI
     return []
 
 
+class ProtectPolicy(_Base):
+    """Files no writer may change (13.5), on top of the platform's own list
+    (`agentic_engine.protect.PLATFORM_PROTECTED`). `paths` are globs on repo-relative paths (`**`,
+    `*`, `?`; case does not matter). `allow` names the writers that may change protected paths
+    that match its globs; a gate must follow such a node, so a person approves the change."""
+
+    paths: list[NonEmptyStr] = Field(
+        default_factory=list[str],
+        max_length=64,
+        description="Globs on repo-relative paths that no writer may change.",
+        examples=[["tests/**", "**/conftest.py"]],
+    )
+    allow: dict[NodeId, list[NonEmptyStr]] = Field(
+        default_factory=dict[NodeId, list[str]],
+        description="Per writer node: the protected paths it may change (globs), with a gate "
+        "after it.",
+    )
+
+
+def protect_issues(root: Node, protect: ProtectPolicy | None) -> list[ValidationIssue]:
+    """Why `protect` cannot work for the workflow under `root` (13.5): a malformed glob
+    (`invalid_protect`), an `allow` on a node that is no writer (`allow_unknown_writer`), or no
+    gate after an allowed node before a writer starts from it or something publishes
+    (`protected_change_without_gate`). Empty without `protect`."""
+    if protect is None:
+        return []
+    issues: list[ValidationIssue] = []
+
+    def check(path: str, glob: str) -> None:
+        if (problem := glob_problem(glob)) is not None:
+            issues.append(
+                ValidationIssue(
+                    code="invalid_protect",
+                    path=path,
+                    message=f"protect: the pattern {glob!r} {problem}",
+                )
+            )
+
+    for i, glob in enumerate(protect.paths):
+        check(f"protect.paths[{i}]", glob)
+    ordered = list(iter_nodes(root))
+    tasked = task_node_ids(root)
+    writers = {
+        n.id: index
+        for index, (_, n) in enumerate(ordered)
+        if _writes(n) and (isinstance(n, OrchestratorNode) or n.id not in tasked)
+    }
+    for node_id, globs in protect.allow.items():
+        for i, glob in enumerate(globs):
+            check(f"protect.allow.{node_id}[{i}]", glob)
+        if node_id not in writers:
+            issues.append(
+                ValidationIssue(
+                    code="allow_unknown_writer",
+                    path=f"protect.allow.{node_id}",
+                    message=f"protect.allow: {node_id!r} is not a writer of this workflow; name "
+                    "a node that can write the repo (for an orchestrator, the orchestrator)",
+                )
+            )
+            continue
+        end = _subtree_end(ordered, writers[node_id])
+        for _, later in ordered[end + 1 :]:
+            if isinstance(later, GateNode):
+                break
+            starts = isinstance(later, AgentNode | OrchestratorNode) and later.start_from == node_id
+            if starts or (isinstance(later, ToolNode) and later.tool in PUBLISH_TOOLS):
+                issues.append(
+                    ValidationIssue(
+                        code="protected_change_without_gate",
+                        path=f"protect.allow.{node_id}",
+                        node_id=node_id,
+                        message=f"protect.allow: {node_id!r} may change protected paths, so a "
+                        f"gate must follow it before {later.id!r}, where a person approves them",
+                    )
+                )
+                break
+    return issues
+
+
 class WorkflowSpec(_Base):
     """A versioned workflow document with a single root node."""
 
@@ -2915,6 +3105,11 @@ class WorkflowSpec(_Base):
         description="The provider of every agent that names none of its own; unset means the "
         "workspace default (8.3).",
     )
+    protect: ProtectPolicy | None = Field(
+        default=None,
+        description="Files no writer may change, besides the platform's own list (CI and "
+        "analyzer config, always protected), and the writers allowed to change them (13.5).",
+    )
     on_review: OnReview | None = Field(
         default=None,
         description="Lets a review comment on the pull request the workflow opened "
@@ -2929,8 +3124,10 @@ class WorkflowSpec(_Base):
         if any(isinstance(node, SubflowNode) for _, node in iter_nodes(self.root)):
             return self
         inputs = input_artifacts(self.input)
-        if issues := structure_issues(self.root, inputs) + on_review_issues(
-            self.root, self.on_review
+        if issues := (
+            structure_issues(self.root, inputs)
+            + on_review_issues(self.root, self.on_review)
+            + protect_issues(self.root, self.protect)
         ):
             raise ValueError("; ".join(messages(issues)))
         return self

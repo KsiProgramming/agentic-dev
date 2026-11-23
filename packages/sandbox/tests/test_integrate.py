@@ -14,7 +14,7 @@ from agentic_sandbox import (
     branch_heads,
     export_branch,
 )
-from agentic_sandbox.integrate import MergeSource, integrate_branches, start_branches
+from agentic_sandbox.integrate import MergeSource, integrate_branches, start_branches, start_writer
 
 RUN_ID = UUID("00000000-0000-4000-8000-000000000001")
 # The clone is root's in the Docker sandbox: git needs it marked safe.
@@ -167,3 +167,63 @@ async def test_a_restored_integration_branch_merges_nothing_twice(
     assert again.merged == ["fix.a", "fix.b"]
     assert again.head == before.head
     assert len(merges.splitlines()) == 2
+
+
+async def test_a_writer_starts_from_another_writers_tip_and_names_its_files(
+    sandbox: Sandbox,
+) -> None:
+    await task(sandbox, "test_writer", "mkdir tests && printf 't\n' > tests/test_a.py")
+
+    started = await start_writer(sandbox, RUN_ID, "implementer", "test_writer")
+
+    tip = await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/test_writer")
+    assert started.start == tip
+    assert started.files == ["tests/test_a.py"]
+    assert await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/implementer") == tip
+    tree = await add_worktree(sandbox, RUN_ID, "implementer")
+    assert await sh(tree, "cat tests/test_a.py") == "t"
+
+
+async def test_a_started_writer_keeps_its_commits_when_asked_again(sandbox: Sandbox) -> None:
+    await task(sandbox, "test_writer", "printf 't\n' > t.txt")
+    first = await start_writer(sandbox, RUN_ID, "implementer", "test_writer")
+    await task(sandbox, "implementer", "printf 'i\n' > i.txt")
+    tip = await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/implementer")
+
+    again = await start_writer(sandbox, RUN_ID, "implementer", "test_writer")
+
+    assert again == first
+    assert await sh(sandbox, f"{_SAFE} rev-parse agent/{RUN_ID}/implementer") == tip
+
+
+async def test_an_orchestrator_started_from_a_writer_has_its_integration_worktree(
+    sandbox: Sandbox,
+) -> None:
+    await task(sandbox, "test_writer", "printf 't\n' > t.txt")
+
+    await start_writer(sandbox, RUN_ID, "fix", "test_writer", worktree=True)
+    await start_branches(sandbox, RUN_ID, "fix", ["fix.a"])
+    await task(sandbox, "fix.a", "printf 'a\n' > a.txt")
+    outcome = await integrate_branches(sandbox, RUN_ID, "fix", sources("fix.a"))
+
+    tree = f"{sandbox.worktrees_dir}/fix"
+    assert await sh(sandbox, "cat t.txt a.txt", cwd=tree) == "t\na"
+    assert outcome.merged == ["fix.a"]
+
+
+async def test_a_task_with_no_work_of_its_own_is_empty_after_a_started_integration(
+    sandbox: Sandbox,
+) -> None:
+    await task(sandbox, "test_writer", "printf 't\n' > t.txt")
+    await start_writer(sandbox, RUN_ID, "fix", "test_writer", worktree=True)
+    await start_branches(sandbox, RUN_ID, "fix", ["fix.a"])
+    await add_worktree(sandbox, RUN_ID, "fix.a")
+
+    outcome = await integrate_branches(sandbox, RUN_ID, "fix", sources("fix.a"))
+
+    assert outcome.empty == ["fix.a"] and outcome.merged == []
+
+
+async def test_a_writer_cannot_start_from_a_branch_that_does_not_exist(sandbox: Sandbox) -> None:
+    with pytest.raises(SandboxError):
+        await start_writer(sandbox, RUN_ID, "implementer", "nobody")

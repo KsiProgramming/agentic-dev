@@ -15,6 +15,7 @@ import { allSpecNodes } from "../graph/spec-graph";
 import { repoLabel } from "../summaries";
 import { AgentMessage } from "./agent-message";
 import type { StepRow } from "./step-entries";
+import { ProtectedPathsList } from "./protected-attempts";
 
 type IssueBrief = components["schemas"]["IssueBrief"];
 type ReviewBrief = components["schemas"]["ReviewBrief"];
@@ -448,6 +449,12 @@ export function StepInput({
                 </li>
               ))}
             </ul>
+          </Field>
+        ) : null}
+        {row.step.protectedPaths ? (
+          <Field label="Protected paths">
+            {/* What this writer was told it can read but not change (13.5). */}
+            <ProtectedPathsList paths={row.step.protectedPaths} />
           </Field>
         ) : null}
         {node ? <NodeFields node={node} /> : null}

@@ -17,6 +17,61 @@ export interface FileChange {
   reason: NotEditableReason | null;
   before: string | null;
   after: string | null;
+  /** Why the file is protected (13.5), when it is: by the platform, by the workflow, or because
+   * an earlier writer's approved work holds it. */
+  protected: ProtectedRule | null;
+}
+
+/** Where a protection comes from (13.5). */
+export type ProtectedRule = "default" | "workflow" | "frozen";
+
+/** What each protection says it is, for people. */
+export const PROTECTED_RULE_LABEL: Record<ProtectedRule, string> = {
+  default: "Platform: CI and analyzer config",
+  workflow: "This workflow",
+  frozen: "Approved tests",
+};
+
+/** A writer's refused tries to change one protected path (13.5), counted. The path is a name,
+ * never content. */
+export interface ProtectedAttempt {
+  nodeId: string;
+  path: string;
+  rule: ProtectedRule;
+  count: number;
+}
+
+const RULES: readonly ProtectedRule[] = ["default", "workflow", "frozen"];
+
+/** The `protected_attempts` of `GET /runs/{id}/gate`; malformed entries are left out. */
+export function parseProtectedAttempts(value: unknown): ProtectedAttempt[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item: unknown): ProtectedAttempt[] => {
+    const entry = record(item);
+    const nodeId = text(entry?.node_id);
+    const path = text(entry?.path);
+    const rule = RULES.find((r) => r === entry?.rule);
+    const count = typeof entry?.count === "number" ? entry.count : 0;
+    return nodeId && path && rule && count > 0 ? [{ nodeId, path, rule, count }] : [];
+  });
+}
+
+/** The attempts of a run's `protected_path_refused` events, grouped by writer, path and rule,
+ * the most tried first (the order `GET /runs/{id}/gate` answers in). */
+export function attemptsFromEvents(events: RunEvent[]): ProtectedAttempt[] {
+  const found = new Map<string, ProtectedAttempt>();
+  for (const event of events) {
+    if (event.type !== "protected_path_refused" || event.node_id == null) continue;
+    const path = text(event.payload?.path);
+    const rule = text(record(event.payload?.rule)?.kind);
+    const kind = RULES.find((r) => r === rule);
+    if (!path || !kind) continue;
+    const key = `${event.node_id}\u0000${path}\u0000${kind}`;
+    const seen = found.get(key);
+    if (seen) seen.count += 1;
+    else found.set(key, { nodeId: event.node_id, path, rule: kind, count: 1 });
+  }
+  return [...found.values()].sort((a, b) => b.count - a.count || a.path.localeCompare(b.path));
 }
 
 /** The approver's new text for an editable file. */
@@ -95,6 +150,8 @@ export interface PendingGate {
   /** What the platform's checks found about the writer's work before this gate (13.3); null
    * for a gate that does not check. */
   evidence: Evidence | null;
+  /** The run's refused tries to change a protected path so far (13.5), most tried first. */
+  protectedAttempts: ProtectedAttempt[];
 }
 
 /** What a `wait_for` waits for: a comment on the issue after the one the platform posted. */
@@ -154,6 +211,8 @@ export function parseChanges(value: unknown): FileChange[] {
         reason: editable ? null : (REASONS.find((r) => r === entry.reason) ?? "binary"),
         before: editable ? text(entry.before) : null,
         after: editable ? after : null,
+        protected:
+          entry.protected === true ? (RULES.find((r) => r === entry.rule) ?? "default") : null,
       },
     ];
   });
@@ -218,6 +277,7 @@ export function pendingGate(events: RunEvent[]): PendingGate | null {
         iteration,
         waitFor: parseWaitFor(wait_for),
         evidence: parseEvidence(evidence),
+        protectedAttempts: attemptsFromEvents(events.slice(0, i)),
       };
     }
   }

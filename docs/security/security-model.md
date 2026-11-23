@@ -180,3 +180,12 @@ The platform cannot secure these for you:
 | G8 | No retention policy for events, artifacts and checkpoints | Low | Manual archival | Not yet planned |
 | G9 | Master key is a local file | Medium | File from a secret manager, mounted read-only | Cloud KMS `KeyProvider` (phase 10.5) |
 | G10 | No distributed tracing for incident response | Low | Structured, redacted logs | OpenTelemetry (phase 10.3) |
+
+## Protected paths (13.5)
+
+An agent that is told to make a check pass can change what the check reads. The platform protects what judges a writer, in the tools, not in instructions:
+
+- **What is protected.** CI (`.github/workflows/**`, `.github/actions/**`) and analyzer and scanner config (`.editorconfig`, `*.globalconfig`, `*.ruleset`, `Directory.Build.props`/`.targets`, `ruff.toml`, `biome.json`, `.shellcheckrc`, `.gitleaks.toml`, `.gitleaksignore`) are protected for every writer, always, at any depth. A workflow adds patterns, and the files an earlier writer's approved work holds (the tests of a test-first flow) are frozen for the writers that start from it. Only a node named in the workflow's `allow`, with a gate after it, may change a protected path.
+- **Where it is enforced.** `repo.write_file` refuses before it writes; `repo.commit` refuses the whole commit if a staged path (both sides of a rename, a write through a symlinked directory) is protected. The refusal is the same on both providers and for orchestrator tasks. A person's edits at a gate and the engine's own commits are not checked.
+- **What is shown.** Every refusal is a `protected_path_refused` event (path and rule, never content), counted on the run and listed at the gate with the protected files marked in the diff.
+- **What is not covered.** Analyzer settings inside a `.csproj` and suppressions written in code (`# noqa`, `#pragma warning disable`) are not protected paths; the evidence step lints by the run's base analyzer config files, which covers a relaxed `ruff.toml`, `.editorconfig` or `[tool.ruff]`, and the reviewers of 13.6 are meant to catch the rest. Sealed tests outside the sandbox are 17.3.

@@ -25,6 +25,7 @@ from agentic_engine.events import (
     GATE_WAITING,
     NODE_FAILED,
     PR_OPENED,
+    PROTECTED_PATH_REFUSED,
     REPO_CREATED,
     RUN_CANCELLED,
     RUN_END_STATUS,
@@ -72,6 +73,7 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
     | `run_cancelled` with a `reason` | `cancel_reason` |
     | `run_failed` | `failed`, `finished_at`, clears `waiting_gate`; `failure_reason` = `error` |
     | an end event with `sandbox_kept_until` | `sandbox_kept_until` (12.3) |
+    | `protected_path_refused` | adds one to `protected_attempts` (13.5) |
     | `usage` | adds its tokens and `estimated_usd`; `cost_complete=false` if it has no price |
 
     and the time columns (see `time_values`).
@@ -100,6 +102,8 @@ def summary_values(event: RunEvent) -> dict[str, Any]:
             # A step that waits for an answer (7.9): what is checked, and what the console shows.
             values["waiting_gate"] = {**values["waiting_gate"], "wait_for": wait}
         values["gate_expires_at"] = expires_at
+    elif event.type == PROTECTED_PATH_REFUSED:
+        values["protected_attempts"] = Run.protected_attempts + 1
     elif event.type == PR_OPENED and isinstance(url := payload.get("url"), str):
         values["pr_url"] = url
     elif event.type == REPO_CREATED and isinstance(branch := payload.get("default_branch"), str):

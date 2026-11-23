@@ -55,9 +55,11 @@ from agentic_engine.graph.state import (
 )
 from agentic_engine.integrate import BranchIntegrator
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
+from agentic_engine.protect import folded_writers, mark_protected
 from agentic_engine.providers import ResolvedProviders
 from agentic_engine.spec import INPUT_WRITER, WorkflowSpec
-from agentic_runtime import AgentRuntime, ReadableWriters, ToolExecutor
+from agentic_engine.spec.models import ProtectPolicy
+from agentic_runtime import AgentRuntime, ProtectedPaths, ReadableWriters, ToolExecutor
 
 RUN_END = {"completed": RUN_COMPLETED, "failed": RUN_FAILED, "cancelled": RUN_CANCELLED}
 
@@ -81,6 +83,7 @@ async def run_workflow(
     inputs: Mapping[str, str] | None = None,
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> WorkflowRunResult:
     """Compile `spec`, run it with `input` for the first node, and summarise the outcome.
 
@@ -145,6 +148,7 @@ async def run_workflow(
             saver=saver,
             providers=providers,
             readable=readable,
+            protected=protected,
         ),
         start,
         _config(spec, log.run_id),
@@ -175,6 +179,7 @@ async def resume_workflow(
     inputs: Mapping[str, str] | None = None,
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> WorkflowRunResult:
     """Carry on a run that an earlier attempt started, from its last checkpoint.
 
@@ -210,6 +215,7 @@ async def resume_workflow(
         saver=saver,
         providers=providers,
         readable=readable,
+        protected=protected,
     )
     config = _config(spec, run_id)
     snapshot = await graph.aget_state(config)
@@ -220,7 +226,7 @@ async def resume_workflow(
     await log.emit(RUN_RESUMED, payload={"attempt": attempt, "completed_nodes": completed})
     if not saved:
         first = await _initial(log, input, artifacts, inputs)
-        return await _finish(log, lambda: graph, first, config, budget, review)
+        return await _finish(log, lambda: graph, first, config, budget, review, spec.protect)
     # A step cut off once its tasks had all saved their results has no `next`, but its tasks are
     # still in the checkpoint: the graph has not applied them, so it goes on. Only a graph that
     # ended has neither.
@@ -233,7 +239,7 @@ async def resume_workflow(
     elif asks and decision:
         resume = decision.model_dump(mode="json")
     start: Command[Any] | None = Command(resume=resume) if resume is not None else None
-    return await _finish(log, lambda: graph, start, config, budget, review)
+    return await _finish(log, lambda: graph, start, config, budget, review, spec.protect)
 
 
 async def rerun_workflow(
@@ -259,6 +265,7 @@ async def rerun_workflow(
     inputs: Mapping[str, str] | None = None,
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> WorkflowRunResult:
     """Start `run_id`, a rerun of `source_run` from its top-level step `from_node` (12.4), as
     `run_workflow` would, but from `source_run`'s checkpoint taken before that step
@@ -292,6 +299,7 @@ async def rerun_workflow(
         saver=saver,
         providers=providers,
         readable=readable,
+        protected=protected,
     )
     config = _config(spec, run_id)
     carried = await seed_rerun(
@@ -312,7 +320,7 @@ async def rerun_workflow(
     )
     await _emit_fallback(log, providers)
     start = None if seeded else await _initial(log, input, artifacts, inputs)
-    return await _finish(log, lambda: graph, start, config, budget, review)
+    return await _finish(log, lambda: graph, start, config, budget, review, spec.protect)
 
 
 async def seed_inputs(
@@ -373,6 +381,7 @@ async def _finish(
     config: RunnableConfig,
     budget: BudgetMeter | None = None,
     review: GateReview | None = None,
+    protect: ProtectPolicy | None = None,
 ) -> WorkflowRunResult:
     """Build the graph and invoke it from `start` (`None` continues from the checkpoint, a
     `Command` continues a paused gate), then report the end, or the pause at a gate. A failure
@@ -403,7 +412,7 @@ async def _finish(
         state, node_id, request = paused
         if is_repo_ready(request):
             return _result(log, state, "suspended", waiting_at=node_id)
-        return await _wait(log, *paused, review)
+        return await _wait(log, *paused, review, protect)
     return await _report(log, final)
 
 
@@ -447,6 +456,7 @@ async def _wait(
     gate_id: str,
     request: dict[str, JsonValue],
     review: GateReview | None,
+    protect: ProtectPolicy | None = None,
 ) -> WorkflowRunResult:
     """Announce the pause at `gate_id`, with the files the writers that completed before it
     changed, the run artifacts so far (`run_artifacts`: the latest version of each, by name) and
@@ -455,14 +465,20 @@ async def _wait(
     ran = [n for n in dict.fromkeys(state["order"]) if state["results"][n].status == "completed"]
     ran += [key for n in ran for key in _task_writers(state["results"][n])]
     ran = list(dict.fromkeys(ran))  # an integrated orchestrator is its own writer (6.3)
+    frozen = state.get("frozen", {})
+    ran = folded_writers(ran, frozen)
     changes: list[FileChange] = []
     error: str | None = None
     if review is not None:
         try:
-            changes = await review.changes(ran)
+            changes = mark_protected(await review.changes(ran), frozen, protect)
         except GateReviewError as e:
             error = str(e)
-    shown: list[JsonValue] = [c.model_dump(mode="json") for c in changes]
+    # `protected` and `rule` are in the payload only for a protected file (13.5).
+    shown: list[JsonValue] = [
+        c.model_dump(mode="json", exclude=None if c.protected else {"protected", "rule"})
+        for c in changes
+    ]
     payload: dict[str, JsonValue] = {**request, "changes": shown}
     payload["run_artifacts"] = [
         GateArtifact.model_validate(ref.model_dump(exclude={"sha256"})).model_dump(mode="json")

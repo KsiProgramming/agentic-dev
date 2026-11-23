@@ -14,8 +14,10 @@ from agentic_sandbox.fake import FakeSandbox, FakeSandboxManager
 from agentic_sandbox.integrate import (
     IntegrationOutcome,
     MergeSource,
+    StartedWriter,
     integrate_branches,
     start_branches,
+    start_writer,
 )
 from agentic_sandbox.protocol import (
     ARTIFACT_NAME,
@@ -40,6 +42,7 @@ from agentic_sandbox.refs import (
     grep_tree,
     list_tree,
     show_file,
+    tree_paths,
 )
 from agentic_sandbox.review import BranchNotFoundError
 from agentic_sandbox.snapshot import Snapshot, snapshot_worktrees, wip_branch
@@ -86,6 +89,7 @@ __all__ = [
     "SandboxError",
     "SandboxManager",
     "Snapshot",
+    "StartedWriter",
     "Worktree",
     "add_worktree",
     "archive",
@@ -103,5 +107,7 @@ __all__ = [
     "show_file",
     "snapshot_worktrees",
     "start_branches",
+    "start_writer",
+    "tree_paths",
     "wip_branch",
 ]

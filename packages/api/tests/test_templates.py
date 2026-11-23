@@ -38,6 +38,7 @@ async def test_lists_the_templates_with_their_options() -> None:
         "answer_ttl_s",
         "move_to",
         "checks",
+        "test_first",
         "check_rounds",
         "coverage_min",
         "spec_model",

@@ -7,7 +7,12 @@ import { ApiError } from "@/api/errors";
 import type { components } from "@/api/schema";
 import { parseArtifacts } from "@/runs/artifacts/artifacts";
 import { parseEvidence } from "@/runs/evidence";
-import { parseChanges, parseSelection, type PendingGate } from "@/runs/gates";
+import {
+  parseChanges,
+  parseProtectedAttempts,
+  parseSelection,
+  type PendingGate,
+} from "@/runs/gates";
 
 type RunGate = components["schemas"]["RunGate"];
 
@@ -42,6 +47,7 @@ export function toInboxGate(body: RunGate): InboxGate {
     iteration: body.iteration ?? 1,
     waitFor: null, // a wait is not reviewed in the Inbox (7.9)
     evidence: parseEvidence(body.evidence),
+    protectedAttempts: parseProtectedAttempts(body.protected_attempts),
     repoUrl: body.repo?.url ?? null,
     base: body.base ?? null,
     branches: body.branches.map((b) => ({ nodeId: b.node_id, branch: b.branch })),

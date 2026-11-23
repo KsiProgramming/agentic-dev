@@ -35,6 +35,7 @@ const COLUMNS = {
   3: "md:grid-cols-3",
   4: "md:grid-cols-4",
   5: "md:grid-cols-5",
+  6: "md:grid-cols-3 xl:grid-cols-6",
 } as const;
 
 /**

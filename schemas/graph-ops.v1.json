@@ -227,6 +227,20 @@
           "title": "Role",
           "type": "string"
         },
+        "start_from": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.",
+          "title": "Start From"
+        },
         "tools": {
           "items": {
             "type": "string"
@@ -1109,6 +1123,20 @@
           ],
           "default": null,
           "description": "Unset: a failed task fails the orchestrator."
+        },
+        "start_from": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Start this writer's branch on top of the earlier writer's (13.5): its files are frozen for this node, which can read but not change them. A gate must come between them.",
+          "title": "Start From"
         },
         "type": {
           "const": "orchestrator",

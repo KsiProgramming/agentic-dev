@@ -136,6 +136,7 @@ from agentic_engine.events import (
     PLAN_MADE,
     POLICY_LIMIT_EXCEEDED,
     PR_OPENED,
+    PROTECTED_PATH_REFUSED,
     REPLAN_STARTED,
     REPO_CREATED,
     ROUTE_CHOSEN,
@@ -172,6 +173,12 @@ from agentic_engine.integrate import (
 )
 from agentic_engine.policy import PLATFORM_POLICY, Policy, PolicyLimitExceeded
 from agentic_engine.ports import PortFailure, check_port
+from agentic_engine.protect import (
+    frozen_rules,
+    protected_payload,
+    protected_text,
+    static_rules,
+)
 from agentic_engine.providers import ResolvedNode, ResolvedProviders
 from agentic_engine.spec import (
     BODY_FROM_TOOLS,
@@ -213,6 +220,8 @@ from agentic_engine.tool import run_tool_node
 from agentic_runtime import (
     AgentEvent,
     AgentRuntime,
+    ProtectedPaths,
+    ProtectRule,
     ReadableWriter,
     ReadableWriters,
     ToolExecutor,
@@ -278,6 +287,13 @@ class _Limits:
         default_factory=dict[str, Mapping[str, object] | None]
     )
     """The base commit's lint report per gate with evidence (13.3), read once per attempt."""
+    protected: ProtectedPaths | None = None
+    """What the repo tools refuse every writer (13.5); the engine sets its rules at compile time
+    and a writer's frozen files when its step starts."""
+    allow: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
+    """The workflow's `protect.allow`: the protected paths each writer may change."""
+    start_gates: dict[str, str] = field(default_factory=dict[str, str])
+    """Each node with a `start_from` → the gate that approves the work it starts from."""
     alive: asyncio.Semaphore = field(init=False)
 
     def __post_init__(self) -> None:
@@ -294,6 +310,11 @@ class _Limits:
     ) -> str:
         """The context `node` is told: the run's, then the work before it (13.1)."""
         work = work_before_text(node, writers, self.roles, reads_as)
+        if self.protected is not None and WRITE_TOOLS.intersection(node.tools):
+            key = reads_as or node.id
+            owner = key.partition(".")[0]
+            guard = protected_text(self.protected.rules_for(key), self.allow.get(owner, ()))
+            work = f"{work}\n\n{guard}" if work else guard
         return f"{self.context}\n\n{work}" if work and self.context else work or self.context
 
     def announce(self, writers: Sequence[ReadableWriter]) -> None:
@@ -474,6 +495,7 @@ def compile_workflow(
     saver: BranchSaver | None = None,
     providers: ResolvedProviders | None = None,
     readable: ReadableWriters | None = None,
+    protected: ProtectedPaths | None = None,
 ) -> CompiledWorkflow:
     """Build the graph for `spec`. Agent nodes run on `runtime`, tool nodes call `tools`, gates
     commit their edits through `review`, run artifacts go to `artifacts` (kept in memory without
@@ -512,6 +534,13 @@ def compile_workflow(
     limits.evidence_loops = _evidence_loops(spec.root)
     limits.providers = providers
     limits.readable = readable
+    if protected is not None:
+        limits.protected = protected
+        policy_paths = spec.protect
+        limits.allow = dict(policy_paths.allow) if policy_paths is not None else {}
+        protected.set(static_rules(policy_paths), limits.allow)
+        protected.on_refused = _refusal_event(log)
+    limits.start_gates = _start_gates(spec.root)
     limits.writer_ids = frozenset(writer_node_ids(spec.root))
     limits.team_ids = frozenset(task_writer_orchestrators(spec.root))
     limits.roles = {
@@ -769,7 +798,16 @@ def _step(
             )
 
         if isinstance(node, AgentNode):
-            return await _spawn(node.id, state, limits, log, run)
+            frozen: dict[str, dict[str, JsonValue]] = {}
+            if node.start_from is not None:
+                started = await _start_from(node, state, limits)
+                if isinstance(started, str):
+                    return await _failed_start(node.id, started, state, log)
+                frozen = started
+            update = await _spawn(node.id, state, limits, log, run)
+            if frozen:
+                update["frozen"] = frozen
+            return update
         result = await run()
         update = _update(node.id, result)
         sent_back = (result.data or {}).get("source") == "checks"
@@ -779,6 +817,81 @@ def _step(
         return update
 
     return step
+
+
+async def _start_from(
+    node: AgentNode | OrchestratorNode, state: RunState, limits: _Limits
+) -> dict[str, dict[str, JsonValue]] | str:
+    """Start the branch of `node` from the work of its `start_from` writer (13.5), before its
+    first turn, and hold it to that work's files as frozen: it can read them, never change them.
+    The branch is made once (a resumed run keeps its commits), the frozen files are those the
+    state kept the first time, so a restart, a restore and a rerun from a step give the same
+    answer. Returns the `frozen` entry for the state, or why it cannot start; nothing without
+    an integrator (a run with no repo)."""
+    source = node.start_from
+    integrator = limits.integrator
+    if source is None or integrator is None:
+        return {}
+    try:
+        started = await integrator.start_writer(
+            node.id, source, orchestrator=isinstance(node, OrchestratorNode)
+        )
+    except IntegrationError as e:
+        return f"cannot start from the work of {source!r}: {e}"
+    entry: dict[str, JsonValue] = state.get("frozen", {}).get(node.id) or {
+        "writer": source,
+        "gate": limits.start_gates.get(node.id),
+        "start": started.start,
+        "files": list[JsonValue](started.files),
+    }
+    if limits.protected is not None:
+        limits.protected.freeze(node.id, frozen_rules(entry))
+    return {node.id: entry}
+
+
+async def _failed_start(node_id: str, error: str, state: RunState, log: RunEventLog) -> RunUpdate:
+    """The node cannot start from its `start_from` writer: it starts and fails, with no agent."""
+    await log.emit(NODE_STARTED, node_id=node_id)
+    await log.emit(NODE_FAILED, node_id=node_id, payload={"error": error})
+    failed = AgentNodeResult(status="failed", text=state["last_text"], usage=None, error=error)
+    return _update(node_id, failed)
+
+
+def _start_gates(root: Node) -> dict[str, str]:
+    """Each node with a `start_from` → the first gate after that writer (13.5), where a person
+    approved the work it starts from."""
+    ordered = list(iter_nodes(root))
+    ids = [n.id for _, n in ordered]
+    found: dict[str, str] = {}
+    for index, (_, node) in enumerate(ordered):
+        if not isinstance(node, AgentNode | OrchestratorNode) or node.start_from is None:
+            continue
+        if node.start_from not in ids:
+            continue
+        for _, later in ordered[ids.index(node.start_from) + 1 : index]:
+            if isinstance(later, GateNode):
+                found[node.id] = later.id
+                break
+    return found
+
+
+def _refusal_event(log: RunEventLog) -> Callable[[str, str, str, ProtectRule], Awaitable[None]]:
+    """What the repo tools call back for each refused change (13.5): one `protected_path_refused`
+    event with the path and the rule, never the file's content."""
+
+    async def refused(key: str, tool: str, path: str, rule: ProtectRule) -> None:
+        owner = owner_node(key)
+        why: dict[str, JsonValue] = {"kind": rule.kind}
+        if rule.kind == "frozen":
+            why |= {"writer": rule.writer, "gate": rule.gate}
+        else:
+            why["pattern"] = rule.glob
+        payload: dict[str, JsonValue] = {"tool": tool, "path": path, "rule": why}
+        if owner != key:
+            payload["task"] = key
+        await log.emit(PROTECTED_PATH_REFUSED, node_id=owner, payload=payload)
+
+    return refused
 
 
 def _evidence(
@@ -1039,6 +1152,18 @@ async def _run_step(
             started = {**(started or {}), **provider}
         if isinstance(node, AgentNode) and READ_TOOLS.intersection(node.tools):
             started = {**(started or {}), "writers": _writers_payload(writers)}
+        if (
+            isinstance(node, AgentNode)
+            and limits.protected is not None
+            and WRITE_TOOLS.intersection(node.tools)
+        ):
+            key = route_as or node.id
+            started = {
+                **(started or {}),
+                "protected": protected_payload(
+                    limits.protected.rules_for(key), limits.allow.get(key.partition(".")[0], ())
+                ),
+            }
         await log.emit(NODE_STARTED, node_id=node.id, payload=started, item=item, branch=branch)
     if reads:
         try:
@@ -2746,8 +2871,24 @@ def _orchestrator_entry(
     async def enter(state: RunState) -> RunUpdate:
         if refused := await _refuse_spawn(node_id, state, 1, limits, log, started):
             return at.stopped(state, refused, 0, [])
+        frozen: dict[str, dict[str, JsonValue]] = {}
+        if at.node.start_from is not None:
+            begun = await _start_from(at.node, state, limits)
+            if isinstance(begun, str):
+                return at.stopped(
+                    state,
+                    AgentNodeResult(
+                        status="failed", text=state["last_text"], usage=None, error=begun
+                    ),
+                    0,
+                    [],
+                )
+            frozen = begun
         await log.emit(NODE_STARTED, node_id=node_id, payload=started)
-        return await _make_plan(at, state, scope, round=1)
+        update = await _make_plan(at, state, scope, round=1)
+        if frozen:
+            update["frozen"] = frozen
+        return update
 
     return enter
 

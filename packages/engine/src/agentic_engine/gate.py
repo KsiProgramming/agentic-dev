@@ -67,6 +67,11 @@ class FileChange(BaseModel):
     reason: NotEditable | None = None
     before: str | None = None
     after: str | None = None
+    protected: bool = False
+    """The file is protected (13.5): by the platform, the workflow, or because an earlier writer's
+    approved work this writer started from. The gate shows it with its `rule`."""
+    rule: str | None = None
+    """Where the protection comes from: `default`, `workflow` or `frozen`."""
 
 
 class FileEdit(BaseModel):

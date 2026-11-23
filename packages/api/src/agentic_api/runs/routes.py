@@ -30,6 +30,7 @@ from agentic_api.runs.models import (
     CreateRunResponse,
     EditErrorDetail,
     GateBranch,
+    GateProtectedAttempt,
     JiraIssueRef,
     PolicyErrorDetail,
     PrReviewRef,
@@ -233,6 +234,7 @@ def _summary_fields(request: Request, row: RunSummaryRow) -> dict[str, Any]:
         "providers": row.providers,
         "pr_review": PrReviewRef.model_validate(row.pr_review) if row.pr_review else None,
         "usage": RunUsage.model_validate(row.usage, from_attributes=True),
+        "protected_attempts": row.protected_attempts,
         "active_ms": active_ms,
         "waiting_ms": waiting_ms,
         "measured_at": now,
@@ -1026,6 +1028,10 @@ async def gate(run_id: UUID, request: Request) -> RunGate:
         on_reject="end" if pending.on_reject == "end" else "cancel",
         changes_left=pending.changes_left,
         iteration=pending.iteration,
+        protected_attempts=[
+            GateProtectedAttempt.model_validate(a, from_attributes=True)
+            for a in pending.protected_attempts
+        ],
         evidence=pending.evidence,
     )
 

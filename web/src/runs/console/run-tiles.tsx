@@ -121,6 +121,7 @@ export function RunTiles({
   runId,
   written,
   noModelCalls,
+  protectedAttempts = 0,
   baseUrl,
 }: {
   facts: HeaderFacts;
@@ -131,13 +132,15 @@ export function RunTiles({
   /** How many `artifact_written` events the page has, so the Output tile follows the run. */
   written: number;
   noModelCalls: boolean;
+  /** How many times a writer tried to change a protected path (13.5); the tile shows above 0. */
+  protectedAttempts?: number;
   baseUrl?: string;
 }) {
   const usage = facts.usage;
   const dash = <span className="text-placeholder">—</span>;
   return (
     <section aria-label="Run figures">
-      <StatStrip columns={5}>
+      <StatStrip columns={protectedAttempts > 0 ? 6 : 5}>
         <StatTile
           label="Active time"
           value={<Duration data-testid="run-duration" ms={facts.activeMs} />}
@@ -209,6 +212,13 @@ export function RunTiles({
           }
           secondary={progress ? stepsLine(progress) : undefined}
         />
+        {protectedAttempts > 0 ? (
+          <StatTile
+            label="Protected files"
+            value={<span data-testid="run-protected">{protectedAttempts}</span>}
+            secondary={protectedAttempts === 1 ? "change refused" : "changes refused"}
+          />
+        ) : null}
         <Output
           prUrl={facts.prUrl}
           createdRepo={createdRepo}

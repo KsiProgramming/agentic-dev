@@ -116,6 +116,16 @@ export interface WorkBefore {
   kind: "writer" | "integration";
 }
 
+/** What a writer was told it cannot change (13.5), from its `node_started`'s `protected`: the
+ * platform's and the workflow's patterns, and the files frozen at a gate. */
+export interface ProtectedPaths {
+  patterns: string[];
+  frozen: string[];
+  /** The writer whose approved work holds the frozen files, and the gate that approved it. */
+  frozenFrom: string | null;
+  gate: string | null;
+}
+
 export interface Step {
   /** The node id. */
   id: string;
@@ -154,6 +164,9 @@ export interface Step {
    * `writers`: an empty list for the first writer, `null` for a step that was told nothing (no
    * repo tools, or a run from before 13.1). */
   writers: WorkBefore[] | null;
+  /** The paths a writer step may read but not change (13.5); `null` for a step that was told
+   * nothing (it does not write, or a run from before 13.5). */
+  protectedPaths: ProtectedPaths | null;
   /** What a `dedupe` or `vote` reduce merged (4.5): its `node_completed`'s `merged`. */
   merged: MergeCounts | null;
   /** Set for a router node (4.6): its routes, the one it took and why, and that route's steps. */
@@ -359,6 +372,19 @@ function str(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function parseProtectedPaths(value: unknown): ProtectedPaths | null {
+  if (typeof value !== "object" || value === null) return null;
+  const found = value as Record<string, unknown>;
+  const strings = (v: unknown) =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+  return {
+    patterns: strings(found.patterns),
+    frozen: strings(found.frozen),
+    frozenFrom: str(found.frozen_from),
+    gate: str(found.gate),
+  };
+}
+
 function parseWriters(value: unknown): WorkBefore[] | null {
   if (!Array.isArray(value)) return null;
   return value.flatMap((w): WorkBefore[] => {
@@ -414,6 +440,7 @@ function newStep(id: string, at: string): Step {
     provider: null,
     model: null,
     writers: null,
+    protectedPaths: null,
     gate: null,
     prUrl: null,
     createdRepo: null,
@@ -749,6 +776,7 @@ class Builder {
         step.model = str(payload.model);
       }
       step.writers = parseWriters(payload.writers);
+      step.protectedPaths = parseProtectedPaths(payload.protected);
       if (payload.items !== undefined) {
         step.items ??= [];
         step.itemCount = num(payload.items);
