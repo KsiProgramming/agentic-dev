@@ -1879,6 +1879,7 @@ def start_from_issues(root: Node) -> list[ValidationIssue]:
     ordered = list(iter_nodes(root))
     tasked = task_node_ids(root)
     apart = _in_map_or_parallel(root)
+    loops = {p for p, n in ordered if isinstance(n, LoopNode)}
     issues: list[ValidationIssue] = []
     for index, (path, node) in enumerate(ordered):
         if not isinstance(node, AgentNode | OrchestratorNode) or node.start_from is None:
@@ -1922,7 +1923,9 @@ def start_from_issues(root: Node) -> list[ValidationIssue]:
             )
             continue
         end = _subtree_end(ordered, found[0])
-        if end >= index or not within(path, scope_of(ordered[found[0]][0])):
+        # A loop's body runs at least once and ends before what follows the loop.
+        ran_at = _runs_in(ordered[found[0]][0], loops)
+        if end >= index or not within(path, scope_of(ran_at)):
             issue(
                 "start_from_unknown_writer",
                 f"{where}: `start_from` {source!r} does not complete before this node; "
