@@ -182,6 +182,7 @@ class ParallelBranch(TypedDict):
     index: int
     branch_input: str
     outcomes_key: NotRequired[str]
+    branch_evidence: NotRequired[dict[str, JsonValue]]
     branch_artifacts: NotRequired[dict[str, ArtifactRef]]
     branch_reads: NotRequired[str | None]
     branch_writers: NotRequired[list[dict[str, str]]]

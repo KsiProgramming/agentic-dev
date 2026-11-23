@@ -2400,6 +2400,8 @@ def output_schema(node: PortProducer) -> dict[str, JsonValue] | None:
     """The schema `node`'s output is typed with, if any (a subflow's is its called workflow's)."""
     if isinstance(node, ReduceNode):
         return FINDINGS_SCHEMA if node.merges else None
+    if isinstance(node, AgentNode) and node.review is not None:
+        return FINDINGS_SCHEMA  # the engine types a review agent's answer (13.6)
     return node.output_schema
 
 

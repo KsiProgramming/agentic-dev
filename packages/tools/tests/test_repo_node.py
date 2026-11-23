@@ -201,3 +201,22 @@ async def test_a_hub_reading_as_its_orchestrator_can_still_name_a_writer(
     assert plain.text == "1\tmerged"  # as before: the integration branch
     assert named.text == "1\ttests"
     assert "added tests.md (+1 -0)" in diff.text
+
+
+async def test_a_review_agent_reads_its_writers_work_without_naming_node(
+    sandbox: Sandbox, run_id: UUID
+) -> None:
+    """13.6: the engine marks a review agent, and its plain reads go to the reviewed writer's
+    committed work, never the run's checkout or the writer's worktree."""
+    await commit_as(sandbox, run_id, "test_writer", "printf 'committed\n' > notes.md")
+    await sh(await add_worktree(sandbox, run_id, "test_writer"), "printf 'draft\n' > draft.md")
+    state = readable(run_id, "test_writer")
+    state.set_review("lens", "test_writer")
+    async with open_repo_tools(sandbox, readable=state) as tools:
+        read = await tools.call("repo.read_file", {"path": "notes.md"}, node_id="lens")
+        draft = await tools.call("repo.read_file", {"path": "draft.md"}, node_id="lens")
+        other = await tools.call("repo.read_file", {"path": "notes.md"}, node_id="reviewer")
+
+    assert read.text == "1\tcommitted"
+    assert draft.is_error  # the writer's uncommitted work is not visible
+    assert other.is_error  # a node that is no review agent still reads the checkout

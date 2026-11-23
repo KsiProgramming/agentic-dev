@@ -180,6 +180,7 @@ from agentic_engine.protect import (
     static_rules,
 )
 from agentic_engine.providers import ResolvedNode, ResolvedProviders
+from agentic_engine.review import NONE, diff_stats, evidence_summary, review_input
 from agentic_engine.spec import (
     BODY_FROM_TOOLS,
     COMMIT_TOOLS,
@@ -309,10 +310,14 @@ class _Limits:
         return {} if found is None else {"provider": found.provider, "model": found.model}
 
     def work_text(
-        self, node: AgentNode, writers: Sequence[ReadableWriter], reads_as: str | None
+        self,
+        node: AgentNode,
+        writers: Sequence[ReadableWriter],
+        reads_as: str | None,
+        reviewing: str | None = None,
     ) -> str:
         """The context `node` is told: the run's, then the work before it (13.1)."""
-        work = work_before_text(node, writers, self.roles, reads_as)
+        work = work_before_text(node, writers, self.roles, reads_as, reviewing)
         if self.protected is not None and WRITE_TOOLS.intersection(node.tools):
             key = reads_as or node.id
             owner = key.partition(".")[0]
@@ -799,6 +804,7 @@ def _step(
                 results=state["results"],
                 writers=writers_before(state, limits.writer_ids, limits.team_ids),
                 evidence=_evidence_input(node, state),
+                packs=state.get("evidence", {}),
             )
 
         if isinstance(node, AgentNode):
@@ -1052,6 +1058,55 @@ async def _refuse_spawn(
     return AgentNodeResult(status="failed", text=state["last_text"], usage=None, error=over.reason)
 
 
+async def _review_setup(
+    node: AgentNode,
+    writers: Sequence[ReadableWriter],
+    refs: Mapping[str, ArtifactRef],
+    packs: Mapping[str, JsonValue],
+    limits: "_Limits",
+    tools: ToolExecutor | None,
+) -> tuple[str, str, dict[str, JsonValue]] | str:
+    """What a review agent (13.6) is given, built from the run and never from the previous step's
+    output: the writer it reviews (`of`, else the latest writer that completed), its input (the
+    spec, the writer's change and its evidence pack) and the `review` of its `node_started`. The
+    writer's work is read from git refs: the repo tools default the agent's reads to it. An error
+    text when there is no writer to review."""
+    assert node.review is not None
+    of = node.review.of or (writers[-1].node_id if writers else None)
+    if of is None or of not in {w.node_id for w in writers}:
+        return f"there is no completed writer {of!r} to review" if of else "no writer ran before"
+    spec_text: str | None = None
+    spec_version: int | None = None
+    if (name := node.review.spec_from) is not None and name in refs:
+        try:
+            spec_text = await reader_input(limits.artifacts, [name], refs)
+            spec_version = refs[name].version
+        except ArtifactError:
+            spec_text = None
+    change: str | None = None
+    if tools is not None:
+        limits.announce(writers)
+        shown = await tools.call("repo.diff", {"node": of})
+        change = None if shown.is_error else shown.text
+    mine: list[dict[str, JsonValue]] = []
+    for value in packs.values():
+        pack = value.get("pack") if isinstance(value, dict) else None
+        if isinstance(pack, dict) and pack.get("node") == of:
+            mine.append(pack)
+    evidence = evidence_summary(mine)
+    if limits.readable is not None:
+        limits.readable.set_review(node.id, of)
+    started: dict[str, JsonValue] = {
+        "of": of,
+        "spec": node.review.spec_from,
+        "spec_version": spec_version,
+        "diff": diff_stats(change or ""),
+        "evidence": evidence != NONE,
+    }
+    text = review_input(spec=spec_text, change=change, evidence=evidence, writer=of)
+    return of, text, started
+
+
 async def _run_step(
     node: StepNode,
     runtime: AgentRuntime,
@@ -1066,6 +1121,7 @@ async def _run_step(
     results: Mapping[str, AgentNodeResult] | None = None,
     writers: Sequence[ReadableWriter] = (),
     evidence: EvidenceInput | None = None,
+    packs: Mapping[str, JsonValue] | None = None,
 ) -> AgentNodeResult:
     """Run one agent, tool or gate node on `input`, writing its events (tagged with `item` inside
     a map or an orchestrator's task, `branch` inside a parallel). `writers` ran before it: an
@@ -1075,7 +1131,20 @@ async def _run_step(
     reads run artifacts runs on the versions in `refs` instead, and one that writes one stores its
     output once it completes. An agent waits for one of the run's `agents_alive` slots before it
     starts, and its usage is counted on the run's budget: once that is spent, the node ends
-    `node_cancelled` and `PolicyLimitExceeded` is raised."""
+    `node_cancelled` and `PolicyLimitExceeded` is raised. A review agent (13.6) is not given
+    `input`: the engine builds its own from the spec, the reviewed writer's change and the
+    evidence in `packs`, and types its answer as findings."""
+    reviewing: str | None = None
+    review_started: dict[str, JsonValue] | None = None
+    if isinstance(node, AgentNode) and node.review is not None:
+        built = await _review_setup(node, writers, refs, packs or {}, limits, tools)
+        if isinstance(built, str):
+            await log.emit(NODE_STARTED, node_id=node.id, item=item, branch=branch)
+            failed: dict[str, JsonValue] = {"error": built}
+            await log.emit(NODE_FAILED, node_id=node.id, payload=failed, item=item, branch=branch)
+            return AgentNodeResult(status="failed", text=input, usage=None, error=built)
+        node = node.model_copy(update={"output_schema": FINDINGS_SCHEMA})
+        reviewing, input, review_started = built
 
     async def write(event: AgentEvent) -> None:
         await log.agent_event(node.id, event, item, branch)
@@ -1139,7 +1208,7 @@ async def _run_step(
                         input,
                         on_event,
                         route_as,
-                        limits.work_text(node, writers, route_as),
+                        limits.work_text(node, writers, route_as, reviewing),
                         limits.resolved(node.id),
                     )
 
@@ -1168,6 +1237,8 @@ async def _run_step(
                     limits.protected.rules_for(key), limits.allow.get(key.partition(".")[0], ())
                 ),
             }
+        if review_started is not None:
+            started = {**(started or {}), "review": review_started}
         await log.emit(NODE_STARTED, node_id=node.id, payload=started, item=item, branch=branch)
     if reads:
         try:
@@ -1704,6 +1775,7 @@ def _fan_out_branches(
                     index=i,
                     branch_input=state["last_text"],
                     outcomes_key=key,
+                    branch_evidence=dict(state.get("evidence", {})),
                     branch_artifacts=dict(refs),
                     branch_reads=_integrated_reader(state),
                     branch_writers=_encode_writers(
@@ -1748,6 +1820,7 @@ def _parallel_branch(
             refs=refs,
             reads=reads,
             writers=_decode_writers(task.get("branch_writers")),
+            packs=task.get("branch_evidence", {}),
         )
         result, error = await _run_branch(join, index, parallel.branches[index], text, scope)
         end: dict[str, JsonValue] = {**marker, "status": result.status}
@@ -2038,6 +2111,8 @@ class _Scope:
     task: tuple[str, str] | None = None
     reads: str | None = None
     writers: tuple[ReadableWriter, ...] = ()
+    packs: Mapping[str, JsonValue] = field(default_factory=dict[str, JsonValue])
+    """The run's evidence packs when the scope started (13.6: what a review agent is given)."""
 
     def route_as(self, node: Node) -> str | None:
         """What `node` is known by to the tools: inside an orchestrator's task, a writer works as
@@ -2083,6 +2158,7 @@ async def _run_inline(node: Node, input: str, scope: _Scope) -> tuple[str, Agent
                 scope.branch,
                 scope.route_as(node),
                 writers=scope.writers,
+                packs=scope.packs,
             )
             scope.ran[node.id] = result
             if result.artifact is not None:
